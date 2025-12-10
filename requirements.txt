@@ -1,0 +1,26 @@
+# --- Web 框架与 API ---
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# --- 核心 AI 与音频处理 ---
+basic-pitch==0.3.0
+librosa==0.10.1
+numpy==1.26.3
+scipy==1.11.4
+soundfile==0.12.1
+pydub==0.25.1              # 推荐：用于把 webm/opus 稳定转 wav（依赖系统 ffmpeg）
+
+# --- MIDI 转音频合成 ---
+midi2audio==0.1.1
+
+# --- 配置与工具 ---
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.1
+
+# --- 测试与质量保证 ---
+pytest==7.4.4
+pytest-asyncio==0.23.5     # 推荐：测试 async FastAPI
+httpx==0.26.0
