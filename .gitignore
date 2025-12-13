@@ -30,3 +30,13 @@ uploads/*
 outputs/*
 !uploads/.gitkeep
 !outputs/.gitkeep
+
+# assets: keep docs only, ignore everything else
+assets/**
+!assets/
+!assets/README*
+!assets/*.md
+!assets/LICENSE*
+!assets/**/README*
+!assets/**/*.md
+!assets/**/LICENSE*
