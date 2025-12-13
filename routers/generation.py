@@ -1,5 +1,6 @@
+# routers/generation.py
 """
-生成业务路由 (Step 07)
+Generation Router (Step 07)
 
 功能：
 1) POST /generate: 流式接收录音 -> 落盘 -> 立即返回 task_id -> 后台启动流水线
@@ -18,13 +19,9 @@ from fastapi.responses import FileResponse
 
 from core.config import get_settings
 from core.utils import TaskManager, build_paths, safe_unlink
-
-from core.audio_preprocess import preprocess_audio
-from core.ai_converter import audio_to_midi
-from core.synthesizer import midi_to_audio
+from core.pipeline import run_pipeline_for_task
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(prefix="/api/v1", tags=["Generation"])
 
@@ -33,7 +30,9 @@ DownloadKind = Literal["audio", "midi"]
 
 
 async def _save_upload_file(upload_file: UploadFile, dst_path: Path, max_mb: int) -> int:
-    """chunk 写入 + 大小限制（不把整文件读进内存）"""
+    """
+    chunk 写入 + 大小限制（不把整文件读进内存）
+    """
     dst_path.parent.mkdir(parents=True, exist_ok=True)
 
     total = 0
@@ -62,63 +61,27 @@ async def _save_upload_file(upload_file: UploadFile, dst_path: Path, max_mb: int
     return total
 
 
-def _run_pipeline_sync(task_id: str, input_filename: str, output_format: AudioFormat, gain: float) -> None:
+def _run_pipeline_sync(
+    task_id: str,
+    input_filename: str,
+    output_format: AudioFormat,
+    gain: float,
+    keep_wav: bool = False,
+    cleanup_uploads: bool = True,
+) -> None:
     """
-    后台流水线（同步函数！供 BackgroundTasks 调用）
+    ✅ 兼容旧测试的函数名：tests/test_routers.py 里会 patch 这个符号。
+    内部仅转调 pipeline，路由层仍不耦合 preprocess/ai/synth 细节。
     """
-    settings = get_settings()
-
-    paths = build_paths(task_id, input_filename)
-    raw_path: Path = paths["raw_audio"]
-    clean_wav_path: Path = paths["clean_wav"]
-    midi_path: Path = paths["midi"]
-
-    try:
-        TaskManager.update_task(task_id, status="processing", progress=10, message="正在清洗音频...")
-
-        # Step02: raw -> clean.wav  (preprocess_audio 返回 Path)
-        out_clean = preprocess_audio(raw_path, output_dir=raw_path.parent)
-        if out_clean.resolve() != clean_wav_path.resolve():
-            clean_wav_path = out_clean
-
-        TaskManager.update_task(task_id, status="processing", progress=45, message="AI正在听音记谱...")
-
-        # Step03: clean.wav -> .mid  (audio_to_midi 返回 Path)
-        out_midi = audio_to_midi(clean_wav_path, output_dir=settings.output_dir)
-        if out_midi.resolve() != midi_path.resolve():
-            midi_path = out_midi
-
-        TaskManager.update_task(task_id, status="processing", progress=80, message="正在合成乐器音频...")
-
-        # Step05: .mid -> mp3/wav  (midi_to_audio 返回 Path)
-        out_audio = midi_to_audio(
-            midi_path,
-            output_dir=settings.output_dir,
-            output_format=output_format,
-            keep_wav=False,
-            gain=gain,
-        )
-
-        TaskManager.done_task(
-            task_id,
-            result={
-                "audio": str(out_audio),
-                "midi": str(midi_path),
-                "output_format": output_format,
-                "download_audio_url": f"/api/v1/tasks/{task_id}/download?kind=audio",
-                "download_midi_url": f"/api/v1/tasks/{task_id}/download?kind=midi",
-            },
-        )
-        logger.info("✅ Task[%s] done", task_id)
-
-    except Exception as e:
-        logger.exception("❌ Task[%s] failed", task_id)
-        TaskManager.fail_task(task_id, str(e))
-
-    finally:
-        # MVP：至少清理 uploads 中的中间物
-        safe_unlink(raw_path)
-        safe_unlink(clean_wav_path)
+    run_pipeline_for_task(
+        task_id=task_id,
+        input_filename=input_filename,
+        output_format=output_format,
+        gain=gain,
+        keep_wav=keep_wav,
+        cleanup_uploads=cleanup_uploads,
+        base_api_prefix="/api/v1",
+    )
 
 
 @router.post("/generate")
@@ -127,12 +90,16 @@ async def start_generation(
     file: UploadFile = File(...),
     output_format: AudioFormat = Query("mp3"),
     gain: float = Query(0.8, ge=0.0, le=5.0),
+    # 调试参数
+    keep_clean_wav: bool = Query(False),
+    cleanup_uploads: bool = Query(True),
 ):
     settings = get_settings()
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
+    # 1. 创建任务
     task_id = TaskManager.create_task(file.filename)
     paths = build_paths(task_id, file.filename)
     raw_path: Path = paths["raw_audio"]
@@ -140,11 +107,20 @@ async def start_generation(
     TaskManager.update_task(task_id, status="processing", progress=2, message="开始上传...")
 
     try:
+        # 2. 接收文件 (Web 层职责)
         written = await _save_upload_file(file, raw_path, settings.max_upload_size_mb)
-        logger.info("Task[%s] uploaded %s (%d bytes)", task_id, file.filename, written)
+        logger.info("Task[%s] uploaded (%d bytes) -> %s", task_id, written, raw_path.name)
 
-        # 关键：add_task 放同步函数
-        background_tasks.add_task(_run_pipeline_sync, task_id, file.filename, output_format, gain)
+        # 3. 丢给后台执行（通过兼容壳函数名，保持旧测试可 patch）
+        background_tasks.add_task(
+            _run_pipeline_sync,
+            task_id,
+            file.filename,
+            output_format,
+            gain,
+            keep_clean_wav,
+            cleanup_uploads,
+        )
 
         return {
             "task_id": task_id,
@@ -176,8 +152,6 @@ def download_result(
     task_id: str,
     kind: DownloadKind = Query("audio"),
 ):
-    settings = get_settings()
-
     task = TaskManager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -194,9 +168,10 @@ def download_result(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件已过期或物理丢失")
 
+    filename = file_path.name
     if kind == "midi":
         media_type = "audio/midi"
     else:
-        media_type = "audio/mpeg" if file_path.suffix.lower() == ".mp3" else "audio/wav"
+        media_type = "audio/wav" if filename.lower().endswith(".wav") else "audio/mpeg"
 
-    return FileResponse(str(file_path), media_type=media_type, filename=file_path.name)
+    return FileResponse(str(file_path), media_type=media_type, filename=filename)

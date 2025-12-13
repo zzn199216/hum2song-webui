@@ -1,81 +1,130 @@
-"""
-通用工具库
-功能：生成唯一ID，清理临时文件等
-"""
 # core/utils.py
 from __future__ import annotations
 
-import logging
+import os
+import re
 import time
 import uuid
-import threading
+import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
-PathLike = Union[str, Path]
+_TASK_STORE: Dict[str, Dict[str, Any]] = {}
 
-
-# ---------------------------
-# IDs / paths / file helpers
-# ---------------------------
-def new_job_id(prefix: str = "") -> str:
-    """
-    生成短 job_id（默认 12 位 hex），用于所有产物命名，避免并发覆盖。
-    """
-    jid = uuid.uuid4().hex[:12]
-    return f"{prefix}{jid}" if prefix else jid
+# 为了避免 prune 每次都跑，做一个简单节流
+_LAST_PRUNE_AT: float = 0.0
+_PRUNE_MIN_INTERVAL_SEC: float = 5.0
 
 
-def ensure_dir(p: PathLike) -> Path:
-    d = Path(p)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+def new_job_id() -> str:
+    """生成短 ID（12 位 hex）"""
+    return uuid.uuid4().hex[:12]
 
 
-def safe_unlink(p: Optional[PathLike]) -> bool:
-    """
-    安全删除：成功 True；不存在/失败 False（不抛异常）。
-    """
+def ensure_dir(p: Path) -> Path:
+    p = Path(p)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def safe_unlink(p: Optional[Path], missing_ok: bool = True) -> bool:
+    """Windows 可能遇到文件锁，尽量安全删除"""
     if not p:
-        return False
-    try:
-        Path(p).unlink(missing_ok=True)
         return True
-    except Exception as e:
-        logger.warning("safe_unlink failed for %s: %s", p, e)
+    p = Path(p)
+    if not p.exists():
+        return True
+    try:
+        p.unlink()
+        return True
+    except FileNotFoundError:
+        return True
+    except PermissionError as e:
+        # Windows 文件被占用时常见
+        logger.warning("safe_unlink PermissionError: %s (%s)", p, e)
+        return False
+    except OSError as e:
+        logger.warning("safe_unlink OSError: %s (%s)", p, e)
         return False
 
 
-def guess_extension(filename: Optional[str]) -> str:
+def cleanup_old_files(dir_path: Path, older_than_seconds: int = 86400) -> int:
+    """清理目录下旧文件（不会删除 .gitkeep）"""
+    dir_path = Path(dir_path)
+    if not dir_path.exists():
+        return 0
+
+    now = time.time()
+    removed = 0
+    for fp in dir_path.glob("*"):
+        if not fp.is_file():
+            continue
+        if fp.name == ".gitkeep":
+            continue
+        try:
+            mtime = fp.stat().st_mtime
+        except OSError:
+            continue
+        if now - mtime >= older_than_seconds:
+            if safe_unlink(fp):
+                removed += 1
+    return removed
+
+
+_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def sanitize_filename(name: str, max_stem: int = 64) -> str:
     """
-    从文件名猜扩展名（带点），如 '.m4a' '.wav'。None/无扩展名返回 ''。
+    清理用户文件名（不改变后缀），避免空格/特殊字符/emoji/超长路径坑。
     """
-    if not filename:
-        return ""
-    return Path(filename).suffix.lower()
+    name = (name or "").strip()
+    # 防止带路径
+    name = name.replace("\\", "/").split("/")[-1]
+    if not name:
+        return "audio.wav"
+
+    p = Path(name)
+    stem = p.stem or "audio"
+    suffix = p.suffix or ".wav"
+
+    stem = _FILENAME_SAFE_RE.sub("_", stem).strip("._- ")
+    if not stem:
+        stem = "audio"
+
+    stem = stem[:max_stem]
+    # Windows 不允许末尾空格/点
+    stem = stem.rstrip(" .")
+    if not stem:
+        stem = "audio"
+
+    suffix = suffix.lower()
+    if len(suffix) > 10 or not suffix.startswith("."):
+        suffix = ".wav"
+
+    return f"{stem}{suffix}"
 
 
-def build_paths(job_id: str, input_filename: Optional[str] = None) -> Dict[str, Path]:
+def build_paths(job_id: str, original_filename: str) -> Dict[str, Path]:
     """
-    统一命名规范（强烈建议全项目都用它）：
-
-    uploads/{job_id}{ext}          原始上传（ext 来自 input_filename）
-    uploads/{job_id}_clean.wav     清洗 wav
-    outputs/{job_id}.mid           midi
-    outputs/{job_id}.wav/.mp3      最终音频（根据 format 选择）
-
-    返回常用路径 dict。
+    统一生成各阶段产物路径：
+    - raw_audio: uploads/<job_id>.<ext>
+    - clean_wav: uploads/<job_id>_clean.wav
+    - midi:      outputs/<job_id>.mid
+    - audio_wav: outputs/<job_id>.wav
+    - audio_mp3: outputs/<job_id>.mp3
     """
     s = get_settings()
+    safe_name = sanitize_filename(original_filename)
+    ext = Path(safe_name).suffix or ".wav"
+
     upload_dir = ensure_dir(s.upload_dir)
     output_dir = ensure_dir(s.output_dir)
 
-    ext = guess_extension(input_filename)
     raw_audio = upload_dir / f"{job_id}{ext}"
     clean_wav = upload_dir / f"{job_id}_clean.wav"
     midi = output_dir / f"{job_id}.mid"
@@ -91,215 +140,71 @@ def build_paths(job_id: str, input_filename: Optional[str] = None) -> Dict[str, 
     }
 
 
-def cleanup_old_files(dir_path: PathLike, older_than_seconds: int = 3600) -> int:
-    """
-    清理目录中超过 older_than_seconds 的文件（跳过 .gitkeep）。
-    返回删除数量。
-    """
-    d = Path(dir_path)
-    if not d.exists():
-        return 0
-
-    now = time.time()
-    threshold = now - older_than_seconds
-    deleted = 0
-
-    for p in d.glob("*"):
-        if not p.is_file():
-            continue
-        if p.name == ".gitkeep":
-            continue
-        try:
-            if p.stat().st_mtime < threshold:
-                p.unlink()
-                deleted += 1
-        except Exception as e:
-            logger.warning("cleanup failed for %s: %s", p, e)
-
-    return deleted
-
-
-def cleanup_runtime(older_than_seconds: int = 3600) -> Dict[str, int]:
-    """清理 uploads/ outputs/ 旧文件（默认 1 小时）"""
-    s = get_settings()
-    return {
-        "uploads": cleanup_old_files(s.upload_dir, older_than_seconds),
-        "outputs": cleanup_old_files(s.output_dir, older_than_seconds),
-    }
-
-
-# ---------------------------
-# In-memory Task Manager (MVP)
-# ---------------------------
-# 注意：仅适用于单进程（uvicorn --workers 1）
-_TASK_STORE: Dict[str, Dict[str, Any]] = {}
-_TASK_LOCK = threading.Lock()
-
-# “机会式 prune”节流：至少间隔多少秒才做一次 prune 扫描
-_PRUNE_MIN_INTERVAL_SECONDS = 60
-_LAST_PRUNE_AT = 0.0
-
-
-def _maybe_prune_locked(now: float, older_than_seconds: int) -> int:
-    """
-    在持锁状态下做 prune（内部函数）。
-    """
-    global _LAST_PRUNE_AT
-
-    if now - _LAST_PRUNE_AT < _PRUNE_MIN_INTERVAL_SECONDS:
-        return 0
-
-    threshold = now - older_than_seconds
-    to_delete = [tid for tid, t in _TASK_STORE.items() if float(t.get("updated_at", 0)) < threshold]
-
-    for tid in to_delete:
-        _TASK_STORE.pop(tid, None)
-
-    _LAST_PRUNE_AT = now
-    return len(to_delete)
-
-
 class TaskManager:
-    """
-    MVP 版任务状态管理器（内存实现，替代 Redis）。
-
-    task 结构示例：
-    {
-      "task_id": "...",
-      "status": "pending|processing|done|failed",
-      "message": "...",
-      "progress": 0~100,
-      "created_at": epoch_seconds,
-      "updated_at": epoch_seconds,
-      "paths": {...},   # build_paths(...) 的结果（string化）
-      "result": {...},  # 可选：返回给前端的结构化结果
-      "error": "...",   # 失败时
-    }
-    """
-
     @staticmethod
-    def create_task(
-        input_filename: Optional[str] = None,
-        *,
-        auto_prune: bool = True,
-        prune_older_than_seconds: int = 3600,
-    ) -> str:
+    def create_task(original_filename: str, auto_prune: bool = True) -> str:
         """
-        创建任务，并可选进行“机会式 prune”。
+        创建任务（兼容测试：auto_prune 参数）
+        """
+        if auto_prune:
+            TaskManager.prune()
 
-        - auto_prune=True: 默认开启，避免 _TASK_STORE 无限增长
-        - prune_older_than_seconds: 清理多久未更新的任务（默认 1 小时）
-        """
         task_id = new_job_id()
-        paths = build_paths(task_id, input_filename=input_filename)
-        now = time.time()
+        paths = build_paths(task_id, original_filename)
 
-        task = {
+        now = time.time()
+        _TASK_STORE[task_id] = {
             "task_id": task_id,
+            "original_filename": original_filename,
             "status": "pending",
             "message": "Task created",
             "progress": 0,
             "created_at": now,
             "updated_at": now,
-            "paths": {k: str(v) for k, v in paths.items()},
             "result": None,
             "error": None,
+            "paths": {k: str(v) for k, v in paths.items()},
         }
-
-        with _TASK_LOCK:
-            if auto_prune:
-                removed = _maybe_prune_locked(now, prune_older_than_seconds)
-                if removed:
-                    logger.info("🧹 pruned %d stale tasks from in-memory store", removed)
-
-            _TASK_STORE[task_id] = task
-
         return task_id
 
     @staticmethod
     def get_task(task_id: str) -> Optional[Dict[str, Any]]:
-        with _TASK_LOCK:
-            t = _TASK_STORE.get(task_id)
-            return dict(t) if t else None  # 返回副本，避免外部修改内部状态
+        return _TASK_STORE.get(task_id)
 
     @staticmethod
-    def update_task(task_id: str, status: Optional[str] = None, **kwargs: Any) -> None:
-        with _TASK_LOCK:
-            if task_id not in _TASK_STORE:
-                return
-            t = _TASK_STORE[task_id]
+    def update_task(task_id: str, status: str, **kwargs: Any) -> None:
+        t = _TASK_STORE.get(task_id)
+        if not t:
+            return
+        t["status"] = status
+        t.update(kwargs)
+        t["updated_at"] = time.time()
 
-            if status is not None:
-                t["status"] = status
-
-            # progress clamp
-            if "progress" in kwargs:
-                try:
-                    p = int(kwargs["progress"])
-                    kwargs["progress"] = max(0, min(100, p))
-                except Exception:
-                    kwargs["progress"] = t.get("progress", 0)
-
-            t.update(kwargs)
-            t["updated_at"] = time.time()
+    @staticmethod
+    def done_task(task_id: str, result: Dict[str, Any]) -> None:
+        TaskManager.update_task(task_id, status="done", progress=100, message="Done", result=result)
 
     @staticmethod
     def fail_task(task_id: str, error_msg: str) -> None:
-        TaskManager.update_task(
-            task_id,
-            status="failed",
-            error=error_msg,
-            message="Task failed",
-            progress=0,
-        )
-        logger.error("❌ Task[%s] failed: %s", task_id, error_msg)
+        TaskManager.update_task(task_id, status="failed", progress=0, message="Failed", error=error_msg)
 
     @staticmethod
-    def done_task(task_id: str, result: Optional[Dict[str, Any]] = None) -> None:
-        TaskManager.update_task(
-            task_id,
-            status="done",
-            result=result,
-            message="Task done",
-            progress=100,
-        )
-
-    @staticmethod
-    def delete_task(task_id: str) -> bool:
-        with _TASK_LOCK:
-            return _TASK_STORE.pop(task_id, None) is not None
-
-    @staticmethod
-    def prune(
-        older_than_seconds: int = 3600,
-        *,
-        force: bool = False,
-    ) -> int:
-        """
-        主动 prune：清理太久未更新的任务记录（只清理内存 store，不动文件）。
-
-        - force=True: 无视节流，立刻扫描并清理
-        返回：清理数量
-        """
+    def prune(older_than_seconds: int = 86400, force: bool = False) -> int:
         global _LAST_PRUNE_AT
-
         now = time.time()
-        with _TASK_LOCK:
-            if force:
-                # force 时直接扫描
-                threshold = now - older_than_seconds
-                to_delete = [tid for tid, t in _TASK_STORE.items() if float(t.get("updated_at", 0)) < threshold]
-                for tid in to_delete:
-                    _TASK_STORE.pop(tid, None)
-                _LAST_PRUNE_AT = now
-                return len(to_delete)
+        if not force and (now - _LAST_PRUNE_AT) < _PRUNE_MIN_INTERVAL_SEC:
+            return 0
 
-            removed = _maybe_prune_locked(now, older_than_seconds)
-            return removed
+        _LAST_PRUNE_AT = now
+        removed = 0
+        to_delete = []
+        for tid, t in _TASK_STORE.items():
+            updated_at = float(t.get("updated_at", 0.0))
+            if now - updated_at >= older_than_seconds:
+                to_delete.append(tid)
 
+        for tid in to_delete:
+            _TASK_STORE.pop(tid, None)
+            removed += 1
 
-if __name__ == "__main__":
-    # quick smoke
-    tid = TaskManager.create_task("demo.m4a")
-    print("task_id:", tid)
-    print("task:", TaskManager.get_task(tid))
+        return removed
