@@ -1,37 +1,56 @@
-# routers/generation.py
-"""
-Generation Router (Step 07)
-
-功能：
-1) POST /generate: 流式接收录音 -> 落盘 -> 立即返回 task_id -> 后台启动流水线
-2) GET  /tasks/{id}: 轮询任务状态
-3) GET  /tasks/{id}/download: 下载 audio 或 midi
-"""
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Optional
+from uuid import UUID
 
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
-from core.config import get_settings
-from core.utils import TaskManager, build_paths, safe_unlink
-from core.pipeline import run_pipeline_for_task
+from core.generation_service import generation_service
+from core.models import FileType, Stage, TaskCreateResponse, TaskInfoResponse, TaskStatus
+from core.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Generation"])
-
-AudioFormat = Literal["mp3", "wav"]
-DownloadKind = Literal["audio", "midi"]
+router = APIRouter(tags=["Generation"])
 
 
-async def _save_upload_file(upload_file: UploadFile, dst_path: Path, max_mb: int) -> int:
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _resolve_upload_dir() -> Path:
+    upload_dir = generation_service.upload_dir
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
+
+
+def _safe_unlink(p: Path) -> None:
+    try:
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
+
+
+def _guess_media_type(path: Path) -> str:
+    suf = path.suffix.lower()
+    if suf == ".mp3":
+        return "audio/mpeg"
+    if suf == ".wav":
+        return "audio/wav"
+    if suf in (".mid", ".midi"):
+        return "audio/midi"
+    return "application/octet-stream"
+
+
+async def _save_upload_file(upload_file: UploadFile, dst_path: Path, *, max_mb: int) -> int:
     """
-    chunk 写入 + 大小限制（不把整文件读进内存）
+    Async chunk write + size limit (no full file read into memory).
     """
     dst_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -49,129 +68,148 @@ async def _save_upload_file(upload_file: UploadFile, dst_path: Path, max_mb: int
                 if total > limit:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"文件过大: {total/1024/1024:.2f}MB > {max_mb}MB",
+                        detail=f"File too large: {total/1024/1024:.2f}MB > {max_mb}MB",
                     )
                 await f.write(chunk)
     except Exception:
-        safe_unlink(dst_path)
+        _safe_unlink(dst_path)
         raise
     finally:
-        await upload_file.close()
+        try:
+            await upload_file.close()
+        except Exception:
+            pass
 
     return total
 
 
-def _run_pipeline_sync(
-    task_id: str,
-    input_filename: str,
-    output_format: AudioFormat,
-    gain: float,
-    keep_wav: bool = False,
-    cleanup_uploads: bool = True,
-) -> None:
+@router.post(
+    "/generate",
+    response_model=TaskCreateResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a generation task",
+)
+async def generate_music(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    output_format: str = Query("mp3", pattern="^(mp3|wav)$"),
+) -> TaskCreateResponse:
     """
-    ✅ 兼容旧测试的函数名：tests/test_routers.py 里会 patch 这个符号。
-    内部仅转调 pipeline，路由层仍不耦合 preprocess/ai/synth 细节。
+    Contract: 202 Accepted -> TaskCreateResponse
     """
-    run_pipeline_for_task(
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is missing")
+
+    # Keep original extension for ffmpeg friendliness; fallback to ".wav"
+    original_ext = (Path(file.filename).suffix or ".wav").lower()
+
+    # Create task (queued)
+    task_id = task_manager.create_task(stage=Stage.preprocessing)
+
+    upload_dir = _resolve_upload_dir()
+    input_path = (upload_dir / f"{task_id}{original_ext}").resolve()
+
+    # Best-effort: settings.max_upload_size_mb else default 50MB
+    max_mb = 50
+    try:
+        from core.config import get_settings  # type: ignore
+
+        s = get_settings()
+        max_mb = int(getattr(s, "max_upload_size_mb", max_mb))
+    except Exception:
+        pass
+
+    try:
+        written = await _save_upload_file(file, input_path, max_mb=max_mb)
+        if written <= 0:
+            task_manager.mark_failed(task_id, message="Empty file", stage=Stage.preprocessing)
+            _safe_unlink(input_path)
+            raise HTTPException(status_code=400, detail="File is empty")
+
+        logger.info("Task[%s] uploaded (%d bytes) -> %s", task_id, written, input_path.name)
+
+        # Background processing (service owns state transitions)
+        background_tasks.add_task(
+            generation_service.process_task,
+            UUID(str(task_id)),
+            input_path,
+            output_format,
+        )
+
+    except HTTPException:
+        # Keep task consistent; input_path already cleaned by _save_upload_file on write failure
+        try:
+            task_manager.mark_failed(task_id, message="Upload rejected", stage=Stage.preprocessing)
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        _safe_unlink(input_path)
+        try:
+            task_manager.mark_failed(task_id, message=f"Upload failed: {e}", stage=Stage.preprocessing)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error during upload")
+
+    return TaskCreateResponse(
         task_id=task_id,
-        input_filename=input_filename,
-        output_format=output_format,
-        gain=gain,
-        keep_wav=keep_wav,
-        cleanup_uploads=cleanup_uploads,
-        base_api_prefix="/api/v1",
+        status=TaskStatus.queued,
+        poll_url=f"/tasks/{task_id}",
+        created_at=_utcnow(),
     )
 
 
-@router.post("/generate")
-async def start_generation(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    output_format: AudioFormat = Query("mp3"),
-    gain: float = Query(0.8, ge=0.0, le=5.0),
-    # 调试参数
-    keep_clean_wav: bool = Query(False),
-    cleanup_uploads: bool = Query(True),
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskInfoResponse,
+    summary="Poll task status",
+)
+def get_task_status(task_id: str) -> TaskInfoResponse:
+    """
+    Contract: 200 OK / 404 Not Found
+    """
+    try:
+        return task_manager.get_task_info(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+
+@router.get(
+    "/tasks/{task_id}/download",
+    summary="Download artifact",
+)
+def download_artifact(
+    task_id: str,
+    file_type: str = Query(..., description="file_type (audio, midi)"),
 ):
-    settings = get_settings()
-
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
-
-    # 1. 创建任务
-    task_id = TaskManager.create_task(file.filename)
-    paths = build_paths(task_id, file.filename)
-    raw_path: Path = paths["raw_audio"]
-
-    TaskManager.update_task(task_id, status="processing", progress=2, message="开始上传...")
+    """
+    Contract:
+    - 200: file stream
+    - 400: invalid file_type
+    - 404: task not found OR artifact missing on disk
+    - 409: task not completed OR requested file_type unavailable
+    """
+    try:
+        ft = FileType(file_type)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid file_type")
 
     try:
-        # 2. 接收文件 (Web 层职责)
-        written = await _save_upload_file(file, raw_path, settings.max_upload_size_mb)
-        logger.info("Task[%s] uploaded (%d bytes) -> %s", task_id, written, raw_path.name)
-
-        # 3. 丢给后台执行（通过兼容壳函数名，保持旧测试可 patch）
-        background_tasks.add_task(
-            _run_pipeline_sync,
-            task_id,
-            file.filename,
-            output_format,
-            gain,
-            keep_clean_wav,
-            cleanup_uploads,
+        path = task_manager.get_artifact_path(task_id, ft)
+        return FileResponse(
+            path=str(path),
+            filename=path.name,
+            media_type=_guess_media_type(path),
         )
 
-        return {
-            "task_id": task_id,
-            "status": "pending",
-            "message": "任务已接收，后台处理中",
-            "poll_url": f"/api/v1/tasks/{task_id}",
-        }
+    except RuntimeError:
+        raise HTTPException(status_code=409, detail="Task not completed or file_type unavailable")
 
-    except HTTPException as e:
-        TaskManager.fail_task(task_id, str(e.detail))
-        safe_unlink(raw_path)
-        raise
-    except Exception as e:
-        TaskManager.fail_task(task_id, f"Upload error: {e}")
-        safe_unlink(raw_path)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Artifact missing")
 
-
-@router.get("/tasks/{task_id}")
-def get_task_status(task_id: str):
-    task = TaskManager.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在或已过期")
-    return task
-
-
-@router.get("/tasks/{task_id}/download")
-def download_result(
-    task_id: str,
-    kind: DownloadKind = Query("audio"),
-):
-    task = TaskManager.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    if task.get("status") != "done":
-        raise HTTPException(status_code=409, detail=f"任务尚未完成，当前状态: {task.get('status')}")
-
-    result = task.get("result") or {}
-    path_str = result.get("audio") if kind == "audio" else result.get("midi")
-    if not path_str:
-        raise HTTPException(status_code=404, detail="文件记录丢失")
-
-    file_path = Path(path_str)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="文件已过期或物理丢失")
-
-    filename = file_path.name
-    if kind == "midi":
-        media_type = "audio/midi"
-    else:
-        media_type = "audio/wav" if filename.lower().endswith(".wav") else "audio/mpeg"
-
-    return FileResponse(str(file_path), media_type=media_type, filename=filename)
+    except KeyError as e:
+        msg = str(e)
+        if "Task not found" in msg or "Invalid UUID format" in msg:
+            raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=409, detail="Task not completed or file_type unavailable")
