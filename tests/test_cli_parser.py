@@ -1,0 +1,12 @@
+from __future__ import annotations
+
+from hum2song.cli import build_parser
+
+
+def test_cli_parser_generate_defaults():
+    p = build_parser()
+    args = p.parse_args(["generate", "a.wav"])
+    assert args.base_url == "http://127.0.0.1:8000"
+    assert args.format == "mp3"
+    assert args.out_dir == "."
+    assert args.no_download is False

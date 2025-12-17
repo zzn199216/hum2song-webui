@@ -40,3 +40,9 @@ assets/**
 !assets/**/README*
 !assets/**/*.md
 !assets/**/LICENSE*
+# runtime artifacts
+/downloads/
+/data/artifacts/
+/uploads/
+/outputs/
+
