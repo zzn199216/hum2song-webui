@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Union
 
 from core.config import get_settings
 from core.utils import TaskManager, build_paths, safe_unlink
@@ -11,6 +12,52 @@ from core.utils import TaskManager, build_paths, safe_unlink
 logger = logging.getLogger(__name__)
 
 AudioFormat = Literal["mp3", "wav"]
+
+
+def _ensure_taskid_midi(task_id: str, midi_path: Union[str, Path], output_dir: Union[str, Path]) -> Path:
+    """
+    Ensure a stable, canonical MIDI artifact exists at:
+        <output_dir>/<task_id>.mid
+
+    Returns the canonical midi path.
+
+    Behavior:
+    - If midi_path is already canonical -> return it.
+    - Else copy/move to canonical path (best-effort).
+    - If canonical still missing -> raise FileNotFoundError.
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    src = Path(midi_path)
+    canonical = (out_dir / f"{task_id}.mid").resolve()
+
+    if src.resolve() == canonical:
+        if not canonical.exists():
+            raise FileNotFoundError(f"Canonical MIDI path expected but missing: {canonical}")
+        return canonical
+
+    if not src.exists():
+        raise FileNotFoundError(f"MIDI path returned by converter does not exist: {src}")
+
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+
+    # Prefer move if src is inside output_dir; else copy.
+    try:
+        src_parent = src.resolve().parent
+        if src_parent == out_dir.resolve():
+            # rename/move within the same dir
+            shutil.move(str(src), str(canonical))
+        else:
+            shutil.copy2(str(src), str(canonical))
+    except Exception:
+        # Last resort: bytes copy
+        canonical.write_bytes(src.read_bytes())
+
+    if not canonical.exists():
+        raise FileNotFoundError(f"Failed to materialize canonical MIDI: {canonical}")
+
+    return canonical
 
 
 def run_pipeline_for_task(
@@ -45,6 +92,9 @@ def run_pipeline_for_task(
         from core.ai_converter import audio_to_midi
 
         midi_path = audio_to_midi(clean_wav_path, output_dir=settings.output_dir)
+
+        # ✅ 强制 MIDI 产物命名/落盘一致性：outputs/{task_id}.mid
+        midi_path = _ensure_taskid_midi(task_id, midi_path, settings.output_dir)
 
         TaskManager.update_task(task_id, status="processing", progress=80, message="正在合成乐器音频...")
 
@@ -83,12 +133,12 @@ def run_pipeline_for_task(
 
 
 # --- Adapter for GenerationService (expects Path-returning runner) ---
-from pathlib import Path
-from typing import Union
-
-from core.config import get_settings
-
-def run_pipeline(input_path: Union[str, Path], output_format: str = "mp3", gain: float = 0.8, keep_wav: bool = False) -> Path:
+def run_pipeline(
+    input_path: Union[str, Path],
+    output_format: str = "mp3",
+    gain: float = 0.8,
+    keep_wav: bool = False,
+) -> Path:
     """
     GenerationService adapter:
     input: a local file path (usually uploads/{task_id}.wav)
@@ -111,7 +161,7 @@ def run_pipeline(input_path: Union[str, Path], output_format: str = "mp3", gain:
     run_pipeline_for_task(
         task_id=str(task_id),
         input_filename=p.name,
-        output_format=output_format,
+        output_format=output_format,  # type: ignore[arg-type]
         gain=gain,
         keep_wav=keep_wav,
         cleanup_uploads=False,     # 交给 GenerationService 去清理
@@ -119,6 +169,7 @@ def run_pipeline(input_path: Union[str, Path], output_format: str = "mp3", gain:
     )
 
     out_dir = Path(s.output_dir)
+
     # 优先按 output_format 找
     preferred = out_dir / f"{task_id}.{output_format}"
     if preferred.exists():

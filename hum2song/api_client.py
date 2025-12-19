@@ -162,3 +162,14 @@ class Hum2SongClient:
             raise NetworkError(str(e)) from e
 
         return DownloadResult(file_type=file_type, path=dest_path, bytes_written=n)
+
+    # New: convenience wrapper (keeps future naming consistent with plan)
+    def download_task_file(
+        self,
+        task_id: str,
+        *,
+        file_type: FileType,
+        dest_path: Path,
+        overwrite: bool = False,
+    ) -> DownloadResult:
+        return self.download_file(task_id, file_type=file_type, dest_path=dest_path, overwrite=overwrite)

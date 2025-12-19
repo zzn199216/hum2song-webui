@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import httpx
 import pytest
 
-from core.models import TaskStatus, Stage
 from hum2song.api_client import Hum2SongClient, ContractError
 
 
@@ -91,3 +89,25 @@ def test_download_file_writes_bytes(tmp_path: Path):
         )
         assert dl.bytes_written == len(b"FAKE_AUDIO_BYTES")
         assert dest.read_bytes() == b"FAKE_AUDIO_BYTES"
+
+
+def test_download_task_file_wrapper(tmp_path: Path):
+    dest = tmp_path / "out.mid"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path.endswith("/download")
+        assert request.url.params.get("file_type") == "midi"
+        return httpx.Response(200, content=b"MThd....FAKE_MIDI")
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, base_url="http://test") as http:
+        c = Hum2SongClient(base_url="http://test", http=http)
+        dl = c.download_task_file(
+            "550e8400-e29b-41d4-a716-446655440000",
+            file_type=__import__("core.models", fromlist=["FileType"]).FileType.midi,
+            dest_path=dest,
+            overwrite=True,
+        )
+        assert dl.bytes_written == len(b"MThd....FAKE_MIDI")
+        assert dest.read_bytes() == b"MThd....FAKE_MIDI"

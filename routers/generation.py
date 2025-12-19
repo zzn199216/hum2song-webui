@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
 
 import aiofiles
@@ -61,6 +61,27 @@ def _resolve_upload_dir() -> Path:
     return upload_dir
 
 
+def _resolve_outputs_dir() -> Path:
+    """
+    Best-effort resolve outputs dir.
+    We prefer generation_service's configured dir if available; fallback to repo ./outputs.
+    """
+    for attr in ("outputs_dir", "output_dir"):
+        p = getattr(generation_service, attr, None)
+        if p is None:
+            continue
+        try:
+            path = Path(p)
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except Exception:
+            pass
+
+    path = Path("outputs")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _safe_unlink(p: Path) -> None:
     try:
         if p.exists():
@@ -78,6 +99,20 @@ def _guess_media_type(path: Path) -> str:
     if suf in (".mid", ".midi"):
         return "audio/midi"
     return "application/octet-stream"
+
+
+def _status_is_success_done(status_value: object) -> bool:
+    """
+    Be defensive: TaskStatus enum names/values may vary slightly across iterations.
+    We treat only *successful terminal* statuses as "done" for artifact-missing -> 404.
+    """
+    try:
+        v = getattr(status_value, "value", status_value)
+        s = str(v).strip().lower()
+    except Exception:
+        return False
+
+    return s in {"done", "completed", "succeeded", "success"}
 
 
 async def _save_upload_file(upload_file: UploadFile, dst_path: Path, *, max_mb: int) -> int:
@@ -223,6 +258,31 @@ def download_artifact(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid file_type")
 
+    # 1) First: verify task exists (so we can consistently return 404 for unknown task_id)
+    try:
+        task_info = task_manager.get_task_info(task_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # 2) MIDI: treat outputs/{task_id}.mid as source of truth.
+    #    If file exists -> return immediately (even if status hasn't flipped yet).
+    if ft == FileType.midi:
+        outputs_dir = _resolve_outputs_dir()
+        midi_path = outputs_dir / f"{task_id}.mid"
+
+        if midi_path.exists():
+            return FileResponse(
+                path=str(midi_path),
+                filename=midi_path.name,
+                media_type=_guess_media_type(midi_path),
+            )
+
+        # MIDI is optional: even if task is completed (audio ready),
+        # MIDI may still be unavailable. Contract expects 409.
+        raise HTTPException(status_code=409, detail="Task not completed or file_type unavailable")
+
+
+    # 3) AUDIO (keep using task_manager's artifact resolution to minimize risk)
     try:
         path = task_manager.get_artifact_path(task_id, ft)
         return FileResponse(
@@ -233,7 +293,10 @@ def download_artifact(
     except RuntimeError:
         raise HTTPException(status_code=409, detail="Task not completed or file_type unavailable")
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Artifact missing")
+        # If task succeeded but file missing -> 404; else -> 409 (not ready)
+        if _status_is_success_done(task_info.status):
+            raise HTTPException(status_code=404, detail="Artifact missing")
+        raise HTTPException(status_code=409, detail="Task not completed or file_type unavailable")
     except KeyError as e:
         msg = str(e)
         if "Task not found" in msg or "Invalid UUID format" in msg:

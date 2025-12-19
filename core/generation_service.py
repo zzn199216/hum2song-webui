@@ -39,6 +39,24 @@ def _resolve_storage_dir() -> Path:
     return base
 
 
+def _resolve_outputs_dir_fallback() -> Path:
+    """
+    Best-effort resolve outputs directory used by pipeline.
+    Prefer core.config.get_settings().output_dir if available.
+    """
+    try:
+        from core.config import get_settings  # type: ignore
+
+        s = get_settings()
+        out = Path(getattr(s, "output_dir", "outputs"))
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+    except Exception:
+        out = Path("outputs")
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+
+
 def _adapt_runner(obj: Callable[..., object]) -> RunnerFn:
     """
     把各种可能的 pipeline callable 适配成统一签名：
@@ -119,6 +137,11 @@ class GenerationService:
         self.artifact_dir = self.base_dir / "artifacts"
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        # ✅ expose outputs_dir for routers (midi download uses it if present)
+        self.outputs_dir = _resolve_outputs_dir_fallback()
+        # keep compatibility with router's fallback attribute name
+        self.output_dir = self.outputs_dir
 
         # runner 惰性加载：如果传入就用，否则第一次任务再加载真实 pipeline / mock
         self._runner: Optional[RunnerFn] = runner

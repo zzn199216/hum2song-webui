@@ -10,3 +10,18 @@ def test_cli_parser_generate_defaults():
     assert args.format == "mp3"
     assert args.out_dir == "."
     assert args.no_download is False
+    assert args.download == "audio"
+    assert args.download_midi is False
+    assert args.midi_out is None
+
+
+def test_cli_parser_generate_download_midi_flag():
+    p = build_parser()
+    args = p.parse_args(["generate", "a.wav", "--download-midi"])
+    assert args.download_midi is True
+
+
+def test_cli_parser_generate_midi_out_implies_midi_download():
+    p = build_parser()
+    args = p.parse_args(["generate", "a.wav", "--midi-out", "x.mid"])
+    assert args.midi_out == "x.mid"

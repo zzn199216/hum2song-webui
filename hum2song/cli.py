@@ -29,8 +29,19 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-download", action="store_true", help="Do not download artifacts")
     g.add_argument("--no-wait", action="store_true", help="Only submit task and exit")
     g.add_argument("--download", default="audio", choices=["audio", "midi", "both"], help="What to download")
+    # convenience flags (do not break existing --download semantics)
+    g.add_argument("--download-midi", action="store_true", help="Also download MIDI artifact")
+    g.add_argument("--midi-out", default=None, help="Custom path to save MIDI file (implies download MIDI)")
     g.add_argument("--poll-interval", type=float, default=1.0, help="Polling interval seconds")
     g.add_argument("--timeout", type=float, default=60.0, help="Polling timeout seconds")
+
+    # ✅ NEW: synth subcommand (local)
+    s = sub.add_parser("synth", help="Synthesize audio from a MIDI file (local)")
+    s.add_argument("midi", type=str, help="Path to .mid")
+    s.add_argument("--format", default="mp3", choices=["mp3", "wav"], help="Output format")
+    s.add_argument("--out-dir", default=".", help="Output directory")
+    s.add_argument("--gain", type=float, default=0.8, help="FluidSynth gain")
+    s.add_argument("--keep-wav", action="store_true", help="Keep intermediate wav when output is mp3")
 
     return p
 
@@ -42,6 +53,28 @@ def _print_err(msg: str) -> None:
 def _safe_filename(name: str) -> str:
     # minimal cross-platform sanitize
     return "".join(c if c not in r'<>:"/\|?*' else "_" for c in name)
+
+
+def _resolve_midi_dest(task_id: str, out_dir: Path, *, midi_out: str | None, prefer_downloads_dir: bool) -> Path:
+    """
+    Default behavior:
+    - if --midi-out provided: use that path (if dir -> append <task_id>.mid)
+    - else:
+        - if --download-midi used: save under <out-dir>/downloads/<task_id>.mid
+        - otherwise: save under <out-dir>/<task_id>.mid
+    """
+    if midi_out:
+        p = Path(midi_out)
+        if p.exists() and p.is_dir():
+            return (p / f"{task_id}.mid").resolve()
+        if p.suffix == "":
+            return p.with_suffix(".mid").resolve()
+        return p.resolve()
+
+    if prefer_downloads_dir:
+        return (out_dir / "downloads" / f"{task_id}.mid").resolve()
+
+    return (out_dir / f"{task_id}.mid").resolve()
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -84,41 +117,56 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
         # 3) completed
         if args.no_download:
-            # still show download_url for audio if present
             if info.result:
                 print(f"download_url={info.result.download_url}")
             return EXIT_OK
 
         # Decide what to download
         want = args.download
+        want_audio = want in ("audio", "both")
+        want_midi = want in ("midi", "both") or bool(args.download_midi) or bool(args.midi_out)
+
         targets: list[FileType] = []
-        if want in ("audio", "both"):
+        if want_audio:
             targets.append(FileType.audio)
-        if want in ("midi", "both"):
+        if want_midi:
             targets.append(FileType.midi)
 
-        # Prefer contract's filename when available (for audio result)
+        # Download
         for ft in targets:
+            if ft == FileType.midi:
+                dest = _resolve_midi_dest(
+                    task_id,
+                    out_dir,
+                    midi_out=args.midi_out,
+                    prefer_downloads_dir=bool(args.download_midi) and not bool(args.midi_out),
+                )
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    dl = client.download_task_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
+                    print(f"downloaded {ft.value}: {dl.path} ({dl.bytes_written} bytes)")
+                except HTTPError as e:
+                    _print_err(f"download {ft.value} failed: {e}")
+                continue
+
+            # audio dest
             filename = None
             if info.result and info.result.file_type == ft:
                 filename = info.result.filename
 
             if not filename:
-                # fallback
-                ext = "mid" if ft == FileType.midi else args.format
+                ext = args.format
                 filename = f"{task_id}.{ext}"
 
             filename = _safe_filename(filename)
             dest = (out_dir / filename).resolve()
 
             try:
-                dl = client.download_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
+                dl = client.download_task_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
                 print(f"downloaded {ft.value}: {dl.path} ({dl.bytes_written} bytes)")
             except HTTPError as e:
-                # e.g. 409 midi unavailable
                 _print_err(f"download {ft.value} failed: {e}")
-                if ft == FileType.audio:
-                    return EXIT_NETWORK_OR_HTTP
+                return EXIT_NETWORK_OR_HTTP
 
         return EXIT_OK
 
@@ -135,12 +183,41 @@ def cmd_generate(args: argparse.Namespace) -> int:
         client.close()
 
 
+def cmd_synth(args: argparse.Namespace) -> int:
+    midi_path = Path(args.midi)
+    if not midi_path.exists() or not midi_path.is_file():
+        _print_err(f"midi_path not found: {midi_path}")
+        return EXIT_BAD_ARGS
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # local synth
+        from core.synthesizer import midi_to_audio
+
+        out_path = midi_to_audio(
+            midi_path,
+            output_dir=out_dir,
+            output_format=args.format,
+            gain=float(args.gain),
+            keep_wav=bool(args.keep_wav),
+        )
+        print(str(Path(out_path).resolve()))
+        return EXIT_OK
+    except Exception as e:
+        _print_err(str(e))
+        return EXIT_BAD_ARGS
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.cmd == "generate":
         return cmd_generate(args)
+    if args.cmd == "synth":
+        return cmd_synth(args)
 
     _print_err(f"Unknown command: {args.cmd}")
     return EXIT_BAD_ARGS
