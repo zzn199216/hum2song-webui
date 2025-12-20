@@ -302,7 +302,39 @@ class TaskManager:
                 del self._tasks[tid]
                 removed += 1
         return removed
+    
+    def attach_artifact(
+        self,
+        task_id: Union[str, UUID],
+        *,
+        artifact_path: Union[str, Path],
+        file_type: FileType,
+    ) -> None:
+        """
+        Attach/overwrite an artifact path for an ALREADY COMPLETED task.
+        Used for:
+        - adding midi after audio
+        - re-rendering audio after score edits
 
+        Error semantics:
+        - task not found -> KeyError
+        - task not completed -> RuntimeError (409)
+        - artifact_path missing -> FileNotFoundError (404)
+        """
+        tid = _ensure_uuid(task_id)
+        p = Path(artifact_path).expanduser().resolve()
+        if not p.exists():
+            raise FileNotFoundError(f"artifact_path does not exist: {p}")
 
+        with self._lock:
+            rec = self._get_record_locked(tid)
+            if rec.status != TaskStatus.completed:
+                raise RuntimeError(f"Task not completed: {tid} status={rec.status}")
+
+            # ✅ 关键：download 只看这个映射
+            rec.artifact_paths[file_type] = str(p)
+            rec.updated_at = _utcnow()
+
+    
 # Singleton Instance
 task_manager = TaskManager()
