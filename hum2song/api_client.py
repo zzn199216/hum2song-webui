@@ -3,7 +3,7 @@ from __future__ import annotations
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from pydantic import ValidationError
@@ -32,7 +32,7 @@ class HTTPError(Hum2SongClientError):
 
 
 class ContractError(Hum2SongClientError):
-    """Response JSON doesn't match frozen contract."""
+    """Response JSON doesn't match frozen contract / expected shape."""
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,11 @@ class Hum2SongClient:
     - POST /generate?output_format=mp3|wav
     - GET  /tasks/{id}
     - GET  /tasks/{id}/download?file_type=audio|midi
+
+    Extended (MVP score workflow):
+    - GET  /tasks/{id}/score
+    - PUT  /tasks/{id}/score
+    - POST /tasks/{id}/render?output_format=mp3|wav
     """
 
     def __init__(
@@ -77,7 +82,7 @@ class Hum2SongClient:
         if self._owns_http:
             self.http.close()
 
-    # --------- core requests ---------
+    # --------- core (frozen) endpoints ---------
     def submit_task(self, audio_path: Path, *, output_format: str = "mp3") -> TaskCreateResponse:
         audio_path = Path(audio_path)
         if not audio_path.exists() or not audio_path.is_file():
@@ -87,7 +92,6 @@ class Hum2SongClient:
         params = {"output_format": output_format}
 
         mime = _guess_mime(audio_path)
-        # httpx handles multipart
         with audio_path.open("rb") as f:
             files = {"file": (audio_path.name, f, mime)}
             try:
@@ -139,7 +143,7 @@ class Hum2SongClient:
         dest_path = Path(dest_path)
 
         if dest_path.exists() and not overwrite:
-            raise FileExistsError(f"Destination exists: {dest_path}")
+            raise ValueError(f"dest_path exists (overwrite=False): {dest_path}")
 
         url = f"{self.base_url}/tasks/{task_id}/download"
         params = {"file_type": file_type.value}
@@ -147,7 +151,6 @@ class Hum2SongClient:
         try:
             with self.http.stream("GET", url, params=params) as r:
                 if r.status_code != 200:
-                    # 409/404/400 should be surfaced as HTTPError
                     raise HTTPError(r.status_code, r.text)
 
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +166,7 @@ class Hum2SongClient:
 
         return DownloadResult(file_type=file_type, path=dest_path, bytes_written=n)
 
-    # New: convenience wrapper (keeps future naming consistent with plan)
+    # --------- Backward compatible alias (old tests / old code) ---------
     def download_task_file(
         self,
         task_id: str,
@@ -172,4 +175,54 @@ class Hum2SongClient:
         dest_path: Path,
         overwrite: bool = False,
     ) -> DownloadResult:
+        """
+        Backward compatible wrapper for older tests/callers.
+        """
         return self.download_file(task_id, file_type=file_type, dest_path=dest_path, overwrite=overwrite)
+
+    # --------- score workflow endpoints ---------
+    def get_score(self, task_id: str) -> dict[str, Any]:
+        url = f"{self.base_url}/tasks/{task_id}/score"
+        try:
+            r = self.http.get(url)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError) as e:
+            raise NetworkError(str(e)) from e
+
+        if r.status_code != 200:
+            raise HTTPError(r.status_code, r.text)
+
+        try:
+            return r.json()
+        except ValueError as e:
+            raise ContractError(f"Invalid JSON in /score response: {e}") from e
+
+    def put_score(self, task_id: str, *, score_json: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.base_url}/tasks/{task_id}/score"
+        try:
+            r = self.http.put(url, json=score_json)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError) as e:
+            raise NetworkError(str(e)) from e
+
+        if r.status_code != 200:
+            raise HTTPError(r.status_code, r.text)
+
+        try:
+            return r.json()
+        except ValueError as e:
+            raise ContractError(f"Invalid JSON in PUT /score response: {e}") from e
+
+    def render_audio(self, task_id: str, *, output_format: str = "mp3") -> dict[str, Any]:
+        url = f"{self.base_url}/tasks/{task_id}/render"
+        params = {"output_format": output_format}
+        try:
+            r = self.http.post(url, params=params)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError) as e:
+            raise NetworkError(str(e)) from e
+
+        if r.status_code != 200:
+            raise HTTPError(r.status_code, r.text)
+
+        try:
+            return r.json()
+        except ValueError as e:
+            raise ContractError(f"Invalid JSON in POST /render response: {e}") from e

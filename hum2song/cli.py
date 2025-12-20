@@ -1,49 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from core.models import FileType, TaskStatus
-from hum2song.api_client import Hum2SongClient, ContractError, HTTPError, NetworkError
+import core.synthesizer as synth  # IMPORTANT: allow monkeypatch in tests
+from core.score_models import ScoreDoc
+from core.score_optimize import OptimizeConfig, optimize_score
+
+from hum2song.api_client import ContractError, HTTPError, Hum2SongClient, NetworkError
 
 
-# exit codes (frozen)
+# exit codes (keep stable)
 EXIT_OK = 0
 EXIT_TASK_FAILED = 2
 EXIT_TIMEOUT = 3
 EXIT_NETWORK_OR_HTTP = 4
 EXIT_BAD_ARGS = 5
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="hum2song", description="Hum2Song CLI (Contract API)")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    g = sub.add_parser("generate", help="Upload -> poll -> (optional) download")
-    g.add_argument("file", type=str, help="Path to audio file")
-    g.add_argument("--base-url", default="http://127.0.0.1:8000", help="Server base url")
-    g.add_argument("--format", default="mp3", choices=["mp3", "wav"], help="Output format")
-    g.add_argument("--out-dir", default=".", help="Output directory")
-    g.add_argument("--no-download", action="store_true", help="Do not download artifacts")
-    g.add_argument("--no-wait", action="store_true", help="Only submit task and exit")
-    g.add_argument("--download", default="audio", choices=["audio", "midi", "both"], help="What to download")
-    # convenience flags (do not break existing --download semantics)
-    g.add_argument("--download-midi", action="store_true", help="Also download MIDI artifact")
-    g.add_argument("--midi-out", default=None, help="Custom path to save MIDI file (implies download MIDI)")
-    g.add_argument("--poll-interval", type=float, default=1.0, help="Polling interval seconds")
-    g.add_argument("--timeout", type=float, default=60.0, help="Polling timeout seconds")
-
-    # ✅ NEW: synth subcommand (local)
-    s = sub.add_parser("synth", help="Synthesize audio from a MIDI file (local)")
-    s.add_argument("midi", type=str, help="Path to .mid")
-    s.add_argument("--format", default="mp3", choices=["mp3", "wav"], help="Output format")
-    s.add_argument("--out-dir", default=".", help="Output directory")
-    s.add_argument("--gain", type=float, default=0.8, help="FluidSynth gain")
-    s.add_argument("--keep-wav", action="store_true", help="Keep intermediate wav when output is mp3")
-
-    return p
 
 
 def _print_err(msg: str) -> None:
@@ -52,31 +29,101 @@ def _print_err(msg: str) -> None:
 
 def _safe_filename(name: str) -> str:
     # minimal cross-platform sanitize
-    return "".join(c if c not in r'<>:"/\|?*' else "_" for c in name)
+    return "".join(c if c not in r'<>:"/\\|?*' else "_" for c in name)
 
 
-def _resolve_midi_dest(task_id: str, out_dir: Path, *, midi_out: str | None, prefer_downloads_dir: bool) -> Path:
+class _MidiOutAction(argparse.Action):
     """
-    Default behavior:
-    - if --midi-out provided: use that path (if dir -> append <task_id>.mid)
-    - else:
-        - if --download-midi used: save under <out-dir>/downloads/<task_id>.mid
-        - otherwise: save under <out-dir>/<task_id>.mid
+    argparse action:
+    --midi-out <path> implies download_midi=True
     """
-    if midi_out:
-        p = Path(midi_out)
-        if p.exists() and p.is_dir():
-            return (p / f"{task_id}.mid").resolve()
-        if p.suffix == "":
-            return p.with_suffix(".mid").resolve()
-        return p.resolve()
 
-    if prefer_downloads_dir:
-        return (out_dir / "downloads" / f"{task_id}.mid").resolve()
-
-    return (out_dir / f"{task_id}.mid").resolve()
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        # imply midi download
+        setattr(namespace, "download_midi", True)
 
 
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="hum2song", description="Hum2Song CLI (FastAPI backend + local tools)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    # ------------------------------------------------------------
+    # generate: upload -> poll -> (optional) download
+    # ------------------------------------------------------------
+    g = sub.add_parser("generate", help="Upload -> poll -> download artifacts")
+    g.add_argument("file", type=str, help="Path to audio file")
+    g.add_argument("--base-url", dest="base_url", default="http://127.0.0.1:8000", help="Server base url")
+    g.add_argument("--format", default="mp3", choices=["mp3", "wav"], help="Output format")
+    g.add_argument("--out-dir", dest="out_dir", default=".", help="Output directory")
+    g.add_argument("--poll-interval", type=float, default=1.0, help="Polling interval seconds")
+    g.add_argument("--timeout", type=float, default=60.0, help="Polling timeout seconds")
+    g.add_argument("--no-wait", action="store_true", help="Only submit task and exit (no polling)")
+    g.add_argument("--no-download", action="store_true", help="Do not download artifacts")
+    g.add_argument(
+        "--download",
+        default="audio",
+        choices=["audio", "midi", "both"],
+        help="What to download when task completes",
+    )
+    g.add_argument("--download-midi", dest="download_midi", action="store_true", help="Download midi after completion")
+    # required by existing tests:
+    g.add_argument("--midi-out", dest="midi_out", default=None, action=_MidiOutAction, help="Write midi to this path")
+
+    # ------------------------------------------------------------
+    # synth: local MIDI -> audio (no server)
+    # ------------------------------------------------------------
+    s = sub.add_parser("synth", help="Local synth: MIDI -> WAV/MP3")
+    s.add_argument("midi", type=str, help="Path to MIDI file")
+    s.add_argument("--format", default="mp3", choices=["mp3", "wav"], help="Output format")
+    s.add_argument("--out-dir", dest="out_dir", default=".", help="Output directory")
+    s.add_argument("--gain", type=float, default=0.8, help="Synthesis gain (0.0~5.0)")
+    s.add_argument("--keep-wav", action="store_true", help="Keep intermediate wav when output is mp3")
+
+    # ------------------------------------------------------------
+    # score: score.json workflow
+    # ------------------------------------------------------------
+    sc = sub.add_parser("score", help="Score workflow: pull/push/optimize score.json")
+    sc_sub = sc.add_subparsers(dest="score_cmd", required=True)
+
+    pull = sc_sub.add_parser("pull", help="GET /tasks/{id}/score -> save score.json")
+    pull.add_argument("task_id", type=str, help="Task UUID")
+    pull.add_argument("--base-url", dest="base_url", default="http://127.0.0.1:8000", help="Server base url")
+    pull.add_argument("--out", type=str, default="", help="Output .json path (default: <out-dir>/<task_id>.score.json)")
+    pull.add_argument("--out-dir", dest="out_dir", type=str, default=".", help="Output directory")
+
+    push = sc_sub.add_parser("push", help="PUT /tasks/{id}/score (and optionally render + download)")
+    push.add_argument("task_id", type=str, help="Task UUID")
+    push.add_argument("--base-url", dest="base_url", default="http://127.0.0.1:8000", help="Server base url")
+    push.add_argument("--score", type=str, required=True, help="Path to score.json")
+    push.add_argument("--render", action="store_true", help="Trigger /render after uploading score")
+    push.add_argument("--format", default="mp3", choices=["mp3", "wav"], help="Render output format (when --render)")
+    push.add_argument("--out-dir", dest="out_dir", default=".", help="Output directory for downloaded artifacts")
+    push.add_argument(
+        "--download",
+        default="auto",
+        choices=["auto", "none", "audio", "midi", "both"],
+        help="Download after push",
+    )
+    push.add_argument("--download-midi", dest="download_midi", action="store_true", help="Download midi after push")
+    push.add_argument("--midi-out", dest="midi_out", default=None, action=_MidiOutAction, help="Write midi to this path")
+
+    # NEW: optimize score.json locally (no server)
+    opt = sc_sub.add_parser("optimize", help="Optimize a local score.json (deterministic rules; LLM-ready)")
+    opt.add_argument("score_path", type=str, help="Input score.json path")
+    opt.add_argument("--out", type=str, default="", help="Output .json path (default: <input>.opt.score.json)")
+    opt.add_argument("--grid-div", dest="grid_div", type=int, default=4, help="Quantize grid: subdivisions per quarter (4=1/16)")
+    opt.add_argument("--min-pitch", dest="min_pitch", type=int, default=48, help="Clamp pitch lower bound (0-127)")
+    opt.add_argument("--max-pitch", dest="max_pitch", type=int, default=84, help="Clamp pitch upper bound (0-127)")
+    opt.add_argument("--velocity", dest="velocity", type=int, default=0, help="If >0, force all velocities to this (1-127)")
+    opt.add_argument("--no-merge-overlaps", action="store_true", help="Do not merge same-pitch overlapping notes")
+
+    return p
+
+
+# -------------------------------
+# Commands
+# -------------------------------
 def cmd_generate(args: argparse.Namespace) -> int:
     audio_path = Path(args.file)
     out_dir = Path(args.out_dir)
@@ -115,16 +162,19 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
             time.sleep(max(0.1, float(args.poll_interval)))
 
-        # 3) completed
+        # 3) download
         if args.no_download:
-            if info.result:
-                print(f"download_url={info.result.download_url}")
             return EXIT_OK
 
-        # Decide what to download
-        want = args.download
-        want_audio = want in ("audio", "both")
-        want_midi = want in ("midi", "both") or bool(args.download_midi) or bool(args.midi_out)
+        # Resolve what to download (keep backward compatible semantics):
+        # - args.download selects base set
+        # - args.download_midi OR args.midi_out implies midi included
+        want_audio = args.download in ("audio", "both")
+        want_midi = (
+            args.download in ("midi", "both")
+            or bool(getattr(args, "download_midi", False))
+            or bool(getattr(args, "midi_out", None))
+        )
 
         targets: list[FileType] = []
         if want_audio:
@@ -132,41 +182,33 @@ def cmd_generate(args: argparse.Namespace) -> int:
         if want_midi:
             targets.append(FileType.midi)
 
-        # Download
         for ft in targets:
-            if ft == FileType.midi:
-                dest = _resolve_midi_dest(
-                    task_id,
-                    out_dir,
-                    midi_out=args.midi_out,
-                    prefer_downloads_dir=bool(args.download_midi) and not bool(args.midi_out),
-                )
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    dl = client.download_task_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
-                    print(f"downloaded {ft.value}: {dl.path} ({dl.bytes_written} bytes)")
-                except HTTPError as e:
-                    _print_err(f"download {ft.value} failed: {e}")
-                continue
-
-            # audio dest
+            # file name
             filename = None
             if info.result and info.result.file_type == ft:
                 filename = info.result.filename
 
             if not filename:
-                ext = args.format
+                ext = "mid" if ft == FileType.midi else args.format
                 filename = f"{task_id}.{ext}"
-
             filename = _safe_filename(filename)
-            dest = (out_dir / filename).resolve()
 
-            try:
-                dl = client.download_task_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
-                print(f"downloaded {ft.value}: {dl.path} ({dl.bytes_written} bytes)")
-            except HTTPError as e:
-                _print_err(f"download {ft.value} failed: {e}")
-                return EXIT_NETWORK_OR_HTTP
+            if ft == FileType.midi:
+                # if user provided --midi-out, use it; else default under out_dir/downloads/
+                if getattr(args, "midi_out", None):
+                    dest = Path(args.midi_out).resolve()
+                else:
+                    dest = (out_dir / "downloads" / filename).resolve()
+            else:
+                dest = (out_dir / filename).resolve()
+
+            # use either new or old method (both exist)
+            if hasattr(client, "download_task_file"):
+                dl = client.download_task_file(task_id, file_type=ft, dest_path=dest, overwrite=True)  # type: ignore[attr-defined]
+            else:
+                dl = client.download_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
+
+            print(f"downloaded {ft.value}: {dl.path} ({dl.bytes_written} bytes)")
 
         return EXIT_OK
 
@@ -185,29 +227,166 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_synth(args: argparse.Namespace) -> int:
     midi_path = Path(args.midi)
-    if not midi_path.exists() or not midi_path.is_file():
-        _print_err(f"midi_path not found: {midi_path}")
-        return EXIT_BAD_ARGS
-
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # local synth
-        from core.synthesizer import midi_to_audio
-
-        out_path = midi_to_audio(
+        out_path = synth.midi_to_audio(
             midi_path,
             output_dir=out_dir,
             output_format=args.format,
             gain=float(args.gain),
             keep_wav=bool(args.keep_wav),
         )
-        print(str(Path(out_path).resolve()))
+        print(str(out_path))
         return EXIT_OK
-    except Exception as e:
+    except FileNotFoundError as e:
         _print_err(str(e))
         return EXIT_BAD_ARGS
+    except Exception as e:
+        _print_err(str(e))
+        return EXIT_NETWORK_OR_HTTP
+
+
+def cmd_score_pull(args: argparse.Namespace) -> int:
+    task_id = str(args.task_id)
+    out_dir = Path(args.out_dir)
+    out_path = Path(args.out) if args.out else (out_dir / f"{task_id}.score.json")
+    out_path = out_path.resolve()
+
+    client = Hum2SongClient(base_url=args.base_url)
+    try:
+        score = client.get_score(task_id)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(score, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(str(out_path))
+        return EXIT_OK
+    except (NetworkError, HTTPError) as e:
+        _print_err(str(e))
+        return EXIT_NETWORK_OR_HTTP
+    except ContractError as e:
+        _print_err(f"Contract error: {e}")
+        return EXIT_NETWORK_OR_HTTP
+    finally:
+        client.close()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(f"Invalid JSON: {path} ({e})") from e
+
+
+def cmd_score_push(args: argparse.Namespace) -> int:
+    task_id = str(args.task_id)
+    score_path = Path(args.score).resolve()
+    out_dir = Path(args.out_dir).resolve()
+
+    client = Hum2SongClient(base_url=args.base_url)
+    try:
+        score_json = _read_json(score_path)
+        client.put_score(task_id, score_json=score_json)
+        print("score uploaded")
+
+        did_render = False
+        if args.render:
+            client.render_audio(task_id, output_format=args.format)
+            did_render = True
+            print("render triggered")
+
+        # auto policy
+        download_choice = str(args.download)
+        if download_choice == "auto":
+            download_choice = "audio" if did_render else "none"
+
+        want_audio = download_choice in ("audio", "both")
+        want_midi = (
+            download_choice in ("midi", "both")
+            or bool(getattr(args, "download_midi", False))
+            or bool(getattr(args, "midi_out", None))
+        )
+
+        if download_choice == "none":
+            return EXIT_OK
+
+        targets: list[FileType] = []
+        if want_audio:
+            targets.append(FileType.audio)
+        if want_midi:
+            targets.append(FileType.midi)
+
+        for ft in targets:
+            ext = "mid" if ft == FileType.midi else args.format
+            filename = _safe_filename(f"{task_id}.{ext}")
+
+            if ft == FileType.midi:
+                dest = Path(args.midi_out).resolve() if getattr(args, "midi_out", None) else (out_dir / "downloads" / filename).resolve()
+            else:
+                dest = (out_dir / filename).resolve()
+
+            if hasattr(client, "download_task_file"):
+                dl = client.download_task_file(task_id, file_type=ft, dest_path=dest, overwrite=True)  # type: ignore[attr-defined]
+            else:
+                dl = client.download_file(task_id, file_type=ft, dest_path=dest, overwrite=True)
+
+            print(f"downloaded {ft.value}: {dl.path} ({dl.bytes_written} bytes)")
+
+        return EXIT_OK
+
+    except (NetworkError, HTTPError) as e:
+        _print_err(str(e))
+        return EXIT_NETWORK_OR_HTTP
+    except ContractError as e:
+        _print_err(f"Contract error: {e}")
+        return EXIT_NETWORK_OR_HTTP
+    except ValueError as e:
+        _print_err(str(e))
+        return EXIT_BAD_ARGS
+    finally:
+        client.close()
+
+
+def cmd_score_optimize(args: argparse.Namespace) -> int:
+    in_path = Path(args.score_path).resolve()
+    if not in_path.exists() or not in_path.is_file():
+        _print_err(f"score_path not found: {in_path}")
+        return EXIT_BAD_ARGS
+
+    # default output naming
+    if args.out:
+        out_path = Path(args.out).resolve()
+    else:
+        name = in_path.name
+        if name.endswith(".score.json"):
+            out_name = name.replace(".score.json", ".opt.score.json")
+        else:
+            out_name = f"{in_path.stem}.opt.score.json"
+        out_path = in_path.with_name(out_name).resolve()
+
+    try:
+        raw = _read_json(in_path)
+        score = ScoreDoc.model_validate(raw)
+
+        cfg = OptimizeConfig(
+            grid_div=int(args.grid_div),
+            min_pitch=int(args.min_pitch),
+            max_pitch=int(args.max_pitch),
+            velocity_target=(int(args.velocity) if int(args.velocity) > 0 else None),
+            merge_same_pitch_overlaps=(not bool(args.no_merge_overlaps)),
+        )
+
+        optimized = optimize_score(score, cfg)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(optimized.model_dump_json(indent=2), encoding="utf-8")
+        print(str(out_path))
+        return EXIT_OK
+
+    except ValueError as e:
+        _print_err(str(e))
+        return EXIT_BAD_ARGS
+    except Exception as e:
+        _print_err(str(e))
+        return EXIT_NETWORK_OR_HTTP
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -218,8 +397,15 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_generate(args)
     if args.cmd == "synth":
         return cmd_synth(args)
+    if args.cmd == "score":
+        if args.score_cmd == "pull":
+            return cmd_score_pull(args)
+        if args.score_cmd == "push":
+            return cmd_score_push(args)
+        if args.score_cmd == "optimize":
+            return cmd_score_optimize(args)
 
-    _print_err(f"Unknown command: {args.cmd}")
+    _print_err("Unknown command.")
     return EXIT_BAD_ARGS
 
 
