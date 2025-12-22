@@ -33,8 +33,13 @@ def test_cli_parser_score_optimize_defaults():
     args = p.parse_args(["score", "optimize", "in.score.json"])
     assert args.cmd == "score"
     assert args.score_cmd == "optimize"
-    assert args.grid_div == 4
-    assert args.min_pitch == 48
-    assert args.max_pitch == 84
+
+    # NEW defaults: safe preset, no quantize / no clamp / no merge / no mono unless explicitly requested
+    assert args.preset == "safe"
+    assert args.grid_div is None
+    assert args.min_pitch is None
+    assert args.max_pitch is None
     assert args.velocity == 0
-    assert args.no_merge_overlaps is False
+    assert args.merge_overlaps is None
+    assert args.monophonic is None
+

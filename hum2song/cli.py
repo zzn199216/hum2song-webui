@@ -112,11 +112,25 @@ def build_parser() -> argparse.ArgumentParser:
     opt = sc_sub.add_parser("optimize", help="Optimize a local score.json (deterministic rules; LLM-ready)")
     opt.add_argument("score_path", type=str, help="Input score.json path")
     opt.add_argument("--out", type=str, default="", help="Output .json path (default: <input>.opt.score.json)")
-    opt.add_argument("--grid-div", dest="grid_div", type=int, default=4, help="Quantize grid: subdivisions per quarter (4=1/16)")
-    opt.add_argument("--min-pitch", dest="min_pitch", type=int, default=48, help="Clamp pitch lower bound (0-127)")
-    opt.add_argument("--max-pitch", dest="max_pitch", type=int, default=84, help="Clamp pitch upper bound (0-127)")
+
+    # Presets:
+    # - safe (default): do NOT change timing/order; only apply explicit options user asked for.
+    # - strong: quantize/clip/merge/monophonic/noise-filter (good for demo, can change melody).
+    opt.add_argument("--preset", choices=["safe", "strong"], default="safe", help="Optimization preset (default: safe)")
+
+    # Use None defaults so preset can decide. Any explicit flag overrides preset.
+    opt.add_argument("--grid-div", dest="grid_div", type=int, default=None, help="Quantize grid: subdivisions per quarter (e.g., 4=1/16). 0/None disables quantize")
+    opt.add_argument("--min-pitch", dest="min_pitch", type=int, default=None, help="Clamp pitch lower bound (0-127). None disables")
+    opt.add_argument("--max-pitch", dest="max_pitch", type=int, default=None, help="Clamp pitch upper bound (0-127). None disables")
     opt.add_argument("--velocity", dest="velocity", type=int, default=0, help="If >0, force all velocities to this (1-127)")
-    opt.add_argument("--no-merge-overlaps", action="store_true", help="Do not merge same-pitch overlapping notes")
+
+    mg = opt.add_mutually_exclusive_group()
+    mg.add_argument("--merge-overlaps", dest="merge_overlaps", action="store_true", default=None, help="Merge same-pitch overlapping notes")
+    mg.add_argument("--no-merge-overlaps", dest="merge_overlaps", action="store_false", default=None, help="Do not merge same-pitch overlapping notes")
+
+    mono = opt.add_mutually_exclusive_group()
+    mono.add_argument("--monophonic", dest="monophonic", action="store_true", default=None, help="Force monophonic (remove overlaps)")
+    mono.add_argument("--polyphonic", dest="monophonic", action="store_false", default=None, help="Keep polyphony (do not remove overlaps)")
 
     return p
 
@@ -367,13 +381,44 @@ def cmd_score_optimize(args: argparse.Namespace) -> int:
         raw = _read_json(in_path)
         score = ScoreDoc.model_validate(raw)
 
+        preset = str(getattr(args, "preset", "safe"))
+
+        # Preset defaults (explicit CLI args override these)
+        if preset == "strong":
+            grid_div = 4 if args.grid_div is None else int(args.grid_div)
+            min_pitch = 48 if args.min_pitch is None else int(args.min_pitch)
+            max_pitch = 84 if args.max_pitch is None else int(args.max_pitch)
+            noise_min_duration = 0.03
+            noise_min_velocity = 25
+            merge_default = True
+            mono_default = True
+        else:
+            # safe: do not alter timing/order unless explicitly requested
+            grid_div = None if args.grid_div is None else int(args.grid_div)
+            min_pitch = None if args.min_pitch is None else int(args.min_pitch)
+            max_pitch = None if args.max_pitch is None else int(args.max_pitch)
+            noise_min_duration = 0.0
+            noise_min_velocity = 0
+            merge_default = False
+            mono_default = False
+
+        if grid_div == 0:
+            grid_div = None
+
+        merge_overlaps = merge_default if getattr(args, "merge_overlaps", None) is None else bool(args.merge_overlaps)
+        monophonic = mono_default if getattr(args, "monophonic", None) is None else bool(args.monophonic)
+
         cfg = OptimizeConfig(
-            grid_div=int(args.grid_div),
-            min_pitch=int(args.min_pitch),
-            max_pitch=int(args.max_pitch),
+            grid_div=grid_div,
+            min_pitch=min_pitch,
+            max_pitch=max_pitch,
             velocity_target=(int(args.velocity) if int(args.velocity) > 0 else None),
-            merge_same_pitch_overlaps=(not bool(args.no_merge_overlaps)),
+            merge_same_pitch_overlaps=merge_overlaps,
+            make_monophonic=monophonic,
+            noise_min_duration=noise_min_duration,
+            noise_min_velocity=noise_min_velocity,
         )
+
 
         optimized = optimize_score(score, cfg)
         out_path.parent.mkdir(parents=True, exist_ok=True)

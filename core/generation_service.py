@@ -14,7 +14,8 @@ from core.task_manager import TaskManager, task_manager as default_task_manager
 
 # 尝试导入配置，如果没有则使用默认值
 try:
-    from core.config import settings  # type: ignore
+    from core.config import get_settings
+    settings = get_settings()  # type: ignore
 except Exception:
     settings = None
 

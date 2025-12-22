@@ -70,9 +70,8 @@ class Settings(BaseSettings):
     frame_threshold: float = Field(default=0.3, validation_alias="FRAME_THRESHOLD")
 
     # ---- Converter switch ----
-    use_stub_converter: bool = Field(
-        default=True, validation_alias="USE_STUB_CONVERTER"
-    )
+    use_stub_converter: bool = Field(default=False, validation_alias="USE_STUB_CONVERTER")
+
 
     def model_post_init(self, __context) -> None:
         # 1) Normalize paths to absolute, relative to BASE_DIR
