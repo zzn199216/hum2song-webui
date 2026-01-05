@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hum2Song Piano-roll</title>
+
+  <!-- 让大多数浏览器不再去请求 /favicon.ico（但有些仍会请求，后端可选补路由） -->
+  <link rel="icon" href="/static/favicon.ico" type="image/x-icon" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+
+  <style>
+    :root { --fg:#111; --muted:#666; --bg:#fff; --line:#ddd; --accent:#2b6cb0; --sel:#e53e3e; }
+    body { font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; color:var(--fg); background:var(--bg); margin:16px; }
+    h1 { font-size:18px; margin:0 0 10px 0; }
+    .muted { color:var(--muted); font-size:12px; }
+    .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+    button { padding:6px 10px; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .chip { padding:2px 8px; border:1px solid var(--line); border-radius:999px; font-size:12px; }
+    .kpi { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px 0; }
+    #log { white-space:pre-wrap; font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px;
+           border:1px solid var(--line); padding:8px; height:150px; overflow:auto; background:#fafafa; }
+    #rollWrap { border:1px solid var(--line); max-width:1200px; overflow:auto; background:#fff; }
+    canvas { display:block; height:520px; }
+    .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+    .sep { height:1px; background:var(--line); margin:10px 0; }
+
+    .drop {
+      border: 2px dashed #bbb; border-radius: 12px;
+      padding: 14px; max-width: 1200px;
+      background: #fcfcfc;
+    }
+    .drop.dragover { border-color: var(--accent); background: #f6fbff; }
+    .drop b { font-size: 13px; }
+    input[type="file"] { font-size:12px; }
+    .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+
+<body>
+  <h1>Hum2Song Piano-roll (MVP)</h1>
+
+  <!-- 文件优先入口 -->
+  <div id="drop" class="drop">
+    <div class="row">
+      <span class="chip">推荐入口</span>
+      <b>拖拽 score.json 到这里</b>
+      <span class="muted">（或点击下面的 “Load Score JSON”）</span>
+    </div>
+    <div class="row">
+      <input id="scoreFile" type="file" accept="application/json,.json" />
+      <button id="btnLoadScoreFile">Load Score JSON</button>
+      <button id="btnDownloadLocalScore" disabled>Download Score (Local)</button>
+      <span class="muted">本地模式：可编辑 + Tone.js 试听，不需要 task_id</span>
+    </div>
+    <div class="row">
+      <span class="muted">
+        说明：如果你需要“云端导出高质量 mp3/midi”，请用下面的 Generate 生成一个 session（会自动绑定）。
+      </span>
+    </div>
+  </div>
+
+  <div class="sep"></div>
+
+  <!-- Generate 入口（自动绑定 session，不需要用户记 task_id） -->
+  <div class="row">
+    <span class="chip">可选</span>
+    <b>WAV → Generate（云端推理）</b>
+  </div>
+  <div class="row">
+    <input id="wavFile" type="file" accept="audio/wav,audio/*" />
+    <button id="btnGenerate">Generate</button>
+    <span id="genStatus" class="muted"></span>
+  </div>
+
+  <!-- server session 信息（只读展示，不要求用户输入） -->
+  <div class="row">
+    <span class="chip">Server session</span>
+    <span class="muted">task_id：</span>
+    <span id="taskIdLabel" class="mono muted">-</span>
+    <span class="muted">分享链接：</span>
+    <a id="shareLink" class="mono" href="#" target="_blank" style="display:none;">/ui?task_id=...</a>
+  </div>
+
+  <div class="row">
+    <button id="btnSave" disabled>Save to Server</button>
+    <button id="btnExport" disabled>Export (Render MP3/MIDI)</button>
+    <button id="btnDownloadServerScore" disabled>Download Score (Server)</button>
+    <span class="muted">只有绑定 session 时才可用</span>
+  </div>
+
+  <div class="row">
+    <label class="muted">Zoom(px/sec)：</label>
+    <input id="zoom" type="range" min="40" max="360" value="120" />
+    <span id="zoomVal" class="muted"></span>
+
+    <span class="chip">快捷键</span>
+    <span class="muted">Space 播放/停止；Delete 删除选中；双击空白新增；双击音符删除</span>
+  </div>
+
+  <div class="kpi">
+    <span class="chip">Notes: <span id="kNotes">-</span></span>
+    <span class="chip">BPM: <span id="kBpm">-</span></span>
+    <span class="chip">Pitch: <span id="kPitch">-</span></span>
+    <span class="chip">Span(s): <span id="kSpan">-</span></span>
+    <span class="chip">Selected: <span id="kSel">-</span></span>
+  </div>
+
+  <div class="row">
+    <button id="btnPlay" disabled>Play</button>
+    <button id="btnStop" disabled>Stop</button>
+    <span class="muted" id="audioStatus">Tone: -</span>
+    <span class="muted" id="dlLinks"></span>
+  </div>
+
+  <div id="rollWrap">
+    <canvas id="roll" width="2400" height="520"></canvas>
+  </div>
+  <div class="hint">
+    交互：点击选中音符（红色），拖拽移动（横向=时间、纵向=音高），拖右边缘改 duration。
+  </div>
+
+  <div class="sep"></div>
+  <div class="row"><span class="chip">Log</span></div>
+  <div id="log"></div>
+
+  <!-- Tone.js：CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.min.js"></script>
+
+  <script>
+  (() => {
+    const $ = (id) => document.getElementById(id);
+
+    function isUuid(s) {
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(s || "").trim());
+    }
+
+    const state = {
+      taskId: "",        // 只在 Generate 或分享链接打开时存在
+      score: null,
+
+      // view
+      pitchMin: 48,
+      pitchMax: 84,
+      pitchPad: 4,
+      minPitchSpan: 24,
+      pxPerSec: 120,
+
+      // tone
+      synth: null,
+      scheduled: false,
+
+      // editing
+      rects: [],
+      selected: null,   // {tr, note}
+      drag: null,
+      rafPending: false,
+    };
+
+    function log(msg) {
+      const el = $("log");
+      const t = new Date().toISOString().slice(11,19);
+      el.textContent += `[${t}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+    function round6(v) { return Math.round(v * 1e6) / 1e6; }
+
+    function getQueryParam(name) {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    }
+
+    function setSession(taskId) {
+      taskId = (taskId || "").trim();
+      state.taskId = isUuid(taskId) ? taskId : "";
+      $("taskIdLabel").textContent = state.taskId || "-";
+
+      const a = $("shareLink");
+      if (state.taskId) {
+        a.style.display = "inline";
+        a.textContent = `/ui?task_id=${state.taskId}`;
+        a.href = `/ui?task_id=${state.taskId}`;
+        localStorage.setItem("hum2song_last_task_id", state.taskId);
+      } else {
+        a.style.display = "none";
+        a.href = "#";
+      }
+      updateButtons();
+    }
+
+    function updateButtons() {
+      const hasScore = !!state.score;
+      const hasSession = isUuid(state.taskId);
+
+      $("btnPlay").disabled = !hasScore;
+      $("btnStop").disabled = !hasScore;
+      $("btnDownloadLocalScore").disabled = !hasScore;
+
+      $("btnSave").disabled = !(hasScore && hasSession);
+      $("btnExport").disabled = !(hasScore && hasSession);
+      $("btnDownloadServerScore").disabled = !hasSession;
+    }
+
+    function kpiUpdate() {
+      const sc = state.score;
+      if (!sc) {
+        $("kNotes").textContent = "-";
+        $("kBpm").textContent = "-";
+        $("kPitch").textContent = "-";
+        $("kSpan").textContent = "-";
+        $("kSel").textContent = "-";
+        return;
+      }
+      const tracks = sc.tracks || [];
+      let n = 0, minP=127, maxP=0, minS=1e9, maxE=0;
+      for (const tr of tracks) {
+        for (const note of (tr.notes||[])) {
+          n++;
+          minP = Math.min(minP, note.pitch);
+          maxP = Math.max(maxP, note.pitch);
+          minS = Math.min(minS, note.start);
+          maxE = Math.max(maxE, note.start + note.duration);
+        }
+      }
+      if (n === 0) { minP=0; maxP=0; minS=0; maxE=0; }
+      $("kNotes").textContent = String(n);
+      $("kBpm").textContent = String(sc.tempo_bpm ?? 120);
+      $("kPitch").textContent = `${minP}..${maxP}`;
+      $("kSpan").textContent = `${round6(Math.max(0, maxE - Math.max(0, minS)))}s`;
+
+      if (state.selected) {
+        const nn = state.selected.note;
+        $("kSel").textContent = `p=${nn.pitch} st=${round6(nn.start)} dur=${round6(nn.duration)}`;
+      } else {
+        $("kSel").textContent = "-";
+      }
+    }
+
+    function autofitPitch() {
+      const sc = state.score;
+      if (!sc) return;
+      let minP = 127, maxP = 0, n = 0;
+      for (const tr of (sc.tracks||[])) {
+        for (const ne of (tr.notes||[])) {
+          n++;
+          minP = Math.min(minP, ne.pitch);
+          maxP = Math.max(maxP, ne.pitch);
+        }
+      }
+      if (n === 0) { minP = 48; maxP = 84; }
+      let span = maxP - minP + 1;
+      span = Math.max(span, state.minPitchSpan);
+      const mid = Math.round((minP + maxP) / 2);
+      const half = Math.floor(span / 2);
+      let vmin = clamp(mid - half, 0, 127);
+      let vmax = clamp(vmin + span - 1, 0, 127);
+      vmin = clamp(vmax - span + 1, 0, 127);
+      vmin = clamp(vmin - state.pitchPad, 0, 127);
+      vmax = clamp(vmax + state.pitchPad, 0, 127);
+      state.pitchMin = vmin;
+      state.pitchMax = vmax;
+    }
+
+    function ensureVisiblePitch(p) {
+      if (p < state.pitchMin || p > state.pitchMax) {
+        const min = clamp(Math.min(state.pitchMin, p) - 2, 0, 127);
+        const max = clamp(Math.max(state.pitchMax, p) + 2, 0, 127);
+        state.pitchMin = min;
+        state.pitchMax = max;
+      }
+    }
+
+    function draw() {
+      const c = $("roll");
+      const ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, c.width, c.height);
+      state.rects = [];
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, c.width, c.height);
+
+      const sc = state.score;
+      if (!sc) {
+        ctx.fillStyle = "#666";
+        ctx.font = "14px sans-serif";
+        ctx.fillText("No score loaded. Drop a score.json or click Load Score JSON.", 20, 30);
+        return;
+      }
+
+      const pitchMin = state.pitchMin;
+      const pitchMax = state.pitchMax;
+      const pitchSpan = Math.max(1, pitchMax - pitchMin + 1);
+      const laneH = c.height / pitchSpan;
+      const pxPerSec = state.pxPerSec;
+
+      // pitch grid
+      ctx.strokeStyle = "#eee";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= pitchSpan; i++) {
+        const y = i * laneH;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke();
+      }
+
+      // second grid
+      const leftPad = 40;
+      ctx.strokeStyle = "#f0f0f0";
+      for (let x = leftPad; x < c.width; x += pxPerSec) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke();
+      }
+
+      // labels (every 12)
+      ctx.fillStyle = "#888";
+      ctx.font = "10px sans-serif";
+      for (let p = pitchMax; p >= pitchMin; p--) {
+        if (p % 12 === 0) {
+          const y = (pitchMax - p) * laneH + 10;
+          ctx.fillText(String(p), 4, y);
+        }
+      }
+
+      // notes
+      for (const tr of (sc.tracks || [])) {
+        for (const n of (tr.notes || [])) {
+          const st = Number(n.start), du = Number(n.duration), p = Number(n.pitch);
+          if (!Number.isFinite(st) || !Number.isFinite(du) || !Number.isFinite(p)) continue;
+          if (p < pitchMin || p > pitchMax) continue;
+
+          const x = leftPad + st * pxPerSec;
+          const w = Math.max(2, du * pxPerSec);
+          const y = (pitchMax - p) * laneH;
+          const h = Math.max(2, laneH - 1);
+
+          state.rects.push({ tr, note: n, x, y, w, h });
+
+          const isSel = state.selected && state.selected.note === n;
+          ctx.fillStyle = isSel ? "rgba(229,62,62,0.90)" : "rgba(43,108,176,0.90)";
+          ctx.fillRect(x, y, w, h);
+
+          if (isSel) {
+            ctx.strokeStyle = "#111";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, w, h);
+          }
+        }
+      }
+    }
+
+    function requestRedraw() {
+      if (state.rafPending) return;
+      state.rafPending = true;
+      requestAnimationFrame(() => {
+        state.rafPending = false;
+        draw();
+        kpiUpdate();
+        updateButtons();
+      });
+    }
+
+    async function fetchJson(url, opts) {
+      const r = await fetch(url, opts);
+      if (!r.ok) throw new Error(`${opts?.method||"GET"} ${url} failed: ${r.status} ${await r.text()}`);
+      return await r.json();
+    }
+
+    function sanitizeScore(sc) {
+      if (!sc || typeof sc !== "object") throw new Error("Invalid score json");
+      if (!Array.isArray(sc.tracks)) sc.tracks = [];
+      if (!Number.isFinite(Number(sc.tempo_bpm))) sc.tempo_bpm = 120;
+      if (typeof sc.time_signature !== "string") sc.time_signature = "4/4";
+      if (!Number.isFinite(Number(sc.version))) sc.version = 1;
+
+      for (const tr of sc.tracks) {
+        if (!tr || typeof tr !== "object") continue;
+        tr.name = String(tr.name ?? "Track");
+        if (!Array.isArray(tr.notes)) tr.notes = [];
+        for (const n of tr.notes) {
+          if (!n || typeof n !== "object") continue;
+          n.pitch = clamp(Math.round(Number(n.pitch)), 0, 127);
+          n.start = Math.max(0, Number(n.start));
+          n.duration = Math.max(1e-3, Number(n.duration));
+          n.velocity = clamp(Math.round(Number(n.velocity ?? 64)), 1, 127);
+        }
+        tr.notes.sort((a,b)=> (a.start-b.start) || (a.pitch-b.pitch) || (a.duration-b.duration));
+      }
+      return sc;
+    }
+
+    // ---- local file load/download ----
+    function downloadText(filename, text, mime="application/json") {
+      const blob = new Blob([text], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    }
+
+    async function loadScoreFile(file) {
+      const txt = await file.text();
+      let obj;
+      try { obj = JSON.parse(txt); }
+      catch { throw new Error("JSON parse failed"); }
+
+      state.score = sanitizeScore(obj);
+      state.selected = null;
+      state.drag = null;
+      state.scheduled = false;
+
+      autofitPitch();
+      requestRedraw();
+      log(`Loaded score from local file: ${file.name}`);
+    }
+
+    function downloadLocalScore() {
+      if (!state.score) return;
+      const name = `score_${new Date().toISOString().replace(/[:.]/g,"-")}.json`;
+      downloadText(name, JSON.stringify(state.score, null, 2));
+      log(`Downloaded local score json: ${name}`);
+    }
+
+    async function downloadServerScore() {
+      if (!isUuid(state.taskId)) return log("No server session.");
+      window.open(`/tasks/${state.taskId}/score/download?file_type=json`, "_blank");
+      log("Opened server score download.");
+    }
+
+    // ---- Tone.js ----
+    function ensureToneReady() {
+      if (!window.Tone) throw new Error("Tone.js not loaded (check network).");
+      if (!state.synth) {
+        state.synth = new Tone.PolySynth(Tone.Synth).toDestination();
+        state.synth.set({ volume: -10 });
+      }
+      $("audioStatus").textContent = `Tone: ok`;
+    }
+
+    function midiToFreq(pitch) {
+      return 440 * Math.pow(2, (pitch - 69) / 12);
+    }
+
+    function clearSchedule() {
+      Tone.Transport.cancel(0);
+      state.scheduled = false;
+    }
+
+    function scheduleAllNotes() {
+      ensureToneReady();
+      if (!state.score) return;
+
+      clearSchedule();
+
+      const bpm = Number(state.score.tempo_bpm || 120);
+      Tone.Transport.bpm.value = bpm;
+
+      let count = 0;
+      for (const tr of (state.score.tracks || [])) {
+        for (const n of (tr.notes || [])) {
+          const st = Number(n.start), du = Number(n.duration), p = Number(n.pitch);
+          if (!Number.isFinite(st) || !Number.isFinite(du) || !Number.isFinite(p)) continue;
+          if (du <= 0) continue;
+
+          const freq = midiToFreq(p);
+          Tone.Transport.scheduleOnce((time) => {
+            state.synth.triggerAttackRelease(freq, du, time, 0.8);
+          }, st);
+          count++;
+        }
+      }
+      state.scheduled = true;
+      log(`Scheduled ${count} notes @ bpm=${bpm}`);
+    }
+
+    async function play() {
+      if (!state.score) return;
+      ensureToneReady();
+      await Tone.start(); // AudioContext resume
+      $("audioStatus").textContent = `Tone: started`;
+
+      if (!state.scheduled) scheduleAllNotes();
+      Tone.Transport.stop();
+      Tone.Transport.position = 0;
+      Tone.Transport.start("+0.05");
+    }
+
+    function stop() { Tone.Transport.stop(); }
+
+    // ---- Generate + Poll ----
+    async function pollTaskUntilDone(taskId) {
+      const url = `/tasks/${taskId}`;
+      while (true) {
+        const t = await fetchJson(url);
+        const pct = Math.round((Number(t.progress || 0) * 100));
+        $("genStatus").textContent = `${t.status} ${t.stage} ${pct}%`;
+        if (t.status === "completed") return t;
+        if (t.status === "failed") throw new Error(`Task failed: ${JSON.stringify(t.error || {})}`);
+        await new Promise(res => setTimeout(res, 600));
+      }
+    }
+
+    async function loadScoreFromServer(taskId) {
+      const sc = await fetchJson(`/tasks/${taskId}/score`);
+      state.score = sanitizeScore(sc);
+      autofitPitch();
+      state.scheduled = false;
+      requestRedraw();
+      log(`Loaded score from server: task_id=${taskId}`);
+    }
+
+    async function generateFromFile(file) {
+      const fd = new FormData();
+      fd.append("file", file);
+
+      $("genStatus").textContent = "uploading...";
+      const r = await fetch(`/generate?output_format=mp3`, { method: "POST", body: fd });
+      if (!r.ok) throw new Error(`POST /generate failed: ${r.status} ${await r.text()}`);
+
+      const body = await r.json();
+      const tid = (body.task_id || "").trim();
+      if (!isUuid(tid)) throw new Error("Server returned invalid task_id.");
+
+      setSession(tid);
+      $("genStatus").textContent = `queued... tid=${tid}`;
+
+      await pollTaskUntilDone(tid);
+      await loadScoreFromServer(tid);
+      $("genStatus").textContent = "done";
+    }
+
+    // ---- Save / Export ----
+    async function saveScore() {
+      if (!state.score || !isUuid(state.taskId)) throw new Error("No score/session");
+      await fetchJson(`/tasks/${state.taskId}/score`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(state.score),
+      });
+      log("Saved score (PUT). Reloading from server...");
+      await loadScoreFromServer(state.taskId);
+    }
+
+    async function exportRender() {
+      if (!isUuid(state.taskId)) throw new Error("No session");
+      const r = await fetchJson(`/tasks/${state.taskId}/render?output_format=mp3`, { method: "POST" });
+      log("Render done.");
+      const mp3 = r.audio_download_url || `/tasks/${state.taskId}/download?file_type=audio`;
+      const mid = `/tasks/${state.taskId}/download?file_type=midi`;
+      $("dlLinks").innerHTML =
+        `Download: <a href="${mp3}" target="_blank">audio</a> | <a href="${mid}" target="_blank">midi</a>`;
+    }
+
+    // ---- Editing ----
+    function canvasXY(evt) {
+      const c = $("roll");
+      const rect = c.getBoundingClientRect();
+      const sx = c.width / rect.width;
+      const sy = c.height / rect.height;
+      return { x: (evt.clientX - rect.left) * sx, y: (evt.clientY - rect.top) * sy };
+    }
+
+    function secFromX(x) { return (x - 40) / state.pxPerSec; }
+
+    function pitchFromY(y) {
+      const c = $("roll");
+      const span = Math.max(1, state.pitchMax - state.pitchMin + 1);
+      const laneH = c.height / span;
+      const p = state.pitchMax - Math.floor(y / laneH);
+      return clamp(p, 0, 127);
+    }
+
+    function hitTest(x, y) {
+      for (let i = state.rects.length - 1; i >= 0; i--) {
+        const r = state.rects[i];
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r;
+      }
+      return null;
+    }
+
+    function resortTrack(tr) {
+      (tr.notes || []).sort((a, b) =>
+        (a.start - b.start) || (a.pitch - b.pitch) || (a.duration - b.duration)
+      );
+    }
+
+    function finalizeNote(n) {
+      n.start = round6(Math.max(0, Number(n.start)));
+      n.duration = round6(Math.max(1e-3, Number(n.duration)));
+      n.pitch = clamp(Math.round(Number(n.pitch)), 0, 127);
+      n.velocity = clamp(Math.round(Number(n.velocity ?? 64)), 1, 127);
+    }
+
+    const canvas = $("roll");
+    canvas.style.userSelect = "none";
+
+    canvas.addEventListener("mousedown", (evt) => {
+      if (!state.score) return;
+      const { x, y } = canvasXY(evt);
+      const hit = hitTest(x, y);
+
+      if (!hit) {
+        state.selected = null;
+        requestRedraw();
+        return;
+      }
+      state.selected = { tr: hit.tr, note: hit.note };
+
+      const edgePx = 10;
+      const nearRight = Math.abs(x - (hit.x + hit.w)) <= edgePx;
+
+      state.drag = {
+        mode: nearRight ? "resize" : "move",
+        tr: hit.tr,
+        note: hit.note,
+        start0: Number(hit.note.start),
+        dur0: Number(hit.note.duration),
+        x0: x,
+        y0: y,
+      };
+      requestRedraw();
+      evt.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (evt) => {
+      if (!state.drag) return;
+      const { x, y } = canvasXY(evt);
+      const dxSec = (x - state.drag.x0) / state.pxPerSec;
+
+      if (state.drag.mode === "move") {
+        state.drag.note.start = Math.max(0, state.drag.start0 + dxSec);
+        state.drag.note.pitch = pitchFromY(y);
+      } else {
+        state.drag.note.duration = Math.max(1e-3, state.drag.dur0 + dxSec);
+      }
+      requestRedraw();
+    });
+
+    function endDrag() {
+      if (!state.drag) return;
+      const tr = state.drag.tr;
+      const n  = state.drag.note;
+      finalizeNote(n);
+      ensureVisiblePitch(n.pitch);
+      resortTrack(tr);
+      state.drag = null;
+      state.scheduled = false;
+      requestRedraw();
+    }
+
+    window.addEventListener("mouseup", endDrag);
+    canvas.addEventListener("mouseleave", endDrag);
+
+    canvas.addEventListener("dblclick", (evt) => {
+      if (!state.score) return;
+      const { x, y } = canvasXY(evt);
+      const hit = hitTest(x, y);
+
+      if (hit) {
+        const idx = hit.tr.notes.indexOf(hit.note);
+        if (idx >= 0) hit.tr.notes.splice(idx, 1);
+        if (state.selected && state.selected.note === hit.note) state.selected = null;
+        state.scheduled = false;
+        requestRedraw();
+        log("Deleted note (dblclick).");
+        return;
+      }
+
+      const targetTr = (state.score.tracks && state.score.tracks[0]) ? state.score.tracks[0] : null;
+      if (!targetTr) return;
+
+      const st = Math.max(0, secFromX(x));
+      const pitch = pitchFromY(y);
+
+      const bpm = Number(state.score.tempo_bpm || 120);
+      const beatSec = 60 / (bpm > 0 ? bpm : 120);
+      const nn = { pitch, start: round6(st), duration: round6(beatSec), velocity: 64 };
+
+      targetTr.notes.push(nn);
+      resortTrack(targetTr);
+      ensureVisiblePitch(pitch);
+      state.selected = { tr: targetTr, note: nn };
+      state.scheduled = false;
+      requestRedraw();
+      log("Added note (dblclick blank).");
+    });
+
+    window.addEventListener("keydown", (evt) => {
+      const active = document.activeElement;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
+
+      if (evt.code === "Space") {
+        evt.preventDefault();
+        if (window.Tone && Tone.Transport.state === "started") stop();
+        else play().catch(e => log(String(e)));
+      }
+
+      if (!state.selected || !state.score) return;
+      if (evt.key === "Delete" || evt.key === "Backspace") {
+        const tr = state.selected.tr;
+        const n  = state.selected.note;
+        const idx = tr.notes.indexOf(n);
+        if (idx >= 0) tr.notes.splice(idx, 1);
+        state.selected = null;
+        state.scheduled = false;
+        requestRedraw();
+        log("Deleted note.");
+        evt.preventDefault();
+      }
+    });
+
+    // ---- UI bindings ----
+    $("zoom").addEventListener("input", () => {
+      state.pxPerSec = Number($("zoom").value);
+      $("zoomVal").textContent = String(state.pxPerSec);
+      requestRedraw();
+    });
+    $("zoomVal").textContent = $("zoom").value;
+
+    $("btnLoadScoreFile").addEventListener("click", async () => {
+      const f = $("scoreFile").files?.[0];
+      if (!f) return log("Please choose a score.json file first.");
+      try { await loadScoreFile(f); } catch (e) { log(String(e)); }
+    });
+
+    $("btnDownloadLocalScore").addEventListener("click", downloadLocalScore);
+    $("btnDownloadServerScore").addEventListener("click", () => downloadServerScore().catch(e => log(String(e))));
+
+    $("btnGenerate").addEventListener("click", async () => {
+      const f = $("wavFile").files?.[0];
+      if (!f) return log("Please choose a wav file first.");
+      try { await generateFromFile(f); }
+      catch (e) { log(String(e)); $("genStatus").textContent = "error"; }
+    });
+
+    $("btnPlay").addEventListener("click", () => play().catch(e => log(String(e))));
+    $("btnStop").addEventListener("click", () => stop());
+    $("btnSave").addEventListener("click", () => saveScore().catch(e => log(String(e))));
+    $("btnExport").addEventListener("click", () => exportRender().catch(e => log(String(e))));
+
+    // ---- drag & drop ----
+    const drop = $("drop");
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+    drop.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      drop.classList.remove("dragover");
+      const f = e.dataTransfer?.files?.[0];
+      if (!f) return;
+      if (!String(f.name).toLowerCase().endsWith(".json")) return log("Drop a .json file.");
+      try { await loadScoreFile(f); } catch (err) { log(String(err)); }
+    });
+
+    // ---- init ----
+    log("UI ready. Primary flow: drop/load score.json.");
+    requestRedraw();
+
+    // 如果是分享链接打开：自动绑定 session 并从 server 拉 score
+    const qid = (getQueryParam("task_id") || "").trim();
+    if (qid && isUuid(qid)) {
+      setSession(qid);
+      loadScoreFromServer(qid).catch(e => log(String(e)));
+      log(`Opened from share link: task_id=${qid}`);
+    } else {
+      setSession(""); // no session by default
+      // 也不自动用 last_task_id，避免“用户不知道为啥加载了别的东西”
+    }
+  })();
+  </script>
+</body>
+</html>

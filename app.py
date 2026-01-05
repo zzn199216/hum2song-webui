@@ -17,7 +17,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from core.config import get_settings
@@ -145,7 +145,24 @@ def create_app() -> FastAPI:
                 "note": "static/index.html not found yet",
             }
         )
-
+    
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        icon_path = STATIC_DIR / "favicon.ico"
+        if icon_path.exists():
+            return FileResponse(str(icon_path))
+        return Response(status_code=204)
+    
+    @app.get("/ui", include_in_schema=False)
+    @app.get("/ui/", include_in_schema=False)
+    def ui():
+        ui_path = STATIC_DIR / "pianoroll" / "index.html"
+        if ui_path.exists():
+            return FileResponse(str(ui_path))
+        return JSONResponse(
+            {"detail": "UI not found. Create static/pianoroll/index.html first."},
+            status_code=404,
+        )
     return app
 
 
