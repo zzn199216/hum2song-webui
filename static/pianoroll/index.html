@@ -2,481 +2,591 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Hum2Song · Piano-roll</title>
-
-  <!-- 显式指向 static 下的 favicon（浏览器仍可能请求 /favicon.ico，那是“额外优化”问题） -->
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hum2Song Studio MVP</title>
   <link rel="icon" href="/static/favicon.ico" />
-
   <style>
     :root{
-      --bg: #F5F7FA;
-      --panel: #FFFFFF;
-      --border: #E3E7EE;
-      --text: #1F2A37;
-      --muted: #6B7280;
-      --blue: #2563EB;
-      --blue2:#1D4ED8;
-      --red:#EF4444;
-      --shadow: 0 10px 25px rgba(16,24,40,.08);
-      --r: 14px;
+      --bg0:#0f1216;
+      --bg1:#141a21;
+      --bg2:#1b232d;
+      --panel:#1a222c;
+      --panel2:#1d2733;
+      --text:#e7edf6;
+      --muted:#9aa9bd;
+      --border:#273242;
+      --accent:#2f7dff;
+      --accent2:#1f5fd0;
+      --danger:#ff4d4f;
+      --good:#31d07c;
+      --shadow:0 8px 24px rgba(0,0,0,.35);
+      --radius:14px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
-    *{ box-sizing:border-box; }
-    html,body{ height:100%; }
+    *{box-sizing:border-box}
     body{
       margin:0;
-      font-family: ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
-      background:var(--bg);
+      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+      background:linear-gradient(180deg,var(--bg0),var(--bg1));
       color:var(--text);
+      height:100vh;
       overflow:hidden;
     }
-
-    .app{
-      height:100%;
-      display:flex;
-      flex-direction:column;
-      min-width: 1024px;
-    }
-    header{
-      height:56px;
-      flex:0 0 auto;
+    .topbar{
+      height:54px;
       display:flex;
       align-items:center;
-      justify-content:space-between;
-      padding:0 18px;
-      background:var(--panel);
-      border-bottom:1px solid var(--border);
-    }
-    .title{
-      display:flex; align-items:center; gap:10px;
-      font-weight:800; letter-spacing:.2px;
-    }
-    .title .brand{ color:var(--blue); }
-    .title .sub{ font-weight:700; color:var(--text); }
-    .tagline{ font-size:13px; color:var(--muted); }
-
-    .top{
-      flex:0 0 auto;
-      padding:14px 16px 10px;
-      display:grid;
-      grid-template-columns: 1.25fr 1fr;
       gap:12px;
-    }
-
-    .card{
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:var(--r);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-    }
-    .card-h{
-      padding:12px 14px;
+      padding:0 14px;
+      background:linear-gradient(180deg,#18202a,#121821);
       border-bottom:1px solid var(--border);
-      display:flex; align-items:center; justify-content:space-between;
-      gap:10px;
-      background:linear-gradient(to bottom, #fff, #fbfcff);
     }
-    .card-h .h{
-      font-weight:700;
-      display:flex; align-items:center; gap:8px;
+    .brand{
+      display:flex; align-items:center; gap:10px;
+      font-weight:800;
+      letter-spacing:.2px;
     }
-    .pill{
-      font-size:11px;
-      color:var(--blue);
-      background:rgba(37,99,235,.08);
-      border:1px solid rgba(37,99,235,.18);
-      padding:2px 8px;
+    .badge{
+      font-size:12px;
+      padding:3px 8px;
       border-radius:999px;
-      white-space:nowrap;
+      background:rgba(47,125,255,.15);
+      border:1px solid rgba(47,125,255,.25);
+      color:#cfe0ff;
+      font-weight:700;
     }
-    .card-b{ padding:12px 14px; }
-
-    .row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .muted{ color:var(--muted); font-size:12px; }
-    .mono{ font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
-    button{
-      border:1px solid var(--border);
-      background:#fff;
-      color:var(--text);
-      border-radius:10px;
-      padding:8px 10px;
-      font-size:13px;
-      cursor:pointer;
-      transition:.15s ease;
+    .spacer{flex:1}
+    .btn{
       display:inline-flex;
       align-items:center;
+      justify-content:center;
       gap:8px;
-    }
-    button:hover{ border-color:#C9D2E3; background:#F9FAFB; }
-    button:disabled{ opacity:.55; cursor:not-allowed; }
-    .btn-primary{
-      background:var(--blue);
-      color:#fff;
-      border-color:transparent;
-    }
-    .btn-primary:hover{ background:var(--blue2); }
-    input[type="file"]{ font-size:12px; }
-
-    #drop{
-      width:100%;
-      border:2px dashed #D7DEEA;
-      background:#FAFBFD;
-      border-radius:12px;
-      padding:14px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
+      height:34px;
+      padding:0 12px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+      color:var(--text);
       cursor:pointer;
       user-select:none;
-      transition:.15s ease;
+      transition:.15s;
     }
-    #drop:hover{ border-color: rgba(37,99,235,.55); background:#F6F9FF; }
-    #drop.dragover{
-      border-color: rgba(37,99,235,.9);
-      background: rgba(37,99,235,.06);
+    .btn:hover{background:rgba(255,255,255,.05); border-color:#314056}
+    .btn:disabled{opacity:.45; cursor:not-allowed}
+    .btn.primary{
+      border:none;
+      background:linear-gradient(180deg,var(--accent),var(--accent2));
+      box-shadow:0 8px 18px rgba(47,125,255,.25);
     }
-    .drop-left{ display:flex; align-items:center; gap:12px; }
-    .drop-icon{
-      width:34px;height:34px;border-radius:10px;
-      display:grid;place-items:center;
-      background:rgba(37,99,235,.1);
-      border:1px solid rgba(37,99,235,.2);
-      color:var(--blue);
-      font-weight:800;
-    }
-    .drop-text b{ display:block; font-size:13px; }
-    .drop-text span{ display:block; font-size:12px; color:var(--muted); margin-top:2px; }
-
-    .stats{
-      display:grid;
-      grid-template-columns: repeat(5, minmax(0,1fr));
-      gap:10px;
-      margin-top:10px;
-    }
-    .stat{
-      border:1px solid var(--border);
+    .btn.primary:hover{filter:brightness(1.03)}
+    .btn.icon{
+      width:34px; padding:0;
       border-radius:12px;
-      padding:10px 10px;
-      background:#fff;
     }
-    .stat .k{ font-size:11px; color:var(--muted); }
-    .stat .v{ font-size:14px; font-weight:750; margin-top:4px; }
+    .btn.circle{
+      width:44px; height:44px;
+      border-radius:999px;
+      border:1px solid #2c3a50;
+      background:rgba(255,255,255,.03);
+    }
+    .btn.play{background:rgba(47,125,255,.22); border-color:rgba(47,125,255,.35)}
+    .btn.stop{background:rgba(255,77,79,.12); border-color:rgba(255,77,79,.25)}
+    .hint{
+      color:var(--muted);
+      font-size:13px;
+    }
 
-    .transport{
-      flex:0 0 auto;
-      margin:0 16px 12px;
-      background:var(--panel);
+    .layout{
+      height:calc(100vh - 54px);
+      display:grid;
+      grid-template-columns: 320px 1fr 320px;
+      grid-template-rows: 60px 1fr 160px;
+      grid-template-areas:
+        "left top right"
+        "left center right"
+        "left log right";
+      gap:12px;
+      padding:12px;
+    }
+
+    .panel{
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
       border:1px solid var(--border);
-      border-radius:var(--r);
-      box-shadow: var(--shadow);
-      padding:10px 12px;
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      min-width:0;
+    }
+    .panelHeader{
+      height:46px;
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:12px;
+      padding:0 12px;
+      border-bottom:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+      font-weight:800;
     }
-    .transport .left{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .play{
-      width:42px;height:42px;border-radius:999px;
-      padding:0; justify-content:center;
-      font-size:14px;
+    .panelBody{padding:12px}
+    .left{grid-area:left; display:flex; flex-direction:column; gap:12px;}
+    .top{grid-area:top; display:flex; align-items:center; gap:12px; padding:8px 12px;}
+    .center{grid-area:center; position:relative;}
+    .right{grid-area:right; display:flex; flex-direction:column;}
+    .log{grid-area:log; display:flex; flex-direction:column;}
+
+    .card{
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:rgba(255,255,255,.02);
+      padding:12px;
     }
-    .stop{
-      width:38px;height:38px;border-radius:12px;
-      padding:0; justify-content:center;
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    .col{display:flex; flex-direction:column; gap:10px}
+    .pill{
+      font-size:12px;
+      padding:3px 10px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      color:var(--muted);
+      background:rgba(255,255,255,.02);
     }
-    .zoom{
-      display:flex; align-items:center; gap:8px;
-      padding:6px 10px;
+    .pill.good{color:#d7ffe8; border-color:rgba(49,208,124,.35); background:rgba(49,208,124,.08)}
+    .pill.warn{color:#ffe3c7; border-color:rgba(255,193,7,.35); background:rgba(255,193,7,.08)}
+    .pill.bad{color:#ffd7d7; border-color:rgba(255,77,79,.35); background:rgba(255,77,79,.08)}
+
+    .fileInput{
+      display:none;
+    }
+    .drop{
+      border:1px dashed #3a4a63;
+      border-radius:14px;
+      padding:12px;
+      color:var(--muted);
+      background:rgba(255,255,255,.02);
+    }
+
+    .clipList{
+      overflow:auto;
+      padding:8px;
+      height:100%;
+    }
+    .clipItem{
       border:1px solid var(--border);
       border-radius:12px;
-      background:#fff;
+      background:rgba(255,255,255,.02);
+      padding:10px;
+      margin-bottom:10px;
     }
-    .zoom input[type="range"]{ width:160px; }
-    #zoomVal{ min-width:56px; text-align:right; font-size:12px; color:var(--muted); }
-
-    main{
-      flex:1 1 auto;
+    .clipItem:hover{border-color:#365078}
+    .clipTitle{font-weight:800}
+    .clipMeta{color:var(--muted); font-size:12px; display:flex; justify-content:space-between; margin-top:6px}
+    .miniBtn{
+      height:28px; padding:0 10px; border-radius:10px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+      color:var(--text);
+      cursor:pointer;
+      font-size:12px;
+    }
+    .miniBtn:hover{border-color:#365078}
+    .miniBtn.primary{border:none; background:rgba(47,125,255,.25)}
+    .miniBtn.danger{border-color:rgba(255,77,79,.25); background:rgba(255,77,79,.10)}
+    .muted{color:var(--muted)}
+    .kpiGrid{
       display:grid;
-      grid-template-columns: 1fr 340px;
-      gap:12px;
-      padding:0 16px 12px;
-      overflow:hidden;
-    }
-    .roll-card{
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:var(--r);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-      min-width: 0;
-    }
-    .roll-top{
-      padding:10px 12px;
-      border-bottom:1px solid var(--border);
-      display:flex; align-items:center; justify-content:space-between;
+      grid-template-columns: repeat(3,1fr);
       gap:10px;
-      background:linear-gradient(to bottom, #fff, #fbfcff);
+      margin-top:8px;
     }
-    .roll-top .hint{ font-size:12px; color:var(--muted); }
-    .rollwrap{
-      flex:1 1 auto;
-      overflow:auto;
-      background:#fff;
-    }
-    #roll{ display:block; background:#fff; }
-
-    .side{
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:var(--r);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-      min-width: 0;
-    }
-    .side-h{
-      padding:12px 14px;
-      border-bottom:1px solid var(--border);
-      font-weight:750;
-      background:linear-gradient(to bottom, #fff, #fbfcff);
-      display:flex; align-items:center; justify-content:space-between;
-      gap:10px;
-    }
-    .side-b{
-      padding:12px 14px;
-      overflow:auto;
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-    .kv{
+    .kpi{
       border:1px solid var(--border);
       border-radius:12px;
       padding:10px;
-      background:#fff;
+      background:rgba(255,255,255,.02);
     }
-    .kv .k{ font-size:11px; color:var(--muted); }
-    .kv .v{ font-size:13px; margin-top:6px; color:var(--text); word-break:break-word; }
-    .statusline{
-      display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-      font-size:12px; color:var(--muted);
-      margin-top:6px;
-    }
-    #dlLinks a{
-      display:inline-block;
-      margin-right:10px;
-      font-size:12px;
-      color:var(--blue);
-      text-decoration:none;
-    }
-    #dlLinks a:hover{ text-decoration:underline; }
+    .kpi .k{color:var(--muted); font-size:12px}
+    .kpi .v{font-weight:900; font-size:18px; margin-top:4px}
 
-    .log{
-      flex:0 0 auto;
-      margin:0 16px 16px;
-      background:var(--panel);
+    /* Center timeline */
+    .timelineWrap{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+    .timelineRuler{
+      height:34px;
+      border-bottom:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+      display:flex;
+      align-items:center;
+      padding:0 10px;
+      gap:12px;
+    }
+    .range{
+      width:180px;
+    }
+    .bpmInput{
+      width:84px;
+      height:30px;
+      border-radius:10px;
       border:1px solid var(--border);
-      border-radius:var(--r);
-      box-shadow: var(--shadow);
+      background:rgba(0,0,0,.15);
+      color:var(--text);
+      padding:0 10px;
+      outline:none;
+    }
+    .timelineCanvas{
+      position:relative;
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      background:
+        linear-gradient(to bottom, rgba(255,255,255,.05) 1px, transparent 1px) 0 0 / 100% 80px,
+        linear-gradient(to right, rgba(255,255,255,.05) 1px, transparent 1px) 0 0 / 120px 100%;
+    }
+    .lane{
+      position:relative;
+      height:80px;
+      border-bottom:1px solid rgba(255,255,255,.05);
+    }
+    .clipInst{
+      position:absolute;
+      top:10px;
+      height:60px;
+      border-radius:12px;
+      border:1px solid rgba(47,125,255,.55);
+      background:rgba(47,125,255,.20);
+      color:#eaf1ff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:800;
+      font-size:12px;
+      cursor:grab;
+      user-select:none;
+      padding:0 10px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .clipInst.selected{
+      border-color:#fff;
+      background:rgba(47,125,255,.35);
+      box-shadow:0 0 0 2px rgba(47,125,255,.25);
+    }
+    .playhead{
+      position:absolute;
+      top:0;
+      bottom:0;
+      width:2px;
+      background:rgba(255,77,79,.95);
+      pointer-events:none;
+    }
+
+    /* Right inspector */
+    .insBody{padding:12px; overflow:auto; flex:1}
+    .sectionTitle{
+      color:#cfe0ff;
+      font-weight:900;
+      margin:6px 0 10px;
+    }
+    .kv{display:flex; justify-content:space-between; gap:10px; margin:8px 0; color:var(--muted); font-size:13px}
+    .kv b{color:var(--text)}
+    .insBox{
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      background:rgba(255,255,255,.02);
+      margin-bottom:12px;
+    }
+    .insBox input{
+      width:110px;
+      height:30px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:rgba(0,0,0,.15);
+      color:var(--text);
+      padding:0 10px;
+      outline:none;
+    }
+
+    /* Log */
+    .logHeader{
+      height:46px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 12px;
+      border-bottom:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+      font-weight:800;
+    }
+    .logArea{
+      flex:1;
+      min-height:0;
+      padding:10px 12px;
+      font-family:var(--mono);
+      font-size:12px;
+      color:#cfe0ff;
+      overflow:auto;
+      background:rgba(0,0,0,.20);
+    }
+
+    /* Modal editor (placeholder) */
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.65);
+      display:none;
+      z-index:999;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+    }
+    .modal.active{display:flex}
+    .modalCard{
+      width:min(1200px, 96vw);
+      height:min(760px, 92vh);
+      border-radius:16px;
+      border:1px solid var(--border);
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      box-shadow:var(--shadow);
+      display:flex;
+      flex-direction:column;
       overflow:hidden;
     }
-    .log-h{
-      padding:10px 12px;
+    .modalTop{
+      height:52px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 12px;
       border-bottom:1px solid var(--border);
-      display:flex; align-items:center; justify-content:space-between;
-      background:linear-gradient(to bottom, #fff, #fbfcff);
+      background:rgba(255,255,255,.02);
+      font-weight:900;
     }
-    pre{
-      margin:0;
+    .modalBody{flex:1; position:relative; overflow:hidden}
+    .modalBody canvas{width:100%; height:100%; display:block}
+    .toast{
+      position:fixed;
+      right:14px;
+      bottom:14px;
+      background:rgba(20,26,33,.95);
+      border:1px solid var(--border);
+      color:var(--text);
       padding:10px 12px;
-      height:120px;
-      overflow:auto;
-      font-size:12px;
-      line-height:1.45;
-      background:#0B1220;
-      color:#E5E7EB;
+      border-radius:12px;
+      box-shadow:var(--shadow);
+      max-width:420px;
+      display:none;
+      z-index:1001;
+      font-size:13px;
     }
+    .toast.show{display:block}
+    .toast small{display:block; color:var(--muted); margin-top:4px}
   </style>
 </head>
 
 <body>
-<div class="app">
-  <header>
-    <div class="title">
-      <span class="brand">🎵 Hum2Song</span>
-      <span class="sub">Piano-roll</span>
-      <span class="pill">MVP</span>
-    </div>
-    <div class="tagline">本地编辑 + 即时试听 · 可选云端高质量导出</div>
-  </header>
-
-  <section class="top">
-    <!-- Local -->
-    <div class="card">
-      <div class="card-h">
-        <div class="h">📄 本地 Score（score.json）</div>
-        <span class="pill">Local</span>
-      </div>
-      <div class="card-b">
-        <input id="scoreFile" type="file" accept="application/json,.json" hidden />
-        <div id="drop" title="点击或拖拽 score.json">
-          <div class="drop-left">
-            <div class="drop-icon">⤓</div>
-            <div class="drop-text">
-              <b>拖拽 score.json 到这里（或点击选择）</b>
-              <span>本地模式：可编辑 + Tone.js 试听，不需要 task_id</span>
-            </div>
-          </div>
-          <div class="muted mono">.json</div>
-        </div>
-
-        <div class="row" style="margin-top:10px;">
-          <button id="btnLoadScoreFile">📂 打开 score.json</button>
-          <button id="btnDownloadLocalScore" disabled>⬇️ 下载 score.json（本地）</button>
-          <span class="muted">提示：本地下载是“当前编辑器内的 JSON”</span>
-        </div>
-
-        <div class="stats">
-          <div class="stat"><div class="k">Notes</div><div class="v" id="kNotes">0</div></div>
-          <div class="stat"><div class="k">BPM</div><div class="v" id="kBpm">-</div></div>
-          <div class="stat"><div class="k">Pitch Range</div><div class="v" id="kPitch">-</div></div>
-          <div class="stat"><div class="k">Span (s)</div><div class="v" id="kSpan">-</div></div>
-          <div class="stat"><div class="k">Selected</div><div class="v" id="kSel">-</div></div>
-        </div>
-
-        <div class="statusline">
-          <span class="muted">说明：</span>
-          <span class="muted">如果你需要“云端导出高质量 MP3/MIDI”，用右侧 Generate 生成一个 session（会自动绑定）。</span>
-        </div>
-      </div>
+  <div class="topbar">
+    <div class="brand">
+      <span style="font-size:18px">🎹</span>
+      <span>Hum2Song</span>
+      <span class="badge">Studio MVP</span>
     </div>
 
-    <!-- Cloud -->
-    <div class="card">
-      <div class="card-h">
-        <div class="h">☁️ 云端 Session（可选）</div>
-        <span class="pill">Server</span>
-      </div>
-      <div class="card-b">
-        <div class="row" style="justify-content:space-between;">
-          <div class="row">
-            <input id="wavFile" type="file" accept="audio/wav" />
-            <button id="btnGenerate" class="btn-primary">✨ Generate</button>
-          </div>
-          <div class="muted" id="genStatus">-</div>
-        </div>
+    <button class="btn circle play" data-action="project-play" title="Play (Preview)">
+      ▶
+    </button>
+    <button class="btn circle stop" data-action="project-stop" title="Stop">
+      ■
+    </button>
 
-        <div class="kv">
-          <div class="k">Session</div>
-          <div class="v">
-            <div class="statusline">
-              <span class="muted">task_id：</span>
-              <span id="taskIdLabel" class="mono muted">-</span>
-            </div>
-            <div class="statusline">
-              <span class="muted">分享链接：</span>
-              <a id="shareLink" class="mono" href="#" target="_blank" style="display:none;">/ui?task_id=...</a>
-              <span class="muted" id="audioStatus">-</span>
-            </div>
-          </div>
-        </div>
+    <button class="btn" data-action="upload-wav">
+      ⬆ Upload WAV
+    </button>
 
-        <div class="row">
-          <button id="btnSave" disabled>💾 Save to Server</button>
-          <button id="btnExport" disabled>🎧 Export (Render MP3/MIDI)</button>
-          <button id="btnDownloadServerScore" disabled>⬇️ Download Score (Server)</button>
-        </div>
+    <div class="spacer"></div>
+    <div class="hint">本地拼歌 + 即时试听；Generate 后自动入库为 Clip，可 Add 到 Timeline</div>
+  </div>
 
-        <div class="kv">
-          <div class="k">Downloads</div>
-          <div class="v" id="dlLinks"><span class="muted">生成后会出现下载链接</span></div>
-        </div>
-
-        <div class="muted">
-          常见现象：服务重启后，旧 task_id 会失效（TaskManager 是内存态）→ GET /tasks/{id}/score 会 404。此时请重新 Generate 或打开本地 score.json。
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="transport">
+  <div class="layout">
+    <!-- LEFT -->
     <div class="left">
-      <button id="btnPlay" class="btn-primary play" title="Play (Space)">▶</button>
-      <button id="btnStop" class="stop" title="Stop">⏹</button>
-      <div class="zoom" title="时间缩放">
-        <span class="muted">Zoom</span>
-        <input id="zoom" type="range" min="0.25" max="4" step="0.05" value="1" />
-        <span id="zoomVal" class="mono">1.00x</span>
-      </div>
-      <span class="muted">快捷键：Space 播放/暂停 · Delete 删除 · Alt+Drag 复制</span>
-    </div>
-    <div class="muted">当前渲染：Canvas · 音频：Tone.js</div>
-  </section>
+      <div class="panel">
+        <div class="panelHeader">
+          <div>CLIP LIBRARY</div>
+          <div class="row">
+            <button class="btn icon" data-action="new-track" title="Add Track">＋</button>
+          </div>
+        </div>
 
-  <main>
-    <div class="roll-card">
-      <div class="roll-top">
+        <div class="panelBody col" style="gap:12px;">
+          <div class="card">
+            <div style="font-weight:900; margin-bottom:6px;">生成 / 入库</div>
+            <div class="muted" style="font-size:13px; line-height:1.5;">
+              录音或上传音频 → 后端 Generate → 自动生成 Clip（带 score.json）
+            </div>
+
+            <div class="row" style="margin-top:10px;">
+              <button class="btn primary" data-action="use-last" disabled title="MVP: placeholder">✨ Use Last Recording</button>
+              <button class="btn" data-action="clear-project">🧹 Clear</button>
+            </div>
+
+            <div class="row" style="margin-top:10px;">
+              <span class="pill" id="gen-state">idle</span>
+              <span class="muted" id="gen-msg" style="font-size:12px;">等待上传</span>
+            </div>
+
+            <div class="muted" style="font-size:12px; margin-top:10px;">
+              提示：task_id 是云端 session。服务重启后可能失效，但 Clip/Project 会保存在浏览器 localStorage。
+            </div>
+
+            <input class="fileInput" id="wavInput" type="file" accept="audio/wav,audio/*,.wav" />
+            <input class="fileInput" id="importProjectInput" type="file" accept="application/json,.json" />
+          </div>
+
+          <div class="card" style="padding:10px;">
+            <div style="font-weight:900; margin-bottom:8px;">CLIPS</div>
+            <div class="clipList" id="clipList" style="height:420px;"></div>
+            <div class="muted" style="font-size:12px; margin-top:8px;">
+              双击 Timeline 片段 → 弹窗编辑（MVP 先做只读预览）
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP CENTER TOOLBAR -->
+    <div class="top panel">
+      <div class="row" style="width:100%; justify-content:space-between;">
+        <div class="row" style="gap:14px;">
+          <div class="row" style="gap:8px;">
+            <span class="muted" style="font-size:12px;">Zoom</span>
+            <input class="range" id="zoomRange" type="range" min="40" max="420" value="120" />
+            <span class="muted" style="font-size:12px;" id="zoomLabel">120 px/s</span>
+          </div>
+
+          <div class="row" style="gap:8px;">
+            <span class="muted" style="font-size:12px;">BPM</span>
+            <input class="bpmInput" id="bpmInput" type="number" min="30" max="300" step="1" value="120"/>
+          </div>
+
+          <div class="row" style="gap:8px;">
+            <span class="muted" style="font-size:12px;">Playhead</span>
+            <span style="font-family:var(--mono);" id="playheadLabel">0.00s</span>
+          </div>
+        </div>
+
+        <div class="muted" style="font-size:12px;">
+          双击 Timeline 片段 → 弹窗编辑 Piano-roll
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="center panel">
+      <div class="timelineWrap">
+        <div class="timelineRuler">
+          <span class="pill" id="timelineHint">Drop Clip here → create instance</span>
+          <span class="spacer"></span>
+          <span class="muted" style="font-size:12px;">快捷键：Space 播放/停止 · Delete 删除所选片段</span>
+        </div>
+
+        <div class="timelineCanvas" id="timelineCanvas">
+          <div class="playhead" id="playhead" style="left:0px;"></div>
+          <div id="lanes"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="right panel">
+      <div class="panelHeader">
+        <div>INSPECTOR</div>
+        <span class="pill warn">MVP</span>
+      </div>
+      <div class="insBody">
+        <div class="insBox">
+          <div class="sectionTitle">Project</div>
+          <div class="kv"><span>Tracks</span><b id="kTracks">1</b></div>
+          <div class="kv"><span>Clips</span><b id="kClips">0</b></div>
+          <div class="kv"><span>Instances</span><b id="kInst">0</b></div>
+        </div>
+
+        <div class="insBox">
+          <div class="sectionTitle">Selection</div>
+          <div id="selEmpty" class="muted" style="font-size:13px;">选中 Timeline 片段后，在这里编辑 start / transpose。</div>
+
+          <div id="selBox" style="display:none;">
+            <div class="kv"><span>ID</span><b id="selId" style="font-family:var(--mono); font-size:12px;">-</b></div>
+            <div class="kv"><span>Clip</span><b id="selClip">-</b></div>
+            <div class="row" style="justify-content:space-between; margin-top:10px;">
+              <div class="col" style="gap:6px;">
+                <span class="muted" style="font-size:12px;">Start(s)</span>
+                <input id="selStart" type="number" step="0.01" />
+              </div>
+              <div class="col" style="gap:6px;">
+                <span class="muted" style="font-size:12px;">Transpose</span>
+                <input id="selTrans" type="number" step="1" />
+              </div>
+            </div>
+
+            <div class="row" style="margin-top:10px;">
+              <button class="btn" data-action="edit-selected">✏️ Edit</button>
+              <button class="btn" data-action="remove-selected" style="border-color:rgba(255,77,79,.25); background:rgba(255,77,79,.08);">🗑 Remove</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="insBox">
+          <div class="sectionTitle">Actions</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn" data-action="export-project">⬇ Export Project JSON</button>
+            <button class="btn" data-action="import-project">⬆ Import Project JSON</button>
+          </div>
+        </div>
+
+        <div class="insBox">
+          <div class="sectionTitle">Backend API</div>
+          <div class="muted" style="font-family:var(--mono); font-size:12px; line-height:1.6;">
+            POST /generate?output_format=mp3<br/>
+            GET&nbsp;&nbsp;/tasks/{task_id}<br/>
+            Modal: GET /tasks/{task_id}/score
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div class="log panel">
+      <div class="logHeader">
+        <div>Log</div>
+        <button class="btn" data-action="clear-log">Clear</button>
+      </div>
+      <div class="logArea" id="logArea"></div>
+    </div>
+  </div>
+
+  <!-- MODAL EDITOR (MVP: read-only piano roll preview) -->
+  <div class="modal" id="editorModal">
+    <div class="modalCard">
+      <div class="modalTop">
+        <div id="editorTitle">Clip Editor</div>
         <div class="row">
-          <span class="pill">Piano-roll</span>
-          <span class="hint">拖拽音符移动；右侧边缘拖拽改时长（MVP）</span>
+          <button class="btn" data-action="close-editor">Close</button>
         </div>
-        <div class="hint muted">看不到音符？先打开本地 score.json 或先 Generate 绑定 session</div>
       </div>
-      <div id="rollWrap" class="rollwrap">
-        <canvas id="roll" width="2400" height="520"></canvas>
+      <div class="modalBody">
+        <canvas id="editorCanvas"></canvas>
       </div>
     </div>
+  </div>
 
-    <aside class="side">
-      <div class="side-h">
-        <span>Inspector</span>
-        <span class="pill">Read-only (MVP)</span>
-      </div>
-      <div class="side-b">
-        <div class="kv">
-          <div class="k">提示</div>
-          <div class="v muted">
-            这块先做“状态展示”，后续再做完整的 FL Studio / GarageBand 风格：力度编辑、钢琴键盘、时间尺、吸附、快捷键、工具栏等。
-          </div>
-        </div>
+  <div class="toast" id="toast"></div>
 
-        <div class="kv">
-          <div class="k">接口对齐</div>
-          <div class="v muted mono">
-            GET /tasks/{task_id}/score<br/>
-            PUT /tasks/{task_id}/score<br/>
-            POST /tasks/{task_id}/render<br/>
-            GET /tasks/{task_id}/download?file_type=audio|midi<br/>
-            GET /tasks/{task_id}/score/download?file_type=json|midi
-          </div>
-        </div>
-      </div>
-    </aside>
-  </main>
-
-  <section class="log">
-    <div class="log-h">
-      <div class="row">
-        <span class="pill">Log</span>
-        <span class="muted">用于调试：加载/保存/渲染的返回信息</span>
-      </div>
-      <div class="muted mono">Hum2Song Piano-roll UI</div>
-    </div>
-    <pre id="log"></pre>
-  </section>
-</div>
-
-<!-- Tone.js (CDN) -->
-<script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
-
-<!-- App JS -->
-<script src="/static/pianoroll/app.js"></script>
-
+  <!-- IMPORTANT: ESM module entry -->
+  <script type="module" src="/static/pianoroll/app.js"></script>
 </body>
 </html>

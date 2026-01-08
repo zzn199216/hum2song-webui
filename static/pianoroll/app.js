@@ -1,669 +1,735 @@
-/*
-  Hum2Song Piano-roll MVP UI
-  Fix重点：
-  1) Generate 完成后自动加载 /tasks/{id}/score → 解决 “No score loaded / 钢琴卷帘空白 / Play没反应”
-  2) Generate 成功后自动把 URL 切到 ?task_id=新id（避免旧id 404 反复出现）
-  3) 页面初始化时：优先 query task_id，其次 localStorage 的 last_task_id（如果服务没重启还能自动恢复）
-  4) 如果 /tasks/{id}/score 404（常见：服务重启），自动清掉 task_id，避免一直报错
-*/
+// static/pianoroll/app.js
+import {
+  STORAGE_KEY,
+  emptyProject,
+  clipFromScore,
+  addInstance,
+  normalizeProject,
+  loadFromStorage,
+  saveToStorage,
+  serialize,
+  uid,
+} from "./project.js";
 
-const $ = (id) => document.getElementById(id);
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const state = {
-  taskId: null,
-  score: null,         // ScoreDoc
-  playing: false,
-  zoom: 1.0,
-  pxPerSec: 120,
-  sel: null,
-  drag: null,
-  _map: null,
+const ui = {
+  wavInput: $("#wavInput"),
+  importProjectInput: $("#importProjectInput"),
+  genState: $("#gen-state"),
+  genMsg: $("#gen-msg"),
+  clipList: $("#clipList"),
+  lanes: $("#lanes"),
+  timelineCanvas: $("#timelineCanvas"),
+  playhead: $("#playhead"),
+  playheadLabel: $("#playheadLabel"),
+  zoomRange: $("#zoomRange"),
+  zoomLabel: $("#zoomLabel"),
+  bpmInput: $("#bpmInput"),
+  logArea: $("#logArea"),
+  toast: $("#toast"),
+
+  kTracks: $("#kTracks"),
+  kClips: $("#kClips"),
+  kInst: $("#kInst"),
+
+  selEmpty: $("#selEmpty"),
+  selBox: $("#selBox"),
+  selId: $("#selId"),
+  selClip: $("#selClip"),
+  selStart: $("#selStart"),
+  selTrans: $("#selTrans"),
+
+  editorModal: $("#editorModal"),
+  editorTitle: $("#editorTitle"),
+  editorCanvas: $("#editorCanvas"),
 };
 
-// ---------- logging ----------
-function log(line){
-  const el = $("log");
-  const ts = new Date().toISOString().slice(11,19);
-  el.textContent += `[${ts}] ${line}\n`;
-  el.scrollTop = el.scrollHeight;
+const state = {
+  project: normalizeProject(loadFromStorage() || emptyProject()),
+  lastTaskId: null,
+  dragging: null, // {instId, startX, origLeftPx}
+  audio: new Audio(),
+};
+
+function log(msg) {
+  const t = new Date();
+  const ts = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")}`;
+  ui.logArea.textContent += `[${ts}] ${msg}\n`;
+  ui.logArea.scrollTop = ui.logArea.scrollHeight;
 }
 
-// ---------- URL helpers ----------
-function getQueryTaskId(){
-  const u = new URL(location.href);
-  return u.searchParams.get("task_id");
-}
-function setQueryTaskId(taskId){
-  const u = new URL(location.href);
-  if(taskId) u.searchParams.set("task_id", taskId);
-  else u.searchParams.delete("task_id");
-  history.replaceState({}, "", u);
-}
-function clearTaskIdEverywhere(){
-  setTaskUI(null);
-  setQueryTaskId(null);
-  try{ localStorage.removeItem("hum2song_last_task_id"); }catch(_e){}
+function toast(title, detail = "") {
+  ui.toast.innerHTML = `${escapeHtml(title)}${detail ? `<small>${escapeHtml(detail)}</small>` : ""}`;
+  ui.toast.classList.add("show");
+  setTimeout(() => ui.toast.classList.remove("show"), 2600);
 }
 
-// ---------- UI binding ----------
-function setTaskUI(taskId){
-  state.taskId = taskId || null;
-  $("taskIdLabel").textContent = taskId || "-";
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+}
 
-  if(taskId){
-    const link = `/ui?task_id=${encodeURIComponent(taskId)}`;
-    const a = $("shareLink");
-    a.href = link;
-    a.textContent = link;
-    a.style.display = "";
-  }else{
-    $("shareLink").style.display = "none";
+function setGenState(kind, msg) {
+  ui.genState.className = "pill";
+  if (kind === "good") ui.genState.classList.add("good");
+  if (kind === "warn") ui.genState.classList.add("warn");
+  if (kind === "bad") ui.genState.classList.add("bad");
+  ui.genState.textContent = kind;
+  ui.genMsg.textContent = msg || "";
+}
+
+function persist() {
+  saveToStorage(state.project);
+}
+
+function clipArray() {
+  return Object.values(state.project.clips || {});
+}
+
+function getSelectedInstance() {
+  const id = state.project.ui.selectedInstanceId;
+  if (!id) return null;
+  return state.project.instances.find(x => x.id === id) || null;
+}
+
+function getClip(id) {
+  return state.project.clips?.[id] || null;
+}
+
+function pxPerSec() {
+  return Number(state.project.ui.zoomPxPerSec) || 120;
+}
+
+function secToPx(sec) {
+  return (Number(sec) || 0) * pxPerSec();
+}
+
+function pxToSec(px) {
+  return (Number(px) || 0) / pxPerSec();
+}
+
+/* ---------------------------
+   Rendering
+--------------------------- */
+
+function renderKPIs() {
+  ui.kTracks.textContent = String(state.project.tracks.length);
+  ui.kClips.textContent = String(Object.keys(state.project.clips || {}).length);
+  ui.kInst.textContent = String(state.project.instances.length);
+}
+
+function renderClipLibrary() {
+  const clips = clipArray().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  ui.clipList.innerHTML = "";
+
+  if (!clips.length) {
+    ui.clipList.innerHTML = `<div class="muted" style="padding:10px;">还没有 Clip。点击 “Upload WAV” 生成一个。</div>`;
+    return;
   }
 
-  const enabled = !!taskId;
-  $("btnSave").disabled = !enabled;
-  $("btnExport").disabled = !enabled;
-  $("btnDownloadServerScore").disabled = !enabled;
-}
+  for (const c of clips) {
+    const span = c.stats?.span_s ?? 0;
+    const notes = c.stats?.notes ?? 0;
 
-function midiToName(m){
-  const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-  const o = Math.floor(m/12)-1;
-  return `${names[m%12]}${o}`;
-}
-
-function scoreStats(){
-  if(!state.score){ return {notes:0, bpm:"-", pitch:"-", span:"-"}; }
-  const bpm = state.score.tempo_bpm?.toFixed?.(2) ?? state.score.tempo_bpm ?? "-";
-  let n=0, lo=999, hi=-1, maxT=0;
-  for(const tr of state.score.tracks||[]){
-    for(const ne of tr.notes||[]){
-      n++;
-      lo = Math.min(lo, ne.pitch);
-      hi = Math.max(hi, ne.pitch);
-      maxT = Math.max(maxT, ne.start + ne.duration);
-    }
+    const el = document.createElement("div");
+    el.className = "clipItem";
+    el.innerHTML = `
+      <div class="clipTitle">${escapeHtml(c.name)}</div>
+      <div class="clipMeta">
+        <span>${span.toFixed(2)}s</span>
+        <span>${notes} notes</span>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="miniBtn" data-action="clip-preview" data-clip="${escapeHtml(c.id)}">▶ Preview</button>
+        <button class="miniBtn primary" data-action="clip-add" data-clip="${escapeHtml(c.id)}">+ Add to Timeline</button>
+        <button class="miniBtn" data-action="clip-edit" data-clip="${escapeHtml(c.id)}">✏ Edit</button>
+      </div>
+      <div class="muted" style="font-size:12px; margin-top:8px; font-family:var(--mono);">
+        ${c.source?.task_id ? `task_id=${escapeHtml(c.source.task_id)}` : "local"}
+      </div>
+    `;
+    ui.clipList.appendChild(el);
   }
-  const pitch = (hi>=0) ? `${midiToName(lo)} - ${midiToName(hi)}` : "-";
-  return {notes:n, bpm, pitch, span:maxT.toFixed(3)};
 }
 
-function updateStatsUI(){
-  const s = scoreStats();
-  $("kNotes").textContent = String(s.notes);
-  $("kBpm").textContent = String(s.bpm);
-  $("kPitch").textContent = String(s.pitch);
-  $("kSpan").textContent = String(s.span);
-  $("kSel").textContent = state.sel ? `${state.sel.tidx}:${state.sel.nidx}` : "-";
-}
+function renderTimeline() {
+  ui.lanes.innerHTML = "";
 
-function normalizeScore(score){
-  // safe normalize: sort + round + ensure Track.name is str
-  if(!score || !score.tracks) return score;
-  for(const tr of score.tracks){
-    tr.name = String(tr.name ?? "Track");
-    if(!Array.isArray(tr.notes)) tr.notes = [];
-    tr.notes.sort((a,b)=> (a.start-b.start) || (a.pitch-b.pitch));
-    for(const n of tr.notes){
-      n.start = +(+n.start).toFixed(6);
-      n.duration = +(+n.duration).toFixed(6);
-      n.velocity = Math.max(1, Math.min(127, parseInt(n.velocity ?? 64, 10)));
-      n.pitch = Math.max(0, Math.min(127, parseInt(n.pitch ?? 60, 10)));
-      if(n.duration<=0) n.duration = 0.01;
-      if(n.start<0) n.start = 0;
-    }
+  const tracks = state.project.tracks;
+  for (const tr of tracks) {
+    const lane = document.createElement("div");
+    lane.className = "lane";
+    lane.dataset.track = tr.id;
+    ui.lanes.appendChild(lane);
   }
-  return score;
-}
 
-function enableLocalDownload(){
-  $("btnDownloadLocalScore").disabled = !state.score;
-}
+  for (const inst of state.project.instances) {
+    const lane = ui.lanes.querySelector(`.lane[data-track="${cssEsc(inst.trackId)}"]`);
+    if (!lane) continue;
 
-// ---------- server I/O ----------
-async function fetchScore(taskId){
-  const r = await fetch(`/tasks/${encodeURIComponent(taskId)}/score`);
-  if(!r.ok){
-    const t = await r.text();
-    throw new Error(`GET /tasks/${taskId}/score failed: ${r.status} ${t}`);
+    const clip = getClip(inst.clipId);
+    const name = clip?.name || inst.clipId;
+
+    const w = Math.max(80, secToPx((clip?.stats?.span_s ?? 2.0)));
+    const left = secToPx(inst.start);
+
+    const el = document.createElement("div");
+    el.className = "clipInst";
+    el.dataset.inst = inst.id;
+    el.style.left = `${left}px`;
+    el.style.width = `${w}px`;
+    el.textContent = name;
+
+    if (state.project.ui.selectedInstanceId === inst.id) el.classList.add("selected");
+
+    lane.appendChild(el);
   }
-  return await r.json();
 }
 
-// fallback: 如果 /score 不可用，尝试下载 score.json 再 parse
-async function fetchScoreViaDownload(taskId){
-  const r = await fetch(`/tasks/${encodeURIComponent(taskId)}/score/download?file_type=json`);
-  if(!r.ok){
-    const t = await r.text();
-    throw new Error(`GET /tasks/${taskId}/score/download?file_type=json failed: ${r.status} ${t}`);
+function renderInspector() {
+  const inst = getSelectedInstance();
+  if (!inst) {
+    ui.selEmpty.style.display = "block";
+    ui.selBox.style.display = "none";
+    return;
   }
-  const txt = await r.text();
-  return JSON.parse(txt);
+  const clip = getClip(inst.clipId);
+
+  ui.selEmpty.style.display = "none";
+  ui.selBox.style.display = "block";
+  ui.selId.textContent = inst.id;
+  ui.selClip.textContent = clip?.name || inst.clipId;
+  ui.selStart.value = String(inst.start ?? 0);
+  ui.selTrans.value = String(inst.transpose ?? 0);
 }
 
-async function putScore(taskId, score){
-  const r = await fetch(`/tasks/${encodeURIComponent(taskId)}/score`, {
-    method:"PUT",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(score),
+function renderAll() {
+  renderKPIs();
+  renderClipLibrary();
+  renderTimeline();
+  renderInspector();
+  ui.zoomRange.value = String(pxPerSec());
+  ui.zoomLabel.textContent = `${pxPerSec()} px/s`;
+  ui.bpmInput.value = String(state.project.bpm || 120);
+}
+
+/* ---------------------------
+   Backend: Generate → Poll → Score
+--------------------------- */
+
+async function apiGenerateFromWav(file) {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+
+  // Backend expects: POST /generate?output_format=mp3
+  const resp = await fetch(`/generate?output_format=mp3`, { method: "POST", body: fd });
+  if (!resp.ok) throw new Error(`POST /generate failed: ${resp.status}`);
+  const data = await resp.json();
+  if (!data.task_id) throw new Error("Missing task_id from /generate");
+  return data.task_id;
+}
+
+async function apiGetTask(taskId) {
+  const resp = await fetch(`/tasks/${taskId}`);
+  if (!resp.ok) throw new Error(`GET /tasks/${taskId} failed: ${resp.status}`);
+  return await resp.json();
+}
+
+async function apiGetScore(taskId) {
+  const resp = await fetch(`/tasks/${taskId}/score`);
+  if (!resp.ok) throw new Error(`GET /tasks/${taskId}/score failed: ${resp.status}`);
+  return await resp.json();
+}
+
+async function pollUntilDone(taskId, { intervalMs = 800, maxMs = 180000 } = {}) {
+  const start = Date.now();
+  while (true) {
+    const t = await apiGetTask(taskId);
+    if (t.status === "completed") return t;
+    if (t.status === "failed") throw new Error(`Task failed: ${t.error?.message || "unknown"}`);
+    if (Date.now() - start > maxMs) throw new Error("Task timeout");
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+}
+
+async function generateAndImportClip(file) {
+  setGenState("warn", `Uploading: ${file.name}`);
+  log(`Upload WAV: ${file.name}`);
+
+  const taskId = await apiGenerateFromWav(file);
+  state.lastTaskId = taskId;
+  setGenState("warn", `Generating... task_id=${taskId}`);
+  toast("Generate queued", taskId);
+  log(`Generate queued: ${taskId}`);
+
+  const t = await pollUntilDone(taskId);
+  setGenState("good", `Completed: ${taskId}`);
+  toast("Task completed", taskId);
+  log(`Task completed: ${taskId}`);
+
+  // Now fetch score and create clip
+  const score = await apiGetScore(taskId);
+  const clipId = taskId; // simplest stable id
+  const clipName = `Clip ${clipId.slice(0, 6)}`;
+
+  const clip = clipFromScore({ clipId, name: clipName, score, taskId });
+  state.project.clips[clipId] = clip;
+
+  // Optional: auto add first instance at 0 if timeline empty
+  if (state.project.instances.length === 0) {
+    addInstance(state.project, { clipId, trackId: "t1", start: 0, transpose: 0 });
+  }
+
+  persist();
+  renderAll();
+
+  toast("Clip imported", `${clipName} 已入库`);
+  log(`Clip imported: ${clipId} notes=${clip.stats.notes} span=${clip.stats.span_s.toFixed(2)}s`);
+}
+
+/* ---------------------------
+   Playback (MVP)
+   - For now: play selected instance's server MP3 if available
+--------------------------- */
+
+function stopPlayback() {
+  try {
+    state.audio.pause();
+    state.audio.currentTime = 0;
+  } catch {}
+  toast("Stop", "preview stopped");
+}
+
+function playSelectionPreview() {
+  const inst = getSelectedInstance() || state.project.instances[0] || null;
+  if (!inst) {
+    toast("No instance", "Add a clip to timeline first");
+    return;
+  }
+  const clip = getClip(inst.clipId);
+  if (!clip?.audio_url) {
+    toast("No audio preview", "This clip has no server audio_url");
+    return;
+  }
+  // NOTE: start offset preview is MVP; we ignore inst.start for now
+  state.audio.src = clip.audio_url;
+  state.audio.play().then(() => {
+    toast("Play", clip.name);
+  }).catch((e) => {
+    toast("Play blocked", "Browser blocked autoplay. Click again.");
+    log(`Audio play error: ${e?.message || e}`);
   });
-  if(!r.ok){
-    const t = await r.text();
-    throw new Error(`PUT /tasks/${taskId}/score failed: ${r.status} ${t}`);
-  }
-  return await r.json();
 }
 
-async function postRender(taskId, fmt="mp3"){
-  const r = await fetch(`/tasks/${encodeURIComponent(taskId)}/render?output_format=${encodeURIComponent(fmt)}`, {
-    method:"POST",
-  });
-  if(!r.ok){
-    const t = await r.text();
-    throw new Error(`POST /tasks/${taskId}/render failed: ${r.status} ${t}`);
-  }
-  return await r.json();
+/* ---------------------------
+   Editor Modal (MVP: read-only piano-roll preview)
+--------------------------- */
+
+function openEditorForClip(clipId) {
+  const clip = getClip(clipId);
+  if (!clip) return;
+  ui.editorTitle.textContent = `Editing: ${clip.name} (MVP: read-only)`;
+  ui.editorModal.classList.add("active");
+  drawScoreToCanvas(clip.score, ui.editorCanvas);
 }
 
-async function tryLoadScoreFromServer(taskId, {retries=10, delayMs=250} = {}){
-  // 先试 /score；不行再试 download-json；都不行就报错
-  let lastErr = null;
-  for(let i=0;i<retries;i++){
-    try{
-      const obj = await fetchScore(taskId);
-      return obj;
-    }catch(e){
-      lastErr = e;
-      // 如果是 404（常见：task不存在/服务重启），直接终止重试
-      if(String(e.message).includes(" 404 ")) break;
-      await new Promise(res=>setTimeout(res, delayMs));
-    }
-  }
-
-  // fallback
-  try{
-    const obj2 = await fetchScoreViaDownload(taskId);
-    return obj2;
-  }catch(e2){
-    lastErr = e2;
-  }
-
-  throw lastErr || new Error("Unknown error loading server score");
+function closeEditor() {
+  ui.editorModal.classList.remove("active");
 }
 
-// ---------- canvas render ----------
-function getPitchRange(){
-  let lo=999, hi=-1;
-  if(!state.score) return {lo:60, hi:72};
-  for(const tr of state.score.tracks||[]){
-    for(const ne of tr.notes||[]){
-      lo = Math.min(lo, ne.pitch);
-      hi = Math.max(hi, ne.pitch);
-    }
+function drawScoreToCanvas(score, canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(300, Math.floor(rect.width));
+  const h = Math.max(200, Math.floor(rect.height));
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  ctx.clearRect(0, 0, w, h);
+
+  // background
+  ctx.fillStyle = "rgba(0,0,0,.25)";
+  ctx.fillRect(0, 0, w, h);
+
+  const notes = [];
+  for (const tr of (score?.tracks || [])) {
+    for (const n of (tr.notes || [])) notes.push(n);
   }
-  if(hi<0) return {lo:60, hi:72};
-  lo = Math.max(0, lo-2);
-  hi = Math.min(127, hi+2);
-  return {lo, hi};
-}
-
-function draw(){
-  const c = $("roll");
-  const ctx = c.getContext("2d");
-
-  const {lo, hi} = getPitchRange();
-  const pitchSpan = (hi-lo+1);
-
-  const zoom = state.zoom;
-  const pxPerSec = state.pxPerSec * zoom;
-
-  let maxT = 10;
-  if(state.score){
-    for(const tr of state.score.tracks||[]){
-      for(const ne of tr.notes||[]){
-        maxT = Math.max(maxT, ne.start + ne.duration);
-      }
-    }
+  if (!notes.length) {
+    ctx.fillStyle = "rgba(255,255,255,.65)";
+    ctx.font = "14px system-ui";
+    ctx.fillText("No notes in this score.", 18, 28);
+    return;
   }
-  const width = Math.max(1200, Math.ceil(maxT * pxPerSec) + 120);
-  const height = c.height;
-  c.width = width;
 
-  const laneH = height / pitchSpan;
-  const x0 = 60;
-  const y0 = 10;
+  // auto pitch fit
+  let pMin = notes[0].pitch, pMax = notes[0].pitch;
+  let tEnd = 0;
+  for (const n of notes) {
+    pMin = Math.min(pMin, n.pitch);
+    pMax = Math.max(pMax, n.pitch);
+    tEnd = Math.max(tEnd, (n.start || 0) + (n.duration || 0));
+  }
+  const pad = 2;
+  pMin -= pad; pMax += pad;
+  const pitchSpan = Math.max(1, pMax - pMin + 1);
 
-  const pitchToY = (p)=> y0 + (hi - p) * laneH;
-  const timeToX = (t)=> x0 + t * pxPerSec;
+  const leftPad = 60;
+  const topPad = 20;
+  const rightPad = 20;
+  const bottomPad = 20;
 
-  ctx.clearRect(0,0,c.width,c.height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0,0,c.width,c.height);
+  const gridW = w - leftPad - rightPad;
+  const gridH = h - topPad - bottomPad;
 
   // grid
+  ctx.strokeStyle = "rgba(255,255,255,.06)";
   ctx.lineWidth = 1;
-  for(let i=0;i<=pitchSpan;i++){
-    const y = y0 + i*laneH;
-    ctx.strokeStyle = (i%12===0) ? "rgba(17,24,39,.10)" : "rgba(17,24,39,.05)";
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke();
+  const rowH = gridH / pitchSpan;
+  const colW = 80; // time grid step
+  for (let i = 0; i <= pitchSpan; i++) {
+    const y = topPad + i * rowH;
+    ctx.beginPath(); ctx.moveTo(leftPad, y); ctx.lineTo(w - rightPad, y); ctx.stroke();
+  }
+  for (let x = leftPad; x <= w - rightPad; x += colW) {
+    ctx.beginPath(); ctx.moveTo(x, topPad); ctx.lineTo(x, h - bottomPad); ctx.stroke();
   }
 
-  const step = 0.25;
-  const nLines = Math.ceil(maxT/step);
-  for(let i=0;i<=nLines;i++){
-    const t = i*step;
-    const x = timeToX(t);
-    ctx.strokeStyle = (i%4===0) ? "rgba(17,24,39,.10)" : "rgba(17,24,39,.05)";
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke();
-  }
-
-  // pitch labels
-  ctx.fillStyle = "rgba(107,114,128,1)";
+  // label
+  ctx.fillStyle = "rgba(255,255,255,.65)";
   ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-  for(let p=hi; p>=lo; p--){
-    const y = pitchToY(p) + laneH*0.72;
-    if(laneH >= 12 && (p%12===0 || laneH>=18)){
-      ctx.fillText(midiToName(p), 8, y);
-    }
-  }
+  ctx.fillText(`Pitch ${pMin}..${pMax} | span ${tEnd.toFixed(2)}s | notes ${notes.length}`, 16, 16);
 
   // notes
-  if(state.score){
-    for(const tr of state.score.tracks||[]){
-      for(const ne of tr.notes||[]){
-        const x = timeToX(ne.start);
-        const y = pitchToY(ne.pitch) + 1;
-        const w = Math.max(2, ne.duration * pxPerSec);
-        const h = Math.max(3, laneH - 2);
-        ctx.fillStyle = "rgba(37,99,235,.85)";
-        ctx.fillRect(x, y, w, h);
-        ctx.strokeStyle = "rgba(29,78,216,.95)";
-        ctx.strokeRect(x+0.5, y+0.5, Math.max(1,w-1), Math.max(1,h-1));
-      }
-    }
-  }
+  const scaleX = gridW / Math.max(0.01, tEnd);
+  for (const n of notes) {
+    const x = leftPad + (n.start || 0) * scaleX;
+    const y = topPad + (pMax - n.pitch) * rowH + 1;
+    const ww = Math.max(3, (n.duration || 0.05) * scaleX);
+    const hh = Math.max(3, rowH - 2);
 
-  // selection highlight
-  if(state.sel && state.score){
-    const tr = state.score.tracks[state.sel.tidx];
-    const ne = tr?.notes?.[state.sel.nidx];
-    if(ne){
-      const x = timeToX(ne.start);
-      const y = pitchToY(ne.pitch) + 1;
-      const w = Math.max(2, ne.duration * pxPerSec);
-      const h = Math.max(3, laneH - 2);
-      ctx.strokeStyle = "rgba(255,255,255,.95)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x+1, y+1, Math.max(1,w-2), Math.max(1,h-2));
-      ctx.lineWidth = 1;
-    }
+    ctx.fillStyle = "rgba(47,125,255,.75)";
+    ctx.fillRect(x, y, ww, hh);
+    ctx.strokeStyle = "rgba(255,255,255,.12)";
+    ctx.strokeRect(x, y, ww, hh);
   }
-
-  state._map = {lo, hi, laneH, x0, y0, pxPerSec};
-  updateStatsUI();
 }
 
-// ---------- hit test / edit ----------
-function hitTest(mx, my){
-  if(!state.score || !state._map) return null;
-  const {hi, laneH, x0, y0, pxPerSec} = state._map;
+/* ---------------------------
+   Timeline interaction (drag instances horizontally)
+--------------------------- */
 
-  const t = (mx - x0) / pxPerSec;
-  const pitch = hi - Math.floor((my - y0) / laneH);
+function selectInstance(instId) {
+  state.project.ui.selectedInstanceId = instId;
+  persist();
+  renderTimeline();
+  renderInspector();
+}
 
-  let best=null;
-  state.score.tracks.forEach((tr,tidx)=>{
-    (tr.notes||[]).forEach((ne,nidx)=>{
-      if(ne.pitch !== pitch) return;
-      if(t >= ne.start && t <= ne.start + ne.duration){
-        best = {tidx, nidx};
-      }
-    });
+function removeSelectedInstance() {
+  const inst = getSelectedInstance();
+  if (!inst) return;
+  state.project.instances = state.project.instances.filter(x => x.id !== inst.id);
+  state.project.ui.selectedInstanceId = null;
+  persist();
+  renderAll();
+  toast("Removed", "Instance deleted");
+}
+
+function updateSelectedFields() {
+  const inst = getSelectedInstance();
+  if (!inst) return;
+  inst.start = Number(ui.selStart.value) || 0;
+  inst.transpose = Number(ui.selTrans.value) || 0;
+  persist();
+  renderTimeline();
+  renderInspector();
+}
+
+function bindTimelineDrag() {
+  ui.timelineCanvas.addEventListener("mousedown", (e) => {
+    const target = e.target.closest(".clipInst");
+    if (!target) return;
+
+    const instId = target.dataset.inst;
+    selectInstance(instId);
+
+    state.dragging = {
+      instId,
+      startX: e.clientX,
+      origLeftPx: parseFloat(target.style.left || "0"),
+    };
+    target.style.cursor = "grabbing";
   });
-  return best;
-}
 
-function onMouseDown(e){
-  if(!state.score) return;
-  const rect = $("roll").getBoundingClientRect();
-  const mx = e.clientX - rect.left + $("rollWrap").scrollLeft;
-  const my = e.clientY - rect.top + $("rollWrap").scrollTop;
+  window.addEventListener("mousemove", (e) => {
+    if (!state.dragging) return;
+    const instId = state.dragging.instId;
+    const el = document.querySelector(`.clipInst[data-inst="${cssEsc(instId)}"]`);
+    if (!el) return;
 
-  const hit = hitTest(mx, my);
-  if(!hit){
-    state.sel = null;
-    draw();
-    return;
-  }
+    const dx = e.clientX - state.dragging.startX;
+    const newLeft = Math.max(0, state.dragging.origLeftPx + dx);
+    el.style.left = `${newLeft}px`;
+    ui.playheadLabel.textContent = `${pxToSec(newLeft).toFixed(2)}s`;
+  });
 
-  state.sel = hit;
-
-  const tr = state.score.tracks[hit.tidx];
-  const ne = tr.notes[hit.nidx];
-  const {x0, y0, pxPerSec, laneH, hi} = state._map;
-  const nx = x0 + ne.start*pxPerSec;
-  const nw = ne.duration*pxPerSec;
-  const ny = y0 + (hi - ne.pitch)*laneH;
-
-  const nearRight = (mx >= nx + nw - 8 && mx <= nx + nw + 2);
-  state.drag = {
-    mode: nearRight ? "resize" : "move",
-    startMx: mx,
-    startMy: my,
-    origStart: ne.start,
-    origDur: ne.duration,
-    origPitch: ne.pitch,
-  };
-
-  draw();
-}
-
-function onMouseMove(e){
-  if(!state.drag || !state.sel || !state.score) return;
-  const rect = $("roll").getBoundingClientRect();
-  const mx = e.clientX - rect.left + $("rollWrap").scrollLeft;
-  const my = e.clientY - rect.top + $("rollWrap").scrollTop;
-
-  const tr = state.score.tracks[state.sel.tidx];
-  const ne = tr.notes[state.sel.nidx];
-  const {laneH, pxPerSec} = state._map;
-
-  if(state.drag.mode === "move"){
-    const dt = (mx - state.drag.startMx) / pxPerSec;
-    const dp = Math.round((my - state.drag.startMy) / laneH);
-    ne.start = Math.max(0, state.drag.origStart + dt);
-    ne.pitch = Math.max(0, Math.min(127, state.drag.origPitch - dp));
-  }else{
-    const dt = (mx - state.drag.startMx) / pxPerSec;
-    ne.duration = Math.max(0.01, state.drag.origDur + dt);
-  }
-  draw();
-}
-
-function onMouseUp(){
-  if(!state.drag || !state.score) return;
-  state.drag = null;
-  normalizeScore(state.score);
-  draw();
-  enableLocalDownload();
-}
-
-function deleteSelected(){
-  if(!state.sel || !state.score) return;
-  const tr = state.score.tracks[state.sel.tidx];
-  if(!tr) return;
-  tr.notes.splice(state.sel.nidx, 1);
-  state.sel = null;
-  normalizeScore(state.score);
-  draw();
-  enableLocalDownload();
-}
-
-// ---------- Tone playback ----------
-let synth = null;
-function ensureSynth(){
-  if(!synth){
-    synth = new Tone.PolySynth(Tone.Synth).toDestination();
-  }
-}
-
-async function play(){
-  if(!state.score){
-    log("No score loaded.");
-    return;
-  }
-  try{ await Tone.start(); }catch(_e){}
-  ensureSynth();
-
-  const bpm = state.score.tempo_bpm || 120;
-  Tone.Transport.bpm.value = bpm;
-
-  Tone.Transport.cancel();
-  for(const tr of state.score.tracks||[]){
-    for(const ne of tr.notes||[]){
-      const t = ne.start;
-      const dur = ne.duration;
-      const vel = (ne.velocity ?? 64) / 127;
-      const freq = Tone.Frequency(ne.pitch, "midi");
-      Tone.Transport.schedule((time)=>{
-        synth.triggerAttackRelease(freq, dur, time, vel);
-      }, t);
+  window.addEventListener("mouseup", () => {
+    if (!state.dragging) return;
+    const instId = state.dragging.instId;
+    const inst = state.project.instances.find(x => x.id === instId);
+    const el = document.querySelector(`.clipInst[data-inst="${cssEsc(instId)}"]`);
+    if (inst && el) {
+      const left = parseFloat(el.style.left || "0");
+      inst.start = pxToSec(left);
+      persist();
+      renderInspector();
     }
-  }
-  Tone.Transport.start();
-  state.playing = true;
-  log(`Play (bpm=${bpm}).`);
+    state.dragging = null;
+    renderTimeline();
+  });
+
+  // double click -> editor
+  ui.timelineCanvas.addEventListener("dblclick", (e) => {
+    const target = e.target.closest(".clipInst");
+    if (!target) return;
+    const instId = target.dataset.inst;
+    const inst = state.project.instances.find(x => x.id === instId);
+    if (!inst) return;
+    openEditorForClip(inst.clipId);
+  });
 }
 
-function stop(){
-  try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(_e){}
-  state.playing = false;
-  log("Stop.");
-}
+/* ---------------------------
+   Actions / Events
+--------------------------- */
 
-// ---------- local file I/O ----------
-function downloadBlob(filename, text){
-  const blob = new Blob([text], {type:"application/json;charset=utf-8"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url), 1000);
-}
+function onAction(action, el) {
+  switch (action) {
+    case "upload-wav":
+      ui.wavInput.click();
+      return;
 
-async function loadScoreFromFile(file){
-  const text = await file.text();
-  const obj = JSON.parse(text);
-  state.score = normalizeScore(obj);
-  state.sel = null;
-  draw();
-  enableLocalDownload();
-  log(`Loaded local score.json: ${file.name}`);
-}
+    case "clear-project":
+      if (!confirm("Clear project? 这会清空本地 Clips/Timeline（仅浏览器 localStorage）。")) return;
+      localStorage.removeItem(STORAGE_KEY);
+      state.project = normalizeProject(emptyProject());
+      persist();
+      renderAll();
+      toast("Cleared", "Project reset");
+      return;
 
-function openScorePicker(){
-  $("scoreFile").value = "";
-  $("scoreFile").click();
-}
+    case "project-play":
+      playSelectionPreview();
+      return;
 
-// ---------- wire UI events ----------
-$("btnLoadScoreFile").addEventListener("click", openScorePicker);
-$("scoreFile").addEventListener("change", (e)=>{
-  const f = e.target.files?.[0];
-  if(!f) return;
-  loadScoreFromFile(f).catch(err=>log("Error: "+err.message));
-});
-$("btnDownloadLocalScore").addEventListener("click", ()=>{
-  if(!state.score) return;
-  downloadBlob("score.json", JSON.stringify(state.score, null, 2));
-  log("Downloaded local score.json");
-});
+    case "project-stop":
+      stopPlayback();
+      return;
 
-$("drop").addEventListener("click", openScorePicker);
-$("drop").addEventListener("dragover", (e)=>{ e.preventDefault(); $("drop").classList.add("dragover"); });
-$("drop").addEventListener("dragleave", ()=> $("drop").classList.remove("dragover"));
-$("drop").addEventListener("drop", (e)=>{
-  e.preventDefault();
-  $("drop").classList.remove("dragover");
-  const f = e.dataTransfer.files?.[0];
-  if(!f) return;
-  loadScoreFromFile(f).catch(err=>log("Error: "+err.message));
-});
+    case "clear-log":
+      ui.logArea.textContent = "";
+      return;
 
-$("btnPlay").addEventListener("click", ()=> play().catch(err=>log("Error: "+err.message)));
-$("btnStop").addEventListener("click", stop);
-
-$("zoom").addEventListener("input", (e)=>{
-  state.zoom = parseFloat(e.target.value || "1");
-  $("zoomVal").textContent = `${state.zoom.toFixed(2)}x`;
-  draw();
-});
-
-$("roll").addEventListener("mousedown", onMouseDown);
-window.addEventListener("mousemove", onMouseMove);
-window.addEventListener("mouseup", onMouseUp);
-
-window.addEventListener("keydown", (e)=>{
-  if(e.key === " "){
-    e.preventDefault();
-    if(state.playing) stop(); else play();
-  }
-  if(e.key === "Delete" || e.key === "Backspace"){
-    deleteSelected();
-  }
-});
-
-// ---------- server session flow ----------
-$("btnGenerate").addEventListener("click", async ()=>{
-  const f = $("wavFile").files?.[0];
-  if(!f){
-    log("Error: please choose a WAV file first.");
-    return;
-  }
-  $("genStatus").textContent = "uploading...";
-  const fd = new FormData();
-  fd.append("file", f);
-
-  try{
-    const r = await fetch(`/generate?output_format=mp3`, { method:"POST", body: fd });
-    const j = await r.json();
-    if(!r.ok) throw new Error(JSON.stringify(j));
-
-    const tid = j.task_id;
-    setTaskUI(tid);
-
-    // ✅ 关键：生成后把 URL 改成新 task_id，避免旧 id 404
-    setQueryTaskId(tid);
-
-    try{ localStorage.setItem("hum2song_last_task_id", tid); }catch(_e){}
-
-    $("genStatus").textContent = `queued (${tid.slice(0,8)}...)`;
-    log(`Generate queued: ${tid}`);
-
-    // poll
-    const pollUrl = j.poll_url;
-    for(let i=0;i<120;i++){
-      await new Promise(res=>setTimeout(res, 500));
-      const rr = await fetch(pollUrl);
-      const info = await rr.json();
-
-      if(info.status === "completed"){
-        $("genStatus").textContent = "completed";
-        $("audioStatus").textContent = "audio ready";
-        log(`Task completed: ${tid}`);
-
-        // ✅ 关键：自动拉取 score 并加载到编辑器（修复空白/无法播放）
-        log("Loading score from server...");
-        try{
-          const scoreObj = await tryLoadScoreFromServer(tid);
-          state.score = normalizeScore(scoreObj);
-          state.sel = null;
-          draw();
-          enableLocalDownload();
-          log("Loaded server score. You can Play now.");
-        }catch(e){
-          log("Error: load server score failed: " + e.message);
-          log("Tip: you can still click “Download Score (Server)” and load it locally.");
-        }
-
+    case "clip-preview": {
+      const clipId = el.dataset.clip;
+      const clip = getClip(clipId);
+      if (!clip?.audio_url) {
+        toast("No audio preview", "This clip has no server audio_url");
         return;
       }
-
-      if(info.status === "failed"){
-        $("genStatus").textContent = "failed";
-        throw new Error(info.error?.message || "failed");
-      }
+      state.audio.src = clip.audio_url;
+      state.audio.play().catch(() => toast("Play blocked", "Click again"));
+      log(`Preview clip: ${clip.name}`);
+      return;
     }
 
-    throw new Error("poll timeout");
-  }catch(err){
-    $("genStatus").textContent = "error";
-    log("Error: "+err.message);
-  }
-});
-
-$("btnDownloadServerScore").addEventListener("click", ()=>{
-  if(!state.taskId) return;
-  const url = `/tasks/${encodeURIComponent(state.taskId)}/score/download?file_type=json`;
-  window.open(url, "_blank");
-  log("Download server score.json");
-});
-
-$("btnSave").addEventListener("click", async ()=>{
-  if(!state.taskId){
-    log("Error: task_id empty");
-    return;
-  }
-  if(!state.score){
-    log("Error: no score loaded");
-    return;
-  }
-  try{
-    const cleaned = normalizeScore(state.score);
-    const resp = await putScore(state.taskId, cleaned);
-    log("Saved to server. " + JSON.stringify(resp));
-  }catch(err){
-    log("Error: "+err.message);
-  }
-});
-
-$("btnExport").addEventListener("click", async ()=>{
-  if(!state.taskId){
-    log("Error: task_id empty");
-    return;
-  }
-  $("audioStatus").textContent = "rendering...";
-  try{
-    const r = await postRender(state.taskId, "mp3");
-    log("Render ok. " + JSON.stringify(r));
-    $("audioStatus").textContent = "render ok";
-    const tid = state.taskId;
-
-    const a1 = `/tasks/${encodeURIComponent(tid)}/download?file_type=audio`;
-    const a2 = `/tasks/${encodeURIComponent(tid)}/download?file_type=midi`;
-    $("dlLinks").innerHTML = `
-      <a href="${a1}" target="_blank">Download MP3</a>
-      <a href="${a2}" target="_blank">Download MIDI</a>
-      <a href="/tasks/${encodeURIComponent(tid)}/score/download?file_type=json" target="_blank">Download score.json</a>
-    `;
-  }catch(err){
-    $("audioStatus").textContent = "render error";
-    log("Error: "+err.message);
-  }
-});
-
-// ---------- init ----------
-(async function init(){
-  $("zoomVal").textContent = `${state.zoom.toFixed(2)}x`;
-  draw();
-
-  // 优先 query task_id，其次 localStorage 的 last_task_id
-  let tid = getQueryTaskId();
-  if(!tid){
-    try{ tid = localStorage.getItem("hum2song_last_task_id"); }catch(_e){}
-  }
-
-  if(tid){
-    setTaskUI(tid);
-    log(`Init: try load score from task_id: ${tid}`);
-    try{
-      const scoreObj = await tryLoadScoreFromServer(tid, {retries: 2, delayMs: 200});
-      state.score = normalizeScore(scoreObj);
-      draw();
-      enableLocalDownload();
-      log("Loaded score from server.");
-    }catch(err){
-      // 常见：服务重启 → 404
-      log("Error: " + err.message);
-      if(String(err.message).includes(" 404 ")){
-        log("Tip: old task_id is invalid after server restart. Cleared task_id.");
-        clearTaskIdEverywhere();
-      }
+    case "clip-add": {
+      const clipId = el.dataset.clip;
+      addInstance(state.project, { clipId, trackId: "t1", start: 0, transpose: 0 });
+      persist();
+      renderAll();
+      toast("Added", "Instance created on timeline");
+      return;
     }
-  }else{
-    log("UI ready. Tip: open local score.json or click Generate.");
+
+    case "clip-edit": {
+      const clipId = el.dataset.clip;
+      openEditorForClip(clipId);
+      return;
+    }
+
+    case "edit-selected": {
+      const inst = getSelectedInstance();
+      if (!inst) return;
+      openEditorForClip(inst.clipId);
+      return;
+    }
+
+    case "remove-selected":
+      removeSelectedInstance();
+      return;
+
+    case "close-editor":
+      closeEditor();
+      return;
+
+    case "export-project": {
+      const blob = new Blob([serialize(state.project)], { type: "application/json;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `hum2song_project_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("Exported", "Project JSON downloaded");
+      return;
+    }
+
+    case "import-project":
+      ui.importProjectInput.click();
+      return;
+
+    case "new-track":
+      toast("MVP", "多轨后续做；当前默认 1 track");
+      return;
+
+    case "use-last":
+      toast("MVP", "录音流程后续接入");
+      return;
+
+    default:
+      toast("Unknown action", action);
   }
-})();
+}
+
+function bindActions() {
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    onAction(btn.dataset.action, btn);
+  });
+
+  ui.wavInput.addEventListener("change", async () => {
+    const file = ui.wavInput.files?.[0];
+    ui.wavInput.value = "";
+    if (!file) return;
+
+    try {
+      await generateAndImportClip(file);
+    } catch (err) {
+      const m = err?.message || String(err);
+      setGenState("bad", m);
+      toast("Generate failed", m);
+      log(`ERROR: ${m}`);
+    }
+  });
+
+  ui.zoomRange.addEventListener("input", () => {
+    const v = Number(ui.zoomRange.value) || 120;
+    state.project.ui.zoomPxPerSec = v;
+    ui.zoomLabel.textContent = `${v} px/s`;
+    persist();
+    renderTimeline();
+  });
+
+  ui.bpmInput.addEventListener("change", () => {
+    state.project.bpm = Number(ui.bpmInput.value) || 120;
+    persist();
+    renderKPIs();
+    toast("BPM updated", String(state.project.bpm));
+  });
+
+  ui.selStart.addEventListener("change", updateSelectedFields);
+  ui.selTrans.addEventListener("change", updateSelectedFields);
+
+  ui.importProjectInput.addEventListener("change", async () => {
+    const file = ui.importProjectInput.files?.[0];
+    ui.importProjectInput.value = "";
+    if (!file) return;
+
+    try {
+      const txt = await file.text();
+      const obj = JSON.parse(txt);
+      state.project = normalizeProject(obj);
+      persist();
+      renderAll();
+      toast("Imported", "Project JSON loaded");
+      log("Project imported from JSON");
+    } catch (e) {
+      toast("Import failed", e?.message || String(e));
+      log(`ERROR: import failed: ${e?.message || e}`);
+    }
+  });
+
+  // keyboard
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "Space") {
+      e.preventDefault();
+      playSelectionPreview();
+    }
+    if (e.code === "Delete") {
+      removeSelectedInstance();
+    }
+    if (e.key === "Escape") {
+      closeEditor();
+    }
+  });
+
+  // close modal on background click
+  ui.editorModal.addEventListener("click", (e) => {
+    if (e.target === ui.editorModal) closeEditor();
+  });
+
+  // resize canvas redraw when modal open
+  window.addEventListener("resize", () => {
+    if (!ui.editorModal.classList.contains("active")) return;
+    const inst = getSelectedInstance();
+    if (inst) {
+      const clip = getClip(inst.clipId);
+      if (clip) drawScoreToCanvas(clip.score, ui.editorCanvas);
+    }
+  });
+}
+
+/* ---------------------------
+   Helpers
+--------------------------- */
+
+function cssEsc(s) {
+  // Minimal CSS.escape fallback
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
+}
+
+/* ---------------------------
+   Boot
+--------------------------- */
+
+function boot() {
+  log("UI boot: Hum2Song Studio MVP");
+  setGenState("idle", "等待上传");
+
+  // render + bind
+  renderAll();
+  bindActions();
+  bindTimelineDrag();
+
+  // If there is at least one instance, select it by default
+  if (!state.project.ui.selectedInstanceId && state.project.instances.length) {
+    state.project.ui.selectedInstanceId = state.project.instances[0].id;
+    persist();
+  }
+  renderAll();
+
+  // expose for debug (optional)
+  window.app = {
+    state,
+    log,
+    generateAndImportClip,
+  };
+}
+
+boot();
