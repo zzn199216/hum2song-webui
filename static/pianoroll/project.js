@@ -1,138 +1,116 @@
-// static/pianoroll/project.js
-// Pure data utilities (no DOM). ESM exports.
+/* Hum2Song Studio MVP - project.js (v8)
+   Plain script (no import/export). Exposes window.H2SProject.
+*/
+(function(){
+  'use strict';
 
-export const STORAGE_KEY = "hum2song.project.v1";
+  function uid(prefix){
+    const s = Math.random().toString(16).slice(2) + Date.now().toString(16);
+    return (prefix || 'id_') + s.slice(0, 12);
+  }
 
-export function uid(prefix = "id") {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
-}
+  function deepClone(obj){
+    return JSON.parse(JSON.stringify(obj));
+  }
 
-export function emptyProject() {
-  return {
-    version: 1,
-    bpm: 120,
-    tracks: [{ id: "t1", name: "Track 1" }],
-    clips: {},         // clipId -> ClipDoc
-    instances: [],     // {id, clipId, trackId, start, transpose}
-    ui: {
-      zoomPxPerSec: 120,
-      selectedInstanceId: null,
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  function midiToName(m){
+    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const n = ((m % 12) + 12) % 12;
+    const o = Math.floor(m / 12) - 1;
+    return names[n] + String(o);
+  }
+
+  function ensureScoreIds(score){
+    if (!score) return score;
+    if (!score.tracks) score.tracks = [];
+    for (const t of score.tracks){
+      if (!t.id) t.id = uid('trk_');
+      if (typeof t.name !== 'string') t.name = String(t.name ?? '');
+      if (!Array.isArray(t.notes)) t.notes = [];
+      for (const n of t.notes){
+        if (!n.id) n.id = uid('n_');
+        if (typeof n.pitch !== 'number') n.pitch = Number(n.pitch ?? 60);
+        if (typeof n.start !== 'number') n.start = Number(n.start ?? 0);
+        if (typeof n.duration !== 'number') n.duration = Number(n.duration ?? 0.2);
+        if (typeof n.velocity !== 'number') n.velocity = Number(n.velocity ?? 100);
+        n.pitch = clamp(Math.round(n.pitch), 0, 127);
+        n.velocity = clamp(Math.round(n.velocity), 1, 127);
+        n.start = Math.max(0, n.start);
+        n.duration = Math.max(0.01, n.duration);
+      }
     }
-  };
-}
-
-export function clipFromScore({ clipId, name, score, taskId = null }) {
-  const span = estimateScoreSpanSeconds(score);
-  const notesCount = countNotes(score);
-  return {
-    id: clipId,
-    name: name || `Clip ${clipId.slice(0, 6)}`,
-    createdAt: new Date().toISOString(),
-    source: { task_id: taskId },
-    score, // ScoreDoc JSON
-    stats: {
-      span_s: span,
-      notes: notesCount,
-      bpm: score?.bpm ?? null,
-      pitchMin: minPitch(score),
-      pitchMax: maxPitch(score),
-    },
-    // server audio preview (optional)
-    audio_url: taskId ? `/tasks/${taskId}/download?file_type=audio` : null,
-  };
-}
-
-export function countNotes(score) {
-  if (!score?.tracks?.length) return 0;
-  let n = 0;
-  for (const t of score.tracks) n += (t.notes?.length || 0);
-  return n;
-}
-
-export function allNotes(score) {
-  const out = [];
-  if (!score?.tracks?.length) return out;
-  for (const t of score.tracks) {
-    const arr = t.notes || [];
-    for (const note of arr) out.push(note);
+    if (typeof score.bpm !== 'number') score.bpm = Number(score.bpm ?? 120);
+    score.bpm = clamp(score.bpm, 30, 260);
+    return score;
   }
-  return out;
-}
 
-export function minPitch(score) {
-  const notes = allNotes(score);
-  if (!notes.length) return null;
-  let m = notes[0].pitch;
-  for (const n of notes) m = Math.min(m, n.pitch);
-  return m;
-}
-
-export function maxPitch(score) {
-  const notes = allNotes(score);
-  if (!notes.length) return null;
-  let m = notes[0].pitch;
-  for (const n of notes) m = Math.max(m, n.pitch);
-  return m;
-}
-
-export function estimateScoreSpanSeconds(score) {
-  const notes = allNotes(score);
-  if (!notes.length) return 0;
-  let end = 0;
-  for (const n of notes) {
-    const e = (n.start ?? 0) + (n.duration ?? 0);
-    if (e > end) end = e;
+  function scoreStats(score){
+    score = ensureScoreIds(deepClone(score || {bpm:120, tracks:[]}));
+    let minP = 127, maxP = 0, maxEnd = 0, count = 0;
+    for (const t of score.tracks){
+      for (const n of t.notes){
+        count += 1;
+        minP = Math.min(minP, n.pitch);
+        maxP = Math.max(maxP, n.pitch);
+        maxEnd = Math.max(maxEnd, n.start + n.duration);
+      }
+    }
+    if (count === 0){ minP = 60; maxP = 60; maxEnd = 0; }
+    return { count, minPitch:minP, maxPitch:maxP, spanSec: maxEnd };
   }
-  return end;
-}
 
-export function addInstance(project, { clipId, trackId = "t1", start = 0, transpose = 0 }) {
-  const inst = {
-    id: uid("inst"),
-    clipId,
-    trackId,
-    start: Number(start) || 0,
-    transpose: Number(transpose) || 0,
+  function defaultProject(){
+    return {
+      version: 1,
+      bpm: 120,
+      tracks: [{ id: uid('trk_'), name: 'Track 1' }],
+      clips: [],
+      instances: [],
+      ui: { pxPerSec: 160, playheadSec: 0 }
+    };
+  }
+
+  function createClipFromScore(score, opts){
+    const s = ensureScoreIds(deepClone(score));
+    const st = scoreStats(s);
+    const name = (opts && opts.name) ? String(opts.name) : ('Clip ' + uid('').slice(0,5));
+    return {
+      id: uid('clip_'),
+      name,
+      createdAt: Date.now(),
+      sourceTaskId: (opts && opts.sourceTaskId) ? String(opts.sourceTaskId) : null,
+      score: s,
+      meta: {
+        notes: st.count,
+        pitchMin: st.minPitch,
+        pitchMax: st.maxPitch,
+        spanSec: st.spanSec
+      }
+    };
+  }
+
+  function createInstance(clipId, startSec, trackIndex){
+    return {
+      id: uid('inst_'),
+      clipId,
+      startSec: Math.max(0, Number(startSec || 0)),
+      trackIndex: Math.max(0, Number(trackIndex || 0)),
+      transpose: 0
+    };
+  }
+
+  // Export
+  window.H2SProject = {
+    uid,
+    deepClone,
+    clamp,
+    midiToName,
+    ensureScoreIds,
+    scoreStats,
+    defaultProject,
+    createClipFromScore,
+    createInstance,
   };
-  project.instances.push(inst);
-  return inst;
-}
-
-export function ensureTrack(project) {
-  if (!project.tracks?.length) project.tracks = [{ id: "t1", name: "Track 1" }];
-  if (!project.tracks.find(t => t.id === "t1")) project.tracks.unshift({ id: "t1", name: "Track 1" });
-  return project;
-}
-
-export function serialize(project) {
-  return JSON.stringify(project, null, 2);
-}
-
-export function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function saveToStorage(project) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-}
-
-export function normalizeProject(p) {
-  // Defensive normalization (avoid undefined fields)
-  if (!p || typeof p !== "object") return emptyProject();
-  if (p.version !== 1) p.version = 1;
-  if (typeof p.bpm !== "number") p.bpm = 120;
-  if (!Array.isArray(p.tracks)) p.tracks = [{ id: "t1", name: "Track 1" }];
-  if (!p.clips || typeof p.clips !== "object") p.clips = {};
-  if (!Array.isArray(p.instances)) p.instances = [];
-  if (!p.ui || typeof p.ui !== "object") p.ui = { zoomPxPerSec: 120, selectedInstanceId: null };
-  if (typeof p.ui.zoomPxPerSec !== "number") p.ui.zoomPxPerSec = 120;
-  if (!("selectedInstanceId" in p.ui)) p.ui.selectedInstanceId = null;
-  ensureTrack(p);
-  return p;
-}
+})();

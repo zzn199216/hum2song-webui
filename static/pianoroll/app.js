@@ -1,735 +1,1211 @@
-// static/pianoroll/app.js
-import {
-  STORAGE_KEY,
-  emptyProject,
-  clipFromScore,
-  addInstance,
-  normalizeProject,
-  loadFromStorage,
-  saveToStorage,
-  serialize,
-  uid,
-} from "./project.js";
+/* Hum2Song Studio MVP - app.js (v8)
+   - Fix hit-testing: note interactions have priority over cursor click
+   - Add "Insert Note" workflow based on selected grid cell
+   - Keep Cancel semantics (draft score)
+*/
+(function(){
+  'use strict';
 
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const API = {
+    generate: (fmt) => `/generate?output_format=${encodeURIComponent(fmt || 'mp3')}`,
+    task: (id) => `/tasks/${encodeURIComponent(id)}`,
+    score: (id) => `/tasks/${encodeURIComponent(id)}/score`,
+  };
 
-const ui = {
-  wavInput: $("#wavInput"),
-  importProjectInput: $("#importProjectInput"),
-  genState: $("#gen-state"),
-  genMsg: $("#gen-msg"),
-  clipList: $("#clipList"),
-  lanes: $("#lanes"),
-  timelineCanvas: $("#timelineCanvas"),
-  playhead: $("#playhead"),
-  playheadLabel: $("#playheadLabel"),
-  zoomRange: $("#zoomRange"),
-  zoomLabel: $("#zoomLabel"),
-  bpmInput: $("#bpmInput"),
-  logArea: $("#logArea"),
-  toast: $("#toast"),
+  const LS_KEY = 'hum2song_studio_project_v1';
 
-  kTracks: $("#kTracks"),
-  kClips: $("#kClips"),
-  kInst: $("#kInst"),
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-  selEmpty: $("#selEmpty"),
-  selBox: $("#selBox"),
-  selId: $("#selId"),
-  selClip: $("#selClip"),
-  selStart: $("#selStart"),
-  selTrans: $("#selTrans"),
+  function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-  editorModal: $("#editorModal"),
-  editorTitle: $("#editorTitle"),
-  editorCanvas: $("#editorCanvas"),
-};
-
-const state = {
-  project: normalizeProject(loadFromStorage() || emptyProject()),
-  lastTaskId: null,
-  dragging: null, // {instId, startX, origLeftPx}
-  audio: new Audio(),
-};
-
-function log(msg) {
-  const t = new Date();
-  const ts = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")}`;
-  ui.logArea.textContent += `[${ts}] ${msg}\n`;
-  ui.logArea.scrollTop = ui.logArea.scrollHeight;
-}
-
-function toast(title, detail = "") {
-  ui.toast.innerHTML = `${escapeHtml(title)}${detail ? `<small>${escapeHtml(detail)}</small>` : ""}`;
-  ui.toast.classList.add("show");
-  setTimeout(() => ui.toast.classList.remove("show"), 2600);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
-}
-
-function setGenState(kind, msg) {
-  ui.genState.className = "pill";
-  if (kind === "good") ui.genState.classList.add("good");
-  if (kind === "warn") ui.genState.classList.add("warn");
-  if (kind === "bad") ui.genState.classList.add("bad");
-  ui.genState.textContent = kind;
-  ui.genMsg.textContent = msg || "";
-}
-
-function persist() {
-  saveToStorage(state.project);
-}
-
-function clipArray() {
-  return Object.values(state.project.clips || {});
-}
-
-function getSelectedInstance() {
-  const id = state.project.ui.selectedInstanceId;
-  if (!id) return null;
-  return state.project.instances.find(x => x.id === id) || null;
-}
-
-function getClip(id) {
-  return state.project.clips?.[id] || null;
-}
-
-function pxPerSec() {
-  return Number(state.project.ui.zoomPxPerSec) || 120;
-}
-
-function secToPx(sec) {
-  return (Number(sec) || 0) * pxPerSec();
-}
-
-function pxToSec(px) {
-  return (Number(px) || 0) / pxPerSec();
-}
-
-/* ---------------------------
-   Rendering
---------------------------- */
-
-function renderKPIs() {
-  ui.kTracks.textContent = String(state.project.tracks.length);
-  ui.kClips.textContent = String(Object.keys(state.project.clips || {}).length);
-  ui.kInst.textContent = String(state.project.instances.length);
-}
-
-function renderClipLibrary() {
-  const clips = clipArray().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  ui.clipList.innerHTML = "";
-
-  if (!clips.length) {
-    ui.clipList.innerHTML = `<div class="muted" style="padding:10px;">还没有 Clip。点击 “Upload WAV” 生成一个。</div>`;
-    return;
+  function fmtSec(x){
+    if (!isFinite(x)) return '-';
+    return (Math.round(x*100)/100).toFixed(2) + 's';
   }
 
-  for (const c of clips) {
-    const span = c.stats?.span_s ?? 0;
-    const notes = c.stats?.notes ?? 0;
-
-    const el = document.createElement("div");
-    el.className = "clipItem";
-    el.innerHTML = `
-      <div class="clipTitle">${escapeHtml(c.name)}</div>
-      <div class="clipMeta">
-        <span>${span.toFixed(2)}s</span>
-        <span>${notes} notes</span>
-      </div>
-      <div class="row" style="margin-top:10px;">
-        <button class="miniBtn" data-action="clip-preview" data-clip="${escapeHtml(c.id)}">▶ Preview</button>
-        <button class="miniBtn primary" data-action="clip-add" data-clip="${escapeHtml(c.id)}">+ Add to Timeline</button>
-        <button class="miniBtn" data-action="clip-edit" data-clip="${escapeHtml(c.id)}">✏ Edit</button>
-      </div>
-      <div class="muted" style="font-size:12px; margin-top:8px; font-family:var(--mono);">
-        ${c.source?.task_id ? `task_id=${escapeHtml(c.source.task_id)}` : "local"}
-      </div>
-    `;
-    ui.clipList.appendChild(el);
-  }
-}
-
-function renderTimeline() {
-  ui.lanes.innerHTML = "";
-
-  const tracks = state.project.tracks;
-  for (const tr of tracks) {
-    const lane = document.createElement("div");
-    lane.className = "lane";
-    lane.dataset.track = tr.id;
-    ui.lanes.appendChild(lane);
+  function log(msg){
+    const el = $('#log');
+    const t = new Date();
+    const line = `[${t.toLocaleTimeString()}] ${msg}\n`;
+    el.textContent = line + el.textContent;
+    // also console
+    console.log(msg);
   }
 
-  for (const inst of state.project.instances) {
-    const lane = ui.lanes.querySelector(`.lane[data-track="${cssEsc(inst.trackId)}"]`);
-    if (!lane) continue;
-
-    const clip = getClip(inst.clipId);
-    const name = clip?.name || inst.clipId;
-
-    const w = Math.max(80, secToPx((clip?.stats?.span_s ?? 2.0)));
-    const left = secToPx(inst.start);
-
-    const el = document.createElement("div");
-    el.className = "clipInst";
-    el.dataset.inst = inst.id;
-    el.style.left = `${left}px`;
-    el.style.width = `${w}px`;
-    el.textContent = name;
-
-    if (state.project.ui.selectedInstanceId === inst.id) el.classList.add("selected");
-
-    lane.appendChild(el);
-  }
-}
-
-function renderInspector() {
-  const inst = getSelectedInstance();
-  if (!inst) {
-    ui.selEmpty.style.display = "block";
-    ui.selBox.style.display = "none";
-    return;
-  }
-  const clip = getClip(inst.clipId);
-
-  ui.selEmpty.style.display = "none";
-  ui.selBox.style.display = "block";
-  ui.selId.textContent = inst.id;
-  ui.selClip.textContent = clip?.name || inst.clipId;
-  ui.selStart.value = String(inst.start ?? 0);
-  ui.selTrans.value = String(inst.transpose ?? 0);
-}
-
-function renderAll() {
-  renderKPIs();
-  renderClipLibrary();
-  renderTimeline();
-  renderInspector();
-  ui.zoomRange.value = String(pxPerSec());
-  ui.zoomLabel.textContent = `${pxPerSec()} px/s`;
-  ui.bpmInput.value = String(state.project.bpm || 120);
-}
-
-/* ---------------------------
-   Backend: Generate → Poll → Score
---------------------------- */
-
-async function apiGenerateFromWav(file) {
-  const fd = new FormData();
-  fd.append("file", file, file.name);
-
-  // Backend expects: POST /generate?output_format=mp3
-  const resp = await fetch(`/generate?output_format=mp3`, { method: "POST", body: fd });
-  if (!resp.ok) throw new Error(`POST /generate failed: ${resp.status}`);
-  const data = await resp.json();
-  if (!data.task_id) throw new Error("Missing task_id from /generate");
-  return data.task_id;
-}
-
-async function apiGetTask(taskId) {
-  const resp = await fetch(`/tasks/${taskId}`);
-  if (!resp.ok) throw new Error(`GET /tasks/${taskId} failed: ${resp.status}`);
-  return await resp.json();
-}
-
-async function apiGetScore(taskId) {
-  const resp = await fetch(`/tasks/${taskId}/score`);
-  if (!resp.ok) throw new Error(`GET /tasks/${taskId}/score failed: ${resp.status}`);
-  return await resp.json();
-}
-
-async function pollUntilDone(taskId, { intervalMs = 800, maxMs = 180000 } = {}) {
-  const start = Date.now();
-  while (true) {
-    const t = await apiGetTask(taskId);
-    if (t.status === "completed") return t;
-    if (t.status === "failed") throw new Error(`Task failed: ${t.error?.message || "unknown"}`);
-    if (Date.now() - start > maxMs) throw new Error("Task timeout");
-    await new Promise(r => setTimeout(r, intervalMs));
-  }
-}
-
-async function generateAndImportClip(file) {
-  setGenState("warn", `Uploading: ${file.name}`);
-  log(`Upload WAV: ${file.name}`);
-
-  const taskId = await apiGenerateFromWav(file);
-  state.lastTaskId = taskId;
-  setGenState("warn", `Generating... task_id=${taskId}`);
-  toast("Generate queued", taskId);
-  log(`Generate queued: ${taskId}`);
-
-  const t = await pollUntilDone(taskId);
-  setGenState("good", `Completed: ${taskId}`);
-  toast("Task completed", taskId);
-  log(`Task completed: ${taskId}`);
-
-  // Now fetch score and create clip
-  const score = await apiGetScore(taskId);
-  const clipId = taskId; // simplest stable id
-  const clipName = `Clip ${clipId.slice(0, 6)}`;
-
-  const clip = clipFromScore({ clipId, name: clipName, score, taskId });
-  state.project.clips[clipId] = clip;
-
-  // Optional: auto add first instance at 0 if timeline empty
-  if (state.project.instances.length === 0) {
-    addInstance(state.project, { clipId, trackId: "t1", start: 0, transpose: 0 });
+  function downloadText(filename, text){
+    const blob = new Blob([text], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
   }
 
-  persist();
-  renderAll();
-
-  toast("Clip imported", `${clipName} 已入库`);
-  log(`Clip imported: ${clipId} notes=${clip.stats.notes} span=${clip.stats.span_s.toFixed(2)}s`);
-}
-
-/* ---------------------------
-   Playback (MVP)
-   - For now: play selected instance's server MP3 if available
---------------------------- */
-
-function stopPlayback() {
-  try {
-    state.audio.pause();
-    state.audio.currentTime = 0;
-  } catch {}
-  toast("Stop", "preview stopped");
-}
-
-function playSelectionPreview() {
-  const inst = getSelectedInstance() || state.project.instances[0] || null;
-  if (!inst) {
-    toast("No instance", "Add a clip to timeline first");
-    return;
-  }
-  const clip = getClip(inst.clipId);
-  if (!clip?.audio_url) {
-    toast("No audio preview", "This clip has no server audio_url");
-    return;
-  }
-  // NOTE: start offset preview is MVP; we ignore inst.start for now
-  state.audio.src = clip.audio_url;
-  state.audio.play().then(() => {
-    toast("Play", clip.name);
-  }).catch((e) => {
-    toast("Play blocked", "Browser blocked autoplay. Click again.");
-    log(`Audio play error: ${e?.message || e}`);
-  });
-}
-
-/* ---------------------------
-   Editor Modal (MVP: read-only piano-roll preview)
---------------------------- */
-
-function openEditorForClip(clipId) {
-  const clip = getClip(clipId);
-  if (!clip) return;
-  ui.editorTitle.textContent = `Editing: ${clip.name} (MVP: read-only)`;
-  ui.editorModal.classList.add("active");
-  drawScoreToCanvas(clip.score, ui.editorCanvas);
-}
-
-function closeEditor() {
-  ui.editorModal.classList.remove("active");
-}
-
-function drawScoreToCanvas(score, canvas) {
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.max(300, Math.floor(rect.width));
-  const h = Math.max(200, Math.floor(rect.height));
-  canvas.width = Math.floor(w * dpr);
-  canvas.height = Math.floor(h * dpr);
-
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  ctx.clearRect(0, 0, w, h);
-
-  // background
-  ctx.fillStyle = "rgba(0,0,0,.25)";
-  ctx.fillRect(0, 0, w, h);
-
-  const notes = [];
-  for (const tr of (score?.tracks || [])) {
-    for (const n of (tr.notes || [])) notes.push(n);
-  }
-  if (!notes.length) {
-    ctx.fillStyle = "rgba(255,255,255,.65)";
-    ctx.font = "14px system-ui";
-    ctx.fillText("No notes in this score.", 18, 28);
-    return;
-  }
-
-  // auto pitch fit
-  let pMin = notes[0].pitch, pMax = notes[0].pitch;
-  let tEnd = 0;
-  for (const n of notes) {
-    pMin = Math.min(pMin, n.pitch);
-    pMax = Math.max(pMax, n.pitch);
-    tEnd = Math.max(tEnd, (n.start || 0) + (n.duration || 0));
-  }
-  const pad = 2;
-  pMin -= pad; pMax += pad;
-  const pitchSpan = Math.max(1, pMax - pMin + 1);
-
-  const leftPad = 60;
-  const topPad = 20;
-  const rightPad = 20;
-  const bottomPad = 20;
-
-  const gridW = w - leftPad - rightPad;
-  const gridH = h - topPad - bottomPad;
-
-  // grid
-  ctx.strokeStyle = "rgba(255,255,255,.06)";
-  ctx.lineWidth = 1;
-  const rowH = gridH / pitchSpan;
-  const colW = 80; // time grid step
-  for (let i = 0; i <= pitchSpan; i++) {
-    const y = topPad + i * rowH;
-    ctx.beginPath(); ctx.moveTo(leftPad, y); ctx.lineTo(w - rightPad, y); ctx.stroke();
-  }
-  for (let x = leftPad; x <= w - rightPad; x += colW) {
-    ctx.beginPath(); ctx.moveTo(x, topPad); ctx.lineTo(x, h - bottomPad); ctx.stroke();
-  }
-
-  // label
-  ctx.fillStyle = "rgba(255,255,255,.65)";
-  ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-  ctx.fillText(`Pitch ${pMin}..${pMax} | span ${tEnd.toFixed(2)}s | notes ${notes.length}`, 16, 16);
-
-  // notes
-  const scaleX = gridW / Math.max(0.01, tEnd);
-  for (const n of notes) {
-    const x = leftPad + (n.start || 0) * scaleX;
-    const y = topPad + (pMax - n.pitch) * rowH + 1;
-    const ww = Math.max(3, (n.duration || 0.05) * scaleX);
-    const hh = Math.max(3, rowH - 2);
-
-    ctx.fillStyle = "rgba(47,125,255,.75)";
-    ctx.fillRect(x, y, ww, hh);
-    ctx.strokeStyle = "rgba(255,255,255,.12)";
-    ctx.strokeRect(x, y, ww, hh);
-  }
-}
-
-/* ---------------------------
-   Timeline interaction (drag instances horizontally)
---------------------------- */
-
-function selectInstance(instId) {
-  state.project.ui.selectedInstanceId = instId;
-  persist();
-  renderTimeline();
-  renderInspector();
-}
-
-function removeSelectedInstance() {
-  const inst = getSelectedInstance();
-  if (!inst) return;
-  state.project.instances = state.project.instances.filter(x => x.id !== inst.id);
-  state.project.ui.selectedInstanceId = null;
-  persist();
-  renderAll();
-  toast("Removed", "Instance deleted");
-}
-
-function updateSelectedFields() {
-  const inst = getSelectedInstance();
-  if (!inst) return;
-  inst.start = Number(ui.selStart.value) || 0;
-  inst.transpose = Number(ui.selTrans.value) || 0;
-  persist();
-  renderTimeline();
-  renderInspector();
-}
-
-function bindTimelineDrag() {
-  ui.timelineCanvas.addEventListener("mousedown", (e) => {
-    const target = e.target.closest(".clipInst");
-    if (!target) return;
-
-    const instId = target.dataset.inst;
-    selectInstance(instId);
-
-    state.dragging = {
-      instId,
-      startX: e.clientX,
-      origLeftPx: parseFloat(target.style.left || "0"),
-    };
-    target.style.cursor = "grabbing";
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (!state.dragging) return;
-    const instId = state.dragging.instId;
-    const el = document.querySelector(`.clipInst[data-inst="${cssEsc(instId)}"]`);
-    if (!el) return;
-
-    const dx = e.clientX - state.dragging.startX;
-    const newLeft = Math.max(0, state.dragging.origLeftPx + dx);
-    el.style.left = `${newLeft}px`;
-    ui.playheadLabel.textContent = `${pxToSec(newLeft).toFixed(2)}s`;
-  });
-
-  window.addEventListener("mouseup", () => {
-    if (!state.dragging) return;
-    const instId = state.dragging.instId;
-    const inst = state.project.instances.find(x => x.id === instId);
-    const el = document.querySelector(`.clipInst[data-inst="${cssEsc(instId)}"]`);
-    if (inst && el) {
-      const left = parseFloat(el.style.left || "0");
-      inst.start = pxToSec(left);
-      persist();
-      renderInspector();
+  async function fetchJson(url, opts){
+    const res = await fetch(url, opts || {});
+    const ct = res.headers.get('content-type') || '';
+    const txt = await res.text();
+    if (!res.ok){
+      throw new Error(`${res.status} ${txt}`);
     }
-    state.dragging = null;
-    renderTimeline();
-  });
+    if (ct.includes('application/json')){
+      return JSON.parse(txt);
+    }
+    // some endpoints may return json without header
+    try { return JSON.parse(txt); } catch(e){ return { raw: txt }; }
+  }
 
-  // double click -> editor
-  ui.timelineCanvas.addEventListener("dblclick", (e) => {
-    const target = e.target.closest(".clipInst");
-    if (!target) return;
-    const instId = target.dataset.inst;
-    const inst = state.project.instances.find(x => x.id === instId);
-    if (!inst) return;
-    openEditorForClip(inst.clipId);
-  });
-}
+  function persist(){
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(app.project));
+    } catch(e){
+      console.warn('persist failed', e);
+    }
+  }
 
-/* ---------------------------
-   Actions / Events
---------------------------- */
+  function restore(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    }catch(e){
+      return null;
+    }
+  }
 
-function onAction(action, el) {
-  switch (action) {
-    case "upload-wav":
-      ui.wavInput.click();
-      return;
+  const app = {
+    project: null,
 
-    case "clear-project":
-      if (!confirm("Clear project? 这会清空本地 Clips/Timeline（仅浏览器 localStorage）。")) return;
-      localStorage.removeItem(STORAGE_KEY);
-      state.project = normalizeProject(emptyProject());
-      persist();
-      renderAll();
-      toast("Cleared", "Project reset");
-      return;
+    state: {
+      selectedInstanceId: null,
+      draggingInstance: null,
+      dragOffsetX: 0,
+      transportPlaying: false,
+      transportStartPerf: 0,
+      lastUploadTaskId: null,
+      modal: {
+        show: false,
+        clipId: null,
+        draftScore: null,
+        savedScore: null,
+        dirty: false,
+        cursorSec: 0,
+        selectedNoteId: null,
+        selectedCell: null, // {startSec, pitch}
+        pxPerSec: 180,
+        pitchCenter: 60,
+        pitchViewRows: 36,
+        rowH: 16,
+        padL: 60,
+        padT: 20,
+        mode: 'none', // drag_note | resize_note
+        drag: {
+          noteId: null,
+          startX: 0,
+          startY: 0,
+          origStart: 0,
+          origPitch: 60,
+          origDur: 0.3,
+        },
+        isPlaying: false,
+        synth: null,
+        raf: 0,
+      },
+    },
 
-    case "project-play":
-      playSelectionPreview();
-      return;
+    init(){
+      const restored = restore();
+      this.project = restored || H2SProject.defaultProject();
 
-    case "project-stop":
-      stopPlayback();
-      return;
+      // Ensure minimal structure
+      if (!this.project.tracks || this.project.tracks.length === 0){
+        this.project.tracks = [{id:H2SProject.uid('trk_'), name:'Track 1'}];
+      }
+      if (!Array.isArray(this.project.clips)) this.project.clips = [];
+      if (!Array.isArray(this.project.instances)) this.project.instances = [];
 
-    case "clear-log":
-      ui.logArea.textContent = "";
-      return;
+      // Bind UI
+      $('#btnUpload').addEventListener('click', () => this.pickWavAndGenerate());
+      $('#btnClear').addEventListener('click', () => this.clearProject());
+      $('#btnClearLog').addEventListener('click', () => $('#log').textContent = '');
 
-    case "clip-preview": {
-      const clipId = el.dataset.clip;
-      const clip = getClip(clipId);
-      if (!clip?.audio_url) {
-        toast("No audio preview", "This clip has no server audio_url");
+      $('#inpBpm').addEventListener('change', () => {
+        const v = Number($('#inpBpm').value || 120);
+        this.project.bpm = H2SProject.clamp(v, 30, 260);
+        $('#inpBpm').value = this.project.bpm;
+        persist();
+        this.render();
+      });
+
+      $('#btnExportProject').addEventListener('click', () => {
+        downloadText(`hum2song_project_${Date.now()}.json`, JSON.stringify(this.project, null, 2));
+      });
+
+      $('#btnImportProject').addEventListener('click', async () => {
+        const f = await this.pickFile('.json');
+        if (!f) return;
+        const txt = await f.text();
+        try{
+          const obj = JSON.parse(txt);
+          this.project = obj;
+          persist();
+          this.render();
+          log('Imported project json.');
+        }catch(e){
+          alert('Invalid JSON.');
+        }
+      });
+
+      // Transport buttons
+      $('#btnPlayProject').addEventListener('click', () => this.playProject());
+      $('#btnStop').addEventListener('click', () => this.stopProject());
+      $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
+
+      // Modal
+      $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
+      $('#btnModalCancel').addEventListener('click', () => this.closeModal(false));
+      $('#btnModalSave').addEventListener('click', () => this.closeModal(true));
+
+      $('#btnClipPlay').addEventListener('click', () => this.modalPlay());
+      $('#btnClipStop').addEventListener('click', () => this.modalStop());
+      $('#btnInsertNote').addEventListener('click', () => this.modalInsertNote());
+      $('#btnDeleteNote').addEventListener('click', () => this.modalDeleteSelectedNote());
+      $('#selSnap').addEventListener('change', () => this.modalRequestDraw());
+      $('#rngPitchCenter').addEventListener('input', () => {
+        const v = Number($('#rngPitchCenter').value || 60);
+        this.state.modal.pitchCenter = H2SProject.clamp(v, 0, 127);
+        this.modalRequestDraw();
+      });
+
+      // Canvas interactions
+      const canvas = $('#canvas');
+      canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      window.addEventListener('pointermove', (ev) => this.modalPointerMove(ev));
+      window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
+
+      window.addEventListener('keydown', (ev) => {
+        if (!this.state.modal.show) return;
+        if (ev.key === 'Escape'){ this.closeModal(false); ev.preventDefault(); }
+        if (ev.key === 'Delete' || ev.key === 'Backspace'){ this.modalDeleteSelectedNote(); ev.preventDefault(); }
+        if (ev.key === ' '){ this.modalTogglePlay(); ev.preventDefault(); }
+      });
+
+      this.render();
+      log('UI ready.');
+    },
+
+    render(){
+      // Inspector stats
+      $('#kvTracks').textContent = String(this.project.tracks.length);
+      $('#kvClips').textContent = String(this.project.clips.length);
+      $('#kvInst').textContent = String(this.project.instances.length);
+      $('#inpBpm').value = this.project.bpm;
+
+      this.renderClipList();
+      this.renderTimeline();
+      this.renderSelection();
+    },
+
+    renderClipList(){
+      const root = $('#clipList');
+      root.innerHTML = '';
+      if (this.project.clips.length === 0){
+        const d = document.createElement('div');
+        d.className = 'muted';
+        d.textContent = 'No clips yet. Upload WAV to generate one.';
+        root.appendChild(d);
         return;
       }
-      state.audio.src = clip.audio_url;
-      state.audio.play().catch(() => toast("Play blocked", "Click again"));
-      log(`Preview clip: ${clip.name}`);
-      return;
-    }
 
-    case "clip-add": {
-      const clipId = el.dataset.clip;
-      addInstance(state.project, { clipId, trackId: "t1", start: 0, transpose: 0 });
-      persist();
-      renderAll();
-      toast("Added", "Instance created on timeline");
-      return;
-    }
+      for (const clip of this.project.clips){
+        const st = H2SProject.scoreStats(clip.score);
+        const el = document.createElement('div');
+        el.className = 'clipCard';
+        el.draggable = true;
+        el.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', clip.id);
+        });
 
-    case "clip-edit": {
-      const clipId = el.dataset.clip;
-      openEditorForClip(clipId);
-      return;
-    }
+        el.innerHTML = `
+          <div class="clipTitle">${escapeHtml(clip.name)}</div>
+          <div class="clipMeta"><span>${st.count} notes</span><span>${fmtSec(st.spanSec)}</span></div>
+          <div class="miniBtns">
+            <button class="btn mini" data-act="play">Play</button>
+            <button class="btn mini" data-act="add">Add</button>
+            <button class="btn mini" data-act="edit">Edit</button>
+          </div>
+        `;
 
-    case "edit-selected": {
-      const inst = getSelectedInstance();
+        el.querySelector('[data-act="play"]').addEventListener('click', (e) => { e.stopPropagation(); this.playClip(clip.id); });
+        el.querySelector('[data-act="add"]').addEventListener('click', (e) => { e.stopPropagation(); this.addClipToTimeline(clip.id); });
+        el.querySelector('[data-act="edit"]').addEventListener('click', (e) => { e.stopPropagation(); this.openClipEditor(clip.id); });
+
+        root.appendChild(el);
+      }
+    },
+
+    renderTimeline(){
+      const tracks = $('#tracks');
+      tracks.innerHTML = '';
+
+      const pxPerSec = this.project.ui && this.project.ui.pxPerSec ? this.project.ui.pxPerSec : 160;
+
+      for (let ti=0; ti<this.project.tracks.length; ti++){
+        const lane = document.createElement('div');
+        lane.className = 'trackLane';
+
+        const label = document.createElement('div');
+        label.className = 'trackLabel';
+        label.textContent = this.project.tracks[ti].name || ('Track ' + (ti+1));
+        lane.appendChild(label);
+
+        const grid = document.createElement('div');
+        grid.className = 'laneGrid';
+        lane.appendChild(grid);
+
+        // drop target
+        lane.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+        lane.addEventListener('drop', (e)=>{ 
+          e.preventDefault();
+          const clipId = e.dataTransfer.getData('text/plain');
+          if (!clipId) return;
+          const rect = lane.getBoundingClientRect();
+          const x = e.clientX - rect.left - 120; // after label
+          const startSec = Math.max(0, x / pxPerSec);
+          this.addClipToTimeline(clipId, startSec, ti);
+        });
+
+        // instances
+        for (const inst of this.project.instances.filter(x => x.trackIndex === ti)){
+          const clip = this.project.clips.find(c => c.id === inst.clipId);
+          if (!clip) continue;
+          const st = H2SProject.scoreStats(clip.score);
+          const w = Math.max(80, st.spanSec * pxPerSec);
+          const x = 120 + inst.startSec * pxPerSec;
+
+          const el = document.createElement('div');
+          el.className = 'instance';
+          if (this.state.selectedInstanceId === inst.id) el.classList.add('selected');
+          el.style.left = x + 'px';
+          el.style.width = w + 'px';
+          el.innerHTML = `
+            <div class="instTitle">${escapeHtml(clip.name)}</div>
+            <div class="instSub"><span>${fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
+          `;
+
+          el.addEventListener('pointerdown', (e) => this.instancePointerDown(e, inst.id));
+          el.addEventListener('click', (e)=>{ e.stopPropagation(); this.selectInstance(inst.id); });
+          el.addEventListener('dblclick', (e)=>{ e.stopPropagation(); this.openClipEditor(inst.clipId); });
+
+          lane.appendChild(el);
+        }
+
+        tracks.appendChild(lane);
+      }
+
+      // playhead line
+      const playhead = document.createElement('div');
+      playhead.className = 'playhead';
+      const x = 120 + (this.project.ui.playheadSec || 0) * pxPerSec;
+      playhead.style.left = x + 'px';
+      tracks.appendChild(playhead);
+
+      tracks.addEventListener('click', (e) => {
+        // click empty timeline -> move playhead
+        const rect = tracks.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const sec = Math.max(0, (x - 120) / pxPerSec);
+        this.project.ui.playheadSec = sec;
+        persist();
+        this.render();
+      });
+    },
+
+    renderSelection(){
+      const box = $('#selectionBox');
+      const id = this.state.selectedInstanceId;
+      if (!id){
+        box.className = 'muted';
+        box.textContent = 'Select a clip instance on timeline.';
+        return;
+      }
+      const inst = this.project.instances.find(x => x.id === id);
+      if (!inst){
+        box.className = 'muted';
+        box.textContent = 'Select a clip instance on timeline.';
+        return;
+      }
+      const clip = this.project.clips.find(c => c.id === inst.clipId);
+      box.className = '';
+      box.innerHTML = `
+        <div class="kv"><b>Clip</b><span>${escapeHtml(clip ? clip.name : inst.clipId)}</span></div>
+        <div class="kv"><b>Start</b><span>${fmtSec(inst.startSec)}</span></div>
+        <div class="kv"><b>Transpose</b><span>${inst.transpose || 0}</span></div>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSelEdit" class="btn mini">Edit</button>
+          <button id="btnSelDup" class="btn mini">Duplicate</button>
+          <button id="btnSelDel" class="btn mini danger">Remove</button>
+        </div>
+      `;
+      box.querySelector('#btnSelEdit').addEventListener('click', () => this.openClipEditor(inst.clipId));
+      box.querySelector('#btnSelDup').addEventListener('click', () => this.duplicateInstance(inst.id));
+      box.querySelector('#btnSelDel').addEventListener('click', () => this.deleteInstance(inst.id));
+    },
+
+    selectInstance(instId){
+      this.state.selectedInstanceId = instId;
+      this.render();
+    },
+
+    duplicateInstance(instId){
+      const inst = this.project.instances.find(x => x.id === instId);
       if (!inst) return;
-      openEditorForClip(inst.clipId);
-      return;
-    }
-
-    case "remove-selected":
-      removeSelectedInstance();
-      return;
-
-    case "close-editor":
-      closeEditor();
-      return;
-
-    case "export-project": {
-      const blob = new Blob([serialize(state.project)], { type: "application/json;charset=utf-8" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `hum2song_project_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      toast("Exported", "Project JSON downloaded");
-      return;
-    }
-
-    case "import-project":
-      ui.importProjectInput.click();
-      return;
-
-    case "new-track":
-      toast("MVP", "多轨后续做；当前默认 1 track");
-      return;
-
-    case "use-last":
-      toast("MVP", "录音流程后续接入");
-      return;
-
-    default:
-      toast("Unknown action", action);
-  }
-}
-
-function bindActions() {
-  document.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-action]");
-    if (!btn) return;
-    onAction(btn.dataset.action, btn);
-  });
-
-  ui.wavInput.addEventListener("change", async () => {
-    const file = ui.wavInput.files?.[0];
-    ui.wavInput.value = "";
-    if (!file) return;
-
-    try {
-      await generateAndImportClip(file);
-    } catch (err) {
-      const m = err?.message || String(err);
-      setGenState("bad", m);
-      toast("Generate failed", m);
-      log(`ERROR: ${m}`);
-    }
-  });
-
-  ui.zoomRange.addEventListener("input", () => {
-    const v = Number(ui.zoomRange.value) || 120;
-    state.project.ui.zoomPxPerSec = v;
-    ui.zoomLabel.textContent = `${v} px/s`;
-    persist();
-    renderTimeline();
-  });
-
-  ui.bpmInput.addEventListener("change", () => {
-    state.project.bpm = Number(ui.bpmInput.value) || 120;
-    persist();
-    renderKPIs();
-    toast("BPM updated", String(state.project.bpm));
-  });
-
-  ui.selStart.addEventListener("change", updateSelectedFields);
-  ui.selTrans.addEventListener("change", updateSelectedFields);
-
-  ui.importProjectInput.addEventListener("change", async () => {
-    const file = ui.importProjectInput.files?.[0];
-    ui.importProjectInput.value = "";
-    if (!file) return;
-
-    try {
-      const txt = await file.text();
-      const obj = JSON.parse(txt);
-      state.project = normalizeProject(obj);
+      const copy = H2SProject.deepClone(inst);
+      copy.id = H2SProject.uid('inst_');
+      copy.startSec = inst.startSec + 0.2; // small offset to see it
+      this.project.instances.push(copy);
       persist();
-      renderAll();
-      toast("Imported", "Project JSON loaded");
-      log("Project imported from JSON");
-    } catch (e) {
-      toast("Import failed", e?.message || String(e));
-      log(`ERROR: import failed: ${e?.message || e}`);
-    }
-  });
+      log('Duplicated instance.');
+      this.render();
+    },
 
-  // keyboard
-  window.addEventListener("keydown", (e) => {
-    if (e.code === "Space") {
-      e.preventDefault();
-      playSelectionPreview();
-    }
-    if (e.code === "Delete") {
-      removeSelectedInstance();
-    }
-    if (e.key === "Escape") {
-      closeEditor();
-    }
-  });
+    deleteInstance(instId){
+      const idx = this.project.instances.findIndex(x => x.id === instId);
+      if (idx < 0) return;
+      this.project.instances.splice(idx, 1);
+      if (this.state.selectedInstanceId === instId) this.state.selectedInstanceId = null;
+      persist();
+      log('Removed instance.');
+      this.render();
+    },
 
-  // close modal on background click
-  ui.editorModal.addEventListener("click", (e) => {
-    if (e.target === ui.editorModal) closeEditor();
-  });
+    addClipToTimeline(clipId, startSec, trackIndex){
+      const inst = H2SProject.createInstance(clipId, startSec || (this.project.ui.playheadSec || 0), trackIndex || 0);
+      this.project.instances.push(inst);
+      this.state.selectedInstanceId = inst.id;
+      persist();
+      log('Added clip to timeline.');
+      this.render();
+    },
 
-  // resize canvas redraw when modal open
-  window.addEventListener("resize", () => {
-    if (!ui.editorModal.classList.contains("active")) return;
-    const inst = getSelectedInstance();
-    if (inst) {
-      const clip = getClip(inst.clipId);
-      if (clip) drawScoreToCanvas(clip.score, ui.editorCanvas);
-    }
-  });
-}
+    instancePointerDown(ev, instId){
+      ev.preventDefault();
+      ev.stopPropagation();
+      const el = ev.currentTarget;
+      this.selectInstance(instId);
+      const rect = el.getBoundingClientRect();
+      this.state.draggingInstance = instId;
+      this.state.dragOffsetX = ev.clientX - rect.left;
+      el.setPointerCapture(ev.pointerId);
+    },
 
-/* ---------------------------
-   Helpers
---------------------------- */
+    timelinePointerMove(ev){
+      if (!this.state.draggingInstance) return;
+      // handled in pointermove on window
+    },
 
-function cssEsc(s) {
-  // Minimal CSS.escape fallback
-  return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
-}
+    timelinePointerUp(ev){
+      // handled in pointerup on window
+    },
 
-/* ---------------------------
-   Boot
---------------------------- */
+    async pickWavAndGenerate(){
+      const f = await this.pickFile('.wav,.mp3,.m4a,.flac,.ogg');
+      if (!f) return;
 
-function boot() {
-  log("UI boot: Hum2Song Studio MVP");
-  setGenState("idle", "等待上传");
+      // Auto-generate on selection
+      log(`Uploading ${f.name} ...`);
+      try{
+        const fd = new FormData();
+        fd.append('file', f, f.name);
+        const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
+        const tid = res.task_id || res.id || res.taskId || res.task || null;
+        if (!tid) throw new Error('generate returned no task_id');
+        this.state.lastUploadTaskId = tid;
+        log(`Generate queued: ${tid}`);
+        await this.pollTaskUntilDone(tid);
+        // Load score and add to library
+        const score = await fetchJson(API.score(tid));
+        const clip = H2SProject.createClipFromScore(score, { name: f.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
+        this.project.clips.unshift(clip);
+        // Also add instance to timeline at playhead
+        this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
+        persist();
+        this.render();
+        log(`Clip added: ${clip.name}`);
+      }catch(e){
+        log(`Error: ${String(e && e.message ? e.message : e)}`);
+        alert('Generate failed. Check log.');
+      }
+    },
 
-  // render + bind
-  renderAll();
-  bindActions();
-  bindTimelineDrag();
+    async pollTaskUntilDone(taskId){
+      // backend seems to expose GET /tasks/{id} with status
+      const maxWaitMs = 180000;
+      const start = performance.now();
+      while (true){
+        const data = await fetchJson(API.task(taskId));
+        const status = String((data.status || data.state || data.task_status || data.taskStatus || '')).toLowerCase();
+        if (status.includes('completed') || status.includes('done') || status === 'success'){
+          log(`Task completed: ${taskId}`);
+          return;
+        }
+        if (status.includes('failed') || status.includes('error')){
+          throw new Error(`Task failed: ${JSON.stringify(data)}`);
+        }
+        if (performance.now() - start > maxWaitMs){
+          throw new Error('Task timeout');
+        }
+        await sleep(800);
+      }
+    },
 
-  // If there is at least one instance, select it by default
-  if (!state.project.ui.selectedInstanceId && state.project.instances.length) {
-    state.project.ui.selectedInstanceId = state.project.instances[0].id;
-    persist();
-  }
-  renderAll();
+    clearProject(){
+      if (!confirm('Clear local project (clips + timeline)?')) return;
+      this.project = H2SProject.defaultProject();
+      persist();
+      this.render();
+      log('Cleared project.');
+    },
 
-  // expose for debug (optional)
-  window.app = {
-    state,
-    log,
-    generateAndImportClip,
+    pickFile(accept){
+      return new Promise((resolve) => {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = accept || '';
+        inp.onchange = () => resolve(inp.files && inp.files[0] ? inp.files[0] : null);
+        inp.click();
+      });
+    },
+
+    /* ---------------- Project playback (simple) ---------------- */
+    async ensureTone(){
+      // Tone may load async (fallback)
+      for (let i=0;i<40;i++){
+        if (window.Tone) return true;
+        await sleep(50);
+      }
+      return !!window.Tone;
+    },
+
+    async playProject(){
+      if (this.state.transportPlaying){
+        this.stopProject();
+        return;
+      }
+      const ok = await this.ensureTone();
+      if (!ok){
+        alert('Tone.js not available.'); return;
+      }
+      await Tone.start();
+
+      // Flatten instances into a quick schedule on a single synth (MVP)
+      const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+      const bpm = this.project.bpm || 120;
+      const startAt = this.project.ui.playheadSec || 0;
+
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      Tone.Transport.seconds = 0;
+      Tone.Transport.bpm.value = bpm;
+
+      let maxT = 0;
+      for (const inst of this.project.instances){
+        const clip = this.project.clips.find(c => c.id === inst.clipId);
+        if (!clip) continue;
+        const score = H2SProject.ensureScoreIds(H2SProject.deepClone(clip.score));
+        for (const tr of (score.tracks || [])){
+          for (const n of (tr.notes || [])){
+            const tAbs = inst.startSec + n.start;
+            if (tAbs + n.duration < startAt) continue;
+            const tRel = (tAbs - startAt);
+            maxT = Math.max(maxT, tRel + n.duration);
+            Tone.Transport.schedule((time) => {
+              const pitch = H2SProject.clamp(Math.round((n.pitch || 60) + (inst.transpose || 0)), 0, 127);
+              const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127) / 127;
+              synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), n.duration, time, vel);
+            }, tRel);
+          }
+        }
+      }
+
+      Tone.Transport.start("+0.05");
+      this.state.transportPlaying = true;
+      this.state.transportStartPerf = performance.now();
+      log('Project play.');
+
+      const raf = () => {
+        if (!this.state.transportPlaying) return;
+        const sec = startAt + (Tone.Transport.seconds || 0);
+        this.project.ui.playheadSec = sec;
+        $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)}`;
+        this.renderTimeline(); // light redraw
+        requestAnimationFrame(raf);
+      };
+      requestAnimationFrame(raf);
+
+      // auto stop
+      setTimeout(()=>{ if (this.state.transportPlaying) this.stopProject(); }, Math.ceil((maxT + 0.2) * 1000));
+    },
+
+    stopProject(){
+      if (window.Tone){
+        try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(e){}
+      }
+      this.state.transportPlaying = false;
+      log('Project stop.');
+      persist();
+      this.render();
+    },
+
+    async playClip(clipId){
+      const clip = this.project.clips.find(c => c.id === clipId);
+      if (!clip) return;
+      const ok = await this.ensureTone();
+      if (!ok){ alert('Tone.js not available.'); return; }
+      await Tone.start();
+      const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      Tone.Transport.seconds = 0;
+      Tone.Transport.bpm.value = this.project.bpm || 120;
+
+      const score = H2SProject.ensureScoreIds(H2SProject.deepClone(clip.score));
+      let maxT = 0;
+      for (const tr of score.tracks || []){
+        for (const n of tr.notes || []){
+          maxT = Math.max(maxT, n.start + n.duration);
+          Tone.Transport.schedule((time) => {
+            const pitch = H2SProject.clamp(Math.round(n.pitch || 60), 0, 127);
+            const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127)/127;
+            synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), n.duration, time, vel);
+          }, n.start);
+        }
+      }
+      Tone.Transport.start("+0.05");
+      log(`Clip play: ${clip.name}`);
+      setTimeout(()=>{ try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(e){} }, Math.ceil((maxT + 0.2) * 1000));
+    },
+
+    /* ---------------- Modal editor ---------------- */
+    openClipEditor(clipId){
+      const clip = this.project.clips.find(c => c.id === clipId);
+      if (!clip) return;
+      this.state.modal.show = true;
+      this.state.modal.clipId = clipId;
+      this.state.modal.savedScore = H2SProject.deepClone(clip.score);
+      this.state.modal.draftScore = H2SProject.deepClone(clip.score);
+      this.state.modal.dirty = false;
+      this.state.modal.cursorSec = 0;
+      this.state.modal.selectedNoteId = null;
+      this.state.modal.selectedCell = null;
+      this.state.modal.mode = 'none';
+
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const center = Math.round((st.minPitch + st.maxPitch) / 2);
+      this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
+      $('#rngPitchCenter').value = this.state.modal.pitchCenter;
+
+      $('#modalTitle').textContent = `Editing: ${clip.name}`;
+      $('#modalSub').textContent = `notes ${st.count} | pitch ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | span ${fmtSec(st.spanSec)}`;
+      $('#modal').classList.add('show');
+      $('#modal').setAttribute('aria-hidden', 'false');
+
+      this.modalUpdateRightPanel();
+      this.modalResizeCanvasToContent();
+      this.modalRequestDraw();
+      log(`Open editor: ${clip.name}`);
+    },
+
+    closeModal(save){
+      if (!this.state.modal.show) return;
+      this.modalStop();
+
+      const clipId = this.state.modal.clipId;
+      const clip = this.project.clips.find(c => c.id === clipId);
+
+      if (save && clip){
+        // Apply draft score back
+        clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+        const st = H2SProject.scoreStats(clip.score);
+        clip.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
+        persist();
+        this.render();
+        log('Saved clip changes.');
+      } else {
+        log('Canceled clip changes.');
+      }
+
+      this.state.modal.show = false;
+      this.state.modal.clipId = null;
+      this.state.modal.draftScore = null;
+      this.state.modal.savedScore = null;
+      this.state.modal.selectedNoteId = null;
+      this.state.modal.selectedCell = null;
+      this.state.modal.mode = 'none';
+
+      $('#modal').classList.remove('show');
+      $('#modal').setAttribute('aria-hidden', 'true');
+    },
+
+    modalTogglePlay(){
+      if (this.state.modal.isPlaying) this.modalStop();
+      else this.modalPlay();
+    },
+
+    modalSnapSec(){
+      const v = $('#selSnap').value;
+      const bpm = this.project.bpm || 120;
+      const beat = 60 / bpm; // quarter note
+      if (v === 'off') return 0;
+      const denom = Number(v);
+      // denom=16 -> 1/16 note = beat*(4/16)=beat/4
+      return beat * (4 / denom);
+    },
+
+    modalQuantize(x){
+      const g = this.modalSnapSec();
+      if (!g || g <= 0) return x;
+      return Math.round(x / g) * g;
+    },
+
+    modalResizeCanvasToContent(){
+      const wrap = $('#canvasWrap');
+      const canvas = $('#canvas');
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const span = Math.max(4, st.spanSec);
+      const w = Math.max(1200, Math.ceil(span * this.state.modal.pxPerSec) + 140);
+      const h = Math.max(420, wrap.clientHeight - 2);
+      canvas.width = w;
+      canvas.height = h;
+    },
+
+    modalUpdateRightPanel(){
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      $('#kvClipNotes').textContent = String(st.count);
+      $('#kvClipPitch').textContent = `${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)}`;
+      $('#kvClipSpan').textContent = fmtSec(st.spanSec);
+      $('#pillCursor').textContent = `Cursor: ${fmtSec(this.state.modal.cursorSec)}`;
+      $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
+    },
+
+    modalRequestDraw(){
+      // coalesce draws
+      if (this.state.modal.raf) return;
+      this.state.modal.raf = requestAnimationFrame(() => {
+        this.state.modal.raf = 0;
+        this.modalDraw();
+      });
+    },
+
+    modalDraw(){
+      if (!this.state.modal.show) return;
+      const canvas = $('#canvas');
+      const ctx = canvas.getContext('2d');
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+
+      // Determine pitch window
+      const rows = this.state.modal.pitchViewRows;
+      let pitchMin, pitchMax;
+      const range = st.maxPitch - st.minPitch + 1;
+      if (range <= rows){
+        // auto-fit with small padding
+        const pad = 2;
+        pitchMin = Math.max(0, st.minPitch - pad);
+        pitchMax = Math.min(127, st.maxPitch + pad);
+      } else {
+        const half = Math.floor(rows / 2);
+        const c = this.state.modal.pitchCenter;
+        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+        pitchMax = pitchMin + rows;
+      }
+
+      const padL = this.state.modal.padL;
+      const padT = this.state.modal.padT;
+
+      // row height
+      const usableH = canvas.height - padT - 10;
+      const totalRows = (pitchMax - pitchMin + 1);
+      const rowH = Math.max(12, Math.min(22, Math.floor(usableH / totalRows)));
+      this.state.modal.rowH = rowH;
+
+      // background
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // fill gradient
+      const g = ctx.createLinearGradient(0,0,0,canvas.height);
+      g.addColorStop(0,'rgba(255,255,255,.02)');
+      g.addColorStop(1,'rgba(0,0,0,.20)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // grid
+      const pxPerSec = this.state.modal.pxPerSec;
+      const gridSec = this.modalSnapSec() || (60/(this.project.bpm||120))/4; // fallback 1/16
+      const gridPx = gridSec * pxPerSec;
+
+      // vertical rows
+      for (let i=0; i<=totalRows; i++){
+        const y = padT + i * rowH + 0.5;
+        ctx.strokeStyle = (i % 12 === 0) ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.06)';
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // time grid
+      const startX = padL;
+      const endX = canvas.width;
+      let k = 0;
+      for (let x = startX; x <= endX; x += gridPx){
+        const strong = (k % 4 === 0);
+        ctx.strokeStyle = strong ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.06)';
+        ctx.beginPath();
+        ctx.moveTo(Math.floor(x)+0.5, 0);
+        ctx.lineTo(Math.floor(x)+0.5, canvas.height);
+        ctx.stroke();
+        k += 1;
+      }
+
+      // labels (left)
+      ctx.fillStyle = 'rgba(255,255,255,.65)';
+      ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
+      for (let p = pitchMax; p >= pitchMin; p--){
+        const y = padT + (pitchMax - p) * rowH;
+        if (p % 12 === 0){
+          ctx.fillText(H2SProject.midiToName(p), 10, y + rowH - 4);
+        }
+      }
+
+      // selected cell highlight
+      if (this.state.modal.selectedCell){
+        const cell = this.state.modal.selectedCell;
+        if (cell.pitch >= pitchMin && cell.pitch <= pitchMax){
+          const x = padL + cell.startSec * pxPerSec;
+          const y = padT + (pitchMax - cell.pitch) * rowH;
+          ctx.fillStyle = 'rgba(59,130,246,.10)';
+          ctx.fillRect(x, y, gridPx, rowH);
+          ctx.strokeStyle = 'rgba(96,165,250,.35)';
+          ctx.strokeRect(x+0.5, y+0.5, gridPx-1, rowH-1);
+        }
+      }
+
+      // notes
+      const notes = this.modalAllNotes();
+      for (const n of notes){
+        if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
+        const x = padL + n.start * pxPerSec;
+        const y = padT + (pitchMax - n.pitch) * rowH + 1;
+        const w = Math.max(6, n.duration * pxPerSec);
+        const h = rowH - 2;
+        const selected = (this.state.modal.selectedNoteId === n.id);
+
+        // body
+        ctx.fillStyle = selected ? 'rgba(96,165,250,.95)' : 'rgba(59,130,246,.85)';
+        ctx.strokeStyle = selected ? 'rgba(255,255,255,.80)' : 'rgba(29,78,216,.90)';
+        roundRect(ctx, x, y, w, h, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        // resize handle (right 10px)
+        ctx.fillStyle = 'rgba(255,255,255,.18)';
+        ctx.fillRect(x + w - 10, y, 10, h);
+      }
+
+      // playhead (cursor)
+      const cx = padL + this.state.modal.cursorSec * pxPerSec;
+      ctx.strokeStyle = 'rgba(239,68,68,.95)';
+      ctx.beginPath();
+      ctx.moveTo(Math.floor(cx)+0.5, 0);
+      ctx.lineTo(Math.floor(cx)+0.5, canvas.height);
+      ctx.stroke();
+
+      // top text
+      ctx.fillStyle = 'rgba(255,255,255,.75)';
+      ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
+      ctx.fillText(`Cursor: ${fmtSec(this.state.modal.cursorSec)} (click empty grid to move; click note to select)`, 10, 14);
+
+      this.modalUpdateRightPanel();
+    },
+
+    modalAllNotes(){
+      const score = this.state.modal.draftScore;
+      const out = [];
+      if (!score || !score.tracks) return out;
+      for (const t of score.tracks){
+        for (const n of (t.notes || [])){
+          out.push(n);
+        }
+      }
+      return out;
+    },
+
+    modalFindNoteById(id){
+      const score = this.state.modal.draftScore;
+      if (!score || !score.tracks) return null;
+      for (const t of score.tracks){
+        const idx = (t.notes || []).findIndex(n => n.id === id);
+        if (idx >= 0) return { track:t, note:t.notes[idx], index: idx };
+      }
+      return null;
+    },
+
+    modalHitTest(px, py){
+      // Return {type:'resize'|'note', noteId} or null
+      const canvas = $('#canvas');
+      const padL = this.state.modal.padL;
+      const padT = this.state.modal.padT;
+      const pxPerSec = this.state.modal.pxPerSec;
+      const rowH = this.state.modal.rowH;
+
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const rows = this.state.modal.pitchViewRows;
+      let pitchMin, pitchMax;
+      const range = st.maxPitch - st.minPitch + 1;
+      if (range <= rows){
+        const pad = 2;
+        pitchMin = Math.max(0, st.minPitch - pad);
+        pitchMax = Math.min(127, st.maxPitch + pad);
+      } else {
+        const half = Math.floor(rows / 2);
+        const c = this.state.modal.pitchCenter;
+        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+        pitchMax = pitchMin + rows;
+      }
+
+      const notes = this.modalAllNotes();
+      // search from topmost (later notes last)
+      for (let i=notes.length-1; i>=0; i--){
+        const n = notes[i];
+        if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
+        const x = padL + n.start * pxPerSec;
+        const y = padT + (pitchMax - n.pitch) * rowH + 1;
+        const w = Math.max(6, n.duration * pxPerSec);
+        const h = rowH - 2;
+        if (px >= x && px <= x+w && py >= y && py <= y+h){
+          // resize area: last 10px
+          if (px >= x + w - 10) return { type:'resize', noteId:n.id };
+          return { type:'note', noteId:n.id };
+        }
+      }
+      return null;
+    },
+
+    modalPointerDown(ev){
+      if (!this.state.modal.show) return;
+      const wrap = $('#canvasWrap');
+      const canvas = $('#canvas');
+      const rect = canvas.getBoundingClientRect();
+      // account for scroll
+      const px = (ev.clientX - rect.left) + wrap.scrollLeft;
+      const py = (ev.clientY - rect.top) + wrap.scrollTop;
+
+      // HIT TEST FIRST (fix: note operations have priority)
+      const hit = this.modalHitTest(px, py);
+      if (hit){
+        this.state.modal.selectedNoteId = hit.noteId;
+        this.state.modal.selectedCell = null;
+
+        const found = this.modalFindNoteById(hit.noteId);
+        if (!found) return;
+
+        const n = found.note;
+        this.state.modal.drag.noteId = hit.noteId;
+        this.state.modal.drag.startX = px;
+        this.state.modal.drag.startY = py;
+        this.state.modal.drag.origStart = n.start;
+        this.state.modal.drag.origPitch = n.pitch;
+        this.state.modal.drag.origDur = n.duration;
+
+        this.state.modal.mode = (hit.type === 'resize') ? 'resize_note' : 'drag_note';
+        $('#editorStatus').textContent = (hit.type === 'resize') ? 'Resize note...' : 'Drag note...';
+        this.modalRequestDraw();
+        return;
+      }
+
+      // Click empty -> move cursor + set selected cell
+      const padL = this.state.modal.padL;
+      const padT = this.state.modal.padT;
+      const pxPerSec = this.state.modal.pxPerSec;
+
+      // time
+      let tSec = (px - padL) / pxPerSec;
+      tSec = Math.max(0, tSec);
+      tSec = this.modalQuantize(tSec);
+      this.state.modal.cursorSec = tSec;
+
+      // pitch from y
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const rows = this.state.modal.pitchViewRows;
+      let pitchMin, pitchMax;
+      const range = st.maxPitch - st.minPitch + 1;
+      if (range <= rows){
+        const pad = 2;
+        pitchMin = Math.max(0, st.minPitch - pad);
+        pitchMax = Math.min(127, st.maxPitch + pad);
+      } else {
+        const half = Math.floor(rows / 2);
+        const c = this.state.modal.pitchCenter;
+        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+        pitchMax = pitchMin + rows;
+      }
+      const rowH = this.state.modal.rowH;
+      const row = Math.floor((py - padT) / rowH);
+      const pitch = H2SProject.clamp(pitchMax - row, 0, 127);
+
+      this.state.modal.selectedNoteId = null;
+      this.state.modal.selectedCell = { startSec: tSec, pitch };
+
+      $('#editorStatus').textContent = `Cursor moved to ${fmtSec(tSec)}; selected cell pitch ${H2SProject.midiToName(pitch)}.`;
+      this.modalRequestDraw();
+    },
+
+    modalPointerMove(ev){
+      if (!this.state.modal.show) return;
+      const m = this.state.modal;
+      if (m.mode !== 'drag_note' && m.mode !== 'resize_note') return;
+
+      const wrap = $('#canvasWrap');
+      const canvas = $('#canvas');
+      const rect = canvas.getBoundingClientRect();
+      const px = (ev.clientX - rect.left) + wrap.scrollLeft;
+      const py = (ev.clientY - rect.top) + wrap.scrollTop;
+
+      const found = this.modalFindNoteById(m.drag.noteId);
+      if (!found) return;
+
+      // derive pitch window for mapping y->pitch
+      const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const rows = m.pitchViewRows;
+      let pitchMin, pitchMax;
+      const range = st.maxPitch - st.minPitch + 1;
+      if (range <= rows){
+        const pad = 2;
+        pitchMin = Math.max(0, st.minPitch - pad);
+        pitchMax = Math.min(127, st.maxPitch + pad);
+      } else {
+        const half = Math.floor(rows / 2);
+        const c = m.pitchCenter;
+        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+        pitchMax = pitchMin + rows;
+      }
+
+      const dx = px - m.drag.startX;
+      const dy = py - m.drag.startY;
+
+      const secDelta = dx / m.pxPerSec;
+      const pitchDelta = -Math.round(dy / m.rowH);
+
+      if (m.mode === 'drag_note'){
+        let ns = m.drag.origStart + secDelta;
+        ns = Math.max(0, ns);
+        ns = this.modalQuantize(ns);
+        let np = m.drag.origPitch + pitchDelta;
+        np = H2SProject.clamp(np, 0, 127);
+        found.note.start = ns;
+        found.note.pitch = np;
+        m.dirty = true;
+        $('#editorStatus').textContent = `Drag: start ${fmtSec(ns)} pitch ${H2SProject.midiToName(np)}`;
+      } else {
+        let nd = m.drag.origDur + secDelta;
+        nd = Math.max(0.05, nd);
+        // quantize duration (optional)
+        const g = this.modalSnapSec();
+        if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+        found.note.duration = nd;
+        m.dirty = true;
+        $('#editorStatus').textContent = `Resize: duration ${fmtSec(nd)}`;
+      }
+
+      this.modalRequestDraw();
+    },
+
+    modalPointerUp(ev){
+      if (!this.state.modal.show) return;
+      const m = this.state.modal;
+      if (m.mode === 'drag_note' || m.mode === 'resize_note'){
+        m.mode = 'none';
+        $('#editorStatus').textContent = 'Ready.';
+        this.modalRequestDraw();
+      }
+
+      // instance dragging on timeline
+      if (this.state.draggingInstance){
+        const instId = this.state.draggingInstance;
+        const inst = this.project.instances.find(x => x.id === instId);
+        if (inst){
+          const tracksEl = $('#tracks');
+          const rect = tracksEl.getBoundingClientRect();
+          const pxPerSec = this.project.ui.pxPerSec || 160;
+          const x = ev.clientX - rect.left - 120 - this.state.dragOffsetX;
+          inst.startSec = Math.max(0, x / pxPerSec);
+          persist();
+          this.render();
+        }
+        this.state.draggingInstance = null;
+      }
+    },
+
+    modalInsertNote(){
+      if (!this.state.modal.show) return;
+      const score = this.state.modal.draftScore;
+      if (!score.tracks || score.tracks.length === 0){
+        score.tracks = [{ id:H2SProject.uid('trk_'), name:'Track 1', notes:[] }];
+      }
+      const tr = score.tracks[0];
+
+      let cell = this.state.modal.selectedCell;
+      if (!cell){
+        // if no cell selected, use cursor and middle pitch
+        cell = { startSec: this.state.modal.cursorSec || 0, pitch: this.state.modal.pitchCenter || 60 };
+      }
+
+      const g = this.modalSnapSec();
+      const dur = (g && g > 0) ? g : 0.25;
+      const note = {
+        id: H2SProject.uid('n_'),
+        pitch: cell.pitch,
+        start: cell.startSec,
+        duration: dur,
+        velocity: 100
+      };
+      tr.notes.push(note);
+      this.state.modal.selectedNoteId = note.id;
+      this.state.modal.dirty = true;
+
+      // move cursor to the end of inserted note (nice for step input)
+      this.state.modal.cursorSec = this.modalQuantize(note.start + note.duration);
+      this.state.modal.selectedCell = { startSec: this.state.modal.cursorSec, pitch: cell.pitch };
+
+      this.modalResizeCanvasToContent();
+      this.modalRequestDraw();
+      $('#editorStatus').textContent = `Inserted note at ${fmtSec(note.start)} pitch ${H2SProject.midiToName(note.pitch)}.`;
+    },
+
+    modalDeleteSelectedNote(){
+      if (!this.state.modal.show) return;
+      const id = this.state.modal.selectedNoteId;
+      if (!id) return;
+      const found = this.modalFindNoteById(id);
+      if (!found) return;
+      found.track.notes.splice(found.index, 1);
+      this.state.modal.selectedNoteId = null;
+      this.state.modal.dirty = true;
+      this.modalResizeCanvasToContent();
+      this.modalRequestDraw();
+      $('#editorStatus').textContent = 'Deleted note.';
+    },
+
+    async modalPlay(){
+      if (!this.state.modal.show) return;
+      if (this.state.modal.isPlaying){ this.modalStop(); return; }
+      const ok = await this.ensureTone();
+      if (!ok){ alert('Tone.js not available.'); return; }
+      await Tone.start();
+
+      const score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+      const startAt = this.state.modal.cursorSec || 0;
+      const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+      this.state.modal.synth = synth;
+
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      Tone.Transport.seconds = 0;
+      Tone.Transport.bpm.value = this.project.bpm || 120;
+
+      let maxT = 0;
+      for (const tr of score.tracks || []){
+        for (const n of tr.notes || []){
+          const end = n.start + n.duration;
+          if (end < startAt) continue;
+          const rel = Math.max(0, n.start - startAt);
+          maxT = Math.max(maxT, rel + n.duration);
+          Tone.Transport.schedule((time) => {
+            const pitch = H2SProject.clamp(Math.round(n.pitch || 60), 0, 127);
+            const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127)/127;
+            synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), n.duration, time, vel);
+          }, rel);
+        }
+      }
+
+      Tone.Transport.start("+0.05");
+      this.state.modal.isPlaying = true;
+      $('#editorStatus').textContent = 'Playing...';
+
+      const tick = () => {
+        if (!this.state.modal.isPlaying) return;
+        const sec = startAt + (Tone.Transport.seconds || 0);
+        this.state.modal.cursorSec = sec;
+        $('#pillCursor').textContent = `Cursor: ${fmtSec(sec)}`;
+        this.modalRequestDraw();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
+      setTimeout(()=>{ if (this.state.modal.isPlaying) this.modalStop(); }, Math.ceil((maxT + 0.2) * 1000));
+    },
+
+    modalStop(){
+      if (!this.state.modal.show) return;
+      if (window.Tone){
+        try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(e){}
+      }
+      this.state.modal.isPlaying = false;
+      $('#editorStatus').textContent = 'Stopped.';
+      this.modalRequestDraw();
+    },
   };
-}
 
-boot();
+  // Global pointer handlers (timeline drag)
+  window.addEventListener('pointermove', (ev) => {
+    if (!app.state.draggingInstance) return;
+    // update instance start live for smoother UX
+    const inst = app.project.instances.find(x => x.id === app.state.draggingInstance);
+    if (!inst) return;
+    const tracksEl = $('#tracks');
+    const rect = tracksEl.getBoundingClientRect();
+    const pxPerSec = app.project.ui.pxPerSec || 160;
+    const x = ev.clientX - rect.left - 120 - app.state.dragOffsetX;
+    inst.startSec = Math.max(0, x / pxPerSec);
+    app.renderTimeline();
+    persist();
+  });
+
+  window.addEventListener('pointerup', (ev) => {
+    // modal pointer up already attached
+    // finalize timeline drag
+    if (app.state.draggingInstance){
+      app.state.draggingInstance = null;
+      persist();
+      app.render();
+    }
+  });
+
+  // Helpers
+  function escapeHtml(s){
+    return String(s || '')
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;')
+      .replaceAll("'",'&#39;');
+  }
+
+  function roundRect(ctx, x, y, w, h, r){
+    r = Math.max(0, Math.min(r, Math.min(w,h)/2));
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  // Expose for debug
+  window.H2SApp = app;
+
+  // Boot
+  window.addEventListener('load', () => app.init());
+})();
