@@ -192,6 +192,20 @@
         if (ev.key === ' '){ this.modalTogglePlay(); ev.preventDefault(); }
       });
 
+
+      // Timeline controller (stabilizes drag/dblclick & prevents DOM rebuild during drag)
+      if (window.H2STimeline && !this.timelineCtrl){
+        this.timelineCtrl = window.H2STimeline.create({
+          tracksEl: document.querySelector('#tracks'),
+          getProject: () => this.project,
+          getState: () => this.state,
+          onSelectInstance: (instId, el) => this.selectInstance(instId, el),
+          onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
+          onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
+          onPersistAndRender: () => { persist(); this.render(); }
+          // Debug: ?debug_timeline=1 OR localStorage.h2s_timeline_debug="1"
+        });
+      }
       this.render();
       log('UI ready.');
     },
@@ -247,89 +261,12 @@
     },
 
     renderTimeline(){
-      const tracks = $('#tracks');
-      tracks.innerHTML = '';
-
-      const pxPerSec = this.project.ui && this.project.ui.pxPerSec ? this.project.ui.pxPerSec : 160;
-
-      for (let ti=0; ti<this.project.tracks.length; ti++){
-        const lane = document.createElement('div');
-        lane.className = 'trackLane';
-
-        const label = document.createElement('div');
-        label.className = 'trackLabel';
-        label.textContent = this.project.tracks[ti].name || ('Track ' + (ti+1));
-        lane.appendChild(label);
-
-        const grid = document.createElement('div');
-        grid.className = 'laneGrid';
-        lane.appendChild(grid);
-
-        // drop target
-        lane.addEventListener('dragover', (e)=>{ e.preventDefault(); });
-        lane.addEventListener('drop', (e)=>{ 
-          e.preventDefault();
-          const clipId = e.dataTransfer.getData('text/plain');
-          if (!clipId) return;
-          // IMPORTANT: the tracks container is scrollable. Convert clientX to timeline content X.
-          const tracksEl = document.querySelector('#tracks');
-          const rect = tracksEl.getBoundingClientRect();
-          const contentX = (e.clientX - rect.left) + (tracksEl.scrollLeft || 0);
-          const x = contentX - 120; // after label
-          const startSec = Math.max(0, x / pxPerSec);
-          this.addClipToTimeline(clipId, startSec, ti);
-        });
-
-        // instances
-        for (const inst of this.project.instances.filter(x => x.trackIndex === ti)){
-          const clip = this.project.clips.find(c => c.id === inst.clipId);
-          if (!clip) continue;
-          const st = H2SProject.scoreStats(clip.score);
-          const w = Math.max(80, st.spanSec * pxPerSec);
-          const x = 120 + inst.startSec * pxPerSec;
-
-          const el = document.createElement('div');
-          el.className = 'instance';
-          if (this.state.selectedInstanceId === inst.id) el.classList.add('selected');
-          el.style.left = x + 'px';
-          el.style.width = w + 'px';
-          el.dataset.instId = inst.id;
-          el.innerHTML = `
-            <div class="instTitle">${escapeHtml(clip.name)}</div>
-            <div class="instSub"><span>${fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
-          `;
-
-          el.addEventListener('pointerdown', (e) => this.instancePointerDown(e, inst.id));
-          // Stop bubbling so the timeline background handler won't move the playhead.
-          // (Selection is already handled in pointerdown.)
-          el.addEventListener('click', (e)=>{ e.stopPropagation(); });
-          // Selection is handled in pointerdown (to keep DOM stable for drag/dblclick).
-          el.addEventListener('dblclick', (e)=>{ e.stopPropagation(); this.openClipEditor(inst.clipId); });
-
-          lane.appendChild(el);
-        }
-
-        tracks.appendChild(lane);
+      if (this.timelineCtrl){
+        this.timelineCtrl.render();
+        return;
       }
-
-      // playhead line
-      const playhead = document.createElement('div');
-      playhead.className = 'playhead';
-      const x = 120 + (this.project.ui.playheadSec || 0) * pxPerSec;
-      playhead.style.left = x + 'px';
-      tracks.appendChild(playhead);
-
-      tracks.onclick = (e) => {
-        // Click empty timeline -> move playhead.
-        // If click originates from an instance, ignore.
-        if (e.target && e.target.closest && e.target.closest('.instance')) return;
-        const rect = tracks.getBoundingClientRect();
-        const contentX = (e.clientX - rect.left) + (tracks.scrollLeft || 0);
-        const sec = Math.max(0, (contentX - 120) / pxPerSec);
-        this.project.ui.playheadSec = sec;
-        persist();
-        this.render();
-      };
+      // Fallback: if controller missing, do nothing (UI will still load, but timeline won't be interactive)
+      console.warn('[Hum2Song] timeline controller not loaded.');
     },
 
     renderSelection(){
@@ -413,25 +350,7 @@
       this.render();
     },
 
-    instancePointerDown(ev, instId){
-      // Do NOT preventDefault for mouse; it can break native dblclick.
-      // For touch/pen, preventDefault reduces accidental page scroll.
-      if (ev.pointerType && ev.pointerType !== 'mouse') ev.preventDefault();
-      ev.stopPropagation();
-
-      const el = ev.currentTarget;
-      this.selectInstance(instId, el);
-
-      const rect = el.getBoundingClientRect();
-      this.state.dragCandidate = {
-        instId,
-        el,
-        pointerId: ev.pointerId,
-        startClientX: ev.clientX,
-        offsetX: ev.clientX - rect.left,
-        started: false
-      };
-    },
+    // instancePointerDown moved to timeline_controller.js
 
 
     timelinePointerMove(ev){
@@ -1199,81 +1118,8 @@
   // - Drag should NOT spam persist() on every pointermove (performance).
   // - Native dblclick should still work (no preventDefault / no pointerCapture until drag starts).
   // - If user never moves beyond threshold, it is a click (selection only).
+  // Timeline pointer handlers moved to timeline_controller.js
 
-  const TIMELINE_DRAG_THRESHOLD_PX = 4;
-  // While dragging, NEVER rebuild the whole timeline (it destroys the DOM element
-  // that holds pointer capture and breaks drag / dblclick). Instead, update the
-  // dragged element's style in place. We commit to project state on pointerup.
-
-  window.addEventListener('pointermove', (ev) => {
-    const cand = app.state.dragCandidate;
-    if (!cand) return;
-    if (cand.pointerId !== ev.pointerId) return;
-
-    const dx = ev.clientX - cand.startClientX;
-
-    if (!cand.started){
-      if (Math.abs(dx) < TIMELINE_DRAG_THRESHOLD_PX) return;
-
-      // Start dragging only after threshold.
-      cand.started = true;
-      app.state.draggingInstance = cand.instId;
-
-      // Capture pointer now so drag remains stable even if cursor leaves element.
-      try{ cand.el.setPointerCapture(cand.pointerId); }catch(e){}
-    }
-
-    const instId = cand.instId;
-    const inst = app.project.instances.find(x => x.id === instId);
-    if (!inst) return;
-
-    const pxPerSec = app.project.ui && app.project.ui.pxPerSec ? app.project.ui.pxPerSec : 160;
-
-    // Offset left includes label width 120. The tracks container is scrollable.
-    const tracks = document.querySelector('#tracks');
-    const rect = tracks.getBoundingClientRect();
-    const contentX = (ev.clientX - rect.left) + (tracks.scrollLeft || 0);
-    const x = contentX - 120 - cand.offsetX;
-    const startSec = Math.max(0, x / pxPerSec);
-
-    // Update state
-    inst.startSec = startSec;
-
-    // Update DOM in-place
-    const leftPx = 120 + startSec * pxPerSec;
-    cand.el.style.left = leftPx + 'px';
-    const span = cand.el.querySelector('.instSub span');
-    if (span) span.textContent = fmtSec(startSec);
-  });
-
-  window.addEventListener('pointerup', (ev) => {
-    const cand = app.state.dragCandidate;
-    if (!cand) return;
-    if (cand.pointerId !== ev.pointerId) return;
-
-    if (cand.started){
-      // Commit
-      try{ cand.el.releasePointerCapture(cand.pointerId); }catch(e){}
-      app.state.draggingInstance = null;
-      app.state.dragCandidate = null;
-
-      persist();
-      app.render();
-    } else {
-      // Click without drag: just clear candidate. Selection already happened on pointerdown.
-      app.state.dragCandidate = null;
-    }
-  });
-
-  window.addEventListener('pointercancel', (ev) => {
-    const cand = app.state.dragCandidate;
-    if (!cand) return;
-    if (cand.pointerId !== ev.pointerId) return;
-    try{ cand.el.releasePointerCapture(cand.pointerId); }catch(e){}
-    app.state.draggingInstance = null;
-    app.state.dragCandidate = null;
-    app.renderTimeline();
-  });
 
 
   // Helpers
