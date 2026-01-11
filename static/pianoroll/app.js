@@ -80,6 +80,7 @@
     state: {
       selectedInstanceId: null,
       draggingInstance: null,
+      dragCandidate: null,
       dragOffsetX: 0,
       transportPlaying: false,
       transportStartPerf: 0,
@@ -116,7 +117,7 @@
 
     init(){
       const restored = restore();
-      this.project = restored || H2SProject.defaultProject();
+      this.project = restored ? (H2SProject.migrateProject ? H2SProject.migrateProject(restored) : restored) : H2SProject.defaultProject();
 
       // Ensure minimal structure
       if (!this.project.tracks || this.project.tracks.length === 0){
@@ -270,8 +271,11 @@
           e.preventDefault();
           const clipId = e.dataTransfer.getData('text/plain');
           if (!clipId) return;
-          const rect = lane.getBoundingClientRect();
-          const x = e.clientX - rect.left - 120; // after label
+          // IMPORTANT: the tracks container is scrollable. Convert clientX to timeline content X.
+          const tracksEl = document.querySelector('#tracks');
+          const rect = tracksEl.getBoundingClientRect();
+          const contentX = (e.clientX - rect.left) + (tracksEl.scrollLeft || 0);
+          const x = contentX - 120; // after label
           const startSec = Math.max(0, x / pxPerSec);
           this.addClipToTimeline(clipId, startSec, ti);
         });
@@ -289,13 +293,17 @@
           if (this.state.selectedInstanceId === inst.id) el.classList.add('selected');
           el.style.left = x + 'px';
           el.style.width = w + 'px';
+          el.dataset.instId = inst.id;
           el.innerHTML = `
             <div class="instTitle">${escapeHtml(clip.name)}</div>
             <div class="instSub"><span>${fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
           `;
 
           el.addEventListener('pointerdown', (e) => this.instancePointerDown(e, inst.id));
-          el.addEventListener('click', (e)=>{ e.stopPropagation(); this.selectInstance(inst.id); });
+          // Stop bubbling so the timeline background handler won't move the playhead.
+          // (Selection is already handled in pointerdown.)
+          el.addEventListener('click', (e)=>{ e.stopPropagation(); });
+          // Selection is handled in pointerdown (to keep DOM stable for drag/dblclick).
           el.addEventListener('dblclick', (e)=>{ e.stopPropagation(); this.openClipEditor(inst.clipId); });
 
           lane.appendChild(el);
@@ -311,15 +319,17 @@
       playhead.style.left = x + 'px';
       tracks.appendChild(playhead);
 
-      tracks.addEventListener('click', (e) => {
-        // click empty timeline -> move playhead
+      tracks.onclick = (e) => {
+        // Click empty timeline -> move playhead.
+        // If click originates from an instance, ignore.
+        if (e.target && e.target.closest && e.target.closest('.instance')) return;
         const rect = tracks.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const sec = Math.max(0, (x - 120) / pxPerSec);
+        const contentX = (e.clientX - rect.left) + (tracks.scrollLeft || 0);
+        const sec = Math.max(0, (contentX - 120) / pxPerSec);
         this.project.ui.playheadSec = sec;
         persist();
         this.render();
-      });
+      };
     },
 
     renderSelection(){
@@ -353,9 +363,23 @@
       box.querySelector('#btnSelDel').addEventListener('click', () => this.deleteInstance(inst.id));
     },
 
-    selectInstance(instId){
+    // IMPORTANT: Selecting an instance MUST NOT re-render the whole timeline on pointerdown.
+    // Re-rendering during pointerdown destroys the DOM node currently receiving events,
+    // which breaks drag and native dblclick.
+    selectInstance(instId, elOpt){
+      const prev = this.state.selectedInstanceId;
       this.state.selectedInstanceId = instId;
-      this.render();
+
+      // Update selected styles without re-render.
+      if (prev && prev !== instId){
+        const prevEl = document.querySelector(`.instance[data-inst-id="${cssEsc(prev)}"]`);
+        if (prevEl) prevEl.classList.remove('selected');
+      }
+      const el = elOpt || document.querySelector(`.instance[data-inst-id="${cssEsc(instId)}"]`);
+      if (el) el.classList.add('selected');
+
+      // Only update inspector (selection panel). Timeline stays stable.
+      this.renderSelection();
     },
 
     duplicateInstance(instId){
@@ -390,15 +414,25 @@
     },
 
     instancePointerDown(ev, instId){
-      ev.preventDefault();
+      // Do NOT preventDefault for mouse; it can break native dblclick.
+      // For touch/pen, preventDefault reduces accidental page scroll.
+      if (ev.pointerType && ev.pointerType !== 'mouse') ev.preventDefault();
       ev.stopPropagation();
+
       const el = ev.currentTarget;
-      this.selectInstance(instId);
+      this.selectInstance(instId, el);
+
       const rect = el.getBoundingClientRect();
-      this.state.draggingInstance = instId;
-      this.state.dragOffsetX = ev.clientX - rect.left;
-      el.setPointerCapture(ev.pointerId);
+      this.state.dragCandidate = {
+        instId,
+        el,
+        pointerId: ev.pointerId,
+        startClientX: ev.clientX,
+        offsetX: ev.clientX - rect.left,
+        started: false
+      };
     },
+
 
     timelinePointerMove(ev){
       if (!this.state.draggingInstance) return;
@@ -590,6 +624,9 @@
 
     /* ---------------- Modal editor ---------------- */
     openClipEditor(clipId){
+      // Safety: if user was mid-drag, clear timeline drag state.
+      this.state.dragCandidate = null;
+      this.state.draggingInstance = null;
       const clip = this.project.clips.find(c => c.id === clipId);
       if (!clip) return;
       this.state.modal.show = true;
@@ -1158,29 +1195,86 @@
   };
 
   // Global pointer handlers (timeline drag)
+  // Design goals:
+  // - Drag should NOT spam persist() on every pointermove (performance).
+  // - Native dblclick should still work (no preventDefault / no pointerCapture until drag starts).
+  // - If user never moves beyond threshold, it is a click (selection only).
+
+  const TIMELINE_DRAG_THRESHOLD_PX = 4;
+  // While dragging, NEVER rebuild the whole timeline (it destroys the DOM element
+  // that holds pointer capture and breaks drag / dblclick). Instead, update the
+  // dragged element's style in place. We commit to project state on pointerup.
+
   window.addEventListener('pointermove', (ev) => {
-    if (!app.state.draggingInstance) return;
-    // update instance start live for smoother UX
-    const inst = app.project.instances.find(x => x.id === app.state.draggingInstance);
+    const cand = app.state.dragCandidate;
+    if (!cand) return;
+    if (cand.pointerId !== ev.pointerId) return;
+
+    const dx = ev.clientX - cand.startClientX;
+
+    if (!cand.started){
+      if (Math.abs(dx) < TIMELINE_DRAG_THRESHOLD_PX) return;
+
+      // Start dragging only after threshold.
+      cand.started = true;
+      app.state.draggingInstance = cand.instId;
+
+      // Capture pointer now so drag remains stable even if cursor leaves element.
+      try{ cand.el.setPointerCapture(cand.pointerId); }catch(e){}
+    }
+
+    const instId = cand.instId;
+    const inst = app.project.instances.find(x => x.id === instId);
     if (!inst) return;
-    const tracksEl = $('#tracks');
-    const rect = tracksEl.getBoundingClientRect();
-    const pxPerSec = app.project.ui.pxPerSec || 160;
-    const x = ev.clientX - rect.left - 120 - app.state.dragOffsetX;
-    inst.startSec = Math.max(0, x / pxPerSec);
-    app.renderTimeline();
-    persist();
+
+    const pxPerSec = app.project.ui && app.project.ui.pxPerSec ? app.project.ui.pxPerSec : 160;
+
+    // Offset left includes label width 120. The tracks container is scrollable.
+    const tracks = document.querySelector('#tracks');
+    const rect = tracks.getBoundingClientRect();
+    const contentX = (ev.clientX - rect.left) + (tracks.scrollLeft || 0);
+    const x = contentX - 120 - cand.offsetX;
+    const startSec = Math.max(0, x / pxPerSec);
+
+    // Update state
+    inst.startSec = startSec;
+
+    // Update DOM in-place
+    const leftPx = 120 + startSec * pxPerSec;
+    cand.el.style.left = leftPx + 'px';
+    const span = cand.el.querySelector('.instSub span');
+    if (span) span.textContent = fmtSec(startSec);
   });
 
   window.addEventListener('pointerup', (ev) => {
-    // modal pointer up already attached
-    // finalize timeline drag
-    if (app.state.draggingInstance){
+    const cand = app.state.dragCandidate;
+    if (!cand) return;
+    if (cand.pointerId !== ev.pointerId) return;
+
+    if (cand.started){
+      // Commit
+      try{ cand.el.releasePointerCapture(cand.pointerId); }catch(e){}
       app.state.draggingInstance = null;
+      app.state.dragCandidate = null;
+
       persist();
       app.render();
+    } else {
+      // Click without drag: just clear candidate. Selection already happened on pointerdown.
+      app.state.dragCandidate = null;
     }
   });
+
+  window.addEventListener('pointercancel', (ev) => {
+    const cand = app.state.dragCandidate;
+    if (!cand) return;
+    if (cand.pointerId !== ev.pointerId) return;
+    try{ cand.el.releasePointerCapture(cand.pointerId); }catch(e){}
+    app.state.draggingInstance = null;
+    app.state.dragCandidate = null;
+    app.renderTimeline();
+  });
+
 
   // Helpers
   function escapeHtml(s){
@@ -1190,6 +1284,14 @@
       .replaceAll('>','&gt;')
       .replaceAll('"','&quot;')
       .replaceAll("'",'&#39;');
+  }
+
+  // CSS.escape polyfill (good enough for our UUID/id use cases)
+  function cssEsc(s){
+    const str = String(s || '');
+    if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(str);
+    // Escape characters that can break attribute selectors.
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
   function roundRect(ctx, x, y, w, h, r){
@@ -1207,5 +1309,11 @@
   window.H2SApp = app;
 
   // Boot
-  window.addEventListener('load', () => app.init());
+  window.addEventListener('load', () => {
+    try{ app.init(); }
+    catch(e){
+      console.error(e);
+      alert('Hum2Song Studio init failed. Please open DevTools Console for details.');
+    }
+  });
 })();

@@ -1,5 +1,10 @@
-/* Hum2Song Studio MVP - project.js (v8)
+/* Hum2Song Studio MVP - project.js (v9)
    Plain script (no import/export). Exposes window.H2SProject.
+
+   v9 changes:
+   - Accept backend score schema: { tempo_bpm } and map to { bpm } for frontend use.
+   - Add migrateProject() to harden localStorage/project JSON compatibility.
+   - Add fromBackendScore()/toBackendScore() helpers for future backend integration.
 */
 (function(){
   'use strict';
@@ -22,8 +27,40 @@
     return names[n] + String(o);
   }
 
+  // Convert score from backend schema to frontend schema (best-effort).
+  // Backend: version, tempo_bpm, time_signature, tracks[].notes[] ...
+  // Frontend: bpm, tracks[].notes[] ...
+  function fromBackendScore(raw){
+    const s = deepClone(raw || {});
+    if (typeof s.bpm !== 'number' && typeof s.tempo_bpm === 'number'){
+      s.bpm = Number(s.tempo_bpm);
+    }
+    return ensureScoreIds(s);
+  }
+
+  // Convert score from frontend schema to backend schema (best-effort).
+  function toBackendScore(score){
+    const s = deepClone(score || {});
+    // Prefer tempo_bpm for backend.
+    if (typeof s.tempo_bpm !== 'number' && typeof s.bpm === 'number'){
+      s.tempo_bpm = Number(s.bpm);
+    }
+    // Some backend normalizers might ignore unknown fields, but we keep it tidy.
+    delete s.bpm;
+    return s;
+  }
+
   function ensureScoreIds(score){
     if (!score) return score;
+
+    // Accept both bpm and tempo_bpm.
+    const bpm = (typeof score.bpm === 'number') ? score.bpm
+      : (typeof score.tempo_bpm === 'number') ? score.tempo_bpm
+      : Number(score.bpm ?? score.tempo_bpm ?? 120);
+
+    score.bpm = Number(bpm);
+    score.bpm = clamp(score.bpm, 30, 260);
+
     if (!score.tracks) score.tracks = [];
     for (const t of score.tracks){
       if (!t.id) t.id = uid('trk_');
@@ -35,14 +72,14 @@
         if (typeof n.start !== 'number') n.start = Number(n.start ?? 0);
         if (typeof n.duration !== 'number') n.duration = Number(n.duration ?? 0.2);
         if (typeof n.velocity !== 'number') n.velocity = Number(n.velocity ?? 100);
+
         n.pitch = clamp(Math.round(n.pitch), 0, 127);
         n.velocity = clamp(Math.round(n.velocity), 1, 127);
         n.start = Math.max(0, n.start);
         n.duration = Math.max(0.01, n.duration);
       }
     }
-    if (typeof score.bpm !== 'number') score.bpm = Number(score.bpm ?? 120);
-    score.bpm = clamp(score.bpm, 30, 260);
+
     return score;
   }
 
@@ -73,7 +110,9 @@
   }
 
   function createClipFromScore(score, opts){
-    const s = ensureScoreIds(deepClone(score));
+    // Accept backend schema here as well (most clips come from /tasks/{id}/score).
+    const s0 = fromBackendScore(score);
+    const s = ensureScoreIds(deepClone(s0));
     const st = scoreStats(s);
     const name = (opts && opts.name) ? String(opts.name) : ('Clip ' + uid('').slice(0,5));
     return {
@@ -101,15 +140,68 @@
     };
   }
 
+  function migrateProject(p){
+    // Best-effort schema hardening for localStorage / imported JSON
+    const out = deepClone(p || {});
+    if (typeof out.version !== 'number') out.version = 1;
+    if (typeof out.bpm !== 'number') out.bpm = Number(out.bpm ?? 120);
+    out.bpm = clamp(out.bpm, 30, 260);
+
+    if (!Array.isArray(out.tracks) || out.tracks.length === 0){
+      out.tracks = [{ id: uid('trk_'), name: 'Track 1' }];
+    } else {
+      for (const t of out.tracks){
+        if (!t.id) t.id = uid('trk_');
+        if (typeof t.name !== 'string') t.name = String(t.name ?? '');
+      }
+    }
+
+    if (!Array.isArray(out.clips)) out.clips = [];
+    for (const c of out.clips){
+      if (!c.id) c.id = uid('clip_');
+      if (typeof c.name !== 'string') c.name = String(c.name ?? 'Untitled');
+      c.score = ensureScoreIds(fromBackendScore(c.score || { bpm: out.bpm, tracks: [] }));
+      // meta is optional; we recompute if missing
+      if (!c.meta) {
+        const st = scoreStats(c.score);
+        c.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
+      }
+      if (c.createdAt == null) c.createdAt = Date.now();
+      if (c.sourceTaskId != null) c.sourceTaskId = String(c.sourceTaskId);
+    }
+
+    if (!Array.isArray(out.instances)) out.instances = [];
+    for (const inst of out.instances){
+      if (!inst.id) inst.id = uid('inst_');
+      if (inst.clipId != null) inst.clipId = String(inst.clipId);
+      inst.startSec = Math.max(0, Number(inst.startSec || 0));
+      inst.trackIndex = Math.max(0, Number(inst.trackIndex || 0));
+      inst.transpose = Number(inst.transpose || 0);
+    }
+
+    if (!out.ui) out.ui = {};
+    if (typeof out.ui.pxPerSec !== 'number') out.ui.pxPerSec = 160;
+    if (typeof out.ui.playheadSec !== 'number') out.ui.playheadSec = 0;
+
+    return out;
+  }
+
   // Export
   window.H2SProject = {
     uid,
     deepClone,
     clamp,
     midiToName,
+
+    fromBackendScore,
+    toBackendScore,
+
     ensureScoreIds,
     scoreStats,
+
     defaultProject,
+    migrateProject,
+
     createClipFromScore,
     createInstance,
   };
