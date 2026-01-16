@@ -1,26 +1,18 @@
-/* Hum2Song Studio MVP - project.js (v8)
-   Plain script (no import/export). Exposes window.H2SProject.
+/* Hum2Song Studio - core/project_core.js
+   Pure project/score utilities and constructors.
+   Depends on H2S.MathCore.
 */
-(function(){
+(function(root){
   'use strict';
 
-  function uid(prefix){
-    const s = Math.random().toString(16).slice(2) + Date.now().toString(16);
-    return (prefix || 'id_') + s.slice(0, 12);
+  const H2S = root.H2S = root.H2S || {};
+  const MathCore = H2S.MathCore;
+  if (!MathCore){
+    throw new Error('H2S.MathCore not loaded. Ensure core/math.js is loaded before core/project_core.js');
   }
 
-  function deepClone(obj){
-    return JSON.parse(JSON.stringify(obj));
-  }
-
-  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
-
-  function midiToName(m){
-    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-    const n = ((m % 12) + 12) % 12;
-    const o = Math.floor(m / 12) - 1;
-    return names[n] + String(o);
-  }
+  const ProjectCore = H2S.ProjectCore = H2S.ProjectCore || {};
+  const { uid, deepClone, clamp, midiToName } = MathCore;
 
   function ensureScoreIds(score){
     if (!score) return score;
@@ -30,7 +22,7 @@
       if (typeof t.name !== 'string') t.name = String(t.name ?? '');
       if (!Array.isArray(t.notes)) t.notes = [];
       for (const n of t.notes){
-        if (!n.id) n.id = uid('n_');
+        if (!n.id) n.id = uid('nt_');
         if (typeof n.pitch !== 'number') n.pitch = Number(n.pitch ?? 60);
         if (typeof n.start !== 'number') n.start = Number(n.start ?? 0);
         if (typeof n.duration !== 'number') n.duration = Number(n.duration ?? 0.2);
@@ -40,6 +32,8 @@
         n.start = Math.max(0, n.start);
         n.duration = Math.max(0.01, n.duration);
       }
+      // Stable sort for determinism
+      t.notes.sort((a,b)=> (a.start-b.start) || (a.pitch-b.pitch) || String(a.id).localeCompare(String(b.id)));
     }
     if (typeof score.bpm !== 'number') score.bpm = Number(score.bpm ?? 120);
     score.bpm = clamp(score.bpm, 30, 260);
@@ -48,17 +42,20 @@
 
   function scoreStats(score){
     score = ensureScoreIds(deepClone(score || {bpm:120, tracks:[]}));
-    let minP = 127, maxP = 0, maxEnd = 0, count = 0;
+    let notes = 0;
+    let minPitch = 127, maxPitch = 0;
+    let end = 0;
     for (const t of score.tracks){
-      for (const n of t.notes){
-        count += 1;
-        minP = Math.min(minP, n.pitch);
-        maxP = Math.max(maxP, n.pitch);
-        maxEnd = Math.max(maxEnd, n.start + n.duration);
+      notes += (t.notes?.length || 0);
+      for (const n of (t.notes || [])){
+        minPitch = Math.min(minPitch, n.pitch);
+        maxPitch = Math.max(maxPitch, n.pitch);
+        end = Math.max(end, n.start + n.duration);
       }
     }
-    if (count === 0){ minP = 60; maxP = 60; maxEnd = 0; }
-    return { count, minPitch:minP, maxPitch:maxP, spanSec: maxEnd };
+    if (!isFinite(minPitch)) minPitch = 60;
+    if (!isFinite(maxPitch)) maxPitch = 72;
+    return { notes, minPitch, maxPitch, durationSec: end };
   }
 
   function defaultProject(){
@@ -80,14 +77,8 @@
       id: uid('clip_'),
       name,
       createdAt: Date.now(),
-      sourceTaskId: (opts && opts.sourceTaskId) ? String(opts.sourceTaskId) : null,
       score: s,
-      meta: {
-        notes: st.count,
-        pitchMin: st.minPitch,
-        pitchMax: st.maxPitch,
-        spanSec: st.spanSec
-      }
+      stats: st,
     };
   }
 
@@ -95,22 +86,26 @@
     return {
       id: uid('inst_'),
       clipId,
-      startSec: Math.max(0, Number(startSec || 0)),
-      trackIndex: Math.max(0, Number(trackIndex || 0)),
-      transpose: 0
+      startSec: Math.max(0, Number(startSec ?? 0)),
+      trackIndex: Number(trackIndex ?? 0),
+      transpose: 0,
+      gain: 1.0,
     };
   }
 
-  // Export
-  window.H2SProject = {
-    uid,
-    deepClone,
-    clamp,
-    midiToName,
-    ensureScoreIds,
-    scoreStats,
-    defaultProject,
-    createClipFromScore,
-    createInstance,
-  };
-})();
+  ProjectCore.ensureScoreIds = ensureScoreIds;
+  ProjectCore.scoreStats = scoreStats;
+  ProjectCore.defaultProject = defaultProject;
+  ProjectCore.createClipFromScore = createClipFromScore;
+  ProjectCore.createInstance = createInstance;
+
+  // Re-export some math helpers to keep call sites simple
+  ProjectCore.uid = uid;
+  ProjectCore.deepClone = deepClone;
+  ProjectCore.clamp = clamp;
+  ProjectCore.midiToName = midiToName;
+
+  if (typeof module !== 'undefined' && module.exports){
+    module.exports = ProjectCore;
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : window);

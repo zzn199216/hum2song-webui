@@ -276,7 +276,27 @@
     .instTitle{ font-weight:900; font-size:13px; }
     .instSub{ font-size:12px; color:rgba(255,255,255,.72); display:flex; justify-content:space-between; }
 
-    .playhead{
+    
+    .instRemove{
+      position:absolute;
+      top:6px;
+      right:6px;
+      width:22px;
+      height:22px;
+      border-radius:8px;
+      border:1px solid rgba(239,68,68,.35);
+      background: rgba(239,68,68,.14);
+      color:#fecaca;
+      font-weight:900;
+      font-size:14px;
+      line-height:18px;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .instRemove:hover{ background: rgba(239,68,68,.22); }
+.playhead{
       position:absolute;
       top:0; bottom:0;
       width:2px;
@@ -541,6 +561,8 @@
             <span class="pill" id="pillSnap">Snap</span>
             <select id="selSnap" class="btn" style="padding:8px 10px;">
               <option value="off">Snap: Off</option>
+              <option value="64">Snap: 1/64</option>
+              <option value="32">Snap: 1/32</option>
               <option value="16" selected>Snap: 1/16</option>
               <option value="8">Snap: 1/8</option>
               <option value="4">Snap: 1/4</option>
@@ -573,20 +595,20 @@
     </div>
   </div>
 
-  <!-- Tone.js: prefer local vendor, fallback to CDN -->
-  <script>
-    // If local Tone is missing, fallback to CDN.
-    (function(){
-      if (window.Tone) return;
-      var s = document.createElement('script');
-      s.src = "https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js";
-      s.onload = function(){ console.log("Tone loaded from CDN"); };
-      document.head.appendChild(s);
-    })();
-  </script>
+  <!-- Tone.js (UMD) -->
+  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
 
   <script src="/static/pianoroll/project.js"></script>
+  <script src="/static/pianoroll/ui/timeline_view.js"></script>
+  <script src="/static/pianoroll/core/timeline_math.js"></script>
+  <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>
   <script src="/static/pianoroll/timeline_controller.js"></script>
+  <script src="/static/pianoroll/ui/library_view.js"></script>
+  <script src="/static/pianoroll/controllers/library_controller.js"></script>
+  <script src="/static/pianoroll/ui/selection_view.js"></script>
+  <script src="/static/pianoroll/controllers/selection_controller.js"></script>
+  <script src="/static/pianoroll/controllers/audio_controller.js"></script>
+  <script src="/static/pianoroll/controllers/editor_runtime.js"></script>
   <script src="/static/pianoroll/app.js"></script>
 </body>
 </html>

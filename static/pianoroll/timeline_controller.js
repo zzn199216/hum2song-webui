@@ -10,6 +10,15 @@
 
   const VERSION = 'timeline_controller_v1';
 
+  // Optional view helper (DOM-free) for stable markup + contract tests.
+  function getTimelineView(){
+    try {
+      return (typeof window !== 'undefined' && window.H2STimelineView) ? window.H2STimelineView : null;
+    } catch(_){
+      return null;
+    }
+  }
+
   function $(sel){ return document.querySelector(sel); }
 
   function escapeHtml(s){
@@ -149,10 +158,35 @@
             el.style.width = w + 'px';
             el.dataset.instId = inst.id;
 
-            el.innerHTML = `
+            el.innerHTML = (function(){
+              const view = getTimelineView();
+              if (view && typeof view.instanceInnerHTML === 'function'){
+                return view.instanceInnerHTML({
+                  clipName: clip.name,
+                  startSec: inst.startSec,
+                  noteCount: st.count,
+                  escapeHtml: ctrl._escapeHtml,
+                  fmtSec: ctrl._fmtSec,
+                });
+              }
+              return `
               <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
               <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
+              <button class="instRemove" title="Remove">×</button>
             `;
+            })();
+
+            // Remove button should not start drag / change playhead.
+            const btnRemove = el.querySelector('.instRemove');
+            if (btnRemove){
+              btnRemove.addEventListener('pointerdown', (e)=>{ e.preventDefault(); e.stopPropagation(); });
+              btnRemove.addEventListener('click', (e)=>{ 
+                e.preventDefault(); 
+                e.stopPropagation();
+                dbg(ctrl, 'remove inst', inst.id);
+                if (config.onRemoveInstance) config.onRemoveInstance(inst.id);
+              });
+            }
 
             // IMPORTANT: selection is handled in pointerdown to keep DOM stable for drag/dblclick.
             el.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
@@ -261,7 +295,17 @@
       const left = contentX - cand.offsetX;
 
       // Convert left (relative to tracks content) to startSec
-      const startSec = Math.max(0, (left - ctrl._labelW) / pxPerSec);
+      let startSec = Math.max(0, (left - ctrl._labelW) / pxPerSec);
+
+      // Snap (music grid): default 1/16, hold Alt to bypass snap.
+      if (!ev.altKey){
+        const bpm = (proj && proj.bpm) ? proj.bpm : 120;
+        const beatSec = 60 / bpm;
+        const gridSec = beatSec / 4; // 1/16 note in seconds
+        if (gridSec > 0){
+          startSec = Math.round(startSec / gridSec) * gridSec;
+        }
+      }
 
       inst.startSec = startSec;
 
