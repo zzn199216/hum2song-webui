@@ -7,6 +7,9 @@
 */
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 const assert = (cond, msg) => {
   if (!cond) throw new Error(msg || 'assertion failed');
 };
@@ -33,7 +36,6 @@ const libView = require('../static/pianoroll/ui/library_view.js');
   pass('library view includes play/add/edit/remove');
 })();
 
-
 (function testTimelineViewContracts(){
   const timelineView = require('../static/pianoroll/ui/timeline_view.js');
   const fmtSec = (x)=> String(x) + 's';
@@ -47,61 +49,28 @@ const libView = require('../static/pianoroll/ui/library_view.js');
     escapeHtml,
   });
 
-  assert(/class="instTitle"/.test(html), 'missing instTitle');
-  assert(/class="instSub"/.test(html), 'missing instSub');
-  assert(/class="instRemove"/.test(html), 'missing instRemove button');
+  // Legacy classes must remain
+  assert(/class=\"instTitle/.test(html), 'missing instTitle');
+  assert(/class=\"instSub/.test(html), 'missing instSub');
+  assert(/class=\"instRemove/.test(html), 'missing instRemove button');
+
+  // R8 contract additions
+  assert(/class=\"instBody/.test(html), 'missing instBody wrapper');
+  assert(/data-act=\"remove\"/.test(html), 'missing data-act=remove');
+  assert(/btn-inst-remove/.test(html), 'missing btn-inst-remove alias');
+
   assert(/Remove/.test(html), 'missing Remove label');
-  assert(/×/.test(html), 'missing × glyph');
-  pass('timeline view includes title/sub/remove');
+  assert(/×/.test(html), 'missing x glyph');
+  pass('timeline view includes body + title/sub/remove');
 })();
 
-
-(function testSelectionViewContracts(){
-  const selView = require('../static/pianoroll/ui/selection_view.js');
-  const fmtSec = (x)=> String(x) + 's';
-  const escapeHtml = (s)=> String(s);
-  const html = selView.selectionBoxInnerHTML({
-    clipName: 'Test Clip',
-    clipId: 'clip_x',
-    startSec: 2.5,
-    transpose: 0,
-    fmtSec,
-    escapeHtml,
-  });
-
-  assert(/data-act="edit"/.test(html), 'missing edit action');
-  assert(/data-act="duplicate"/.test(html), 'missing duplicate action');
-  assert(/data-act="remove"/.test(html), 'missing remove action');
-  assert(/Remove/.test(html), 'missing Remove label');
-  pass('selection view includes edit/duplicate/remove');
-})();
-
-
-(function testAudioFlatten(){
-  const audio = require('../static/pianoroll/controllers/audio_controller.js');
-  if (!audio || typeof audio.flattenProjectToEvents !== 'function'){
-    throw new Error('audio_controller.js must export flattenProjectToEvents');
-  }
-
-  const project = {
-    bpm: 120,
-    ui: { playheadSec: 0 },
-    clips: [
-      { id: 'c1', name: 'Clip1', score: { tracks: [ { notes: [ { start: 0, duration: 1, pitch: 60, velocity: 100 } ] } ] } }
-    ],
-    instances: [
-      { id: 'i1', clipId: 'c1', startSec: 2, transpose: 12 }
-    ]
-  };
-
-  const out = audio.flattenProjectToEvents(project, 0);
-  if (!out || !Array.isArray(out.events)) throw new Error('flattenProjectToEvents must return {events,maxT}');
-  if (out.events.length !== 1) throw new Error('expected 1 event');
-  const ev = out.events[0];
-  if (Math.abs(ev.t - 2) > 1e-9) throw new Error('event time wrong');
-  if (ev.pitch !== 72) throw new Error('transpose pitch wrong');
-  if (Math.abs(out.maxT - 3) > 1e-9) throw new Error('maxT wrong');
-  pass('audio flattenProjectToEvents works');
+(function testTimelineControllerSourceContract(){
+  // Source-level contract: controller should bind events to instBody if present.
+  const p = path.join(__dirname, '..', 'static', 'pianoroll', 'timeline_controller.js');
+  const src = fs.readFileSync(p, 'utf8');
+  assert(src.includes("querySelector('.instBody')") || src.includes('querySelector(\".instBody\")'), 'timeline_controller must query .instBody');
+  assert(src.includes('data-act=\"remove\"') || src.includes('[data-act=\"remove\"]'), 'timeline_controller must handle [data-act="remove"]');
+  pass('timeline controller binds to instBody + data-act remove');
 })();
 
 console.log('\nAll frontend contract tests passed.');

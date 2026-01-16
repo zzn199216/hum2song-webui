@@ -1,37 +1,53 @@
-// scripts/run_frontend_timeline_unit_tests.js
-// Node-only unit tests for timeline_math + timeline_runtime.
-const assert = require('assert');
+/* Node-only unit tests for timeline math/runtime (no DOM). */
+const path = require('path');
 
-const MathLib = require('../static/pianoroll/core/timeline_math.js');
-const Rt = require('../static/pianoroll/controllers/timeline_runtime.js');
+function assert(cond, msg){
+  if (!cond) throw new Error(msg || 'assert failed');
+}
 
-function nearly(a,b,eps=1e-9){ return Math.abs(a-b) <= eps; }
+function pass(name){ console.log('PASS', name); }
 
-(function test_snap(){
-  assert.strictEqual(MathLib.snapSec(-1, 0.5, false), 0);
-  assert.ok(nearly(MathLib.snapSec(0.49, 0.5, false), 0.5));
-  assert.ok(nearly(MathLib.snapSec(1.01, 0.5, false), 1.0));
-  assert.ok(nearly(MathLib.snapSec(1.01, 0.5, true), 1.01)); // bypass
+(function main(){
+  const math = require(path.join('..','static','pianoroll','core','timeline_math.js'));
+  const rt = require(path.join('..','static','pianoroll','controllers','timeline_runtime.js'));
+
+  assert(math && math.secToPx && math.pxToSec && math.snap, 'math exports missing');
+  pass('timeline_math exports');
+
+  assert(math.secToPx(2, 100) === 200, 'secToPx');
+  assert(Math.abs(math.pxToSec(200, 100) - 2) < 1e-9, 'pxToSec');
+  pass('sec<->px');
+
+  assert(math.snap(1.01, 0.5) === 1.0, 'snap down');
+  assert(math.snap(1.26, 0.5) === 1.5, 'snap up');
+  pass('snap');
+
+  const sess = rt.createDragSession({
+    instId: 'i1',
+    pointerId: 7,
+    startClientX: 100,
+    offsetX: 20,
+    labelW: 120,
+    pxPerSec: 200,
+    thresholdPx: 4,
+  });
+
+  assert(sess.started === false, 'initial started');
+  assert(sess.maybeStart(102) === false, 'below threshold should not start');
+  assert(sess.maybeStart(120) === true, 'above threshold should start');
+  pass('drag threshold');
+
+  // Suppose tracks rectLeft=10, scrollLeft=0, clientX=210
+  // contentX=(210-10)+0=200; left=200-20=180; startSec=(180-120)/200=0.3
+  const out = sess.compute(210, 10, 0, 0, false);
+  assert(Math.abs(out.startSec - 0.3) < 1e-9, 'compute startSec');
+  assert(Math.abs(out.leftPx - (120 + 0.3*200)) < 1e-9, 'compute leftPx');
+  pass('compute');
+
+  // With snap grid 0.25 sec (no bypass): startSec 0.3 snaps to 0.25
+  const out2 = sess.compute(210, 10, 0, 0.25, false);
+  assert(Math.abs(out2.startSec - 0.25) < 1e-9, 'compute snapped');
+  pass('compute snapped');
+
+  console.log('\nAll timeline unit tests passed.');
 })();
-
-(function test_drag(){
-  const pxPerSec = 100; // 100px == 1sec
-  const instStartSec = 2.0;
-  const st = Rt.beginDrag({ pxPerSec, pointerX: 250, instStartSec }); 
-  // pointerX 250 => 2.5sec, offset 0.5
-  assert.ok(nearly(st.offsetSec, 0.5));
-
-  let u = Rt.updateDrag(st, { pointerX: 350, gridSec: 0.25, bypass: false }); // 3.5-0.5=3.0 => snap 3.0
-  assert.ok(nearly(u.previewStartSec, 3.0));
-
-  u = Rt.updateDrag(st, { pointerX: 333, gridSec: 0.25, bypass: false }); // 3.33-0.5=2.83 => snap 2.75
-  assert.ok(nearly(u.previewStartSec, 2.75));
-
-  u = Rt.updateDrag(st, { pointerX: 333, gridSec: 0.25, bypass: true }); // bypass
-  assert.ok(nearly(u.previewStartSec, 2.83));
-
-  const e = Rt.endDrag(st);
-  assert.ok(nearly(e.committedStartSec, 2.83));
-})();
-
-console.log('PASS timeline_math + timeline_runtime unit tests');

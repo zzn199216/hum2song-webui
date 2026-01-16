@@ -10,15 +10,6 @@
 
   const VERSION = 'timeline_controller_v1';
 
-  // Optional view helper (DOM-free) for stable markup + contract tests.
-  function getTimelineView(){
-    try {
-      return (typeof window !== 'undefined' && window.H2STimelineView) ? window.H2STimelineView : null;
-    } catch(_){
-      return null;
-    }
-  }
-
   function $(sel){ return document.querySelector(sel); }
 
   function escapeHtml(s){
@@ -158,30 +149,31 @@
             el.style.width = w + 'px';
             el.dataset.instId = inst.id;
 
-            el.innerHTML = (function(){
-              const view = getTimelineView();
-              if (view && typeof view.instanceInnerHTML === 'function'){
-                return view.instanceInnerHTML({
-                  clipName: clip.name,
-                  startSec: inst.startSec,
-                  noteCount: st.count,
-                  escapeHtml: ctrl._escapeHtml,
-                  fmtSec: ctrl._fmtSec,
-                });
-              }
-              return `
-              <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
-              <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
-              <button class="instRemove" title="Remove">×</button>
-            `;
-            })();
+            // Prefer view helper (keeps markup stable + supports instBody + data-act remove).
+            if (window.H2STimelineView && typeof window.H2STimelineView.instanceInnerHTML === 'function'){
+              el.innerHTML = window.H2STimelineView.instanceInnerHTML({
+                clipName: clip.name,
+                startSec: (typeof inst.startSec === 'number') ? inst.startSec : 0,
+                noteCount: (typeof st.count === 'number') ? st.count : 0,
+                fmtSec: ctrl._fmtSec.bind(ctrl),
+                escapeHtml: ctrl._escapeHtml.bind(ctrl),
+              });
+            } else {
+              el.innerHTML = `
+                <div class="instBody" data-role="inst-body">
+                  <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
+                  <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
+                </div>
+                <button class="instRemove" type="button" data-act="remove" title="Remove" aria-label="Remove">×</button>
+              `;
+            }
 
             // Remove button should not start drag / change playhead.
-            const btnRemove = el.querySelector('.instRemove');
+            const btnRemove = el.querySelector('[data-act="remove"], .instRemove');
             if (btnRemove){
               btnRemove.addEventListener('pointerdown', (e)=>{ e.preventDefault(); e.stopPropagation(); });
-              btnRemove.addEventListener('click', (e)=>{ 
-                e.preventDefault(); 
+              btnRemove.addEventListener('click', (e)=>{
+                e.preventDefault();
                 e.stopPropagation();
                 dbg(ctrl, 'remove inst', inst.id);
                 if (config.onRemoveInstance) config.onRemoveInstance(inst.id);
@@ -189,11 +181,12 @@
             }
 
             // IMPORTANT: selection is handled in pointerdown to keep DOM stable for drag/dblclick.
-            el.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
+            const hit = el.querySelector('.instBody') || el;
+            hit.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
             // Stop bubbling so the timeline background handler won't move the playhead.
             el.addEventListener('click', (e)=>{ e.stopPropagation(); });
             // Native dblclick is reliable as long as we don't rebuild DOM between clicks.
-            el.addEventListener('dblclick', (e)=>{ e.stopPropagation(); dbg(ctrl,'dblclick inst', inst.id); config.onOpenClipEditor(inst.clipId); });
+            hit.addEventListener('dblclick', (e)=>{ e.stopPropagation(); dbg(ctrl,'dblclick inst', inst.id); if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId); });
 
             lane.appendChild(el);
           }

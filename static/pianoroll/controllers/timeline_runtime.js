@@ -1,65 +1,82 @@
-/* Hum2Song - timeline_runtime.js
-   Pure logic for timeline dragging. Node-safe UMD export.
-   This does NOT touch the DOM. Controller can use it to compute preview/commit startSec.
+/* Hum2Song Studio - controllers/timeline_runtime.js
+   Pure-ish runtime helpers for timeline drag behavior.
+   - No DOM dependencies; caller provides track geometry.
+   UMD-style: window.H2STimelineRuntime + Node require().
 */
 (function(root, factory){
-  if (typeof module !== 'undefined' && module.exports){
+  if (typeof module === 'object' && module.exports){
     module.exports = factory(require('../core/timeline_math.js'));
   } else {
     root.H2STimelineRuntime = factory(root.H2STimelineMath);
   }
-})(typeof window !== 'undefined' ? window : globalThis, function(MathLib){
+})(typeof window !== 'undefined' ? window : globalThis, function(MathUtil){
   'use strict';
 
-  if (!MathLib){
-    // In browser, timeline_math.js must be loaded before this file.
-    // In Node, require path should resolve.
-    MathLib = {
-      pxToSec: (px, pps)=>px/pps,
-      snapSec: (s)=>Math.max(0,s||0),
-    };
+  const VERSION = 'timeline_runtime_v1';
+
+  function _requireMath(){
+    if (!MathUtil) throw new Error('H2STimelineMath is required');
+    return MathUtil;
   }
 
-  // DragState stores pointer->instance offset.
-  function beginDrag(opts){
-    const pxPerSec = opts.pxPerSec;
-    const pointerX = opts.pointerX;
-    const instStartSec = opts.instStartSec;
-    const offsetSec = MathLib.pxToSec(pointerX, pxPerSec) - instStartSec;
-    return {
-      pxPerSec,
-      offsetSec,
-      startedAt: opts.startedAt || Date.now(),
-      originStartSec: instStartSec,
-      lastPreviewStartSec: instStartSec,
-    };
-  }
+  /**
+   * Create a drag session.
+   * All units are in seconds + pixels (we will convert).
+   */
+  function createDragSession(opts){
+    opts = opts || {};
+    const M = _requireMath();
 
-  function updateDrag(state, opts){
-    const pointerX = opts.pointerX;
-    const gridSec = opts.gridSec || 0;
-    const bypass = !!opts.bypass;
-    const rawStart = MathLib.pxToSec(pointerX, state.pxPerSec) - state.offsetSec;
-    const snapped = MathLib.snapSec(rawStart, gridSec, bypass);
-    state.lastPreviewStartSec = snapped;
-    return {
-      previewStartSec: snapped,
-      rawStartSec: rawStart,
-    };
-  }
+    const session = {
+      instId: String(opts.instId || ''),
+      pointerId: opts.pointerId,
+      startClientX: Number(opts.startClientX || 0),
+      offsetX: Number(opts.offsetX || 0),
+      labelW: Number(opts.labelW || 120),
+      pxPerSec: Number(opts.pxPerSec || 160),
+      thresholdPx: Number(opts.thresholdPx || 4),
+      started: false,
 
-  function endDrag(state){
-    return {
-      committedStartSec: state.lastPreviewStartSec,
-      originStartSec: state.originStartSec,
-      moved: Math.abs(state.lastPreviewStartSec - state.originStartSec) > 1e-9,
-      elapsedMs: Date.now() - state.startedAt,
+      /** Decide whether we should enter drag mode based on current clientX. */
+      maybeStart(clientX){
+        const dx = Number(clientX || 0) - session.startClientX;
+        if (!session.started && M.shouldStartDrag(dx, session.thresholdPx)){
+          session.started = true;
+          return true;
+        }
+        return session.started;
+      },
+
+      /**
+       * Compute startSec from pointer position.
+       * Caller provides:
+       * - rectLeft: tracks.getBoundingClientRect().left
+       * - scrollLeft: tracks.scrollLeft
+       * Optional:
+       * - gridSec: snap grid in seconds (<=0 means no snap)
+       * - bypassSnap: boolean
+       */
+      compute(clientX, rectLeft, scrollLeft, gridSec, bypassSnap){
+        const M2 = _requireMath();
+        const cx = Number(clientX || 0);
+        const rl = Number(rectLeft || 0);
+        const sl = Number(scrollLeft || 0);
+        const contentX = (cx - rl) + sl;
+        const left = contentX - session.offsetX;
+        let startSec = Math.max(0, (left - session.labelW) / session.pxPerSec);
+        if (!bypassSnap && isFinite(gridSec) && Number(gridSec) > 0){
+          startSec = Math.max(0, M2.snap(startSec, Number(gridSec)));
+        }
+        const leftPx = session.labelW + startSec * session.pxPerSec;
+        return { startSec, leftPx };
+      },
     };
+
+    return session;
   }
 
   return {
-    beginDrag,
-    updateDrag,
-    endDrag,
+    VERSION,
+    createDragSession,
   };
 });
