@@ -51,7 +51,8 @@
    * - onSelectInstance(instId, el)
    * - onOpenClipEditor(clipId)
    * - onAddClipToTimeline(clipId, startSec, trackIndex)
-   * - onPersistAndRender(): called on commit (pointerup after drag OR click empty moves playhead)
+   * - onPersistAndRender(): called on commit (pointerup after drag)
+   * - onMovePlayheadSec(sec): optional; called when user clicks empty lane to move playhead (you decide persist/seek)
    *
    * Optional:
    * - escapeHtml, fmtSec
@@ -74,6 +75,19 @@
         const ui = proj && proj.ui ? proj.ui : null;
         const v = ui && typeof ui.pxPerSec === 'number' ? ui.pxPerSec : 160;
         return v;
+      },
+      _playheadEl: null,
+      setPlayheadSec(sec){
+        const tracks = ctrl._tracksEl;
+        if (!tracks) return;
+        const pxPerSec = ctrl._getPxPerSec();
+        const s = Math.max(0, Number(sec || 0));
+        // Re-acquire in case a render replaced DOM
+        if (!ctrl._playheadEl || !ctrl._playheadEl.isConnected){
+          ctrl._playheadEl = tracks.querySelector('.playhead');
+        }
+        if (!ctrl._playheadEl) return;
+        ctrl._playheadEl.style.left = (ctrl._labelW + s * pxPerSec) + 'px';
       },
       _ensureBound(){
         if (ctrl._bound) return;
@@ -101,6 +115,13 @@
         if (cand && cand.started){
           dbg(ctrl, 'render() skipped because dragging is active');
           return;
+        }
+
+        // Preserve existing playhead element across renders (so playback can move it without full re-render)
+        let preservedPlayhead = null;
+        if (ctrl._playheadEl && ctrl._playheadEl.isConnected){
+          preservedPlayhead = ctrl._playheadEl;
+          try{ preservedPlayhead.remove(); }catch(e){}
         }
 
         tracks.innerHTML = '';
@@ -194,11 +215,12 @@
           tracks.appendChild(lane);
         }
 
-        // playhead line
-        const playhead = document.createElement('div');
+        // playhead line (preserve element for cheap per-frame updates)
+        const playhead = preservedPlayhead || document.createElement('div');
         playhead.className = 'playhead';
-        const x = ctrl._labelW + ((proj.ui && proj.ui.playheadSec) ? proj.ui.playheadSec : 0) * pxPerSec;
-        playhead.style.left = x + 'px';
+        const phSec = (proj.ui && typeof proj.ui.playheadSec === 'number') ? proj.ui.playheadSec : 0;
+        playhead.style.left = (ctrl._labelW + phSec * pxPerSec) + 'px';
+        ctrl._playheadEl = playhead;
         tracks.appendChild(playhead);
 
         // Click empty timeline -> move playhead
@@ -211,7 +233,11 @@
           const proj2 = config.getProject();
           proj2.ui = proj2.ui || {};
           proj2.ui.playheadSec = sec;
-          config.onPersistAndRender();
+          if (typeof config.onMovePlayheadSec === 'function'){
+            try{ config.onMovePlayheadSec(sec); }catch(err){ console.warn('onMovePlayheadSec failed', err); }
+          } else {
+            config.onPersistAndRender();
+          }
         };
       }
     };

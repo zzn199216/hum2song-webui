@@ -11,8 +11,131 @@
     task: (id) => `/tasks/${encodeURIComponent(id)}`,
     score: (id) => `/tasks/${encodeURIComponent(id)}/score`,
   };
+  const LS_KEY_V1 = 'hum2song_studio_project_v1';
+  const LS_KEY_V2 = 'hum2song_studio_project_v2';
 
-  const LS_KEY = 'hum2song_studio_project_v1';
+  // --- storage is beats-only (ProjectDoc v2). UI remains v1 seconds until controllers are migrated. ---
+  function _readLS(key){
+    try{
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e){
+      console.warn('[app] Failed to parse localStorage', key, e);
+      return null;
+    }
+  }
+
+  function _writeLS(key, obj){
+    try{
+      localStorage.setItem(key, JSON.stringify(obj));
+    } catch (e){
+      console.warn('[app] Failed to write localStorage', key, e);
+    }
+  }
+
+  function _beatToSec(beat, bpm){
+    const P = window.H2SProject;
+    if (P && typeof P.beatToSec === 'function') return P.beatToSec(beat, bpm);
+    return (beat * 60) / (bpm || 120);
+  }
+
+  function _scoreBeatToSec(scoreBeat, bpm){
+    const P = window.H2SProject;
+    if (P && typeof P.scoreBeatToSec === 'function') return P.scoreBeatToSec(scoreBeat, bpm);
+
+    // Fallback: convert minimal beat score -> sec score (single tempo).
+    const out = { version: 1, tempo_bpm: bpm || 120, time_signature: scoreBeat && scoreBeat.time_signature ? scoreBeat.time_signature : null, tracks: [] };
+    if (!scoreBeat || !Array.isArray(scoreBeat.tracks)) return out;
+
+    for (const tr of scoreBeat.tracks){
+      const notes = [];
+      for (const n of (tr.notes || [])){
+        notes.push({
+          id: n.id,
+          pitch: n.pitch,
+          velocity: n.velocity,
+          start: _beatToSec(n.startBeat || 0, bpm || 120),
+          duration: _beatToSec(n.durationBeat || 0, bpm || 120)
+        });
+      }
+      out.tracks.push({ id: tr.id, name: tr.name, notes });
+    }
+    return out;
+  }
+
+  function _projectV1ToV2(p1){
+    const P = window.H2SProject;
+    if (P && typeof P.migrateProjectV1toV2 === 'function') return P.migrateProjectV1toV2(p1);
+    return null;
+  }
+
+  function _isProjectV2(obj){
+    const P = window.H2SProject;
+    if (P && typeof P.isProjectV2 === 'function') return P.isProjectV2(obj);
+    return !!(obj && obj.version === 2 && obj.timebase === 'beat');
+  }
+
+  function _projectV2ToV1View(p2){
+    const bpm = (p2 && typeof p2.bpm === 'number') ? p2.bpm : 120;
+
+    const tracks = Array.isArray(p2 && p2.tracks)
+      ? p2.tracks.map(t => ({ id: t.id, name: t.name }))
+      : [{ id: 'track-1', name: 'Track 1' }];
+
+    const trackIndexById = {};
+    tracks.forEach((t, i) => { trackIndexById[t.id] = i; });
+
+    const pxPerBeat = (p2 && p2.ui && typeof p2.ui.pxPerBeat === 'number') ? p2.ui.pxPerBeat : 240;
+    const pxPerSec = (window.H2SProject && typeof window.H2SProject.pxPerBeatToPxPerSec === 'function')
+      ? window.H2SProject.pxPerBeatToPxPerSec(pxPerBeat, bpm)
+      : (pxPerBeat * bpm / 60);
+
+    const playheadBeat = (p2 && p2.ui && typeof p2.ui.playheadBeat === 'number') ? p2.ui.playheadBeat : 0;
+    const playheadSec = _beatToSec(playheadBeat, bpm);
+
+    const clipsMap = (p2 && p2.clips) ? p2.clips : {};
+    const order = (p2 && Array.isArray(p2.clipOrder)) ? p2.clipOrder : Object.keys(clipsMap);
+
+    const clips = [];
+    for (const cid of order){
+      const c = clipsMap[cid];
+      if (!c) continue;
+
+      const scoreSec = _scoreBeatToSec(c.score, bpm);
+      const meta = c.meta || {};
+      const spanBeat = (typeof meta.spanBeat === 'number') ? meta.spanBeat : 0;
+
+      clips.push({
+        id: c.id || cid,
+        name: c.name || 'Clip',
+        createdAt: c.createdAt || Date.now(),
+        sourceTaskId: (c.sourceTaskId !== undefined) ? c.sourceTaskId : null,
+        score: scoreSec,
+        meta: {
+          notes: (typeof meta.notes === 'number') ? meta.notes : 0,
+          pitchMin: (typeof meta.pitchMin === 'number') ? meta.pitchMin : null,
+          pitchMax: (typeof meta.pitchMax === 'number') ? meta.pitchMax : null,
+          spanSec: _beatToSec(spanBeat, bpm),
+          sourceTempoBpm: (typeof meta.sourceTempoBpm === 'number') ? meta.sourceTempoBpm : null
+        }
+      });
+    }
+
+    const instances = [];
+    for (const inst of (p2 && Array.isArray(p2.instances) ? p2.instances : [])){
+      const trackIndex = (inst && inst.trackId && (inst.trackId in trackIndexById)) ? trackIndexById[inst.trackId] : 0;
+      instances.push({
+        id: inst.id,
+        clipId: inst.clipId,
+        trackIndex,
+        startSec: _beatToSec(inst.startBeat || 0, bpm),
+        transpose: inst.transpose || 0
+      });
+    }
+
+    return { version: 1, bpm, tracks, clips, instances, ui: { pxPerSec, playheadSec } };
+  }
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -55,23 +178,33 @@
     // some endpoints may return json without header
     try { return JSON.parse(txt); } catch(e){ return { raw: txt }; }
   }
-
   function persist(){
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(app.project));
-    } catch(e){
-      console.warn('persist failed', e);
-    }
+    // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
+    const p2 = _projectV1ToV2(app.project);
+    if (!p2) return;
+
+    _writeLS(LS_KEY_V2, p2);
+
+    // Ensure beats-only storage after migration.
+    try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
   }
 
   function restore(){
-    try{
-      const raw = localStorage.getItem(LS_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    }catch(e){
-      return null;
+    const p2 = _readLS(LS_KEY_V2);
+    if (p2) return p2;
+
+    const legacy = _readLS(LS_KEY_V1);
+    if (!legacy) return null;
+
+    const migrated = _projectV1ToV2(legacy);
+    if (migrated){
+      _writeLS(LS_KEY_V2, migrated);
+      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+      return migrated;
     }
+
+    // Fallback: still return legacy if migration is unavailable.
+    return legacy;
   }
 
   const app = {
@@ -118,7 +251,13 @@
 
     init(){
       const restored = restore();
-      this.project = restored || H2SProject.defaultProject();
+
+      // Storage is beats-only (v2). Convert to a v1 (seconds) view for current UI/controllers.
+      if (restored && _isProjectV2(restored)){
+        this.project = _projectV2ToV1View(restored);
+      } else {
+        this.project = restored || H2SProject.defaultProject();
+      }
 
       // Ensure minimal structure
       if (!this.project.tracks || this.project.tracks.length === 0){
@@ -133,15 +272,23 @@
       $('#btnClearLog').addEventListener('click', () => $('#log').textContent = '');
 
       $('#inpBpm').addEventListener('change', () => {
-        const v = Number($('#inpBpm').value || 120);
-        this.project.bpm = H2SProject.clamp(v, 30, 260);
-        $('#inpBpm').value = this.project.bpm;
-        persist();
-        this.render();
+        // Safety: changing BPM while the clip editor is open can corrupt
+        // the sec<->beat boundary (draft seconds would be reinterpreted).
+        if (this.state && this.state.modal && this.state.modal.show){
+          alert('Please close the Clip Editor before changing BPM.');
+          $('#inpBpm').value = this.project.bpm;
+          return;
+        }
+        const raw = Number($('#inpBpm').value || 120);
+        const nextBpm = H2SProject.clamp(raw, 30, 260);
+        this.setProjectBpm(nextBpm);
       });
 
       $('#btnExportProject').addEventListener('click', () => {
-        downloadText(`hum2song_project_${Date.now()}.json`, JSON.stringify(this.project, null, 2));
+        const p2 = _projectV1ToV2(this.project);
+        const payload = p2 || this.project;
+        const fname = p2 ? `hum2song_project_v2_${Date.now()}.json` : `hum2song_project_${Date.now()}.json`;
+        downloadText(fname, JSON.stringify(payload, null, 2));
       });
 
       $('#btnImportProject').addEventListener('click', async () => {
@@ -150,7 +297,14 @@
         const txt = await f.text();
         try{
           const obj = JSON.parse(txt);
-          this.project = obj;
+          if (_isProjectV2(obj)){
+            _writeLS(LS_KEY_V2, obj);
+            try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+            this.project = _projectV2ToV1View(obj);
+          } else {
+            this.project = obj;
+          }
+          this.project = H2SProject.ensureProjectIds(this.project);
           persist();
           this.render();
           log('Imported project json.');
@@ -261,16 +415,25 @@
         if (window.H2SAudioController && window.H2SAudioController.create){
           this.audioCtrl = window.H2SAudioController.create({
             getProject: () => this.project,
+            // Beats-based document for project playback scheduling (T2 uses flatten(ProjectDocV2)).
+            getProjectDoc: () => _projectV1ToV2(this.project),
             getState: () => this.state,
             setTransportPlaying: (v) => { this.state.transportPlaying = !!v; },
             onUpdatePlayhead: (sec) => {
               this.project.ui.playheadSec = sec;
-              $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)}`;
-              this.renderTimeline();
+              const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
+              const beat = (sec * bpm) / 60;
+              $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+              if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
+                this.timelineCtrl.setPlayheadSec(sec);
+              } else {
+                this.renderTimeline();
+              }
             },
             onLog: log,
             onAlert: (msg) => alert(msg),
-            onRenderTick: () => { persist(); this.render(); },
+            // Persist/render only on discrete stop events (NOT per-frame).
+            onStopped: () => { persist(); this.render(); },
           });
         }
       }catch(e){
@@ -306,6 +469,26 @@ try{
     onRemoveInstance: (instId) => this.deleteInstance(instId),
     escapeHtml,
     fmtSec,
+    // Click empty timeline -> move playhead (seek if playing, persist if stopped)
+    onMovePlayheadSec: (sec) => {
+      this.project.ui.playheadSec = sec;
+      const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
+      const beat = (sec * bpm) / 60;
+      $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+
+      if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
+        this.timelineCtrl.setPlayheadSec(sec);
+      }
+
+      if (this.state.transportPlaying && this.audioCtrl && typeof this.audioCtrl.seekSec === 'function'){
+        // Avoid persisting/rebuilding during playback; stop+reschedule inside seekSec().
+        this.audioCtrl.seekSec(sec);
+        return;
+      }
+      // Not playing: persist and re-render so the new playhead is saved.
+      persist();
+      this.render();
+    },
     // Optional: label width and drag threshold
     labelWidthPx: 120,
     dragThresholdPx: 4,
@@ -317,6 +500,74 @@ try{
 
       this.render();
       log('UI ready.');
+    },
+
+    /**
+     * Change BPM while preserving beat-positions (no visual drift).
+     *
+     * Rule:
+     * - Beats are the source-of-truth (ProjectDoc v2).
+     * - UI stays in a v1 seconds-view, but it must keep pxPerBeat constant;
+     *   therefore pxPerSec/startSec/playheadSec are re-derived from beats.
+     * - If currently playing, we stop+reschedule from the same beat.
+     */
+    setProjectBpm(nextBpm){
+      const oldBpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
+      const bpm = H2SProject.clamp(Number(nextBpm || oldBpm), 30, 260);
+      if (bpm === oldBpm){
+        $('#inpBpm').value = bpm;
+        return;
+      }
+
+      const curSec = (this.project && this.project.ui && typeof this.project.ui.playheadSec === 'number') ? this.project.ui.playheadSec : 0;
+      const curBeat = (curSec * oldBpm) / 60;
+      const wasPlaying = !!(this.state && this.state.transportPlaying && this.audioCtrl && this.audioCtrl.isPlaying && this.audioCtrl.isPlaying());
+
+      // Preferred path: roundtrip through ProjectDoc v2 so ALL derived seconds fields
+      // (instances, scores, meta.spanSec, etc.) stay consistent.
+      const p2 = _projectV1ToV2(this.project);
+      if (p2 && _isProjectV2(p2)){
+        p2.bpm = bpm;
+        p2.ui = p2.ui || {};
+        // Preserve beat position for playhead.
+        p2.ui.playheadBeat = Math.max(0, curBeat);
+        _writeLS(LS_KEY_V2, p2);
+        try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+        this.project = _projectV2ToV1View(p2);
+      } else {
+        // Fallback path (should be rare): scale all seconds by oldBpm/bpm.
+        const scale = oldBpm / bpm;
+        this.project.bpm = bpm;
+        this.project.ui = this.project.ui || {};
+        if (typeof this.project.ui.playheadSec === 'number') this.project.ui.playheadSec *= scale;
+        if (typeof this.project.ui.pxPerSec === 'number') this.project.ui.pxPerSec /= scale; // keep pxPerBeat constant
+        if (Array.isArray(this.project.instances)){
+          for (const inst of this.project.instances){
+            if (typeof inst.startSec === 'number') inst.startSec *= scale;
+          }
+        }
+        if (Array.isArray(this.project.clips)){
+          for (const clip of this.project.clips){
+            if (clip && clip.score && Array.isArray(clip.score.notes)){
+              for (const n of clip.score.notes){
+                if (typeof n.start === 'number') n.start *= scale;
+                if (typeof n.dur === 'number') n.dur *= scale;
+              }
+            }
+            if (clip && clip.meta && typeof clip.meta.spanSec === 'number') clip.meta.spanSec *= scale;
+          }
+        }
+      }
+
+      $('#inpBpm').value = this.project.bpm;
+      persist();
+      this.render();
+      log('BPM set: ' + this.project.bpm);
+
+      // If playing: stop+reschedule from the same beat.
+      if (wasPlaying && this.audioCtrl && typeof this.audioCtrl.seekBeat === 'function'){
+        this.audioCtrl.seekBeat(curBeat);
+      }
     },
 
     render(){
@@ -534,7 +785,23 @@ renderTimeline(){
         await this.pollTaskUntilDone(tid);
         // Load score and add to library
         const score = await fetchJson(API.score(tid));
+
+        // BPM init rule: on the very first clip import, initialize project BPM
+        // from score.tempo_bpm (or score.bpm) if it looks valid.
+        if ((this.project.clips || []).length === 0){
+          const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
+          if (typeof srcBpm === 'number' && isFinite(srcBpm) && srcBpm >= 30 && srcBpm <= 300){
+            this.project.bpm = srcBpm;
+            const el = $('#bpm');
+            if (el) el.value = String(Math.round(srcBpm));
+          }
+        }
+
         const clip = H2SProject.createClipFromScore(score, { name: f.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
+        // Trace source tempo (for v2 migration).
+        if (!clip.meta) clip.meta = {};
+        if (typeof score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = score.tempo_bpm;
+        else if (typeof score.bpm === 'number') clip.meta.sourceTempoBpm = score.bpm;
         this.project.clips.unshift(clip);
         // Also add instance to timeline at playhead
         this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);

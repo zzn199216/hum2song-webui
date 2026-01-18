@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "tempo_bpm": 120,
+  "time_signature": "4/4",
+  "tracks": [
+    {
+      "id": "t_de7911fd2f",
+      "name": "ch0",
+      "program": 4,
+      "channel": 0,
+      "notes": [
+        {
+          "id": "n_e1e273513f60",
+          "pitch": 42,
+          "start": 0,
+          "duration": 0.190909,
+          "velocity": 39
+        },
+        {
+          "id": "n_337615b644d8",
+          "pitch": 44,
+          "start": 0.25303,
+          "duration": 0.107576,
+          "velocity": 44
+        },
+        {
+          "id": "n_db7b6ee0a248",
+          "pitch": 46,
+          "start": 0.410607,
+          "duration": 0.126516,
+          "velocity": 56
+        },
+        {
+          "id": "n_dd3ff76870c3",
+          "pitch": 47,
+          "start": 0.651515,
+          "duration": 0.556818,
+          "velocity": 60
+        },
+        {
+          "id": "n_a804cdfd301e",
+          "pitch": 50,
+          "start": 1.553031,
+          "duration": 0.284091,
+          "velocity": 66
+        },
+        {
+          "id": "n_91bb4a880465",
+          "pitch": 52,
+          "start": 1.963636,
+          "duration": 0.207576,
+          "velocity": 62
+        },
+        {
+          "id": "n_b5842762bcd2",
+          "pitch": 54,
+          "start": 2.153788,
+          "duration": 0.362122,
+          "velocity": 48
+        },
+        {
+          "id": "n_97d054d6be93",
+          "pitch": 55,
+          "start": 2.539394,
+          "duration": 0.358333,
+          "velocity": 97
+        }
+      ]
+    }
+  ]
+}

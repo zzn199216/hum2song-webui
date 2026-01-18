@@ -39,6 +39,159 @@
         ctx.closePath();
       }
 
+      // --- Beats v2 boundary helpers (storage beat, editor works in seconds) ---
+      function _firstNote(score){
+        try {
+          const tr = score && score.tracks && score.tracks[0];
+          const n = tr && tr.notes && tr.notes[0];
+          return n || null;
+        } catch(e){ return null; }
+      }
+
+      function _isBeatScore(score){
+        if (!score) return false;
+        if (score.timebase === 'beat') return true;
+        if (Number(score.version) === 2) return true;
+        const n = _firstNote(score);
+        return !!(n && (Object.prototype.hasOwnProperty.call(n,'startBeat') || Object.prototype.hasOwnProperty.call(n,'durationBeat')));
+      }
+
+      function _findClip(project, clipId){
+        if(!project || !clipId) return null;
+        const clips = project.clips;
+        if (Array.isArray(clips)){
+          return clips.find(c => c && c.id === clipId) || null;
+        }
+        if (clips && typeof clips === 'object'){
+          if (clips[clipId]) return clips[clipId];
+          for (const k of Object.keys(clips)){
+            const c = clips[k];
+            if (c && c.id === clipId) return c;
+          }
+        }
+        return null;
+      }
+
+      function _beatToSec(beat, bpm){
+        const b = Number(beat) || 0;
+        const t = Number(bpm) || 120;
+        if (H2SProject && typeof H2SProject.beatToSec === 'function') return H2SProject.beatToSec(b, t);
+        return b * 60 / t;
+      }
+
+      function _secToBeat(sec, bpm){
+        const s = Number(sec) || 0;
+        const t = Number(bpm) || 120;
+        if (H2SProject && typeof H2SProject.secToBeat === 'function') return H2SProject.secToBeat(s, t);
+        return s * t / 60;
+      }
+
+      function _normalizeBeat(x){
+        const v = Number(x);
+        if (!isFinite(v)) return 0;
+        if (H2SProject && typeof H2SProject.normalizeBeat === 'function') return H2SProject.normalizeBeat(v);
+        // fallback: float round only (no grid snap)
+        return Math.round(v * 1e6) / 1e6;
+      }
+
+      function _manualScoreBeatToSec(scoreBeat, bpm){
+        const out = {
+          version: 1,
+          tempo_bpm: (scoreBeat && scoreBeat.tempo_bpm != null) ? scoreBeat.tempo_bpm : (Number(bpm) || 120),
+          time_signature: (scoreBeat && scoreBeat.time_signature) ? scoreBeat.time_signature : '4/4',
+          tracks: []
+        };
+        const tracks = (scoreBeat && Array.isArray(scoreBeat.tracks)) ? scoreBeat.tracks : [];
+        out.tracks = tracks.map(t => ({
+          id: t.id,
+          name: t.name,
+          program: t.program,
+          channel: t.channel,
+          notes: (t.notes || []).map(n => ({
+            id: n.id,
+            pitch: n.pitch,
+            velocity: n.velocity,
+            start: _beatToSec(n.startBeat, bpm),
+            duration: _beatToSec(n.durationBeat, bpm)
+          }))
+        }));
+        return out;
+      }
+
+      function _manualScoreSecToBeat(scoreSec, bpm){
+        const out = {
+          version: 2,
+          tempo_bpm: (scoreSec && scoreSec.tempo_bpm != null) ? scoreSec.tempo_bpm : null,
+          time_signature: (scoreSec && scoreSec.time_signature) ? scoreSec.time_signature : null,
+          tracks: []
+        };
+        const tracks = (scoreSec && Array.isArray(scoreSec.tracks)) ? scoreSec.tracks : [];
+        out.tracks = tracks.map(t => ({
+          id: t.id,
+          name: t.name,
+          program: t.program,
+          channel: t.channel,
+          notes: (t.notes || []).map(n => ({
+            id: n.id,
+            pitch: n.pitch,
+            velocity: n.velocity,
+            startBeat: _normalizeBeat(Math.max(0, _secToBeat(n.start, bpm))),
+            durationBeat: _normalizeBeat(Math.max(0, _secToBeat(n.duration, bpm)))
+          }))
+        }));
+        return out;
+      }
+
+      function _scoreBeatToSec(scoreBeat, bpm){
+        if (H2SProject && typeof H2SProject.scoreBeatToSec === 'function'){
+          return H2SProject.scoreBeatToSec(scoreBeat, bpm);
+        }
+        return _manualScoreBeatToSec(scoreBeat, bpm);
+      }
+
+      function _scoreSecToBeat(scoreSec, bpm){
+        if (H2SProject && typeof H2SProject.scoreSecToBeat === 'function'){
+          return H2SProject.scoreSecToBeat(scoreSec, bpm);
+        }
+        return _manualScoreSecToBeat(scoreSec, bpm);
+      }
+
+      function _recomputeClipMetaFromBeatScore(clip, scoreBeat){
+        const meta0 = (clip && clip.meta) ? clip.meta : {};
+        if (H2SProject && typeof H2SProject.recomputeClipMetaFromScoreBeat === 'function' && clip){
+          try { H2SProject.recomputeClipMetaFromScoreBeat(clip); return; } catch(e){}
+        }
+        let count = 0;
+        let minP = null;
+        let maxP = null;
+        let spanBeat = 0;
+        const tracks = (scoreBeat && Array.isArray(scoreBeat.tracks)) ? scoreBeat.tracks : [];
+        for (const t of tracks){
+          const notes = t && Array.isArray(t.notes) ? t.notes : [];
+          for (const n of notes){
+            if (!n) continue;
+            count += 1;
+            const p = Number(n.pitch);
+            if (isFinite(p)){
+              if (minP == null || p < minP) minP = p;
+              if (maxP == null || p > maxP) maxP = p;
+            }
+            const end = (Number(n.startBeat) || 0) + (Number(n.durationBeat) || 0);
+            if (isFinite(end) && end > spanBeat) spanBeat = end;
+          }
+        }
+        if (clip){
+          clip.meta = {
+            notes: count,
+            pitchMin: minP,
+            pitchMax: maxP,
+            spanBeat: spanBeat,
+            sourceTempoBpm: (meta0 && meta0.sourceTempoBpm != null) ? meta0.sourceTempoBpm : ((scoreBeat && scoreBeat.tempo_bpm != null) ? scoreBeat.tempo_bpm : null)
+          };
+        }
+      }
+
+
       // Implementation object: methods are copied from app.js modal editor section.
       const impl = {
         // Provide accessors similar to app.js
@@ -90,13 +243,32 @@
           });
         },
     openClipEditor(clipId){
-      const clip = this.project.clips.find(c => c.id === clipId);
+      const clip = _findClip(this.project, clipId);
       if (!clip) return;
+
+      const bpm = this.project && this.project.bpm ? this.project.bpm : 120;
+      const projectWantsBeat = !!(this.project && (this.project.timebase === 'beat' || Number(this.project.version) === 2));
+      const clipScoreIsBeat = _isBeatScore(clip.score);
+
+      // Editor always operates on a seconds-score draft to preserve the existing interaction feel.
+      // If the stored score is beats, we convert beats->seconds on open, and seconds->beats on save.
+      let savedScoreSec;
+      if (clipScoreIsBeat){
+        try { savedScoreSec = _scoreBeatToSec(clip.score, bpm); } catch(e){ savedScoreSec = H2SProject.deepClone(clip.score); }
+      } else {
+        savedScoreSec = H2SProject.deepClone(clip.score);
+      }
+
       this.state.modal.show = true;
       this.state.modal.clipId = clipId;
-      this.state.modal.savedScore = H2SProject.deepClone(clip.score);
-      this.state.modal.draftScore = H2SProject.deepClone(clip.score);
+      this.state.modal.savedScore = H2SProject.deepClone(savedScoreSec);
+      this.state.modal.draftScore = H2SProject.deepClone(savedScoreSec);
       this.state.modal.dirty = false;
+
+      // Remember source timebase for save boundary.
+      this.state.modal._sourceClipWasBeat = !!clipScoreIsBeat;
+      this.state.modal._projectWantsBeat = !!projectWantsBeat;
+
       // Keep snap memory in sync
       const snapV = this.modalGetSnapValue();
       if (snapV !== 'off') this.state.modal.snapLastNonOff = snapV;
@@ -128,16 +300,46 @@
       this.modalStop();
 
       const clipId = this.state.modal.clipId;
-      const clip = this.project.clips.find(c => c.id === clipId);
+      const clip = _findClip(this.project, clipId);
+
+      const bpm = this.project && this.project.bpm ? this.project.bpm : 120;
+      const storeAsBeat = !!(this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat);
 
       if (save && clip){
-        // Apply draft score back
-        clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
-        const st = H2SProject.scoreStats(clip.score);
-        clip.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
-        persist();
-        this.render();
-        log('Saved clip changes.');
+        if (storeAsBeat){
+          // seconds draft -> beats score (normalize-on-write; no grid snap)
+          const draftSec = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+          let scoreBeat = _scoreSecToBeat(draftSec, bpm);
+
+          // Best-effort normalize/clamp in case importer produced weird values.
+          if (scoreBeat && Array.isArray(scoreBeat.tracks)) {
+            for (const t of scoreBeat.tracks){
+              const notes = t && Array.isArray(t.notes) ? t.notes : [];
+              for (const n of notes){
+                if (!n) continue;
+                n.startBeat = _normalizeBeat(Math.max(0, Number(n.startBeat) || 0));
+                n.durationBeat = _normalizeBeat(Math.max(0, Number(n.durationBeat) || 0));
+                // keep pitch/vel in range
+                n.pitch = H2SProject.clamp(Number(n.pitch) || 0, 0, 127);
+                n.velocity = H2SProject.clamp(Number(n.velocity) || 80, 1, 127);
+              }
+            }
+          }
+
+          clip.score = scoreBeat;
+          _recomputeClipMetaFromBeatScore(clip, scoreBeat);
+          persist();
+          this.render();
+          log('Saved clip changes (beats).');
+        } else {
+          // Legacy seconds storage (v1)
+          clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+          const st = H2SProject.scoreStats(clip.score);
+          clip.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
+          persist();
+          this.render();
+          log('Saved clip changes.');
+        }
       } else {
         log('Canceled clip changes.');
       }
@@ -149,6 +351,8 @@
       this.state.modal.selectedNoteId = null;
       this.state.modal.selectedCell = null;
       this.state.modal.mode = 'none';
+      this.state.modal._sourceClipWasBeat = false;
+      this.state.modal._projectWantsBeat = false;
 
       $('#modal').classList.remove('show');
       $('#modal').setAttribute('aria-hidden', 'true');

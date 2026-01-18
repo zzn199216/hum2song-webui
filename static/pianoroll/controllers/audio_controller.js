@@ -12,7 +12,8 @@
   if (typeof module === 'object' && module.exports){
     module.exports = factory();
   } else {
-    G.H2SAudioController = factory();
+    // Browser global export
+    root.H2SAudioController = factory();
   }
 })(typeof window !== 'undefined' ? window : globalThis, function(){
   'use strict';
