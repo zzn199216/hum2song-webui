@@ -67,6 +67,104 @@
     TRANSPOSE_MAX: 48,
   };
 
+  // Schema defaults / versioning guard (T3-0b)
+  const SCHEMA_V2 = {
+    DEFAULT_TRACK_ID: 'trk_0',
+    DEFAULT_INSTRUMENT: 'default',
+  };
+
+  function defaultTrackV2(){
+    return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT };
+  }
+
+  function ensureTrackV2(track, idx){
+    const t = (track && typeof track === 'object') ? track : {};
+    if (!t.id || typeof t.id !== 'string' || !t.id.trim()){
+      t.id = (idx == 0) ? SCHEMA_V2.DEFAULT_TRACK_ID : uid('trk_');
+    }
+    if (typeof t.name !== 'string'){
+      t.name = String(t.name ?? ('Track ' + String((idx ?? 0) + 1)));
+    }
+    if (typeof t.instrument !== 'string' || !t.instrument.trim()){
+      t.instrument = SCHEMA_V2.DEFAULT_INSTRUMENT;
+    }
+    return t;
+  }
+
+  function upgradeProjectV2LegacyInPlace(project){
+    // Accept slightly-older v2 saves where some fields are missing or in v1-ish shape.
+    // This MUST be safe & idempotent.
+    if (!project || typeof project !== 'object') return project;
+
+    // tracks[] guard
+    if (!Array.isArray(project.tracks) || project.tracks.length === 0){
+      project.tracks = [ defaultTrackV2() ];
+    } else {
+      for (let i = 0; i < project.tracks.length; i++){
+        project.tracks[i] = ensureTrackV2(project.tracks[i], i);
+      }
+    }
+
+    // ui legacy conversion: pxPerSec/playheadSec -> pxPerBeat/playheadBeat
+    if (!project.ui) project.ui = {};
+    const bpm = coerceBpm(project.bpm);
+    if ((!isFiniteNumber(project.ui.pxPerBeat) || project.ui.pxPerBeat <= 0) && isFiniteNumber(project.ui.pxPerSec)) {
+      project.ui.pxPerBeat = pxPerSecToPxPerBeat(project.ui.pxPerSec, bpm);
+    }
+    if ((!isFiniteNumber(project.ui.playheadBeat) || project.ui.playheadBeat < 0) && isFiniteNumber(project.ui.playheadSec)) {
+      project.ui.playheadBeat = Math.max(0, normalizeBeat(secToBeat(project.ui.playheadSec, bpm)));
+    }
+
+    // clips: array -> map (preserve order)
+    if (Array.isArray(project.clips)) {
+      const arr = project.clips;
+      const map = {};
+      const order = [];
+      for (const c of arr){
+        if (!c || typeof c !== 'object') continue;
+        const id = (c.id != null) ? String(c.id) : uid('clip_');
+        c.id = id;
+        if (typeof c.name !== 'string') c.name = String(c.name ?? '');
+        if (!isFiniteNumber(c.createdAt)) c.createdAt = Date.now();
+        if (!c.meta || typeof c.meta !== 'object') c.meta = {};
+        const srcTempo = (c.meta && isFiniteNumber(c.meta.sourceTempoBpm)) ? Number(c.meta.sourceTempoBpm) : null;
+        c.score = ensureScoreBeatIds(c.score);
+        recomputeClipMetaFromScoreBeat(c);
+        if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        if (c.meta && 'spanSec' in c.meta) delete c.meta.spanSec;
+        map[id] = c;
+        order.push(id);
+      }
+      project.clips = map;
+      if (!Array.isArray(project.clipOrder) || project.clipOrder.length === 0) {
+        project.clipOrder = order;
+      }
+    }
+
+    // clipOrder missing for map
+    if (project.clips && typeof project.clips === 'object' && !Array.isArray(project.clipOrder)) {
+      project.clipOrder = Object.keys(project.clips);
+    }
+
+    // instances legacy: trackIndex -> trackId
+    if (!Array.isArray(project.instances)) project.instances = [];
+    const defaultTrackId = (project.tracks && project.tracks[0]) ? project.tracks[0].id : SCHEMA_V2.DEFAULT_TRACK_ID;
+    for (const inst of project.instances){
+      if (!inst || typeof inst !== 'object') continue;
+      if (!inst.trackId || typeof inst.trackId !== 'string'){
+        const tiRaw = ('trackIndex' in inst) ? Number(inst.trackIndex) : 0;
+        const ti = (isFiniteNumber(tiRaw) && tiRaw >= 0) ? Math.floor(tiRaw) : 0;
+        const tid = (project.tracks && project.tracks[ti] && project.tracks[ti].id) ? project.tracks[ti].id : defaultTrackId;
+        inst.trackId = tid;
+      }
+      if ('trackIndex' in inst) delete inst.trackIndex;
+      if ('startSec' in inst) delete inst.startSec;
+    }
+
+    return project;
+  }
+
+
   function coerceBpm(bpm){
     const n = Number(bpm);
     if (!isFinite(n) || n <= 0) return TIMEBASE.BPM_DEFAULT;
@@ -285,7 +383,7 @@
     return {
       version: 1,
       bpm: TIMEBASE.BPM_DEFAULT,
-      tracks: [{ id: uid('trk_'), name: 'Track 1' }],
+      tracks: [ defaultTrackV2() ],
       clips: [],
       instances: [],
       ui: { pxPerSec: 160, playheadSec: 0 }
@@ -328,7 +426,7 @@
       version: 2,
       timebase: 'beat',
       bpm: TIMEBASE.BPM_DEFAULT,
-      tracks: [{ id: uid('trk_'), name: 'Track 1' }],
+      tracks: [ defaultTrackV2() ],
       clips: {},
       clipOrder: [],
       instances: [],
@@ -397,6 +495,171 @@
     return clip;
   }
 
+/* -------------------- T3-1 clip revisions (version chain) -------------------- */
+
+// Store previous clip heads inside clip.revisions[] so clip.id remains stable for instances.
+// Each revision stores score+meta snapshot and can be activated (rollback) safely.
+const CLIP_REVISIONS_MAX = 40;
+
+function _iso(ts){
+  try{
+    const d = new Date(ts);
+    if (isFiniteNumber(ts) && !isNaN(d.getTime())) return d.toISOString().slice(0,19).replace('T',' ');
+  }catch(e){}
+  return '';
+}
+
+function ensureClipRevisionChain(clip){
+  if (!clip) return clip;
+  if (!Array.isArray(clip.revisions)) clip.revisions = [];
+
+  const out = [];
+  const seen = new Set();
+  for (const r of clip.revisions){
+    if (!r || typeof r !== 'object') continue;
+    const rid = String(r.revisionId || '');
+    if (!rid || seen.has(rid)) continue;
+    seen.add(rid);
+        out.push({
+      revisionId: rid,
+      parentRevisionId: (r.parentRevisionId !== undefined && r.parentRevisionId !== null) ? String(r.parentRevisionId) : null,
+      createdAt: isFiniteNumber(r.createdAt) ? Number(r.createdAt) : Date.now(),
+      name: (typeof r.name === 'string') ? r.name : String(r.name ?? (clip.name || '')),
+      score: ensureScoreBeatIds(r.score),
+      meta: (r.meta && typeof r.meta === 'object') ? r.meta : null,
+    });
+  }
+
+  // Keep oldest->newest in storage; UI can sort differently.
+  out.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0));
+  if (out.length > CLIP_REVISIONS_MAX) out.splice(0, out.length - CLIP_REVISIONS_MAX);
+
+  clip.revisions = out;
+
+  if (!clip.revisionId) clip.revisionId = uid('rev_');
+  if (clip.parentRevisionId === undefined) clip.parentRevisionId = null;
+  clip.parentRevisionId = (clip.parentRevisionId !== null) ? String(clip.parentRevisionId) : null;
+
+  if (!isFiniteNumber(clip.updatedAt)) clip.updatedAt = isFiniteNumber(clip.createdAt) ? clip.createdAt : Date.now();
+
+  return clip;
+}
+
+function snapshotClipHead(clip){
+  if (!clip) return null;
+  ensureClipRevisionChain(clip);
+  return {
+    revisionId: String(clip.revisionId || uid('rev_')),
+    parentRevisionId: (clip.parentRevisionId !== undefined && clip.parentRevisionId !== null) ? String(clip.parentRevisionId) : null,
+    createdAt: isFiniteNumber(clip.updatedAt) ? Number(clip.updatedAt) : Date.now(),
+    name: (typeof clip.name === 'string') ? clip.name : String(clip.name ?? ''),
+    score: ensureScoreBeatIds(deepClone(clip.score || { version:2, tracks:[] })),
+    meta: deepClone(clip.meta || {}),
+  };
+}
+
+function applySnapshotToClipHead(clip, snap){
+  if (!clip || !snap) return clip;
+  const keepSourceTempo = (clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm)) ? Number(clip.meta.sourceTempoBpm) : null;
+
+  clip.revisionId = String(snap.revisionId || uid('rev_'));
+  clip.parentRevisionId = (snap.parentRevisionId !== undefined && snap.parentRevisionId !== null) ? String(snap.parentRevisionId) : null;
+  clip.updatedAt = isFiniteNumber(snap.createdAt) ? Number(snap.createdAt) : Date.now();
+  if (typeof snap.name === 'string') clip.name = snap.name;
+
+  clip.score = ensureScoreBeatIds(deepClone(snap.score || { version:2, tracks:[] }));
+  clip.meta = deepClone((snap.meta && typeof snap.meta === 'object') ? snap.meta : (clip.meta || {}));
+
+  // Recompute derived meta, but preserve sourceTempoBpm if present.
+  const src = (clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm)) ? Number(clip.meta.sourceTempoBpm) : keepSourceTempo;
+  recomputeClipMetaFromScoreBeat(clip);
+  if (clip.meta) clip.meta.sourceTempoBpm = isFiniteNumber(src) ? Number(src) : null;
+
+  ensureClipRevisionChain(clip);
+  return clip;
+}
+
+function listClipRevisions(clip){
+  if (!clip) return { activeRevisionId: '', items: [] };
+  ensureClipRevisionChain(clip);
+
+  const items = [];
+  const head = snapshotClipHead(clip);
+  if (head) items.push({ ...head, kind: 'head' });
+  for (const r of (clip.revisions || [])) items.push({ ...r, kind: 'history' });
+
+  // UI uses newest-first.
+  items.sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
+
+  const out = items.map(r => ({
+    revisionId: String(r.revisionId || ''),
+    parentRevisionId: (r.parentRevisionId !== undefined && r.parentRevisionId !== null) ? String(r.parentRevisionId) : null,
+    createdAt: isFiniteNumber(r.createdAt) ? Number(r.createdAt) : Date.now(),
+    kind: r.kind,
+    label: (r.kind === 'head' ? 'Current' : 'Rev') + ' · ' + (_iso(r.createdAt) || String(r.createdAt || '')),
+  }));
+
+  return { activeRevisionId: String(clip.revisionId || ''), items: out };
+}
+
+// Activate a previous revision by swapping it with the current head.
+// This keeps both versions (so A/B switching is stable).
+function setClipActiveRevision(project, clipId, revisionId){
+  const p = project;
+  if (!p || !isProjectV2(p)) return { ok:false, error:'not_v2' };
+  const cid = String(clipId || '');
+  const rid = String(revisionId || '');
+  if (!cid || !rid) return { ok:false, error:'bad_args' };
+  if (!p.clips || !p.clips[cid]) return { ok:false, error:'clip_not_found' };
+
+  const clip = p.clips[cid];
+  ensureClipRevisionChain(clip);
+  if (String(clip.revisionId || '') === rid) return { ok:true, changed:false };
+
+  const idx = (clip.revisions || []).findIndex(r => String(r.revisionId || '') === rid);
+  if (idx < 0) return { ok:false, error:'revision_not_found' };
+
+  const cur = snapshotClipHead(clip);
+  const target = clip.revisions[idx];
+  clip.revisions.splice(idx, 1);
+  if (cur) clip.revisions.push(cur);
+
+  applySnapshotToClipHead(clip, target);
+  ensureClipRevisionChain(clip);
+
+  return { ok:true, changed:true };
+}
+
+// Start a new revision: snapshot current head into history, then update revisionId.
+// Callers may then mutate clip.score and clip.meta, and finally recompute meta.
+function beginNewClipRevision(project, clipId, opts){
+  const p = project;
+  if (!p || !isProjectV2(p)) return { ok:false, error:'not_v2' };
+  const cid = String(clipId || '');
+  if (!cid) return { ok:false, error:'bad_args' };
+  if (!p.clips || !p.clips[cid]) return { ok:false, error:'clip_not_found' };
+
+  const clip = p.clips[cid];
+  ensureClipRevisionChain(clip);
+
+  const snap = snapshotClipHead(clip);
+  if (snap) clip.revisions.push(snap);
+
+  clip.parentRevisionId = String(clip.revisionId || (snap && snap.revisionId) || uid('rev_'));
+  clip.revisionId = uid('rev_');
+  clip.updatedAt = Date.now();
+
+  // Reset A/B pair (ephemeral UI helper). Safe if persisted.
+  clip._abARevisionId = null;
+  clip._abBRevisionId = null;
+
+  if (opts && typeof opts.name === 'string') clip.name = opts.name;
+
+  ensureClipRevisionChain(clip);
+  return { ok:true, revisionId: clip.revisionId };
+}
+
+
   function createClipFromScoreBeat(scoreBeat, opts){
     const s = ensureScoreBeatIds(deepClone(scoreBeat));
     const st = recomputeScoreBeatStats(s);
@@ -407,6 +670,10 @@
       id: clipId,
       name,
       createdAt: (opts && isFiniteNumber(opts.createdAt)) ? Number(opts.createdAt) : Date.now(),
+      updatedAt: (opts && isFiniteNumber(opts.updatedAt)) ? Number(opts.updatedAt) : ((opts && isFiniteNumber(opts.createdAt)) ? Number(opts.createdAt) : Date.now()),
+      revisionId: (opts && opts.revisionId) ? String(opts.revisionId) : uid('rev_'),
+      parentRevisionId: (opts && opts.parentRevisionId !== undefined && opts.parentRevisionId !== null) ? String(opts.parentRevisionId) : null,
+      revisions: (opts && Array.isArray(opts.revisions)) ? opts.revisions : [],
       sourceTaskId: (opts && opts.sourceTaskId) ? String(opts.sourceTaskId) : null,
       score: s,
       meta: {
@@ -466,17 +733,19 @@
   }
 
   function normalizeProjectV2(project){
+    // T3-0b: schema versioning guard (accept legacy v2 shapes)
+    upgradeProjectV2LegacyInPlace(project);
+
     if (!project) return project;
     project.version = 2;
     project.timebase = 'beat';
     project.bpm = coerceBpm(project.bpm);
 
     if (!Array.isArray(project.tracks) || project.tracks.length === 0){
-      project.tracks = [{ id: uid('trk_'), name: 'Track 1' }];
+      project.tracks = [ defaultTrackV2() ];
     } else {
-      for (const t of project.tracks){
-        if (!t.id) t.id = uid('trk_');
-        if (typeof t.name !== 'string') t.name = String(t.name ?? '');
+      for (let i = 0; i < project.tracks.length; i++){
+        project.tracks[i] = ensureTrackV2(project.tracks[i], i);
       }
     }
 
@@ -502,6 +771,7 @@
       const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
       recomputeClipMetaFromScoreBeat(clip);
       if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+      ensureClipRevisionChain(clip);
       // remove v1 fields if they exist
       if (clip.meta && 'spanSec' in clip.meta) delete clip.meta.spanSec;
     }
@@ -509,7 +779,7 @@
 
     // instances
     if (!Array.isArray(project.instances)) project.instances = [];
-    const defaultTrackId = project.tracks[0] ? project.tracks[0].id : uid('trk_');
+    const defaultTrackId = project.tracks[0] ? project.tracks[0].id : SCHEMA_V2.DEFAULT_TRACK_ID;
     for (const inst of project.instances){
       if (!inst.id) inst.id = uid('inst_');
       if (!inst.clipId) inst.clipId = '';
@@ -534,6 +804,13 @@
     if (project && project.ui){
       if ('pxPerSec' in project.ui) errors.push('ui.pxPerSec_present');
       if ('playheadSec' in project.ui) errors.push('ui.playheadSec_present');
+    }
+    if (project && Array.isArray(project.tracks)){
+      for (const t of project.tracks){
+        if (!t || typeof t !== 'object'){ errors.push('track_not_object'); continue; }
+        if (typeof t.id !== 'string' || !t.id) errors.push('track.id_missing');
+        if (typeof t.instrument !== 'string' || !t.instrument) errors.push('track.instrument_missing:' + String(t.id));
+      }
     }
     if (project){
       if (Array.isArray(project.clips)) errors.push('clips_is_array');
@@ -814,7 +1091,221 @@
     return p2;
   }
 
-  /* -------------------- Export -------------------- */
+  
+  /* -------------------- T3-0b load() + migration guard -------------------- */
+
+  // Load any project-like JSON (object or JSON string) and return a normalized ProjectDoc v2.
+  // FROZEN: storage remains beats-only; seconds are derived.
+  function loadProjectDoc(raw){
+    let obj = raw;
+    if (typeof raw === 'string'){
+      try { obj = JSON.parse(raw); } catch(e){ obj = null; }
+    }
+    if (!obj || typeof obj !== 'object'){
+      const p = defaultProjectV2();
+      normalizeProjectV2(p);
+      return { project: p, changed: true, from: 'invalid' };
+    }
+
+    // v1 -> v2
+    if (!isProjectV2(obj) && (obj.version === 1 || Array.isArray(obj.clips) || (obj.ui && 'pxPerSec' in obj.ui))){
+      const p2 = migrateProjectV1toV2(obj);
+      // ensure latest schema fields (e.g., track.instrument)
+      normalizeProjectV2(p2);
+      return { project: p2, changed: true, from: 'v1' };
+    }
+
+    // v2 (or near-v2)
+    if (isProjectV2(obj) || obj.version === 2){
+      const p = deepClone(obj);
+      upgradeProjectV2LegacyInPlace(p);
+      normalizeProjectV2(p);
+      return { project: p, changed: true, from: 'v2' };
+    }
+
+    // Unknown shape -> default
+    const p = defaultProjectV2();
+    normalizeProjectV2(p);
+    return { project: p, changed: true, from: 'unknown' };
+  }
+
+
+/* -------------------- T3-0b load / schema versioning -------------------- */
+
+  // Load any project-like JSON and return a normalized ProjectDoc v2.
+  // raw can be an object or a JSON string.
+  function loadProjectDoc(raw, opts){
+    const options = opts || {};
+    const info = { from: null, to: 2, changed: false, warnings: [] };
+
+    let obj = raw;
+    if (typeof obj === 'string'){
+      try { obj = JSON.parse(obj); }
+      catch (e){ obj = null; info.warnings.push('json_parse_failed'); }
+    }
+
+    if (!obj || typeof obj !== 'object'){
+      info.from = null;
+      info.changed = true;
+      const p2 = defaultProjectV2();
+      normalizeProjectV2(p2);
+      return { project: p2, info };
+    }
+
+    // v2 (or near-v2)
+    if (isProjectV2(obj) || obj.version === 2 || obj.timebase === 'beat'){
+      info.from = 2;
+      const p2 = deepClone(obj);
+      const sig0 = JSON.stringify({
+        v: p2.version, tb: p2.timebase,
+        tracks: Array.isArray(p2.tracks) ? p2.tracks.length : null,
+        clipsArray: Array.isArray(p2.clips),
+        clipsKeys: (p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips)) ? Object.keys(p2.clips).length : null,
+        clipOrder: Array.isArray(p2.clipOrder) ? p2.clipOrder.length : null,
+      });
+
+      upgradeProjectV2LegacyInPlace(p2);
+      normalizeProjectV2(p2);
+
+      const sig1 = JSON.stringify({
+        v: p2.version, tb: p2.timebase,
+        tracks: Array.isArray(p2.tracks) ? p2.tracks.length : null,
+        clipsArray: Array.isArray(p2.clips),
+        clipsKeys: (p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips)) ? Object.keys(p2.clips).length : null,
+        clipOrder: Array.isArray(p2.clipOrder) ? p2.clipOrder.length : null,
+      });
+      info.changed = (sig0 !== sig1);
+
+      const inv = checkProjectV2Invariants(p2);
+      if (!inv.ok){
+        // Last resort: keep as much user data as possible.
+        repairClipOrderV2(p2);
+      }
+      return { project: p2, info };
+    }
+
+    // v1 or unknown -> attempt v1->v2 migration
+    info.from = (typeof obj.version === 'number') ? obj.version : 1;
+    info.changed = true;
+    const p2 = migrateProjectV1toV2(obj);
+    // v1->v2 already normalizes; keep one more normalization pass to apply any new fields.
+    normalizeProjectV2(p2);
+    return { project: p2, info };
+  }
+
+  function loadProjectDocV2(raw, opts){
+    return loadProjectDoc(raw, opts).project;
+  }
+
+function rollbackClipRevision(projectV2, clipId){
+  const p = projectV2;
+  if (!p || !isProjectV2(p)) return { ok:false, reason:'not_v2' };
+  const cid = String(clipId || '');
+  if (!cid) return { ok:false, reason:'bad_args' };
+  if (!p.clips || !p.clips[cid]) return { ok:false, reason:'clip_not_found' };
+  const clip = p.clips[cid];
+  ensureClipRevisionChain(clip);
+  const parent = clip.parentRevisionId ? String(clip.parentRevisionId) : '';
+  if (!parent) return { ok:false, reason:'no_parent' };
+  return setClipActiveRevision(p, cid, parent);
+}
+
+function toggleClipAB(projectV2, clipId){
+  const p = projectV2;
+  if (!p || !isProjectV2(p)) return { ok:false, reason:'not_v2' };
+  const cid = String(clipId || '');
+  if (!cid) return { ok:false, reason:'bad_args' };
+  if (!p.clips || !p.clips[cid]) return { ok:false, reason:'clip_not_found' };
+
+  const clip = p.clips[cid];
+  ensureClipRevisionChain(clip);
+
+  const cur = String(clip.revisionId || '');
+  const pickDefaultAlt = () => {
+    if (clip.parentRevisionId) return String(clip.parentRevisionId);
+    if (Array.isArray(clip.revisions) && clip.revisions.length){
+      return String(clip.revisions[0].revisionId || '');
+    }
+    return '';
+  };
+
+  let a = clip._abARevisionId ? String(clip._abARevisionId) : '';
+  let b = clip._abBRevisionId ? String(clip._abBRevisionId) : '';
+
+  // Initialize (or repair) the A/B pair when needed.
+  if (!a || !b || (cur !== a && cur !== b)){
+    a = cur;
+    b = pickDefaultAlt();
+    if (!b || b === a) return { ok:false, reason:'no_alt_revision' };
+    clip._abARevisionId = a;
+    clip._abBRevisionId = b;
+  }
+
+  const target = (cur === a) ? b : a;
+  const res = setClipActiveRevision(p, cid, target);
+  if (!res || !res.ok) return res || { ok:false, reason:'swap_failed' };
+  return { ok:true, activeRevisionId: String(target), pair:[a,b] };
+}
+
+
+  /* -------------------- Agent Patch (T3-2) -------------------- */
+
+  function _getAgentPatchApi(){
+    if (typeof window !== 'undefined' && window.H2SAgentPatch) return window.H2SAgentPatch;
+    if (typeof globalThis !== 'undefined' && globalThis.H2SAgentPatch) return globalThis.H2SAgentPatch;
+    return null;
+  }
+
+  function validateAgentPatch(patch, clip){
+    const AP = _getAgentPatchApi();
+    if (!AP || typeof AP.validatePatch !== 'function'){
+      return { ok:false, errors:['agent_patch_missing'], warnings:[] };
+    }
+    return AP.validatePatch(patch, clip);
+  }
+
+  function applyAgentPatchToClip(clip, patch){
+    const AP = _getAgentPatchApi();
+    if (!AP || typeof AP.applyPatchToClip !== 'function'){
+      return { ok:false, errors:['agent_patch_missing'], warnings:[] };
+    }
+    return AP.applyPatchToClip(clip, patch);
+  }
+
+  // Convenience: create a NEW clip revision, apply patch on the head (active) clip,
+  // and keep audit info on the head revision. Rolls back if patch fails.
+  function applyAgentPatchAsNewRevision(projectV2, clipId, patch, opts){
+    if (!projectV2 || !projectV2.clips) return { ok:false, errors:['project_missing'] };
+    const clip = projectV2.clips[clipId];
+    if (!clip) return { ok:false, errors:['clip_not_found:' + String(clipId)] };
+
+    const label = (opts && opts.label) ? String(opts.label) : 'Patched';
+    ensureClipRevisionChain(clip);
+
+    // Start a new revision (parent snapshot preserved in clip.revisions).
+    beginNewClipRevision(clip, { label });
+
+    const res = applyAgentPatchToClip(clip, patch);
+    if (!res.ok){
+      // revert to parent
+      rollbackClipRevision(projectV2, clipId);
+      return res;
+    }
+
+    // Adopt patched score/meta into head clip.
+    clip.score = res.clip.score;
+    clip.meta = res.clip.meta;
+    clip.revisionLabel = label;
+    clip.lastAppliedPatch = {
+      at: Date.now(),
+      patchId: patch && patch.id ? String(patch.id) : null,
+      ops: Array.isArray(patch && patch.ops) ? patch.ops.length : 0
+    };
+
+    return { ok:true, clip, appliedPatch: res.appliedPatch, inversePatch: res.inversePatch };
+  }
+
+/* -------------------- Export -------------------- */
 
   window.H2SProject = {
     // existing v1 API
@@ -830,6 +1321,7 @@
 
     // constants
     TIMEBASE,
+    SCHEMA_V2,
 
     // timebase API (T1-0)
     coerceBpm,
@@ -863,6 +1355,19 @@
     normalizeProjectV2,
     checkProjectV2Invariants,
 
+
+
+    // clip revisions (T3-1)
+    ensureClipRevisionChain,
+    snapshotClipHead,
+    rollbackClipRevision,
+    toggleClipAB,
+    listClipRevisions,
+    setClipActiveRevision,
+    beginNewClipRevision,
+    validateAgentPatch,
+    applyAgentPatchToClip,
+    applyAgentPatchAsNewRevision,
     // flatten (T1-2)
     flatten,
 
@@ -870,5 +1375,9 @@
     scoreSecToBeat,
     scoreBeatToSec,
     migrateProjectV1toV2,
+
+    // load / schema versioning (T3-0b)
+    loadProjectDoc,
+    loadProjectDocV2,
   };
 })();

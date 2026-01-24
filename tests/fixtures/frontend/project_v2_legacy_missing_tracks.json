@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "timebase": "beat",
+  "bpm": 120,
+  "clips": [
+    {
+      "id": "clip_a",
+      "name": "Legacy Clip A",
+      "createdAt": 1700000000000,
+      "score": {
+        "version": 2,
+        "tempo_bpm": 120,
+        "time_signature": "4/4",
+        "tracks": [
+          {
+            "id": "trk_s",
+            "name": "Score Track",
+            "notes": [
+              {"id": "n1", "pitch": 60, "velocity": 100, "startBeat": 0, "durationBeat": 0.5},
+              {"id": "n2", "pitch": 62, "velocity": 96,  "startBeat": 0.5, "durationBeat": 0.5}
+            ]
+          }
+        ]
+      },
+      "meta": {
+        "spanSec": 1.0,
+        "sourceTempoBpm": 120
+      }
+    }
+  ],
+  "instances": [
+    {
+      "id": "inst_a",
+      "clipId": "clip_a",
+      "startBeat": 0,
+      "trackIndex": 0,
+      "transpose": 0
+    }
+  ],
+  "ui": {
+    "pxPerSec": 160,
+    "playheadSec": 0
+  }
+}

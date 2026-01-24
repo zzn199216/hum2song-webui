@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "bpm": 120,
+  "tracks": [
+    {
+      "id": "trk_0",
+      "name": "Track 1"
+    }
+  ],
+  "clips": [
+    {
+      "id": "clip_a",
+      "name": "Clip A",
+      "createdAt": 1760000000000,
+      "sourceTaskId": null,
+      "score": {
+        "bpm": 120,
+        "tempo_bpm": 120,
+        "tracks": [
+          {
+            "id": "s_trk_0",
+            "name": "Track 1",
+            "notes": [
+              {
+                "id": "n_a1",
+                "pitch": 60,
+                "velocity": 100,
+                "start": 0.0,
+                "duration": 0.5
+              },
+              {
+                "id": "n_a2",
+                "pitch": 62,
+                "velocity": 96,
+                "start": 0.5,
+                "duration": 0.5
+              }
+            ]
+          }
+        ]
+      },
+      "meta": {
+        "notes": 2,
+        "pitchMin": 60,
+        "pitchMax": 62,
+        "spanSec": 1.0
+      }
+    },
+    {
+      "id": "clip_b",
+      "name": "Clip B",
+      "createdAt": 1760000001000,
+      "sourceTaskId": null,
+      "score": {
+        "bpm": 120,
+        "tempo_bpm": 120,
+        "tracks": [
+          {
+            "id": "s_trk_0",
+            "name": "Track 1",
+            "notes": [
+              {
+                "id": "n_b1",
+                "pitch": 67,
+                "velocity": 110,
+                "start": 0.0,
+                "duration": 0.25
+              },
+              {
+                "id": "n_b2",
+                "pitch": 69,
+                "velocity": 108,
+                "start": 0.25,
+                "duration": 0.25
+              },
+              {
+                "id": "n_b3",
+                "pitch": 71,
+                "velocity": 106,
+                "start": 0.5,
+                "duration": 0.5
+              }
+            ]
+          }
+        ]
+      },
+      "meta": {
+        "notes": 3,
+        "pitchMin": 67,
+        "pitchMax": 71,
+        "spanSec": 1.0
+      }
+    }
+  ],
+  "instances": [
+    {
+      "id": "inst_a",
+      "clipId": "clip_a",
+      "startSec": 0.0,
+      "trackIndex": 0,
+      "transpose": 0
+    },
+    {
+      "id": "inst_b",
+      "clipId": "clip_b",
+      "startSec": 1.0,
+      "trackIndex": 0,
+      "transpose": 0
+    }
+  ],
+  "ui": {
+    "pxPerSec": 160,
+    "playheadSec": 0.0
+  }
+}

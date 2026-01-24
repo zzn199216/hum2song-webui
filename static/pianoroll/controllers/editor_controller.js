@@ -45,6 +45,7 @@
         this._orig.openClipEditor = app.openClipEditor.bind(app);
         const self = this;
         app.openClipEditor = function(clipId){
+          self._activeClipId = String(clipId);
           if(self.onOpen) { try { self.onOpen(clipId); } catch(e){} }
           return self._orig.openClipEditor(clipId);
         };
@@ -54,6 +55,14 @@
         this._orig.closeModal = app.closeModal.bind(app);
         const self = this;
         app.closeModal = function(save){
+          // T3-1 safety: before overwriting clip data, snapshot current head into revision history.
+          try {
+            if(!!save && self._activeClipId && typeof global.H2SProject !== 'undefined' && global.H2SProject && typeof global.H2SProject.beginNewClipRevision === 'function'){
+              const appNow = self.getApp ? self.getApp() : null;
+              const proj = appNow && appNow.project;
+              if(proj){ global.H2SProject.beginNewClipRevision(proj, self._activeClipId, { reason: 'editor_save' }); }
+            }
+          } catch(e){}
           if(self.onClose) { try { self.onClose(!!save); } catch(e){} }
           return self._orig.closeModal(save);
         };
@@ -61,6 +70,14 @@
         this._orig.closeEditorModal = app.closeEditorModal.bind(app);
         const self = this;
         app.closeEditorModal = function(save){
+          // T3-1 safety: before overwriting clip data, snapshot current head into revision history.
+          try {
+            if(!!save && self._activeClipId && typeof global.H2SProject !== 'undefined' && global.H2SProject && typeof global.H2SProject.beginNewClipRevision === 'function'){
+              const appNow = self.getApp ? self.getApp() : null;
+              const proj = appNow && appNow.project;
+              if(proj){ global.H2SProject.beginNewClipRevision(proj, self._activeClipId, { reason: 'editor_save' }); }
+            }
+          } catch(e){}
           if(self.onClose) { try { self.onClose(!!save); } catch(e){} }
           return self._orig.closeEditorModal(save);
         };

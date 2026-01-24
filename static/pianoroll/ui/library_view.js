@@ -1,11 +1,12 @@
 /* Hum2Song Studio MVP - ui/library_view.js
-   Plain script (no import/export). Exposes window.H2SLibraryView.
+   Plain script (no import/export). Browser global + Node-safe export.
 
-   This module is intentionally DOM-free so it can be used in Node tests.
+   Node contract tests require this file with no DOM and no `window`.
 */
 (function(root, factory){
   'use strict';
   const api = factory();
+
   // Node (tests)
   if (typeof module !== 'undefined' && module.exports){
     module.exports = api;
@@ -14,39 +15,85 @@
   if (root){
     root.H2SLibraryView = api;
   }
-})(
-  (typeof window !== 'undefined') ? window :
-  (typeof globalThis !== 'undefined') ? globalThis :
-  null,
-  function(){
-    'use strict';
+})(typeof window !== 'undefined' ? window : null, function(){
+  'use strict';
 
-    function emptyMessage(){
-      return 'No clips yet. Upload WAV to generate one.';
-    }
-
-    function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml){
-      const safeName = escapeHtml ? escapeHtml(clip && clip.name) : String((clip && clip.name) || '');
-      const notes = (stats && typeof stats.count === 'number') ? stats.count : 0;
-      const spanSec = (stats && typeof stats.spanSec === 'number') ? stats.spanSec : 0;
-      const spanText = fmtSec ? fmtSec(spanSec) : String(spanSec);
-
-      // IMPORTANT: keep these data-act values stable (contract tests depend on them)
-      return `
-        <div class="clipTitle">${safeName}</div>
-        <div class="clipMeta"><span>${notes} notes</span><span>${spanText}</span></div>
-        <div class="miniBtns">
-          <button class="btn mini" data-act="play">Play</button>
-          <button class="btn mini" data-act="add">Add</button>
-          <button class="btn mini" data-act="edit">Edit</button>
-          <button class="btn mini danger" data-act="remove">Remove</button>
-        </div>
-      `;
-    }
-
-    return {
-      emptyMessage,
-      clipCardInnerHTML,
-    };
+  function emptyMessage(){
+    return 'No clips yet. Record or Upload to start.';
   }
-);
+
+  function _defaultEscapeHtml(s){
+    return String(s ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  function _defaultFmtSec(sec){
+    const s = Math.max(0, Number(sec) || 0);
+    const m = Math.floor(s / 60);
+    const r = s - m*60;
+    const ss = (r < 10 ? '0' : '') + r.toFixed(2);
+    return m + ':' + ss;
+  }
+
+  function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo){
+    clip = clip || {};
+    stats = stats || {};
+    fmtSec = (typeof fmtSec === 'function') ? fmtSec : _defaultFmtSec;
+    escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
+
+    const id = escapeHtml(clip.id || '');
+    const name = escapeHtml(clip.name || 'Untitled');
+    const notes = Number(stats.count ?? stats.notes ?? 0) || 0;
+    const spanSec = Number(stats.spanSec ?? 0) || 0;
+
+    let revHtml = '';
+    if (revInfo && Array.isArray(revInfo.items) && revInfo.items.length > 1){
+      const active = String(revInfo.activeRevisionId || '');
+      const items = revInfo.items || [];
+      const activeItem = items.find(it => String(it.revisionId || '') === active) || items.find(it => it.isActive) || items[0] || null;
+      const hasParent = !!(activeItem && activeItem.parentRevisionId);
+
+      const opts = items.map(it => {
+        const rid = escapeHtml(it.revisionId || '');
+        const label = escapeHtml(it.label || it.revisionId || '');
+        const sel = (String(it.revisionId || '') === active) ? ' selected' : '';
+        return `<option value="${rid}"${sel}>${label}</option>`;
+      }).join('');
+
+      const rollbackDisabled = hasParent ? '' : ' disabled';
+
+      revHtml = (
+        `<div class="clip-revisions" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">` +
+          `<span style="font-size:12px; opacity:0.7;">Version</span>` +
+          `<select data-act="revSelect" data-id="${id}" style="padding:4px 6px; max-width:240px;">${opts}</select>` +
+          `<button class="btn" data-act="revActivate" data-id="${id}" style="padding:4px 8px;">Use</button>` +
+          `<button class="btn" data-act="rollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>Rollback</button>` +
+          `<button class="btn" data-act="abToggle" data-id="${id}" style="padding:4px 8px;">A/B</button>` +
+        `</div>`
+      );
+    }
+
+    return (
+      `<div class="clip-card" data-clip-id="${id}">` +
+        `<div class="clip-title">${name}</div>` +
+        `<div class="clip-sub">${notes} notes · ${fmtSec(spanSec)}</div>` +
+        `<div class="clip-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">` +
+          `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
+          `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
+          `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
+          `<button class="btn" data-act="remove" data-id="${id}">Remove</button>` +
+        `</div>` +
+        revHtml +
+      `</div>`
+    );
+  }
+
+  return {
+    emptyMessage,
+    clipCardInnerHTML,
+  };
+});
