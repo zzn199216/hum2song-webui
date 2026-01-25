@@ -84,7 +84,7 @@
         `<div class="clip-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">` +
           `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
           `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
-          `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
+          `<button class="btn" data-act="edit" data-id="${id}">Edit</button><button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
           `<button class="btn" data-act="remove" data-id="${id}">Remove</button>` +
         `</div>` +
         revHtml +

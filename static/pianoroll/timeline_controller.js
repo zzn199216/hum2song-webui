@@ -68,6 +68,7 @@
       _tracksEl: config.tracksEl,
       _labelW: (config && typeof config.labelWidthPx === 'number') ? config.labelWidthPx : 120,
       _dragThresholdPx: (config && typeof config.dragThresholdPx === 'number') ? config.dragThresholdPx : 4,
+      _laneSnapHysteresisPx: (config && typeof config.laneSnapHysteresisPx === 'number') ? config.laneSnapHysteresisPx : 10,
       _escapeHtml: (config && config.escapeHtml) ? config.escapeHtml : escapeHtml,
       _fmtSec: (config && config.fmtSec) ? config.fmtSec : fmtSec,
       _getPxPerSec(){
@@ -261,11 +262,36 @@
         el,
         pointerId: ev.pointerId,
         startClientX: ev.clientX,
+        startClientY: ev.clientY,
         offsetX: ev.clientX - rect.left,
+        startTrackIndex: 0,
+        curTrackIndex: 0,
         started: false,
         _elConnectedAtDown: el.isConnected
       };
       dbg(ctrl, 'pointerdown inst', instId);
+    }
+
+    function laneIndexAtClientY(clientY, preferIndex){
+      const tracks = ctrl._tracksEl;
+      if (!tracks) return 0;
+      const lanes = tracks.querySelectorAll('.trackLane');
+      if (!lanes || !lanes.length) return 0;
+      const h = ctrl._laneSnapHysteresisPx || 0;
+      const pi = (typeof preferIndex === 'number' && isFinite(preferIndex)) ? preferIndex : null;
+      if (pi !== null && lanes[pi]){
+        const r0 = lanes[pi].getBoundingClientRect();
+        if (clientY >= r0.top - h && clientY <= r0.bottom + h) return pi;
+      }
+      let best = 0;
+      let bestD = Infinity;
+      for (let i=0;i<lanes.length;i++){
+        const r = lanes[i].getBoundingClientRect();
+        const cy = (r.top + r.bottom) / 2;
+        const d = Math.abs(clientY - cy);
+        if (d < bestD){ bestD = d; best = i; }
+      }
+      return best;
     }
 
     function onPointerMove(ev){
@@ -327,6 +353,18 @@
       }
 
       inst.startSec = startSec;
+
+      // Vertical lane snap (multi-track): drag across lanes updates inst.trackIndex.
+      const newLane = laneIndexAtClientY(ev.clientY, cand.curTrackIndex);
+      if (typeof newLane === 'number' && isFinite(newLane) && newLane !== cand.curTrackIndex){
+        const lanes = ctrl._tracksEl.querySelectorAll('.trackLane');
+        if (lanes && lanes[newLane]){
+          try{ lanes[newLane].appendChild(cand.el); }catch(e){}
+          inst.trackIndex = newLane;
+          cand.curTrackIndex = newLane;
+          dbg(ctrl, 'drag lane', cand.instId, '->', newLane);
+        }
+      }
 
       // Update DOM in-place (NO full render!)
       cand.el.style.left = (ctrl._labelW + startSec * pxPerSec) + 'px';

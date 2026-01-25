@@ -265,6 +265,26 @@
       this.state.modal.draftScore = H2SProject.deepClone(savedScoreSec);
       this.state.modal.dirty = false;
 
+      // T3-4: ghost + patch summary (revision UI bridge)
+      this.state.modal.ghostScore = null;
+      try{
+        const parentId = clip && clip.parentRevisionId;
+        if (parentId && Array.isArray(clip.revisions)){
+          const parent = clip.revisions.find(r => r && r.revisionId === parentId);
+          if (parent && parent.score) this.state.modal.ghostScore = H2SProject.deepClone(parent.score);
+        }
+      }catch(e){}
+
+      try{
+        const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
+        const agent = clip && clip.meta && clip.meta.agent;
+        if (el){
+          if (agent && agent.patchSummary) el.textContent = JSON.stringify(agent.patchSummary, null, 2);
+          else if (agent && typeof agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: agent.patchOps }, null, 2);
+          else el.textContent = '(none)';
+        }
+      }catch(e){}
+
       // Remember source timebase for save boundary.
       this.state.modal._sourceClipWasBeat = !!clipScoreIsBeat;
       this.state.modal._projectWantsBeat = !!projectWantsBeat;
@@ -549,6 +569,30 @@
       }
 
       // notes
+      // ghost overlay (stroke-only, non-interactive)
+      if (this.state.modal.ghostScore){
+        const gnotes = [];
+        const gscore = this.state.modal.ghostScore;
+        if (gscore && gscore.tracks){
+          for (const gt of gscore.tracks){
+            for (const gn of (gt.notes || [])) gnotes.push(gn);
+          }
+        }
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255,255,255,.55)';
+        for (const n of gnotes){
+          if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
+          const x = padL + n.start * pxPerSec;
+          const y = padT + (pitchMax - n.pitch) * rowH + 1;
+          const w = Math.max(6, n.duration * pxPerSec);
+          const h = rowH - 2;
+          ctx.strokeRect(Math.floor(x)+0.5, Math.floor(y)+0.5, Math.floor(w), Math.floor(h));
+        }
+        ctx.restore();
+      }
+
       const notes = this.modalAllNotes();
       for (const n of notes){
         if (n.pitch < pitchMin || n.pitch > pitchMax) continue;

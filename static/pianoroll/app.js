@@ -318,6 +318,24 @@
       $('#btnStop').addEventListener('click', () => this.stopProject());
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
+      // Tracks management (T4-0)
+      const btnAddTrack = document.getElementById('btnAddTrack');
+      if (btnAddTrack){
+        btnAddTrack.addEventListener('click', () => this.addTrack());
+      }
+      const tracksBox = document.getElementById('tracksBox');
+      if (tracksBox){
+        tracksBox.addEventListener('click', (e) => {
+          const t = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
+          if (!t) return;
+          const act = t.getAttribute('data-act');
+          const tid = t.getAttribute('data-track-id');
+          if (!act || !tid) return;
+          if (act === 'trkRename') this.renameTrack(tid);
+          if (act === 'trkRemove') this.deleteTrack(tid);
+        });
+      }
+
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
       $('#btnModalCancel').addEventListener('click', () => this.closeModal(false));
@@ -577,11 +595,121 @@ try{
       $('#kvInst').textContent = String(this.project.instances.length);
       $('#inpBpm').value = this.project.bpm;
 
+      this.renderTracksInspector();
+
       this.renderClipList();
       this.renderTimeline();
       this.renderSelection();
     },
 
+    renderTracksInspector(){
+      const box = document.getElementById('tracksBox');
+      if (!box) return;
+      box.innerHTML = '';
+      const tracks = this.project.tracks || [];
+      for (const trk of tracks){
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
+        row.style.marginTop = '6px';
+        const name = document.createElement('div');
+        name.className = 'muted';
+        name.style.flex = '1';
+        name.textContent = trk.name + ' (' + trk.id + ')';
+        const btnRename = document.createElement('button');
+        btnRename.className = 'btn mini';
+        btnRename.textContent = 'Rename';
+        btnRename.setAttribute('data-act', 'trkRename');
+        btnRename.setAttribute('data-track-id', trk.id);
+        const btnRemove = document.createElement('button');
+        btnRemove.className = 'btn mini danger';
+        btnRemove.textContent = 'Delete';
+        btnRemove.setAttribute('data-act', 'trkRemove');
+        btnRemove.setAttribute('data-track-id', trk.id);
+        row.appendChild(name);
+        row.appendChild(btnRename);
+        row.appendChild(btnRemove);
+        box.appendChild(row);
+      }
+    },
+
+    addTrack(){
+      const p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)){
+        alert('Track edit requires v2 project.');
+        return;
+      }
+      const nextIndex = (p2.tracks || []).length + 1;
+      const newTrack = {
+        id: H2SProject.uid('trk_'),
+        name: 'Track ' + nextIndex,
+        instrument: 'default'
+      };
+      p2.tracks = p2.tracks || [];
+      p2.tracks.push(newTrack);
+      _writeLS(LS_KEY_V2, p2);
+      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+      this.project = _projectV2ToV1View(p2);
+      persist();
+      this.render();
+      log('Added track: ' + newTrack.name);
+    },
+
+    renameTrack(trackId){
+      const p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)){
+        alert('Track edit requires v2 project.');
+        return;
+      }
+      const t = (p2.tracks || []).find(x => x.id === trackId);
+      if (!t) return;
+      const next = prompt('Track name:', t.name);
+      if (next === null) return;
+      const name = String(next || '').trim();
+      if (!name) return;
+      t.name = name;
+      _writeLS(LS_KEY_V2, p2);
+      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+      this.project = _projectV2ToV1View(p2);
+      persist();
+      this.render();
+      log('Renamed track: ' + trackId);
+    },
+
+    deleteTrack(trackId){
+      const p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)){
+        alert('Track edit requires v2 project.');
+        return;
+      }
+      const tracks = p2.tracks || [];
+      if (tracks.length <= 1){
+        alert('At least one track is required.');
+        return;
+      }
+      const idx = tracks.findIndex(x => x.id === trackId);
+      if (idx < 0) return;
+
+      const insts = (p2.instances || []).filter(i => i.trackId === trackId);
+      if (insts.length > 0){
+        const ok = confirm(`Delete track and its ${insts.length} instances?\n\nThis cannot be undone.`);
+        if (!ok) return;
+      } else {
+        const ok = confirm('Delete track?\n\nThis cannot be undone.');
+        if (!ok) return;
+      }
+
+      p2.instances = (p2.instances || []).filter(i => i.trackId !== trackId);
+      p2.tracks = tracks.filter(t => t.id !== trackId);
+      _writeLS(LS_KEY_V2, p2);
+      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+      this.project = _projectV2ToV1View(p2);
+      persist();
+      this.render();
+      log('Deleted track: ' + trackId);
+    },
     renderClipList(){
       // Prefer controller-rendered library to keep app.js smaller and reduce regressions.
       if (this.libraryCtrl && this.libraryCtrl.render){
