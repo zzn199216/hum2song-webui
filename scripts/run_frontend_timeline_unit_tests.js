@@ -49,5 +49,10 @@ function pass(name){ console.log('PASS', name); }
   assert(Math.abs(out2.startSec - 0.25) < 1e-9, 'compute snapped');
   pass('compute snapped');
 
+
+  // Timeline controller drag smoke (Node)
+  require(path.join('..','scripts','tests','timeline_controller_drag_smoke.test.js'));
+  pass('timeline_controller drag smoke');
+
   console.log('\nAll timeline unit tests passed.');
 })();

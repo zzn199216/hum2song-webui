@@ -50,8 +50,71 @@
     `;
   }
 
+
+function _snapSelectOptionsHTML(){
+  // Values are parsed by TimelineController.setSnapFromValue:
+  // - "off"
+  // - "1" (1 beat)
+  // - "1/2" ... "1/32"
+  return [
+    ['off', 'Off'],
+    ['1', '1'],
+    ['1/2', '1/2'],
+    ['1/4', '1/4'],
+    ['1/8', '1/8'],
+    ['1/16', '1/16'],
+    ['1/32', '1/32'],
+  ].map(([v,label]) => `<option value="${v}">${label}</option>`).join('');
+}
+
+/**
+ * Ensure the Timeline snap dropdown exists in DOM (view responsibility).
+ *
+ * This is intentionally a view-layer DOM creation helper so controllers can
+ * reliably bind without having to "inject UI".
+ *
+ * It will insert <select id="selTimelineSnap"> next to #inpBpm (if present).
+ * Safe in Node tests (no document).
+ */
+function ensureTimelineSnapSelect(args){
+  args = args || {};
+  if (typeof document === 'undefined') return { ok:false, reason:'no_document' };
+
+  const existing = document.getElementById('selTimelineSnap');
+  if (existing) return { ok:true, reason:'exists', el: existing };
+
+  const bpmEl = document.getElementById('inpBpm');
+  if (!bpmEl) return { ok:false, reason:'no_inpBpm' };
+
+  const sel = document.createElement('select');
+  sel.id = 'selTimelineSnap';
+  sel.className = (args.className || 'inp');
+  sel.title = 'Timeline Snap';
+  sel.setAttribute('aria-label', 'Timeline Snap');
+  sel.innerHTML = _snapSelectOptionsHTML();
+
+  // Default value: 1/16 (common DAW default). Controller may override.
+  sel.value = (args.defaultValue != null ? String(args.defaultValue) : '1/16');
+
+  // Insert right after BPM input.
+  const parent = bpmEl.parentElement;
+  if (parent){
+    if (bpmEl.nextSibling){
+      parent.insertBefore(sel, bpmEl.nextSibling);
+    } else {
+      parent.appendChild(sel);
+    }
+    sel.style.marginLeft = sel.style.marginLeft || '6px';
+    return { ok:true, reason:'inserted', el: sel };
+  }
+
+  document.body.appendChild(sel);
+  return { ok:true, reason:'appended_body', el: sel };
+}
+
   return {
     VERSION: 'timeline_view_v2_r8',
     instanceInnerHTML,
+    ensureTimelineSnapSelect,
   };
 });

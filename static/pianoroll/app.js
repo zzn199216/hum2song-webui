@@ -112,7 +112,21 @@
         createdAt: c.createdAt || Date.now(),
         sourceTaskId: (c.sourceTaskId !== undefined) ? c.sourceTaskId : null,
         score: scoreSec,
+        revisionId: (c.revisionId != null) ? String(c.revisionId) : null,
+        parentRevisionId: (c.parentRevisionId != null) ? String(c.parentRevisionId) : null,
+        updatedAt: (typeof c.updatedAt === 'number') ? c.updatedAt : null,
+        _abARevisionId: (c._abARevisionId != null) ? String(c._abARevisionId) : null,
+        _abBRevisionId: (c._abBRevisionId != null) ? String(c._abBRevisionId) : null,
+        revisions: Array.isArray(c.revisions) ? c.revisions.map(r => ({
+          revisionId: (r && r.revisionId != null) ? String(r.revisionId) : null,
+          parentRevisionId: (r && r.parentRevisionId != null) ? String(r.parentRevisionId) : null,
+          createdAt: (r && typeof r.createdAt === 'number') ? r.createdAt : null,
+          name: (r && typeof r.name === 'string') ? r.name : null,
+          score: (r && r.score) ? _scoreBeatToSec(r.score, bpm) : null,
+          meta: (r && r.meta) ? r.meta : null,
+        })) : [],
         meta: {
+          agent: (meta && meta.agent) ? meta.agent : null,
           notes: (typeof meta.notes === 'number') ? meta.notes : 0,
           pitchMin: (typeof meta.pitchMin === 'number') ? meta.pitchMin : null,
           pitchMax: (typeof meta.pitchMax === 'number') ? meta.pitchMax : null,
@@ -318,24 +332,6 @@
       $('#btnStop').addEventListener('click', () => this.stopProject());
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
-      // Tracks management (T4-0)
-      const btnAddTrack = document.getElementById('btnAddTrack');
-      if (btnAddTrack){
-        btnAddTrack.addEventListener('click', () => this.addTrack());
-      }
-      const tracksBox = document.getElementById('tracksBox');
-      if (tracksBox){
-        tracksBox.addEventListener('click', (e) => {
-          const t = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
-          if (!t) return;
-          const act = t.getAttribute('data-act');
-          const tid = t.getAttribute('data-track-id');
-          if (!act || !tid) return;
-          if (act === 'trkRename') this.renameTrack(tid);
-          if (act === 'trkRemove') this.deleteTrack(tid);
-        });
-      }
-
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
       $('#btnModalCancel').addEventListener('click', () => this.closeModal(false));
@@ -345,8 +341,11 @@
       $('#btnClipStop').addEventListener('click', () => this.modalStop());
       $('#btnInsertNote').addEventListener('click', () => this.modalInsertNote());
       $('#btnDeleteNote').addEventListener('click', () => this.modalDeleteSelectedNote());
-      $('#selSnap').addEventListener('change', () => this.modalRequestDraw());
-      $('#rngPitchCenter').addEventListener('input', () => {
+      $('#selSnap').addEventListener('change', () => {
+        // Clip editor snap only (timeline snap has its own dropdown: #selTimelineSnap)
+        this.modalRequestDraw();
+      });
+$('#rngPitchCenter').addEventListener('input', () => {
         const v = Number($('#rngPitchCenter').value || 60);
         this.state.modal.pitchCenter = H2SProject.clamp(v, 0, 127);
         this.modalRequestDraw();
@@ -459,6 +458,10 @@
       }
 
 
+      // Ensure timeline snap dropdown exists before TimelineController binds.
+      this._ensureTimelineSnapSelect();
+
+
 
 // Timeline controller (stable drag + dblclick; avoids DOM rebuild between clicks)
 try{
@@ -519,6 +522,48 @@ try{
       this.render();
       log('UI ready.');
     },
+
+    // Ensure the Timeline Snap dropdown exists in the DOM.
+    // TimelineController will bind to #selTimelineSnap if present.
+    _ensureTimelineSnapSelect(){
+      try {
+        if (typeof document === 'undefined') return;
+        if (document.getElementById('selTimelineSnap')) return;
+
+        const bpmInp = document.getElementById('inpBpm');
+        if (!bpmInp) return;
+
+        const label = document.createElement('span');
+        label.textContent = 'Snap:';
+        label.className = 'miniLabel';
+
+        const sel = document.createElement('select');
+        sel.id = 'selTimelineSnap';
+        sel.className = 'mini';
+        const opts = [
+          {v:'off', t:'Off'},
+          {v:'4', t:'1/4'},
+          {v:'8', t:'1/8'},
+          {v:'16', t:'1/16'},
+          {v:'32', t:'1/32'},
+        ];
+        for (const o of opts){
+          const op = document.createElement('option');
+          op.value = o.v;
+          op.textContent = o.t;
+          sel.appendChild(op);
+        }
+        sel.value = '16';
+
+        // Insert right after the BPM input so it's always visible.
+        bpmInp.insertAdjacentElement('afterend', sel);
+        sel.insertAdjacentElement('beforebegin', label);
+      } catch (e) {
+        // Never break UI init for a convenience widget.
+        console.warn('[app] _ensureTimelineSnapSelect failed', e);
+      }
+    },
+
 
     /**
      * Change BPM while preserving beat-positions (no visual drift).
@@ -595,121 +640,11 @@ try{
       $('#kvInst').textContent = String(this.project.instances.length);
       $('#inpBpm').value = this.project.bpm;
 
-      this.renderTracksInspector();
-
       this.renderClipList();
       this.renderTimeline();
       this.renderSelection();
     },
 
-    renderTracksInspector(){
-      const box = document.getElementById('tracksBox');
-      if (!box) return;
-      box.innerHTML = '';
-      const tracks = this.project.tracks || [];
-      for (const trk of tracks){
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.style.justifyContent = 'space-between';
-        row.style.alignItems = 'center';
-        row.style.gap = '8px';
-        row.style.marginTop = '6px';
-        const name = document.createElement('div');
-        name.className = 'muted';
-        name.style.flex = '1';
-        name.textContent = trk.name + ' (' + trk.id + ')';
-        const btnRename = document.createElement('button');
-        btnRename.className = 'btn mini';
-        btnRename.textContent = 'Rename';
-        btnRename.setAttribute('data-act', 'trkRename');
-        btnRename.setAttribute('data-track-id', trk.id);
-        const btnRemove = document.createElement('button');
-        btnRemove.className = 'btn mini danger';
-        btnRemove.textContent = 'Delete';
-        btnRemove.setAttribute('data-act', 'trkRemove');
-        btnRemove.setAttribute('data-track-id', trk.id);
-        row.appendChild(name);
-        row.appendChild(btnRename);
-        row.appendChild(btnRemove);
-        box.appendChild(row);
-      }
-    },
-
-    addTrack(){
-      const p2 = _projectV1ToV2(this.project);
-      if (!p2 || !_isProjectV2(p2)){
-        alert('Track edit requires v2 project.');
-        return;
-      }
-      const nextIndex = (p2.tracks || []).length + 1;
-      const newTrack = {
-        id: H2SProject.uid('trk_'),
-        name: 'Track ' + nextIndex,
-        instrument: 'default'
-      };
-      p2.tracks = p2.tracks || [];
-      p2.tracks.push(newTrack);
-      _writeLS(LS_KEY_V2, p2);
-      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-      this.project = _projectV2ToV1View(p2);
-      persist();
-      this.render();
-      log('Added track: ' + newTrack.name);
-    },
-
-    renameTrack(trackId){
-      const p2 = _projectV1ToV2(this.project);
-      if (!p2 || !_isProjectV2(p2)){
-        alert('Track edit requires v2 project.');
-        return;
-      }
-      const t = (p2.tracks || []).find(x => x.id === trackId);
-      if (!t) return;
-      const next = prompt('Track name:', t.name);
-      if (next === null) return;
-      const name = String(next || '').trim();
-      if (!name) return;
-      t.name = name;
-      _writeLS(LS_KEY_V2, p2);
-      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-      this.project = _projectV2ToV1View(p2);
-      persist();
-      this.render();
-      log('Renamed track: ' + trackId);
-    },
-
-    deleteTrack(trackId){
-      const p2 = _projectV1ToV2(this.project);
-      if (!p2 || !_isProjectV2(p2)){
-        alert('Track edit requires v2 project.');
-        return;
-      }
-      const tracks = p2.tracks || [];
-      if (tracks.length <= 1){
-        alert('At least one track is required.');
-        return;
-      }
-      const idx = tracks.findIndex(x => x.id === trackId);
-      if (idx < 0) return;
-
-      const insts = (p2.instances || []).filter(i => i.trackId === trackId);
-      if (insts.length > 0){
-        const ok = confirm(`Delete track and its ${insts.length} instances?\n\nThis cannot be undone.`);
-        if (!ok) return;
-      } else {
-        const ok = confirm('Delete track?\n\nThis cannot be undone.');
-        if (!ok) return;
-      }
-
-      p2.instances = (p2.instances || []).filter(i => i.trackId !== trackId);
-      p2.tracks = tracks.filter(t => t.id !== trackId);
-      _writeLS(LS_KEY_V2, p2);
-      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-      this.project = _projectV2ToV1View(p2);
-      persist();
-      this.render();
-      log('Deleted track: ' + trackId);
-    },
     renderClipList(){
       // Prefer controller-rendered library to keep app.js smaller and reduce regressions.
       if (this.libraryCtrl && this.libraryCtrl.render){
@@ -735,8 +670,7 @@ try{
         el.addEventListener('dragstart', (e) => {
           e.dataTransfer.setData('text/plain', clip.id);
         });
-
-        el.innerHTML = `
+el.innerHTML = `
           <div class="clipTitle">${escapeHtml(clip.name)}</div>
           <div class="clipMeta"><span>${st.count} notes</span><span>${fmtSec(st.spanSec)}</span></div>
           <div class="miniBtns">

@@ -13,5 +13,6 @@ runOne('scripts/run_frontend_contract_tests.js');
 runOne('scripts/run_frontend_editor_contract_tests.js');
 runOne('scripts/run_frontend_numeric_invariants_tests.js');
 runOne('scripts/run_frontend_bpm_invariants_tests.js');
+runOne('scripts/run_frontend_timeline_unit_tests.js');
 
-console.log('\nAll frontend tests (contracts + editor + numeric invariants) passed.');
+console.log('\nAll frontend tests (contracts + editor + numeric invariants + timeline) passed.');

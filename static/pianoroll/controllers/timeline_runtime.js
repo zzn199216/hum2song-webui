@@ -14,6 +14,55 @@
 
   const VERSION = 'timeline_runtime_v1';
 
+  /**
+   * Pick a lane index based on pointer Y.
+   *
+   * This is the only place that should convert Y -> lane index.
+   * Controllers should NOT scatter Y math.
+   *
+   * opts:
+   * - clientY: number
+   * - rectTop: tracks.getBoundingClientRect().top
+   * - scrollTop: tracks.scrollTop
+   * - laneHeight: px per lane (>0)
+   * - trackCount: number of tracks
+   * - currentIndex: current lane index (for hysteresis)
+   * - hysteresisPx: dead-zone around boundaries (default laneHeight*0.2)
+   */
+  function pickLaneIndexByY(opts){
+    opts = opts || {};
+    const trackCount = Math.max(0, Number(opts.trackCount || 0));
+    if (trackCount <= 0) return 0;
+    const laneH = Number(opts.laneHeight || 0);
+    if (!(laneH > 0)) return Math.min(trackCount - 1, Math.max(0, Number(opts.currentIndex || 0)));
+
+    const rectTop = Number(opts.rectTop || 0);
+    const scrollTop = Number(opts.scrollTop || 0);
+    const clientY = Number(opts.clientY || 0);
+    const contentY = (clientY - rectTop) + scrollTop;
+
+    let idx = Math.floor(contentY / laneH);
+    if (!isFinite(idx)) idx = 0;
+    idx = Math.max(0, Math.min(trackCount - 1, idx));
+
+    // Hysteresis: avoid rapid lane flipping near boundaries.
+    const cur = Math.max(0, Math.min(trackCount - 1, Number(opts.currentIndex || idx)));
+    if (idx === cur) return idx;
+
+    const dead = (typeof opts.hysteresisPx === 'number') ? Number(opts.hysteresisPx) : (laneH * 0.2);
+    const boundaryTop = cur * laneH;
+    const boundaryBottom = (cur + 1) * laneH;
+
+    if (idx > cur){
+      // Moving down: require pointer to go below boundary + dead
+      if (contentY < (boundaryBottom + dead)) return cur;
+      return idx;
+    }
+    // Moving up: require pointer to go above boundary - dead
+    if (contentY > (boundaryTop - dead)) return cur;
+    return idx;
+  }
+
   function _requireMath(){
     if (!MathUtil) throw new Error('H2STimelineMath is required');
     return MathUtil;
@@ -78,5 +127,6 @@
   return {
     VERSION,
     createDragSession,
+    pickLaneIndexByY,
   };
 });

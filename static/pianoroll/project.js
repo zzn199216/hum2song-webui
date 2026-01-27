@@ -509,6 +509,20 @@ function _iso(ts){
   return '';
 }
 
+  function getTimelineSnapBeat(project){
+    if (!project || !project.ui) return 0.25;
+    return isFiniteNumber(project.ui.timelineSnapBeat) ? project.ui.timelineSnapBeat : 0.25;
+  }
+
+  function setTimelineSnapBeat(project, beat){
+    if (!project || !project.ui) return;
+    let b = Number(beat);
+    if (!isFiniteNumber(b) || b < 0) b = 0;
+    // 0 means Off
+    project.ui.timelineSnapBeat = b === 0 ? 0 : normalizeBeat(b);
+  }
+
+
 function ensureClipRevisionChain(clip){
   if (!clip) return clip;
   if (!Array.isArray(clip.revisions)) clip.revisions = [];
@@ -794,6 +808,7 @@ function beginNewClipRevision(project, clipId, opts){
     // strip v1 ui fields
     if ('pxPerSec' in project.ui) delete project.ui.pxPerSec;
     if ('playheadSec' in project.ui) delete project.ui.playheadSec;
+    delete project.ui.timelineSnapSec;
 
     return project;
   }
@@ -1339,6 +1354,8 @@ function toggleClipAB(projectV2, clipId){
     getProjectBpm,
     getPlayheadSec,
     getInstanceStartSec,
+    getTimelineSnapBeat,
+    setTimelineSnapBeat,
     setPlayheadFromSec_Free,
     setPlayheadFromSec_Snapped,
     setInstanceStartFromSec_Free,

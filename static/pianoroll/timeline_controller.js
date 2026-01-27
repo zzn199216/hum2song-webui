@@ -27,6 +27,7 @@
   }
 
   function isDebugEnabled(){
+    if (typeof window === 'undefined') return false;
     try{
       const u = new URL(window.location.href);
       if (u.searchParams.get('debug_timeline') === '1') return true;
@@ -68,9 +69,112 @@
       _tracksEl: config.tracksEl,
       _labelW: (config && typeof config.labelWidthPx === 'number') ? config.labelWidthPx : 120,
       _dragThresholdPx: (config && typeof config.dragThresholdPx === 'number') ? config.dragThresholdPx : 4,
-      _laneSnapHysteresisPx: (config && typeof config.laneSnapHysteresisPx === 'number') ? config.laneSnapHysteresisPx : 10,
       _escapeHtml: (config && config.escapeHtml) ? config.escapeHtml : escapeHtml,
       _fmtSec: (config && config.fmtSec) ? config.fmtSec : fmtSec,
+      // snap grid (timeline)
+      _snapDiv: 4, // divisions per beat; 4 => 1/4 beat (16th note). 0 => off
+      _snapSelectEl: null,
+      _getSnapSec(proj){
+        const div = (typeof ctrl._snapDiv === 'number') ? ctrl._snapDiv : 0;
+        if (!proj || !proj.bpm || div <= 0) return 0;
+        const beatSec = 60 / proj.bpm; // beat = quarter note
+        return beatSec / div;
+      },
+      setSnapDiv(div){
+        const n = Number(div);
+        ctrl._snapDiv = (Number.isFinite(n) && n > 0) ? Math.max(1, Math.min(128, Math.round(n))) : 0;
+        // reflect UI if present
+        if (ctrl._snapSelectEl) {
+          ctrl._snapSelectEl.value = ctrl._snapDiv ? String(ctrl._snapDiv) : 'off';
+        }
+        ctrl._applyGrid();
+      },
+      setSnapFromValue(v){
+        if (v === 'off' || v === '' || v == null) return ctrl.setSnapDiv(0);
+        const n = Number(v);
+        return ctrl.setSnapDiv(n);
+      },
+      _ensureSnapSelect(){
+        // Node-safe: some tests provide a dummy 'document' object without DOM APIs
+        if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return null;
+
+        let sel = document.getElementById('selTimelineSnap') || document.getElementById('selSnap');
+        if (!sel) {
+          // Create snap select next to BPM input if it doesn't exist in HTML.
+          const bpmEl = document.getElementById('inpBpm');
+          if (!bpmEl || !bpmEl.parentElement) return null;
+
+          sel = document.createElement('select');
+          sel.id = 'selTimelineSnap';
+          sel.className = 'sel';
+          sel.style.marginLeft = '8px';
+          const opts = [
+            ['off','Snap: Off'],
+            ['4','1/16'],
+            ['8','1/32'],
+            ['16','1/64'],
+            ['32','1/128'],
+          ];
+          for (const [val, label] of opts) {
+            const o = document.createElement('option');
+            o.value = val;
+            o.textContent = label;
+            sel.appendChild(o);
+          }
+
+          // Insert after BPM input
+          bpmEl.insertAdjacentElement('afterend', sel);
+        }
+        return sel;
+      },
+      _initSnapUi(){
+        const sel = ctrl._ensureSnapSelect();
+        ctrl._snapSelectEl = sel || null;
+        if (!sel) return;
+        // Initialize controller state from current UI value
+        ctrl.setSnapFromValue(sel.value);
+        ctrl._applyGrid();
+        sel.addEventListener('change', () => {
+          ctrl.setSnapFromValue(sel.value);
+          ctrl._applyGrid();
+        });
+      },
+      _applyGrid(){
+        // Apply grid to each instBody so we don't draw over empty areas
+        if (typeof document === 'undefined') return;
+        const proj = (ctrl._cfg && typeof ctrl._cfg.getProject === 'function') ? ctrl._cfg.getProject() : null;
+        const gridSec = ctrl._getSnapSec(proj);
+        const pxPerSec = (ctrl._cfg && typeof ctrl._cfg.getPxPerSec === 'function') ? ctrl._cfg.getPxPerSec() : (proj ? (proj.pxPerBeat ? (proj.pxPerBeat * proj.bpm / 60) : 120) : 120);
+
+        // Find inst bodies under tracks root
+        const root = ctrl._els && (ctrl._els.tracks || ctrl._els.root);
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        const instBodies = root.querySelectorAll('.instBody');
+        if (!instBodies || instBodies.length === 0) return;
+
+        if (!gridSec || gridSec <= 0) {
+          instBodies.forEach(el => {
+            el.style.backgroundImage = '';
+            el.style.backgroundSize = '';
+            el.style.backgroundPosition = '';
+          });
+          return;
+        }
+
+        const beatSec = proj && proj.bpm ? (60 / proj.bpm) : 0.5;
+        const minorPx = Math.max(4, gridSec * pxPerSec);
+        const majorPx = Math.max(minorPx, beatSec * pxPerSec);
+
+        const minor = `repeating-linear-gradient(to right, rgba(0,0,0,0.10) 0, rgba(0,0,0,0.10) 1px, transparent 1px, transparent ${minorPx}px)`;
+        const major = `repeating-linear-gradient(to right, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 1px, transparent 1px, transparent ${majorPx}px)`;
+        const bg = (Math.abs(majorPx - minorPx) < 0.01) ? major : `${major}, ${minor}`;
+
+        instBodies.forEach(el => {
+          el.style.backgroundImage = bg;
+          el.style.backgroundSize = 'auto';
+          el.style.backgroundPosition = '0 0';
+        });
+      },
       _getPxPerSec(){
         const proj = config.getProject();
         const ui = proj && proj.ui ? proj.ui : null;
@@ -81,8 +185,10 @@
       setPlayheadSec(sec){
         const tracks = ctrl._tracksEl;
         if (!tracks) return;
-        const pxPerSec = ctrl._getPxPerSec();
-        const s = Math.max(0, Number(sec || 0));
+        const pxPerSec = (typeof ctrl._getPxPerSec === 'function') ? ctrl._getPxPerSec()
+        : ((proj && proj.ui && Number.isFinite(proj.ui.pxPerSec)) ? proj.ui.pxPerSec
+           : (proj && Number.isFinite(proj.pxPerBeat) && proj.bpm ? (proj.pxPerBeat * proj.bpm / 60) : 120));
+const s = Math.max(0, Number(sec || 0));
         // Re-acquire in case a render replaced DOM
         if (!ctrl._playheadEl || !ctrl._playheadEl.isConnected){
           ctrl._playheadEl = tracks.querySelector('.playhead');
@@ -100,6 +206,9 @@
         window.addEventListener('pointercancel', onPointerCancel, {passive:true});
 
         dbg(ctrl, 'bound global pointer handlers', VERSION);
+
+        // Snap UI binding (Node-safe inside _initSnapUi)
+        ctrl._initSnapUi();
       },
       render(){
         ctrl._ensureBound();
@@ -109,9 +218,10 @@
 
         const proj = config.getProject();
         const state = config.getState();
-        const pxPerSec = ctrl._getPxPerSec();
-
-        // HARD RULE: never rebuild timeline while dragging (DOM replacement breaks capture/dblclick)
+        const pxPerSec = (typeof ctrl._getPxPerSec === 'function') ? ctrl._getPxPerSec()
+        : ((proj && proj.ui && Number.isFinite(proj.ui.pxPerSec)) ? proj.ui.pxPerSec
+           : (proj && Number.isFinite(proj.pxPerBeat) && proj.bpm ? (proj.pxPerBeat * proj.bpm / 60) : 120));
+// HARD RULE: never rebuild timeline while dragging (DOM replacement breaks capture/dblclick)
         const cand = state && state.dragCandidate;
         if (cand && cand.started){
           dbg(ctrl, 'render() skipped because dragging is active');
@@ -262,36 +372,11 @@
         el,
         pointerId: ev.pointerId,
         startClientX: ev.clientX,
-        startClientY: ev.clientY,
         offsetX: ev.clientX - rect.left,
-        startTrackIndex: 0,
-        curTrackIndex: 0,
         started: false,
         _elConnectedAtDown: el.isConnected
       };
       dbg(ctrl, 'pointerdown inst', instId);
-    }
-
-    function laneIndexAtClientY(clientY, preferIndex){
-      const tracks = ctrl._tracksEl;
-      if (!tracks) return 0;
-      const lanes = tracks.querySelectorAll('.trackLane');
-      if (!lanes || !lanes.length) return 0;
-      const h = ctrl._laneSnapHysteresisPx || 0;
-      const pi = (typeof preferIndex === 'number' && isFinite(preferIndex)) ? preferIndex : null;
-      if (pi !== null && lanes[pi]){
-        const r0 = lanes[pi].getBoundingClientRect();
-        if (clientY >= r0.top - h && clientY <= r0.bottom + h) return pi;
-      }
-      let best = 0;
-      let bestD = Infinity;
-      for (let i=0;i<lanes.length;i++){
-        const r = lanes[i].getBoundingClientRect();
-        const cy = (r.top + r.bottom) / 2;
-        const d = Math.abs(clientY - cy);
-        if (d < bestD){ bestD = d; best = i; }
-      }
-      return best;
     }
 
     function onPointerMove(ev){
@@ -329,8 +414,10 @@
       const inst = (proj.instances||[]).find(x => x.id === cand.instId);
       if (!inst) return;
 
-      const pxPerSec = ctrl._getPxPerSec();
-      const tracks = ctrl._tracksEl;
+      const pxPerSec = (typeof ctrl._getPxPerSec === 'function') ? ctrl._getPxPerSec()
+        : ((proj && proj.ui && Number.isFinite(proj.ui.pxPerSec)) ? proj.ui.pxPerSec
+           : (proj && Number.isFinite(proj.pxPerBeat) && proj.bpm ? (proj.pxPerBeat * proj.bpm / 60) : 120));
+const tracks = ctrl._tracksEl;
 
       // Convert clientX to timeline content X (tracks is scrollable)
       const rect = tracks.getBoundingClientRect();
@@ -342,29 +429,16 @@
       // Convert left (relative to tracks content) to startSec
       let startSec = Math.max(0, (left - ctrl._labelW) / pxPerSec);
 
-      // Snap (music grid): default 1/16, hold Alt to bypass snap.
+      // Snap (timeline grid): driven by current snap dropdown (beat-based), hold Alt to bypass.
+      // Off => no snap.
       if (!ev.altKey){
-        const bpm = (proj && proj.bpm) ? proj.bpm : 120;
-        const beatSec = 60 / bpm;
-        const gridSec = beatSec / 4; // 1/16 note in seconds
-        if (gridSec > 0){
+        const gridSec = (typeof ctrl._getSnapSec === 'function') ? ctrl._getSnapSec(proj) : 0;
+        if (gridSec && gridSec > 0){
           startSec = Math.round(startSec / gridSec) * gridSec;
         }
       }
 
       inst.startSec = startSec;
-
-      // Vertical lane snap (multi-track): drag across lanes updates inst.trackIndex.
-      const newLane = laneIndexAtClientY(ev.clientY, cand.curTrackIndex);
-      if (typeof newLane === 'number' && isFinite(newLane) && newLane !== cand.curTrackIndex){
-        const lanes = ctrl._tracksEl.querySelectorAll('.trackLane');
-        if (lanes && lanes[newLane]){
-          try{ lanes[newLane].appendChild(cand.el); }catch(e){}
-          inst.trackIndex = newLane;
-          cand.curTrackIndex = newLane;
-          dbg(ctrl, 'drag lane', cand.instId, '->', newLane);
-        }
-      }
 
       // Update DOM in-place (NO full render!)
       cand.el.style.left = (ctrl._labelW + startSec * pxPerSec) + 'px';
@@ -405,8 +479,12 @@
       state.dragCandidate = null;
     }
 
+    ctrl.__testHooks = { instancePointerDown, onPointerMove, onPointerUp, onPointerCancel };
+
     return ctrl;
   }
 
-  window.H2STimeline = { VERSION, create };
+  const __root = (typeof window !== 'undefined') ? window : globalThis;
+  __root.H2STimeline = { VERSION, create };
+  if (typeof module !== 'undefined' && module.exports){ module.exports = __root.H2STimeline; }
 })();
