@@ -193,16 +193,7 @@
     try { return JSON.parse(txt); } catch(e){ return { raw: txt }; }
   }
   function persist(){
-    // Persist beats-only ProjectDoc v2.
-    // IMPORTANT: if v2 already exists, DO NOT re-migrate from v1 view here,
-    // otherwise we can accidentally drop v2-only fields (e.g., clip revisions/meta.agent).
-    const existing = _readLS(LS_KEY_V2);
-    if (existing && _isProjectV2(existing)){
-      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-      return;
-    }
-
-    // No v2 yet: migrate current v1 (seconds view) into v2 once.
+    // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
     const p2 = _projectV1ToV2(app.project);
     if (!p2) return;
 
@@ -266,6 +257,8 @@ async optimizeClip(clipId){
 
     state: {
       selectedInstanceId: null,
+      activeTrackIndex: 0,
+      activeTrackId: null,
       draggingInstance: null,
       dragCandidate: null,
       dragOffsetX: 0,
@@ -533,6 +526,11 @@ try{
       // Soft-select: update state + DOM class + inspector, WITHOUT full re-render.
       const prev = this.state.selectedInstanceId;
       this.state.selectedInstanceId = instId;
+      // If we can resolve the instance, update active track highlight.
+      try{
+        const inst = (this.project.instances||[]).find(x => x && x.id === instId);
+        if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
+      }catch(e){}
 
       // Toggle selected class in-place
       if (this._selectedInstEl && this._selectedInstEl !== el){
@@ -546,6 +544,7 @@ try{
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
     onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
+    onSetActiveTrackIndex: (ti) => this.setActiveTrackIndex(ti),
     onPersistAndRender: () => { persist(); this.render(); },
     onRemoveInstance: (instId) => this.deleteInstance(instId),
     escapeHtml,
@@ -861,8 +860,28 @@ renderTimeline(){
 
 
 
+
+    setActiveTrackIndex(trackIndex){
+      const n = Number(trackIndex);
+      if (!Number.isFinite(n)) return {ok:false, error:'bad_track_index'};
+      const max = Math.max(0, (this.project.tracks||[]).length - 1);
+      const ti = Math.max(0, Math.min(max, Math.round(n)));
+      this.state.activeTrackIndex = ti;
+      this.state.activeTrackId = (this.project.tracks && this.project.tracks[ti]) ? this.project.tracks[ti].id : null;
+      // Soft update: timeline highlight only (no persist)
+      try{
+        if (this.timelineCtrl && typeof this.timelineCtrl.setActiveTrackIndex === 'function'){
+          this.timelineCtrl.setActiveTrackIndex(ti);
+        }else{
+          this.renderTimeline();
+        }
+      }catch(e){}
+      return {ok:true, trackIndex: ti, trackId: this.state.activeTrackId};
+    },
+
     addClipToTimeline(clipId, startSec, trackIndex){
-      const inst = H2SProject.createInstance(clipId, startSec || (this.project.ui.playheadSec || 0), trackIndex || 0);
+      const ti = (trackIndex == null) ? (Number.isFinite(this.state.activeTrackIndex) ? this.state.activeTrackIndex : 0) : trackIndex;
+      const inst = H2SProject.createInstance(clipId, startSec || (this.project.ui.playheadSec || 0), ti);
       this.project.instances.push(inst);
       this.state.selectedInstanceId = inst.id;
       persist();

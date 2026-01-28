@@ -89,6 +89,44 @@
         }
         ctrl._applyGrid();
       },
+      // --- Active Track (MVP: visual target for Add-to-Song) ---
+      _activeTrackIndex: 0,
+      setActiveTrackIndex: function(ti){
+        const n = Number(ti);
+        ctrl._activeTrackIndex = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+        ctrl._ensureActiveTrackStyles();
+        ctrl._applyActiveTrack();
+      },
+      _applyActiveTrack: function(){
+        if (typeof document === 'undefined') return;
+        try{
+          const lanes = ctrl._tracksEl ? ctrl._tracksEl.querySelectorAll('.trackLane') : null;
+          if (!lanes) return;
+          const a = Number.isFinite(ctrl._activeTrackIndex) ? ctrl._activeTrackIndex : 0;
+          lanes.forEach((lane, idx)=>{
+            if (!lane || !lane.classList) return;
+            if (idx === a) lane.classList.add('activeTrack');
+            else lane.classList.remove('activeTrack');
+          });
+        }catch(e){}
+      },
+      _ensureActiveTrackStyles: function(){
+        if (typeof document === 'undefined') return;
+        try{
+          // Inject once. Keep it very subtle; do not touch grid/clip styling.
+          const id = 'h2sActiveTrackStyle';
+          if (document.getElementById && document.getElementById(id)) return;
+          if (!document.createElement || !document.head) return;
+          const st = document.createElement('style');
+          st.id = id;
+          st.textContent = `
+            .trackLane.activeTrack{ background: rgba(80,160,255,0.06); }
+            .trackLane.activeTrack .trackLabel{ color:#4da3ff; font-weight:600; }
+          `;
+          document.head.appendChild(st);
+        }catch(e){}
+      },
+
       setSnapFromValue(v){
         if (v === 'off' || v === '' || v == null) return ctrl.setSnapDiv(0);
         const n = Number(v);
@@ -221,6 +259,7 @@
       },
       render(){
         ctrl._ensureBound();
+        ctrl._ensureActiveTrackStyles();
 
         const tracks = ctrl._tracksEl;
         if (!tracks) return;
@@ -252,6 +291,15 @@
           const label = document.createElement('div');
           label.className = 'trackLabel';
           label.textContent = (proj.tracks[ti] && proj.tracks[ti].name) ? proj.tracks[ti].name : ('Track ' + (ti+1));
+          // Click track header to set Active Track (target for Add-to-Song)
+          label.style.cursor = 'pointer';
+          label.title = 'Set as target track';
+          label.addEventListener('click', ()=>{
+            ctrl.setActiveTrackIndex(ti);
+            if (typeof config.onSetActiveTrackIndex === 'function'){
+              try{ config.onSetActiveTrackIndex(ti); }catch(e){}
+            }
+          });
           lane.appendChild(label);
 
           const grid = document.createElement('div');
@@ -333,6 +381,9 @@
 
           tracks.appendChild(lane);
         }
+
+        // apply active track highlight
+        ctrl._applyActiveTrack();
 
         // playhead line (preserve element for cheap per-frame updates)
         const playhead = preservedPlayhead || document.createElement('div');
