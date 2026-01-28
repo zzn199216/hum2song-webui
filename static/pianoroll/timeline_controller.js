@@ -140,41 +140,52 @@
         });
       },
       _applyGrid(){
-        // Apply grid to each instBody so we don't draw over empty areas
-        if (typeof document === 'undefined') return;
-        const proj = (ctrl._cfg && typeof ctrl._cfg.getProject === 'function') ? ctrl._cfg.getProject() : null;
-        const gridSec = ctrl._getSnapSec(proj);
-        const pxPerSec = (ctrl._cfg && typeof ctrl._cfg.getPxPerSec === 'function') ? ctrl._cfg.getPxPerSec() : (proj ? (proj.pxPerBeat ? (proj.pxPerBeat * proj.bpm / 60) : 120) : 120);
+  // V15 base: snap works but grid was effectively "hidden" because we were painting inside clips.
+  // Fix: drive the visible track grid (.laneGrid) density from the same snap truth source.
+  if (typeof document === 'undefined') return;
 
-        // Find inst bodies under tracks root
-        const root = ctrl._els && (ctrl._els.tracks || ctrl._els.root);
-        if (!root || typeof root.querySelectorAll !== 'function') return;
-        const instBodies = root.querySelectorAll('.instBody');
-        if (!instBodies || instBodies.length === 0) return;
+  const proj = (ctrl._cfg && typeof ctrl._cfg.getProject === 'function') ? ctrl._cfg.getProject() : null;
+  const gridSec = ctrl._getSnapSec(proj);
+  const pxPerSec = (ctrl._cfg && typeof ctrl._cfg.getPxPerSec === 'function')
+    ? ctrl._cfg.getPxPerSec()
+    : (proj ? (proj.ui && Number.isFinite(proj.ui.pxPerSec) ? proj.ui.pxPerSec : 160) : 160);
 
-        if (!gridSec || gridSec <= 0) {
-          instBodies.forEach(el => {
-            el.style.backgroundImage = '';
-            el.style.backgroundSize = '';
-            el.style.backgroundPosition = '';
-          });
-          return;
-        }
+  const root = ctrl._tracksEl;
+  if (!root || typeof root.querySelectorAll !== 'function') return;
 
-        const beatSec = proj && proj.bpm ? (60 / proj.bpm) : 0.5;
-        const minorPx = Math.max(4, gridSec * pxPerSec);
-        const majorPx = Math.max(minorPx, beatSec * pxPerSec);
+  // Clear any clip-local grid so it never appears "inside the blue block".
+  const instBodies = root.querySelectorAll('.instBody');
+  if (instBodies && instBodies.length){
+    instBodies.forEach(el => {
+      el.style.backgroundImage = '';
+      el.style.backgroundSize = '';
+      el.style.backgroundPosition = '';
+    });
+  }
 
-        const minor = `repeating-linear-gradient(to right, rgba(0,0,0,0.10) 0, rgba(0,0,0,0.10) 1px, transparent 1px, transparent ${minorPx}px)`;
-        const major = `repeating-linear-gradient(to right, rgba(0,0,0,0.18) 0, rgba(0,0,0,0.18) 1px, transparent 1px, transparent ${majorPx}px)`;
-        const bg = (Math.abs(majorPx - minorPx) < 0.01) ? major : `${major}, ${minor}`;
+  const laneGrids = root.querySelectorAll('.laneGrid');
+  if (!laneGrids || laneGrids.length === 0) return;
 
-        instBodies.forEach(el => {
-          el.style.backgroundImage = bg;
-          el.style.backgroundSize = 'auto';
-          el.style.backgroundPosition = '0 0';
-        });
-      },
+  // Off => hide grid entirely (override CSS).
+  if (!gridSec || !(gridSec > 0)){
+    laneGrids.forEach(el => {
+      el.style.backgroundImage = 'none';
+      el.style.backgroundSize = '';
+      el.style.backgroundPosition = '';
+    });
+    return;
+  }
+
+  // Visible density: keep the CSS grid image, only change X spacing to match snap.
+  // NOTE: laneGrid CSS already defines the line pattern; background-size controls spacing.
+  const minorPx = Math.max(4, gridSec * pxPerSec);
+  laneGrids.forEach(el => {
+    // Restore CSS background-image (in case Off set inline 'none')
+    el.style.backgroundImage = '';
+    el.style.backgroundSize = `${minorPx}px 24px`;
+    el.style.backgroundPosition = '0 0';
+  });
+},
       _getPxPerSec(){
         const proj = config.getProject();
         const ui = proj && proj.ui ? proj.ui : null;
@@ -185,10 +196,8 @@
       setPlayheadSec(sec){
         const tracks = ctrl._tracksEl;
         if (!tracks) return;
-        const pxPerSec = (typeof ctrl._getPxPerSec === 'function') ? ctrl._getPxPerSec()
-        : ((proj && proj.ui && Number.isFinite(proj.ui.pxPerSec)) ? proj.ui.pxPerSec
-           : (proj && Number.isFinite(proj.pxPerBeat) && proj.bpm ? (proj.pxPerBeat * proj.bpm / 60) : 120));
-const s = Math.max(0, Number(sec || 0));
+        const pxPerSec = ctrl._getPxPerSec();
+        const s = Math.max(0, Number(sec || 0));
         // Re-acquire in case a render replaced DOM
         if (!ctrl._playheadEl || !ctrl._playheadEl.isConnected){
           ctrl._playheadEl = tracks.querySelector('.playhead');
@@ -218,10 +227,9 @@ const s = Math.max(0, Number(sec || 0));
 
         const proj = config.getProject();
         const state = config.getState();
-        const pxPerSec = (typeof ctrl._getPxPerSec === 'function') ? ctrl._getPxPerSec()
-        : ((proj && proj.ui && Number.isFinite(proj.ui.pxPerSec)) ? proj.ui.pxPerSec
-           : (proj && Number.isFinite(proj.pxPerBeat) && proj.bpm ? (proj.pxPerBeat * proj.bpm / 60) : 120));
-// HARD RULE: never rebuild timeline while dragging (DOM replacement breaks capture/dblclick)
+        const pxPerSec = ctrl._getPxPerSec();
+
+        // HARD RULE: never rebuild timeline while dragging (DOM replacement breaks capture/dblclick)
         const cand = state && state.dragCandidate;
         if (cand && cand.started){
           dbg(ctrl, 'render() skipped because dragging is active');
@@ -414,10 +422,8 @@ const s = Math.max(0, Number(sec || 0));
       const inst = (proj.instances||[]).find(x => x.id === cand.instId);
       if (!inst) return;
 
-      const pxPerSec = (typeof ctrl._getPxPerSec === 'function') ? ctrl._getPxPerSec()
-        : ((proj && proj.ui && Number.isFinite(proj.ui.pxPerSec)) ? proj.ui.pxPerSec
-           : (proj && Number.isFinite(proj.pxPerBeat) && proj.bpm ? (proj.pxPerBeat * proj.bpm / 60) : 120));
-const tracks = ctrl._tracksEl;
+      const pxPerSec = ctrl._getPxPerSec();
+      const tracks = ctrl._tracksEl;
 
       // Convert clientX to timeline content X (tracks is scrollable)
       const rect = tracks.getBoundingClientRect();
