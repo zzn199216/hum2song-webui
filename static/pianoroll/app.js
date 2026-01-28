@@ -193,7 +193,16 @@
     try { return JSON.parse(txt); } catch(e){ return { raw: txt }; }
   }
   function persist(){
-    // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
+    // Persist beats-only ProjectDoc v2.
+    // IMPORTANT: if v2 already exists, DO NOT re-migrate from v1 view here,
+    // otherwise we can accidentally drop v2-only fields (e.g., clip revisions/meta.agent).
+    const existing = _readLS(LS_KEY_V2);
+    if (existing && _isProjectV2(existing)){
+      try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+      return;
+    }
+
+    // No v2 yet: migrate current v1 (seconds view) into v2 once.
     const p2 = _projectV1ToV2(app.project);
     if (!p2) return;
 
@@ -223,6 +232,37 @@
 
   const app = {
     project: null,
+// Controllers (optional)
+agentCtrl: null,
+
+// --- v2 hooks: Library/Agent expect these (beats-only truth) ---
+getProjectV2(){
+  // Single source of truth: localStorage v2 (beats-only)
+  const p2 = _readLS(LS_KEY_V2);
+  if (p2) return p2;
+  // As a last resort, migrate current v1 view (derived) back into v2
+  try{
+    if (typeof _projectV1ToV2 === 'function' && this.project) return _projectV1ToV2(this.project);
+  }catch(e){}
+  return null;
+},
+
+setProjectFromV2(projectV2){
+  // Persist v2 beats-only doc, then refresh derived v1 view for UI/controllers.
+  if (!projectV2) return {ok:false, error:'no_project_v2'};
+  _writeLS(LS_KEY_V2, projectV2);
+  this.project = _projectV2ToV1View(projectV2);
+  this.render();
+  return {ok:true};
+},
+
+async optimizeClip(clipId){
+  if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
+    console.warn('[App] optimizeClip called but agent controller is not available');
+    return {ok:false, error:'no_agent_controller'};
+  }
+  return await this.agentCtrl.optimizeClip(clipId);
+},
 
     state: {
       selectedInstanceId: null,
@@ -273,7 +313,25 @@
         this.project = restored || H2SProject.defaultProject();
       }
 
-      // Ensure minimal structure
+      
+// Wire AgentController (Optimize) if available
+try{
+  const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
+  if (ROOT.H2SAgentController && typeof ROOT.H2SAgentController.create === 'function'){
+    // AgentController expects v2 hooks + persist/render callbacks
+    this.agentCtrl = ROOT.H2SAgentController.create({
+      app: this,
+      getProjectV2: () => this.getProjectV2(),
+      setProjectFromV2: (p2) => this.setProjectFromV2(p2),
+      persist: () => persist(),
+      render: () => this.render(),
+    });
+  }
+}catch(e){
+  console.warn('AgentController init failed', e);
+}
+
+// Ensure minimal structure
       if (!this.project.tracks || this.project.tracks.length === 0){
         this.project.tracks = [{id:H2SProject.uid('trk_'), name:'Track 1'}];
       }
@@ -372,6 +430,8 @@ $('#rngPitchCenter').addEventListener('input', () => {
       try{
         if (window.H2SLibraryController && window.H2SLibraryController.create){
           this.libraryCtrl = window.H2SLibraryController.create({
+            app: this,
+            getProjectV2: () => this.getProjectV2(),
             rootEl: $('#clipList'),
             getProject: () => this.project,
             fmtSec,

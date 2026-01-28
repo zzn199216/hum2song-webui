@@ -160,6 +160,9 @@
           return;
         }
         Promise.resolve(fn.call(app, clipId)).then((res)=>{
+          if (res && res.ok === false){
+            console.warn('[LibraryController] optimize returned not ok', res, { clipId });
+          }
           // app.optimizeClip is expected to update projectV2 internally; still re-render & persist.
           _notifyChanged('optimize');
           render();

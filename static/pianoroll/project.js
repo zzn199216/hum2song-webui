@@ -1027,8 +1027,9 @@ function beginNewClipRevision(project, clipId, opts){
     // tracks
     const tracks = Array.isArray(p1.tracks) && p1.tracks.length ? p1.tracks.map(t => ({
       id: t.id || uid('trk_'),
-      name: (typeof t.name === 'string') ? t.name : String(t.name ?? '')
-    })) : [{ id: uid('trk_'), name: 'Track 1' }];
+      name: (typeof t.name === 'string') ? t.name : String(t.name ?? ''),
+      instrument: (typeof t.instrument === 'string' && t.instrument.trim()) ? t.instrument : SCHEMA_V2.DEFAULT_INSTRUMENT,
+    })) : [{ id: uid('trk_'), name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT }];
     const defaultTrackId = tracks[0].id;
 
     // ui
