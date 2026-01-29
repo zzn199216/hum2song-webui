@@ -216,11 +216,15 @@ let maxT = 0;
 if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   const flat2 = G.H2SProject.flatten(projectV2);
 
-  // Build synths per trackId using v2 instruments
+  // Build synths per trackId using v2 instruments (+ per-track gainDb)
   const instByTrackId = new Map();
+  const gainByTrackId = new Map();
   try{
     for (const t of (projectV2.tracks || [])){
-      if (t && t.trackId) instByTrackId.set(t.trackId, t.instrument || 'default');
+      if (t && t.trackId) {
+        instByTrackId.set(t.trackId, t.instrument || 'default');
+        if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTrackId.set(t.trackId, t.gainDb);
+      }
     }
   }catch(e){}
 
@@ -229,6 +233,15 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
     if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
     const inst = instByTrackId.get(trackId) || 'default';
     const s = _makeSynthByInstrument(inst).toDestination();
+
+    // Gain staging: keep default quieter to avoid "jump scare".
+    // Per-track gainDb is user controlled, additive on top of a conservative base.
+    try{
+      const g = (gainByTrackId && gainByTrackId.has(trackId)) ? Number(gainByTrackId.get(trackId)) : 0;
+      const gainDb = Number.isFinite(g) ? Math.max(-30, Math.min(6, g)) : 0;
+      if (s && s.volume && typeof s.volume.value === 'number') s.volume.value = (-12 + gainDb);
+    }catch(e){}
+
     _trackSynths.push(s);
     synthByTrackId.set(trackId, s);
     return s;

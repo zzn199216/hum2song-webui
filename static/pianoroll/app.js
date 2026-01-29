@@ -89,6 +89,7 @@
             // view-only fields:
             trackId: tid,
             instrument: (t && typeof t.instrument === 'string' && t.instrument) ? t.instrument : 'default',
+            gainDb: (t && typeof t.gainDb === 'number' && isFinite(t.gainDb)) ? t.gainDb : 0,
           };
         })
       : [{ id: 'track-1', name: 'Track 1', trackId: 'track-1', instrument: 'default' }];
@@ -211,29 +212,36 @@
     const p2 = _projectV1ToV2(app.project);
     if (!p2) return;
 
-    // Preserve v2-only track fields (currently: instrument).
-    try{
-      if (prevV2 && Array.isArray(prevV2.tracks) && Array.isArray(p2.tracks)){
-        const instByTid = new Map();
-        for (const t of prevV2.tracks){
-          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
-          if (!tid) continue;
-          if (typeof t.instrument === 'string' && t.instrument) instByTid.set(tid, t.instrument);
-        }
+    
+// Preserve v2-only track fields (currently: instrument, gainDb).
+try{
+  if (prevV2 && Array.isArray(prevV2.tracks) && Array.isArray(p2.tracks)){
+    const instByTid = new Map();
+    const gainByTid = new Map();
+    for (const t of prevV2.tracks){
+      const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
+      if (!tid) continue;
+      if (typeof t.instrument === 'string' && t.instrument) instByTid.set(tid, t.instrument);
+      if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTid.set(tid, t.gainDb);
+    }
 
-        for (const t of p2.tracks){
-          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
-          if (!tid) continue;
+    for (const t of p2.tracks){
+      const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
+      if (!tid) continue;
 
-          // Keep id/trackId consistent (compat).
-          if (!t.id) t.id = tid;
-          if (!t.trackId) t.trackId = tid;
+      // Keep id/trackId consistent (compat).
+      if (!t.id) t.id = tid;
+      if (!t.trackId) t.trackId = tid;
 
-          const inst = instByTid.get(tid);
-          if (typeof inst === 'string' && inst) t.instrument = inst;
-        }
-      }
-    } catch(e){
+      const inst = instByTid.get(tid);
+      if (typeof inst === 'string' && inst) t.instrument = inst;
+
+      const g = gainByTid.get(tid);
+      if (typeof g === 'number' && isFinite(g)) t.gainDb = g;
+      else if (typeof t.gainDb !== 'number' || !isFinite(t.gainDb)) t.gainDb = 0;
+    }
+  }
+} catch(e){
       console.warn('[persist] v2 merge failed', e);
     }
 
@@ -289,6 +297,7 @@ getProjectV2(){
         for (const t of p2.tracks) {
           if (t && !t.trackId && t.id) t.trackId = t.id;
           if (t && typeof t.instrument !== 'string') t.instrument = 'default';
+          if (t && (typeof t.gainDb !== 'number' || !isFinite(t.gainDb))) t.gainDb = 0;
         }
       }
       this._projectV2 = p2;
@@ -310,6 +319,7 @@ setProjectFromV2(projectV2){
     for (const t of projectV2.tracks) {
       if (t && !t.trackId && t.id) t.trackId = t.id;
       if (t && typeof t.instrument !== 'string') t.instrument = 'default';
+      if (t && (typeof t.gainDb !== 'number' || !isFinite(t.gainDb))) t.gainDb = 0;
     }
   }
   this._projectV2 = projectV2;
@@ -335,6 +345,22 @@ setTrackInstrument(trackId, instrument){
   if (!t.trackId && t.id === trackId) t.trackId = trackId;
   t.instrument = instrument;
   this.setProjectFromV2(p2); // persist + rebuild v1 view + render
+},
+setTrackGainDb(trackId, gainDb){
+  const p2 = this.getProjectV2();
+  if (!p2 || !Array.isArray(p2.tracks)){
+    console.error('[App] setTrackGainDb: project v2 missing');
+    return;
+  }
+  const t = p2.tracks.find(x => x && ((x.trackId === trackId) || (x.id === trackId)));
+  if (!t){
+    console.error('[App] setTrackGainDb: trackId not found', trackId);
+    return;
+  }
+  if (!t.trackId && t.id === trackId) t.trackId = trackId;
+  const v = Number(gainDb);
+  t.gainDb = (Number.isFinite(v) ? Math.max(-30, Math.min(6, v)) : 0);
+  this.setProjectFromV2(p2);
 },
 
 
@@ -643,6 +669,7 @@ try{
     onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
     onSetActiveTrackIndex: (ti) => this.setActiveTrackIndex(ti),
     onSetTrackInstrument: (trackId, instrument) => this.setTrackInstrument(trackId, instrument),
+    onSetTrackGainDb: (trackId, gainDb) => this.setTrackGainDb(trackId, gainDb),
     onPersistAndRender: () => { persist(); this.render(); },
     onRemoveInstance: (instId) => this.deleteInstance(instId),
     escapeHtml,

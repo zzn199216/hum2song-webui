@@ -290,43 +290,153 @@
 
           const label = document.createElement('div');
           label.className = 'trackLabel';
-          // Track header content: name + instrument select (T4-1.F)
-          const track = (proj.tracks && proj.tracks[ti]) ? proj.tracks[ti] : null;
+          // Track header (stacked): name -> volume -> instrument
+          const track = (proj.tracks||[])[ti] || {};
+          const trackName = (track && track.name) ? track.name : ('Track ' + (ti+1));
 
-          const nameSpan = document.createElement('span');
-          nameSpan.textContent = (track && track.name) ? track.name : ('Track ' + (ti+1));
-          label.appendChild(nameSpan);
-
-          // Instrument select (view-only; truth is in v2 via app.setTrackInstrument)
-          const sel = document.createElement('select');
-          sel.className = 'trackInstrumentSelect';
-          const opts = ['default','bass','lead','pad','pluck','drum'];
-          for (const v of opts){
-            const o = document.createElement('option');
-            o.value = v;
-            o.textContent = v;
-            sel.appendChild(o);
-          }
-          sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
-
-          // Prevent affecting track selection / drag
-          const stop = (e) => { try{ e.stopPropagation(); }catch(_){} };
-          sel.addEventListener('pointerdown', stop);
-          sel.addEventListener('mousedown', stop);
-          sel.addEventListener('click', stop);
-
-          sel.addEventListener('change', (e)=>{
-            stop(e);
-            if (config && typeof config.onSetTrackInstrument === 'function'){
-              const trackId = track && (track.trackId || track.id);
-              config.onSetTrackInstrument(trackId, sel.value);
-            }
-          });
-
-          label.appendChild(sel);
-          // Click track header to set Active Track (target for Add-to-Song)
           label.style.cursor = 'pointer';
           label.title = 'Set as target track';
+          label.style.display = 'flex';
+          label.style.flexDirection = 'column';
+          label.style.alignItems = 'stretch';
+          label.style.gap = '6px';
+          label.style.paddingTop = '6px';
+          label.style.paddingBottom = '6px';
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'trackName';
+          nameEl.textContent = trackName;
+          nameEl.style.fontWeight = '600';
+          label.appendChild(nameEl);
+
+          // Volume slider (dB)
+          const volWrap = document.createElement('div');
+          volWrap.className = 'trackVolWrap';
+          volWrap.style.display = 'flex';
+          volWrap.style.alignItems = 'center';
+          volWrap.style.gap = '6px';
+
+          const volLab = document.createElement('span');
+          volLab.textContent = 'Vol';
+          volLab.style.opacity = '0.85';
+          volLab.style.fontSize = '12px';
+          volWrap.appendChild(volLab);
+
+          const vol = document.createElement('input');
+          vol.type = 'range';
+          vol.min = '-30';
+          vol.max = '6';
+          vol.step = '1';
+          vol.value = (typeof track.gainDb === 'number') ? String(track.gainDb) : '0';
+          vol.style.width = '100%';
+          vol.title = 'Track volume (dB)';
+          // Show value bubble while dragging (0-100 like Windows volume)
+          const volBubble = document.createElement('div');
+          volBubble.className = 'trackVolBubble';
+          volBubble.style.position = 'absolute';
+          volBubble.style.top = '-18px';
+          volBubble.style.left = '0';
+          volBubble.style.transform = 'translateX(-50%)';
+          volBubble.style.padding = '2px 6px';
+          volBubble.style.borderRadius = '10px';
+          volBubble.style.fontSize = '11px';
+          volBubble.style.background = 'rgba(0,0,0,0.65)';
+          volBubble.style.color = '#fff';
+          volBubble.style.pointerEvents = 'none';
+          volBubble.style.display = 'none';
+
+          // Wrap needs positioning context for bubble.
+          volWrap.style.position = 'relative';
+          volWrap.appendChild(volBubble);
+
+          let _volDragging = false;
+          const _updateVolBubble = ()=>{
+            // Map dB range (-30..+6) -> 0..100
+            const v = parseFloat(vol.value);
+            const pct = Math.max(0, Math.min(100, Math.round(((v - (-30)) / (6 - (-30))) * 100)));
+            volBubble.textContent = String(pct);
+
+            // Position bubble above thumb (approx; good enough)
+            const min = parseFloat(vol.min), max = parseFloat(vol.max);
+            const ratio = (v - min) / (max - min);
+            const x = 18 + ratio * (vol.clientWidth - 36); // thumb-ish padding
+            volBubble.style.left = x + 'px';
+          };
+
+          // IMPORTANT: Do NOT call app.setTrackGainDb on every input, because it re-renders timeline and kills drag.
+          // Commit only on pointerup/change.
+          vol.style.touchAction = 'none';
+          vol.addEventListener('pointerdown', (e)=>{
+            _volDragging = true;
+            e.stopPropagation();
+            // Keep pointer events on the input even if the pointer leaves slightly.
+            try{ vol.setPointerCapture(e.pointerId); }catch(_e){}
+            volBubble.style.display = 'inline-block';
+            _updateVolBubble();
+          });
+          vol.addEventListener('pointermove', (e)=>{
+            if (_volDragging){
+              e.stopPropagation();
+              _updateVolBubble();
+            }
+          });
+          vol.addEventListener('input', (e)=>{
+            if (_volDragging){
+              e.stopPropagation();
+              _updateVolBubble();
+            }
+          });
+          const _commitVol = ()=>{
+            const tid = track.trackId || track.id;
+            if (window.H2SApp && typeof window.H2SApp.setTrackGainDb === 'function' && tid){
+              window.H2SApp.setTrackGainDb(tid, parseFloat(vol.value));
+            }
+          };
+          vol.addEventListener('pointerup', (e)=>{
+            if (_volDragging){
+              e.stopPropagation();
+              _volDragging = false;
+              volBubble.style.display = 'none';
+              _commitVol();
+              try{ vol.releasePointerCapture(e.pointerId); }catch(_e){}
+            }
+          });
+          vol.addEventListener('change', (e)=>{
+            // Fallback (keyboard or click)
+            e.stopPropagation();
+            _commitVol();
+          });
+          volWrap.appendChild(vol);
+          label.appendChild(volWrap);
+
+          // Instrument select
+          const instWrap = document.createElement('div');
+          instWrap.className = 'trackInstWrap';
+          instWrap.style.display = 'flex';
+          instWrap.style.alignItems = 'center';
+          instWrap.style.gap = '6px';
+
+          const sel = document.createElement('select');
+          sel.className = 'trackInstrumentSelect';
+          sel.innerHTML = [
+            'default','bass','lead','pad','pluck','drum'
+          ].map(x=>`<option value="${x}">${x}</option>`).join('');
+          sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
+          sel.title = 'Instrument';
+          sel.style.width = '100%';
+          sel.addEventListener('pointerdown', (e)=>{ e.stopPropagation(); });
+          sel.addEventListener('click', (e)=>{ e.stopPropagation(); });
+          sel.addEventListener('change', (e)=>{
+            e.stopPropagation();
+            const tid = track.trackId || track.id;
+            if (window.H2SApp && typeof window.H2SApp.setTrackInstrument === 'function' && tid){
+              window.H2SApp.setTrackInstrument(tid, sel.value);
+            }
+          });
+          instWrap.appendChild(sel);
+          label.appendChild(instWrap);
+
+          // Click empty header area to set Active Track (target for Add-to-Song)
           label.addEventListener('click', ()=>{
             ctrl.setActiveTrackIndex(ti);
             if (typeof config.onSetActiveTrackIndex === 'function'){
