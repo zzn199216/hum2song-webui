@@ -79,12 +79,25 @@
   function _projectV2ToV1View(p2){
     const bpm = (p2 && typeof p2.bpm === 'number') ? p2.bpm : 120;
 
+    // v2 track schema uses `trackId` (not `id`). v1 view must carry `trackId` + `instrument`
+    // but remains a disposable snapshot (v2 is the only source of truth).
     const tracks = Array.isArray(p2 && p2.tracks)
-      ? p2.tracks.map(t => ({ id: t.id, name: t.name }))
-      : [{ id: 'track-1', name: 'Track 1' }];
+      ? p2.tracks.map((t, i) => {
+          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : `track-${i+1}`;
+          return {
+            // legacy compatibility: some UI still reads `track.id`
+            id: tid,
+            name: (t && typeof t.name === 'string' && t.name) ? t.name : `Track ${i+1}`,
+            // NEW view-only fields:
+            trackId: tid,
+            instrument: (t && typeof t.instrument === 'string' && t.instrument) ? t.instrument : 'default',
+          };
+        })
+      : [{ id: 'track-1', name: 'Track 1', trackId: 'track-1', instrument: 'default' }];
 
     const trackIndexById = {};
-    tracks.forEach((t, i) => { trackIndexById[t.id] = i; });
+    // IMPORTANT: key by `trackId` because instances carry `inst.trackId`.
+    tracks.forEach((t, i) => { trackIndexById[t.trackId] = i; });
 
     const pxPerBeat = (p2 && p2.ui && typeof p2.ui.pxPerBeat === 'number') ? p2.ui.pxPerBeat : 240;
     const pxPerSec = (window.H2SProject && typeof window.H2SProject.pxPerBeatToPxPerSec === 'function')
