@@ -79,16 +79,14 @@
   function _projectV2ToV1View(p2){
     const bpm = (p2 && typeof p2.bpm === 'number') ? p2.bpm : 120;
 
-    // v2 track schema uses `trackId` (not `id`). v1 view must carry `trackId` + `instrument`
-    // but remains a disposable snapshot (v2 is the only source of truth).
     const tracks = Array.isArray(p2 && p2.tracks)
       ? p2.tracks.map((t, i) => {
-          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : `track-${i+1}`;
+          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : ('track-' + (i+1));
           return {
-            // legacy compatibility: some UI still reads `track.id`
+            // legacy compat: some UI reads `id`
             id: tid,
-            name: (t && typeof t.name === 'string' && t.name) ? t.name : `Track ${i+1}`,
-            // NEW view-only fields:
+            name: (t && typeof t.name === 'string' && t.name) ? t.name : ('Track ' + (i+1)),
+            // view-only fields:
             trackId: tid,
             instrument: (t && typeof t.instrument === 'string' && t.instrument) ? t.instrument : 'default',
           };
@@ -96,7 +94,7 @@
       : [{ id: 'track-1', name: 'Track 1', trackId: 'track-1', instrument: 'default' }];
 
     const trackIndexById = {};
-    // IMPORTANT: key by `trackId` because instances carry `inst.trackId`.
+    // IMPORTANT: instances carry inst.trackId; key by `trackId`
     tracks.forEach((t, i) => { trackIndexById[t.trackId] = i; });
 
     const pxPerBeat = (p2 && p2.ui && typeof p2.ui.pxPerBeat === 'number') ? p2.ui.pxPerBeat : 240;
@@ -207,10 +205,43 @@
   }
   function persist(){
     // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
+    // IMPORTANT: persist() must NOT clobber v2-only fields (e.g., track.instrument) by migrating from v1.
+    const prevV2 = app._projectV2 || _readLS(LS_KEY_V2);
+
     const p2 = _projectV1ToV2(app.project);
     if (!p2) return;
 
+    // Preserve v2-only track fields (currently: instrument).
+    try{
+      if (prevV2 && Array.isArray(prevV2.tracks) && Array.isArray(p2.tracks)){
+        const instByTid = new Map();
+        for (const t of prevV2.tracks){
+          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
+          if (!tid) continue;
+          if (typeof t.instrument === 'string' && t.instrument) instByTid.set(tid, t.instrument);
+        }
+
+        for (const t of p2.tracks){
+          const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
+          if (!tid) continue;
+
+          // Keep id/trackId consistent (compat).
+          if (!t.id) t.id = tid;
+          if (!t.trackId) t.trackId = tid;
+
+          const inst = instByTid.get(tid);
+          if (typeof inst === 'string' && inst) t.instrument = inst;
+        }
+      }
+    } catch(e){
+      console.warn('[persist] v2 merge failed', e);
+    }
+
     _writeLS(LS_KEY_V2, p2);
+
+    // IMPORTANT: sync in-memory v2 cache; otherwise later writes (e.g. setTrackInstrument)
+    // may read a stale cached project and overwrite newer instances.
+    app._projectV2 = p2;
 
     // Ensure beats-only storage after migration.
     try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
@@ -236,29 +267,76 @@
 
   const app = {
     project: null,
+    _projectV2: null,
 // Controllers (optional)
 agentCtrl: null,
 
 // --- v2 hooks: Library/Agent expect these (beats-only truth) ---
 getProjectV2(){
-  // Single source of truth: localStorage v2 (beats-only)
-  const p2 = _readLS(LS_KEY_V2);
-  if (p2) return p2;
-  // As a last resort, migrate current v1 view (derived) back into v2
+  // v2 beats-only doc is the only source of truth.
+  if (this._projectV2) return this._projectV2;
+
+  const raw = _readLS(LS_KEY_V2);
+  if (!raw) return null;
+
+  // Normalize / migrate using project.js helpers if available.
   try{
-    if (typeof _projectV1ToV2 === 'function' && this.project) return _projectV1ToV2(this.project);
-  }catch(e){}
-  return null;
+    const P = window.H2SProject;
+    if (P && typeof P.loadProjectDocV2 === 'function'){
+      const p2 = P.loadProjectDocV2(raw);
+      // Normalize legacy track schema: some old saves used `id` instead of `trackId`.
+      if (p2 && Array.isArray(p2.tracks)) {
+        for (const t of p2.tracks) {
+          if (t && !t.trackId && t.id) t.trackId = t.id;
+          if (t && typeof t.instrument !== 'string') t.instrument = 'default';
+        }
+      }
+      this._projectV2 = p2;
+      return p2;
+    }
+  } catch(e){
+    console.warn('[App] getProjectV2 normalize failed', e);
+  }
+  // Fallback: return raw (best effort)
+  this._projectV2 = raw;
+  return raw;
 },
 
 setProjectFromV2(projectV2){
   // Persist v2 beats-only doc, then refresh derived v1 view for UI/controllers.
   if (!projectV2) return {ok:false, error:'no_project_v2'};
+  // Normalize legacy track schema on write.
+  if (Array.isArray(projectV2.tracks)) {
+    for (const t of projectV2.tracks) {
+      if (t && !t.trackId && t.id) t.trackId = t.id;
+      if (t && typeof t.instrument !== 'string') t.instrument = 'default';
+    }
+  }
+  this._projectV2 = projectV2;
   _writeLS(LS_KEY_V2, projectV2);
   this.project = _projectV2ToV1View(projectV2);
   this.render();
   return {ok:true};
 },
+
+// --- T4-1.F: single write entry for per-track instrument (v2 truth) ---
+setTrackInstrument(trackId, instrument){
+  const p2 = this.getProjectV2();
+  if (!p2 || !Array.isArray(p2.tracks)){
+    console.error('[App] setTrackInstrument: project v2 missing');
+    return;
+  }
+  const t = p2.tracks.find(x => x && ((x.trackId === trackId) || (x.id === trackId)));
+  if (!t){
+    console.error('[App] setTrackInstrument: trackId not found', trackId);
+    return;
+  }
+  // Repair legacy data that used `id` instead of `trackId`
+  if (!t.trackId && t.id === trackId) t.trackId = trackId;
+  t.instrument = instrument;
+  this.setProjectFromV2(p2); // persist + rebuild v1 view + render
+},
+
 
 async optimizeClip(clipId){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
@@ -394,6 +472,7 @@ try{
       // Transport buttons
       $('#btnPlayProject').addEventListener('click', () => this.playProject());
       $('#btnStop').addEventListener('click', () => this.stopProject());
+      this._initMasterVolumeUI();
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
       // Modal
@@ -499,7 +578,9 @@ $('#rngPitchCenter').addEventListener('input', () => {
           this.audioCtrl = window.H2SAudioController.create({
             getProject: () => this.project,
             // Beats-based document for project playback scheduling (T2 uses flatten(ProjectDocV2)).
-            getProjectDoc: () => _projectV1ToV2(this.project),
+            getProjectV2: () => this.getProjectV2(),
+            // legacy compat (some audio builds read getProjectDoc)
+            getProjectDoc: () => this.getProjectV2(),
             getState: () => this.state,
             setTransportPlaying: (v) => { this.state.transportPlaying = !!v; },
             onUpdatePlayhead: (sec) => {
@@ -554,10 +635,14 @@ try{
         this._selectedInstEl = el;
       }
       this.renderSelection();
+    
+      // Keep dynamic master volume UI alive across renders.
+      this._initMasterVolumeUI();
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
     onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
     onSetActiveTrackIndex: (ti) => this.setActiveTrackIndex(ti),
+    onSetTrackInstrument: (trackId, instrument) => this.setTrackInstrument(trackId, instrument),
     onPersistAndRender: () => { persist(); this.render(); },
     onRemoveInstance: (instId) => this.deleteInstance(instId),
     escapeHtml,
@@ -1017,7 +1102,76 @@ renderTimeline(){
       return !!window.Tone;
     },
 
-    async playProject(){
+    async _getMasterGainDb(){
+      try{
+        const raw = localStorage.getItem('h2s_master_gain_db');
+        const v = Number(raw);
+        if (Number.isFinite(v)) return Math.max(-40, Math.min(0, v));
+      }catch(e){}
+      return -24;
+    },
+    _setMasterGainDb(db){
+      const v = Math.max(-40, Math.min(0, Number(db)));
+      try{ localStorage.setItem('h2s_master_gain_db', String(v)); }catch(e){}
+      this._masterGainDb = v;
+      this._applyMasterGain();
+    },
+    _applyMasterGain(){
+      try{
+        if (window.Tone && Tone.Destination && Tone.Destination.volume){
+          const v = (typeof this._masterGainDb === 'number') ? this._masterGainDb : this._getMasterGainDb();
+          Tone.Destination.volume.value = v;
+        }
+      }catch(e){}
+    },
+    _initMasterVolumeUI(){
+      // Browser-only, safe if called multiple times.
+      try{
+        if (typeof document === 'undefined') return;
+        if (document.getElementById('h2sMasterVol')) return;
+
+        const row = document.querySelector('.topbar .row');
+        if (!row) return;
+
+        this._masterGainDb = this._getMasterGainDb();
+
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.alignItems = 'center';
+        wrap.style.gap = '6px';
+        wrap.style.marginLeft = '10px';
+
+        const lab = document.createElement('span');
+        lab.textContent = 'Vol';
+        lab.style.fontSize = '12px';
+        lab.style.opacity = '0.85';
+
+        const input = document.createElement('input');
+        input.id = 'h2sMasterVol';
+        input.type = 'range';
+        input.min = '-40';
+        input.max = '0';
+        input.step = '1';
+        input.value = String(this._masterGainDb);
+        input.title = 'Master volume (dB)';
+        input.style.width = '120px';
+
+        const stop = (e)=>e.stopPropagation();
+        input.addEventListener('pointerdown', stop);
+        input.addEventListener('mousedown', stop);
+        input.addEventListener('click', stop);
+
+        input.addEventListener('input', () => {
+          this._setMasterGainDb(Number(input.value));
+        });
+
+        wrap.appendChild(lab);
+        wrap.appendChild(input);
+        row.appendChild(wrap);
+      }catch(e){}
+    },
+	async playProject(){
+      this._applyMasterGain();
       if (this.audioCtrl && this.audioCtrl.playProject){
         // Delegate to AudioController (centralized Tone.Transport scheduling)
         return await this.audioCtrl.playProject();
@@ -1032,8 +1186,68 @@ renderTimeline(){
       }
       await Tone.start();
 
-      // Flatten instances into a quick schedule on a single synth (MVP)
+      // Safer default volume (avoid surprising loud output)
+      try { Tone.Destination.volume.value = -14; } catch(e) {}
+
+      // Prefer v2 flatten playback (beats-only truth) with per-track instruments.
+      const p2 = this.getProjectV2 && this.getProjectV2();
+      const P = window.H2SProject;
+      if (p2 && P && typeof P.flatten === 'function' && Array.isArray(p2.tracks)){
+        const flat = P.flatten(p2);
+        const bpm = p2.bpm || 120;
+        Tone.Transport.stop();
+        Tone.Transport.cancel();
+        Tone.Transport.seconds = 0;
+        Tone.Transport.bpm.value = bpm;
+
+        const makeSynth = (instName) => {
+          let syn;
+          switch (instName){
+            case 'bass':  syn = new Tone.MonoSynth(); break;
+            case 'lead':  syn = new Tone.Synth(); break;
+            case 'pad':   syn = new Tone.FMSynth(); break;
+            case 'pluck': syn = new Tone.PluckSynth(); break;
+            case 'drum':  syn = new Tone.MembraneSynth(); break;
+            default:      syn = new Tone.PolySynth(Tone.Synth); break;
+          }
+          try { syn.volume.value = -10; } catch(e) {}
+          syn.toDestination();
+          return syn;
+        };
+
+        const synthByTrack = new Map();
+        for (const t of p2.tracks){
+          const tid = t.trackId || t.id;
+          if (!tid) continue;
+          synthByTrack.set(tid, makeSynth(t.instrument || 'default'));
+        }
+
+        let maxT = 0;
+        for (const tr of (flat.tracks || [])){
+          const synth = synthByTrack.get(tr.trackId) || synthByTrack.get('default');
+          if (!synth) continue;
+          for (const n of (tr.notes || [])){
+            const vel = Math.max(0.0, Math.min(0.8, (n.velocity == null ? 0.7 : n.velocity)));
+            const t0 = Math.max(0, (n.startSec || 0));
+            const dur = Math.max(0.01, (n.durationSec || 0.1));
+            Tone.Transport.schedule((time)=>{
+              // For drum synth, pitch still affects tone but remains percussive.
+              const freq = Tone.Frequency(n.pitch, 'midi');
+              if (synth.triggerAttackRelease) synth.triggerAttackRelease(freq, dur, time, vel);
+            }, t0);
+            maxT = Math.max(maxT, t0 + dur);
+          }
+        }
+
+        Tone.Transport.start('+0.05');
+        this.state.transportPlaying = true;
+        this.render && this.render();
+        return;
+      }
+
+      // Legacy fallback: single-synth seconds-based schedule (older v1 UI)
       const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+      try { synth.volume.value = -10; } catch(e) {}
       const bpm = this.project.bpm || 120;
       const startAt = this.project.ui.playheadSec || 0;
 

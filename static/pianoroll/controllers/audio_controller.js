@@ -105,6 +105,8 @@
   function create(opts){
     opts = opts || {};
     const getProject = opts.getProject || (() => null);
+    const getProjectV2 = opts.getProjectV2 || null;
+    const getProjectDoc = opts.getProjectDoc || null;
     const setTransportPlaying = opts.setTransportPlaying || (() => {});
     const onUpdatePlayhead = opts.onUpdatePlayhead || (() => {});
     const onLog = opts.onLog || (() => {});
@@ -115,6 +117,8 @@
     let startAt = 0;
     let rafId = 0;
     let stopTimer = 0;
+    let _trackSynths = [];
+
 
     async function ensureTone(){
       for (let i = 0; i < 40; i++){
@@ -123,6 +127,26 @@
       }
       return !!G.Tone;
     }
+
+function _disposeTrackSynths(){
+  for (const s of _trackSynths){
+    try{ s.dispose(); }catch(e){}
+  }
+  _trackSynths = [];
+}
+
+function _makeSynthByInstrument(name){
+  // Keep it simple: "clearly different" timbres, not high quality.
+  switch(String(name||'default')){
+    case 'bass': return new G.Tone.MonoSynth();
+    case 'lead': return new G.Tone.Synth();
+    case 'pad': return new G.Tone.FMSynth();
+    case 'pluck': return new G.Tone.PluckSynth();
+    case 'drum': return new G.Tone.MembraneSynth();
+    default: return new G.Tone.PolySynth(G.Tone.Synth);
+  }
+}
+
 
     function _cancelTimers(){
       if (rafId){
@@ -136,6 +160,7 @@
     }
 
     function stop(){
+      _disposeTrackSynths();
       _cancelTimers();
       if (G.Tone){
         try{ G.Tone.Transport.stop(); G.Tone.Transport.cancel(); }catch(e){}
@@ -172,26 +197,76 @@
       await G.Tone.start();
 
       const project = getProject();
-      const bpm = (project && project.bpm) ? project.bpm : 120;
-      startAt = (project && project.ui && isFinite(project.ui.playheadSec)) ? project.ui.playheadSec : 0;
+const bpm = (project && project.bpm) ? project.bpm : 120;
+startAt = (project && project.ui && isFinite(project.ui.playheadSec)) ? project.ui.playheadSec : 0;
 
-      const synth = new G.Tone.PolySynth(G.Tone.Synth).toDestination();
+// Prefer beats-only v2 playback when available (trackId-aware).
+const projectV2 = (typeof getProjectV2 === 'function' && getProjectV2()) ? getProjectV2()
+  : ((typeof getProjectDoc === 'function' && getProjectDoc()) ? getProjectDoc() : null);
 
-      G.Tone.Transport.stop();
-      G.Tone.Transport.cancel();
-      G.Tone.Transport.seconds = 0;
-      G.Tone.Transport.bpm.value = bpm;
+_disposeTrackSynths();
 
-      const flat = flattenProjectToEvents(project, startAt);
-      const events = flat.events;
-      const maxT = flat.maxT;
+G.Tone.Transport.stop();
+G.Tone.Transport.cancel();
+G.Tone.Transport.seconds = 0;
+G.Tone.Transport.bpm.value = bpm;
 
-      for (const ev of events){
-        G.Tone.Transport.schedule((time) => {
-          synth.triggerAttackRelease(G.Tone.Frequency(ev.pitch, 'midi'), ev.dur, time, ev.vel);
-        }, ev.t);
-      }
+let maxT = 0;
 
+if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
+  const flat2 = G.H2SProject.flatten(projectV2);
+
+  // Build synths per trackId using v2 instruments
+  const instByTrackId = new Map();
+  try{
+    for (const t of (projectV2.tracks || [])){
+      if (t && t.trackId) instByTrackId.set(t.trackId, t.instrument || 'default');
+    }
+  }catch(e){}
+
+  const synthByTrackId = new Map();
+  const getSynth = (trackId) => {
+    if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
+    const inst = instByTrackId.get(trackId) || 'default';
+    const s = _makeSynthByInstrument(inst).toDestination();
+    _trackSynths.push(s);
+    synthByTrackId.set(trackId, s);
+    return s;
+  };
+
+  for (const tr of (flat2.tracks || [])){
+    const tid = tr && tr.trackId;
+    if (!tid) continue;
+    const s = getSynth(tid);
+    for (const n of (tr.notes || [])){
+      const absStart = Number(n.startSec || 0);
+      if (absStart < startAt) continue;
+      const t = absStart - startAt;
+      const dur = Math.max(0.01, Number(n.durationSec || 0.1));
+      const vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
+      if (t + dur > maxT) maxT = t + dur;
+      G.Tone.Transport.schedule((time) => {
+        try{
+          s.triggerAttackRelease(G.Tone.Frequency(n.pitch, 'midi'), dur, time, vel);
+        }catch(e){}
+      }, t);
+    }
+  }
+} else {
+  // Legacy fallback: v1 seconds-only schedule, single synth.
+  const synth = new G.Tone.PolySynth(G.Tone.Synth).toDestination();
+  _trackSynths.push(synth);
+
+  const flat = flattenProjectToEvents(project, startAt);
+  const events = flat.events;
+  maxT = flat.maxT;
+
+  for (const ev of events){
+    G.Tone.Transport.schedule((time) => {
+      synth.triggerAttackRelease(G.Tone.Frequency(ev.pitch, 'midi'), ev.dur, time, ev.vel);
+    }, ev.t);
+  }
+}
       G.Tone.Transport.start('+0.05');
       playing = true;
       setTransportPlaying(true);

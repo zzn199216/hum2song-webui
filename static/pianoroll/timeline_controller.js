@@ -290,7 +290,40 @@
 
           const label = document.createElement('div');
           label.className = 'trackLabel';
-          label.textContent = (proj.tracks[ti] && proj.tracks[ti].name) ? proj.tracks[ti].name : ('Track ' + (ti+1));
+          // Track header content: name + instrument select (T4-1.F)
+          const track = (proj.tracks && proj.tracks[ti]) ? proj.tracks[ti] : null;
+
+          const nameSpan = document.createElement('span');
+          nameSpan.textContent = (track && track.name) ? track.name : ('Track ' + (ti+1));
+          label.appendChild(nameSpan);
+
+          // Instrument select (view-only; truth is in v2 via app.setTrackInstrument)
+          const sel = document.createElement('select');
+          sel.className = 'trackInstrumentSelect';
+          const opts = ['default','bass','lead','pad','pluck','drum'];
+          for (const v of opts){
+            const o = document.createElement('option');
+            o.value = v;
+            o.textContent = v;
+            sel.appendChild(o);
+          }
+          sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
+
+          // Prevent affecting track selection / drag
+          const stop = (e) => { try{ e.stopPropagation(); }catch(_){} };
+          sel.addEventListener('pointerdown', stop);
+          sel.addEventListener('mousedown', stop);
+          sel.addEventListener('click', stop);
+
+          sel.addEventListener('change', (e)=>{
+            stop(e);
+            if (config && typeof config.onSetTrackInstrument === 'function'){
+              const trackId = track && (track.trackId || track.id);
+              config.onSetTrackInstrument(trackId, sel.value);
+            }
+          });
+
+          label.appendChild(sel);
           // Click track header to set Active Track (target for Add-to-Song)
           label.style.cursor = 'pointer';
           label.title = 'Set as target track';
