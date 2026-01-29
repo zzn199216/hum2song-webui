@@ -1182,6 +1182,19 @@ renderTimeline(){
         input.value = String(this._masterGainDb);
         input.title = 'Master volume (dB)';
         input.style.width = '120px';
+        const val = document.createElement('span');
+        val.id = 'h2sMasterVolVal';
+        val.style.fontSize = '12px';
+        val.style.opacity = '0.85';
+        val.style.minWidth = '28px';
+        val.style.textAlign = 'right';
+
+        const dbToPct = (db) => {
+          const x = Math.max(-40, Math.min(0, Number(db)));
+          return Math.round(((x + 40) / 40) * 100);
+        };
+        const updateVal = () => { val.textContent = String(dbToPct(input.value)); };
+        updateVal();
 
         const stop = (e)=>e.stopPropagation();
         input.addEventListener('pointerdown', stop);
@@ -1190,10 +1203,12 @@ renderTimeline(){
 
         input.addEventListener('input', () => {
           this._setMasterGainDb(Number(input.value));
+          updateVal();
         });
 
         wrap.appendChild(lab);
         wrap.appendChild(input);
+        wrap.appendChild(val);
         row.appendChild(wrap);
       }catch(e){}
     },
