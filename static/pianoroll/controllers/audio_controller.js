@@ -250,7 +250,11 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
       if (absStart < startAt) continue;
       const t = absStart - startAt;
       const dur = Math.max(0.01, Number(n.durationSec || 0.1));
-      const vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
+      let vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
+// Normalize: some paths store velocity as MIDI 1..127, others as 0..1.
+// If it looks like MIDI, scale down.
+if (Number.isFinite(vel) && vel > 1.01) vel = vel / 127;
+vel = clamp(vel, 0.01, 1);
       if (t + dur > maxT) maxT = t + dur;
       G.Tone.Transport.schedule((time) => {
         try{
