@@ -309,6 +309,60 @@
           nameEl.style.fontWeight = '600';
           label.appendChild(nameEl);
 
+          // Mute button (structural ignore; not just volume=0)
+          label.style.position = "relative";
+          const _getMuted = ()=>{
+            if (typeof track.muted === "boolean") return !!track.muted;
+            try{
+              const a = (window.H2SApp && typeof window.H2SApp.getProjectV2 === "function") ? window.H2SApp.getProjectV2() : null;
+              const tid = track.trackId || track.id;
+              if (a && tid && Array.isArray(a.tracks)){
+                const tt = a.tracks.find(x => x && (x.id === tid || x.trackId === tid));
+                if (tt && typeof tt.muted === "boolean") return !!tt.muted;
+              }
+            }catch(e){}
+            return false;
+          };
+          const muteBtn = document.createElement("button");
+          muteBtn.className = "trackMuteBtn";
+          muteBtn.type = "button";
+          muteBtn.textContent = "M";
+          muteBtn.title = "Mute track";
+          muteBtn.style.position = "absolute";
+          muteBtn.style.top = "6px";
+          muteBtn.style.right = "6px";
+          muteBtn.style.width = "24px";
+          muteBtn.style.height = "24px";
+          muteBtn.style.borderRadius = "8px";
+          muteBtn.style.border = "1px solid rgba(255,255,255,0.25)";
+          muteBtn.style.background = "rgba(255,255,255,0.08)";
+          muteBtn.style.color = "#fff";
+          muteBtn.style.cursor = "pointer";
+          muteBtn.style.display = "inline-flex";
+          muteBtn.style.alignItems = "center";
+          muteBtn.style.justifyContent = "center";
+          const _syncMuteStyle = ()=>{
+            const m = _getMuted();
+            muteBtn.style.background = m ? "rgba(220,60,60,0.85)" : "rgba(255,255,255,0.08)";
+            muteBtn.style.borderColor = m ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.25)";
+          };
+          _syncMuteStyle();
+          muteBtn.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); });
+          muteBtn.addEventListener("click", (e)=>{
+            e.preventDefault(); e.stopPropagation();
+            const tid = track.trackId || track.id || (proj.tracks[ti] && (proj.tracks[ti].trackId || proj.tracks[ti].id));
+            const next = !_getMuted();
+            if (typeof config.onSetTrackMuted === "function"){
+              config.onSetTrackMuted(tid, next);
+            } else if (window.H2SApp && typeof window.H2SApp.setTrackMuted === "function"){
+              window.H2SApp.setTrackMuted(tid, next);
+            }
+            // UI will re-render via app.setProjectFromV2; but update immediately for responsiveness
+            try{ track.muted = next; }catch(_){}
+            _syncMuteStyle();
+          });
+          label.appendChild(muteBtn);
+
           // Volume slider (dB)
           const volWrap = document.createElement('div');
           volWrap.className = 'trackVolWrap';

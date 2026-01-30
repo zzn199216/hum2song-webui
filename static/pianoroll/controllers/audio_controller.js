@@ -216,35 +216,25 @@ let maxT = 0;
 if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   const flat2 = G.H2SProject.flatten(projectV2);
 
-  // Build synths per trackId using v2 instruments (+ per-track gainDb)
-  const instByTrackId = new Map();
-  const gainByTrackId = new Map();
+  // Build track meta per trackId (v2 truth)
+  const metaByTrackId = new Map();
   try{
     for (const t of (projectV2.tracks || [])){
-      const tid = t && (t.trackId || t.id);
+      if (!t) continue;
+      const tid = t.trackId || t.id;
       if (!tid) continue;
-      instByTrackId.set(String(tid), (t && t.instrument) ? t.instrument : 'default');
-      if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTrackId.set(String(tid), t.gainDb);
+      metaByTrackId.set(tid, { instrument: (t.instrument || 'default'), muted: !!t.muted, gainDb: (Number.isFinite(Number(t.gainDb)) ? Number(t.gainDb) : 0) });
     }
   }catch(e){}
 
   const synthByTrackId = new Map();
   const getSynth = (trackId) => {
     if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
-    const inst = instByTrackId.get(trackId) || 'default';
-    if (!instByTrackId.has(trackId)){
-      console.warn('[Audio] event.trackId not found in projectV2.tracks; using default synth for', trackId);
-    }
+    const meta = metaByTrackId.get(trackId) || {instrument:'default', muted:false, gainDb:0};
+    if (meta.muted) return null;
+    const inst = meta.instrument || 'default';
     const s = _makeSynthByInstrument(inst).toDestination();
-
-    // Gain staging: keep default quieter to avoid "jump scare".
-    // Per-track gainDb is user controlled, additive on top of a conservative base.
-    try{
-      const g = (gainByTrackId && gainByTrackId.has(trackId)) ? Number(gainByTrackId.get(trackId)) : 0;
-      const gainDb = Number.isFinite(g) ? Math.max(-30, Math.min(6, g)) : 0;
-      if (s && s.volume && typeof s.volume.value === 'number') s.volume.value = (-12 + gainDb);
-    }catch(e){}
-
+    try{ if (s && s.volume && Number.isFinite(meta.gainDb)) s.volume.value = meta.gainDb; }catch(e){};
     _trackSynths.push(s);
     synthByTrackId.set(trackId, s);
     return s;
@@ -252,25 +242,19 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
 
   for (const tr of (flat2.tracks || [])){
     const tid = tr && (tr.trackId || tr.id);
-    if (!tid){
-      console.error('[Audio] v2 flatten produced a track without trackId. Refusing to schedule those notes.', tr);
-      continue;
-    }
-    const trackId = String(tid);
-    const s = getSynth(trackId);
+    if (!tid) continue;
+    const s = getSynth(tid);
+    if (!s) continue;
     for (const n of (tr.notes || [])){
       const absStart = Number(n.startSec || 0);
       if (absStart < startAt) continue;
       const t = absStart - startAt;
       const dur = Math.max(0.01, Number(n.durationSec || 0.1));
-      const velRaw = (n.velocity == null) ? 0.8 : Number(n.velocity);
-      const vel = (Number.isFinite(velRaw) ? Math.max(0, Math.min(1, velRaw)) : 0.8);
+      const vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
       if (t + dur > maxT) maxT = t + dur;
       G.Tone.Transport.schedule((time) => {
         try{
-          const p = Number(n.pitch);
-          const pitch = Number.isFinite(p) ? p : 60;
-          s.triggerAttackRelease(G.Tone.Frequency(pitch, 'midi'), dur, time, vel);
+          s.triggerAttackRelease(G.Tone.Frequency(n.pitch, 'midi'), dur, time, vel);
         }catch(e){}
       }, t);
     }

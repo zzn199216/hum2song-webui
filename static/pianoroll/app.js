@@ -90,6 +90,7 @@
             trackId: tid,
             instrument: (t && typeof t.instrument === 'string' && t.instrument) ? t.instrument : 'default',
             gainDb: (t && typeof t.gainDb === 'number' && isFinite(t.gainDb)) ? t.gainDb : 0,
+            muted: (t && typeof t.muted === 'boolean') ? t.muted : false,
           };
         })
       : [{ id: 'track-1', name: 'Track 1', trackId: 'track-1', instrument: 'default' }];
@@ -218,11 +219,13 @@ try{
   if (prevV2 && Array.isArray(prevV2.tracks) && Array.isArray(p2.tracks)){
     const instByTid = new Map();
     const gainByTid = new Map();
+    const mutedByTid = new Map();
     for (const t of prevV2.tracks){
       const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
       if (!tid) continue;
       if (typeof t.instrument === 'string' && t.instrument) instByTid.set(tid, t.instrument);
       if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTid.set(tid, t.gainDb);
+      if (typeof t.muted === 'boolean') mutedByTid.set(tid, t.muted);
     }
 
     for (const t of p2.tracks){
@@ -238,7 +241,13 @@ try{
 
       const g = gainByTid.get(tid);
       if (typeof g === 'number' && isFinite(g)) t.gainDb = g;
-      else if (typeof t.gainDb !== 'number' || !isFinite(t.gainDb)) t.gainDb = 0;
+      const m = mutedByTid.get(tid);
+      if (typeof m === 'boolean') t.muted = m;
+
+      // Ensure defaults for v2-only fields when missing from v1 migration.
+      if (typeof t.instrument !== 'string' || !t.instrument) t.instrument = 'default';
+      if (typeof t.gainDb !== 'number' || !isFinite(t.gainDb)) t.gainDb = 0;
+      if (typeof t.muted !== 'boolean') t.muted = false;
     }
   }
 } catch(e){
@@ -298,6 +307,8 @@ getProjectV2(){
           if (t && !t.trackId && t.id) t.trackId = t.id;
           if (t && typeof t.instrument !== 'string') t.instrument = 'default';
           if (t && (typeof t.gainDb !== 'number' || !isFinite(t.gainDb))) t.gainDb = 0;
+      if (t && typeof t.muted !== 'boolean') t.muted = false;
+      if (t && typeof t.muted !== 'boolean') t.muted = false;
         }
       }
       this._projectV2 = p2;
@@ -360,6 +371,24 @@ setTrackGainDb(trackId, gainDb){
   if (!t.trackId && t.id === trackId) t.trackId = trackId;
   const v = Number(gainDb);
   t.gainDb = (Number.isFinite(v) ? Math.max(-30, Math.min(6, v)) : 0);
+  this.setProjectFromV2(p2);
+},
+
+// --- T4-4: single write entry for per-track mute (v2 truth) ---
+setTrackMuted(trackId, muted){
+  const p2 = this.getProjectV2();
+  if (!p2 || !Array.isArray(p2.tracks)){
+    console.error('[App] setTrackMuted: project v2 missing');
+    return;
+  }
+  const t = p2.tracks.find(x => x && ((x.trackId === trackId) || (x.id === trackId)));
+  if (!t){
+    console.error('[App] setTrackMuted: trackId not found', trackId);
+    return;
+  }
+  // Repair legacy data that used `id` instead of `trackId`
+  if (!t.trackId && t.id === trackId) t.trackId = trackId;
+  t.muted = Boolean(muted);
   this.setProjectFromV2(p2);
 },
 

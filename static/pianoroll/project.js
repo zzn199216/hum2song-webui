@@ -74,7 +74,7 @@
   };
 
   function defaultTrackV2(){
-    return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT };
+    return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT, gainDb: 0, muted: false };
   }
 
   function ensureTrackV2(track, idx){
@@ -88,6 +88,9 @@
     if (typeof t.instrument !== 'string' || !t.instrument.trim()){
       t.instrument = SCHEMA_V2.DEFAULT_INSTRUMENT;
     }
+    if (!isFiniteNumber(t.gainDb)) t.gainDb = 0;
+    t.gainDb = Math.max(-30, Math.min(6, Number(t.gainDb)));
+    if (typeof t.muted !== 'boolean') t.muted = false;
     return t;
   }
 
