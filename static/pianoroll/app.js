@@ -1213,128 +1213,15 @@ renderTimeline(){
       }catch(e){}
     },
 	async playProject(){
+      // Single source of truth: AudioController schedules project playback (v2 flatten).
+      // app.js must NOT maintain a parallel legacy scheduling path, to avoid "wrong entry" regressions.
       this._applyMasterGain();
-      if (this.audioCtrl && this.audioCtrl.playProject){
-        // Delegate to AudioController (centralized Tone.Transport scheduling)
-        return await this.audioCtrl.playProject();
+      if (!(this.audioCtrl && typeof this.audioCtrl.playProject === 'function')){
+        console.error('[App] playProject: AudioController not available (refusing legacy path).');
+        alert('Audio engine not ready (AudioController missing).');
+        return false;
       }
-      if (this.state.transportPlaying){
-        this.stopProject();
-        return;
-      }
-      const ok = await this.ensureTone();
-      if (!ok){
-        alert('Tone.js not available.'); return;
-      }
-      await Tone.start();
-
-      // Safer default volume (avoid surprising loud output)
-      try { Tone.Destination.volume.value = -14; } catch(e) {}
-
-      // Prefer v2 flatten playback (beats-only truth) with per-track instruments.
-      const p2 = this.getProjectV2 && this.getProjectV2();
-      const P = window.H2SProject;
-      if (p2 && P && typeof P.flatten === 'function' && Array.isArray(p2.tracks)){
-        const flat = P.flatten(p2);
-        const bpm = p2.bpm || 120;
-        Tone.Transport.stop();
-        Tone.Transport.cancel();
-        Tone.Transport.seconds = 0;
-        Tone.Transport.bpm.value = bpm;
-
-        const makeSynth = (instName) => {
-          let syn;
-          switch (instName){
-            case 'bass':  syn = new Tone.MonoSynth(); break;
-            case 'lead':  syn = new Tone.Synth(); break;
-            case 'pad':   syn = new Tone.FMSynth(); break;
-            case 'pluck': syn = new Tone.PluckSynth(); break;
-            case 'drum':  syn = new Tone.MembraneSynth(); break;
-            default:      syn = new Tone.PolySynth(Tone.Synth); break;
-          }
-          try { syn.volume.value = -10; } catch(e) {}
-          syn.toDestination();
-          return syn;
-        };
-
-        const synthByTrack = new Map();
-        for (const t of p2.tracks){
-          const tid = t.trackId || t.id;
-          if (!tid) continue;
-          synthByTrack.set(tid, makeSynth(t.instrument || 'default'));
-        }
-
-        let maxT = 0;
-        for (const tr of (flat.tracks || [])){
-          const synth = synthByTrack.get(tr.trackId) || synthByTrack.get('default');
-          if (!synth) continue;
-          for (const n of (tr.notes || [])){
-            const vel = Math.max(0.0, Math.min(0.8, (n.velocity == null ? 0.7 : n.velocity)));
-            const t0 = Math.max(0, (n.startSec || 0));
-            const dur = Math.max(0.01, (n.durationSec || 0.1));
-            Tone.Transport.schedule((time)=>{
-              // For drum synth, pitch still affects tone but remains percussive.
-              const freq = Tone.Frequency(n.pitch, 'midi');
-              if (synth.triggerAttackRelease) synth.triggerAttackRelease(freq, dur, time, vel);
-            }, t0);
-            maxT = Math.max(maxT, t0 + dur);
-          }
-        }
-
-        Tone.Transport.start('+0.05');
-        this.state.transportPlaying = true;
-        this.render && this.render();
-        return;
-      }
-
-      // Legacy fallback: single-synth seconds-based schedule (older v1 UI)
-      const synth = new Tone.PolySynth(Tone.Synth).toDestination();
-      try { synth.volume.value = -10; } catch(e) {}
-      const bpm = this.project.bpm || 120;
-      const startAt = this.project.ui.playheadSec || 0;
-
-      Tone.Transport.stop();
-      Tone.Transport.cancel();
-      Tone.Transport.seconds = 0;
-      Tone.Transport.bpm.value = bpm;
-
-      let maxT = 0;
-      for (const inst of this.project.instances){
-        const clip = this.project.clips.find(c => c.id === inst.clipId);
-        if (!clip) continue;
-        const score = H2SProject.ensureScoreIds(H2SProject.deepClone(clip.score));
-        for (const tr of (score.tracks || [])){
-          for (const n of (tr.notes || [])){
-            const tAbs = inst.startSec + n.start;
-            if (tAbs + n.duration < startAt) continue;
-            const tRel = (tAbs - startAt);
-            maxT = Math.max(maxT, tRel + n.duration);
-            Tone.Transport.schedule((time) => {
-              const pitch = H2SProject.clamp(Math.round((n.pitch || 60) + (inst.transpose || 0)), 0, 127);
-              const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127) / 127;
-              synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), n.duration, time, vel);
-            }, tRel);
-          }
-        }
-      }
-
-      Tone.Transport.start("+0.05");
-      this.state.transportPlaying = true;
-      this.state.transportStartPerf = performance.now();
-      log('Project play.');
-
-      const raf = () => {
-        if (!this.state.transportPlaying) return;
-        const sec = startAt + (Tone.Transport.seconds || 0);
-        this.project.ui.playheadSec = sec;
-        $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)}`;
-        this.renderTimeline(); // light redraw
-        requestAnimationFrame(raf);
-      };
-      requestAnimationFrame(raf);
-
-      // auto stop
-      setTimeout(()=>{ if (this.state.transportPlaying) this.stopProject(); }, Math.ceil((maxT + 0.2) * 1000));
+      return await this.audioCtrl.playProject();
     },
 
     stopProject(){

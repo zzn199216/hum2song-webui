@@ -221,10 +221,10 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   const gainByTrackId = new Map();
   try{
     for (const t of (projectV2.tracks || [])){
-      if (t && t.trackId) {
-        instByTrackId.set(t.trackId, t.instrument || 'default');
-        if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTrackId.set(t.trackId, t.gainDb);
-      }
+      const tid = t && (t.trackId || t.id);
+      if (!tid) continue;
+      instByTrackId.set(String(tid), (t && t.instrument) ? t.instrument : 'default');
+      if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTrackId.set(String(tid), t.gainDb);
     }
   }catch(e){}
 
@@ -232,6 +232,9 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   const getSynth = (trackId) => {
     if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
     const inst = instByTrackId.get(trackId) || 'default';
+    if (!instByTrackId.has(trackId)){
+      console.warn('[Audio] event.trackId not found in projectV2.tracks; using default synth for', trackId);
+    }
     const s = _makeSynthByInstrument(inst).toDestination();
 
     // Gain staging: keep default quieter to avoid "jump scare".
@@ -248,19 +251,26 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   };
 
   for (const tr of (flat2.tracks || [])){
-    const tid = tr && tr.trackId;
-    if (!tid) continue;
-    const s = getSynth(tid);
+    const tid = tr && (tr.trackId || tr.id);
+    if (!tid){
+      console.error('[Audio] v2 flatten produced a track without trackId. Refusing to schedule those notes.', tr);
+      continue;
+    }
+    const trackId = String(tid);
+    const s = getSynth(trackId);
     for (const n of (tr.notes || [])){
       const absStart = Number(n.startSec || 0);
       if (absStart < startAt) continue;
       const t = absStart - startAt;
       const dur = Math.max(0.01, Number(n.durationSec || 0.1));
-      const vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
+      const velRaw = (n.velocity == null) ? 0.8 : Number(n.velocity);
+      const vel = (Number.isFinite(velRaw) ? Math.max(0, Math.min(1, velRaw)) : 0.8);
       if (t + dur > maxT) maxT = t + dur;
       G.Tone.Transport.schedule((time) => {
         try{
-          s.triggerAttackRelease(G.Tone.Frequency(n.pitch, 'midi'), dur, time, vel);
+          const p = Number(n.pitch);
+          const pitch = Number.isFinite(p) ? p : 60;
+          s.triggerAttackRelease(G.Tone.Frequency(pitch, 'midi'), dur, time, vel);
         }catch(e){}
       }, t);
     }
