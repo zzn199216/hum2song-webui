@@ -553,6 +553,15 @@ $('#rngPitchCenter').addEventListener('input', () => {
 
       // Canvas interactions
       const canvas = $('#canvas');
+      const canvasWrap = $('#canvasWrap');
+      // Some UI overlays (e.g., playhead/ghost layers) may sit above the canvas and swallow pointer events.
+      // Bind on the wrapper in capture phase so note hit-testing still works even if the event target isn't the canvas.
+      if (canvasWrap){
+        canvasWrap.addEventListener('pointerdown', (ev) => {
+          if (!this.state.modal || !this.state.modal.show) return;
+          this.modalPointerDown(ev);
+        }, true);
+      }
       canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
       window.addEventListener('pointermove', (ev) => this.modalPointerMove(ev));
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
