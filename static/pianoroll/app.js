@@ -241,6 +241,7 @@ try{
 
       const g = gainByTid.get(tid);
       if (typeof g === 'number' && isFinite(g)) t.gainDb = g;
+
       const m = mutedByTid.get(tid);
       if (typeof m === 'boolean') t.muted = m;
 
@@ -308,7 +309,6 @@ getProjectV2(){
           if (t && typeof t.instrument !== 'string') t.instrument = 'default';
           if (t && (typeof t.gainDb !== 'number' || !isFinite(t.gainDb))) t.gainDb = 0;
       if (t && typeof t.muted !== 'boolean') t.muted = false;
-      if (t && typeof t.muted !== 'boolean') t.muted = false;
         }
       }
       this._projectV2 = p2;
@@ -331,6 +331,7 @@ setProjectFromV2(projectV2){
       if (t && !t.trackId && t.id) t.trackId = t.id;
       if (t && typeof t.instrument !== 'string') t.instrument = 'default';
       if (t && (typeof t.gainDb !== 'number' || !isFinite(t.gainDb))) t.gainDb = 0;
+      if (t && typeof t.muted !== 'boolean') t.muted = false;
     }
   }
   this._projectV2 = projectV2;
@@ -374,7 +375,7 @@ setTrackGainDb(trackId, gainDb){
   this.setProjectFromV2(p2);
 },
 
-// --- T4-4: single write entry for per-track mute (v2 truth) ---
+
 setTrackMuted(trackId, muted){
   const p2 = this.getProjectV2();
   if (!p2 || !Array.isArray(p2.tracks)){
@@ -386,16 +387,17 @@ setTrackMuted(trackId, muted){
     console.error('[App] setTrackMuted: trackId not found', trackId);
     return;
   }
-  // Repair legacy data that used `id` instead of `trackId`
   if (!t.trackId && t.id === trackId) t.trackId = trackId;
   t.muted = Boolean(muted);
   this.setProjectFromV2(p2);
 },
 
 
+
 async optimizeClip(clipId){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
     console.warn('[App] optimizeClip called but agent controller is not available');
+    try{ alert('Optimize unavailable: agent controller not initialized. Check console for details.'); }catch(_){}
     return {ok:false, error:'no_agent_controller'};
   }
   return await this.agentCtrl.optimizeClip(clipId);
@@ -580,11 +582,32 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onAdd: (clipId) => this.addClipToTimeline(clipId),
             onEdit: (clipId) => this.openClipEditor(clipId),
             onRemove: (clipId) => this.deleteClip(clipId),
+            onOptimize: (clipId) => this.optimizeClip(clipId),
           });
         }
       }catch(e){
         console.warn('LibraryController init failed', e);
       }
+
+
+      // Fallback: ensure Optimize button always triggers, even if a controller binding is missing.
+      // We only intercept data-act="optimize" and leave other actions to the existing controller.
+      try{
+        const clipList = $('#clipList');
+        if (clipList && !clipList.__h2sOptFallbackBound){
+          clipList.__h2sOptFallbackBound = true;
+          clipList.addEventListener('click', (e)=>{
+            const btn = e.target && e.target.closest ? e.target.closest('[data-act="optimize"]') : null;
+            if (!btn) return;
+            const clipId = btn.getAttribute('data-id') || btn.getAttribute('data-clip-id');
+            if (!clipId) return;
+            // Prevent double-handling if another listener exists.
+            e.preventDefault();
+            e.stopPropagation();
+            Promise.resolve(this.optimizeClip(clipId)).catch(err=>console.warn('[App] optimizeClip failed', err));
+          }, true); // capture
+        }
+      }catch(_){}
 
       // Selection / Inspector controller (render + shortcuts)
       // IMPORTANT: must NOT rebuild timeline DOM; only touches #selectionBox.
@@ -846,7 +869,87 @@ try{
       }
     },
 
+addTrack(){
+  // v2-only mutation: add a new track and persist via setProjectFromV2
+  const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+  const p2 = this.getProjectV2 && this.getProjectV2();
+  if (!p2 || !P) { console.error('[App] addTrack: missing project v2 or H2SProject'); return; }
+  if (!Array.isArray(p2.tracks)) p2.tracks = [];
+  const id = (P && typeof P.uid === 'function') ? P.uid('trk_') : ('trk_' + Math.random().toString(16).slice(2,10));
+  const name = 'Track ' + (p2.tracks.length + 1);
+  p2.tracks.push({ id, name, instrument: 'default', gainDb: 0, muted: false });
+  // Make the new track active
+  this.state.activeTrackIndex = Math.max(0, p2.tracks.length - 1);
+  this.state.activeTrackId = id;
+  if (typeof this.setProjectFromV2 === 'function') this.setProjectFromV2(p2);
+  else { this.project = p2; if (typeof this.persist === 'function') this.persist(); if (typeof this.render === 'function') this.render(); }
+},
+
+removeActiveTrack(){
+  const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+  const p2 = this.getProjectV2 && this.getProjectV2();
+  if (!p2 || !P) { console.error('[App] removeActiveTrack: missing project v2 or H2SProject'); return; }
+  if (!Array.isArray(p2.tracks) || p2.tracks.length <= 1){
+    console.warn('[App] removeActiveTrack: cannot remove last track');
+    return;
+  }
+  const idx = Math.max(0, Math.min(p2.tracks.length - 1, Number(this.state.activeTrackIndex||0)));
+  const tid = p2.tracks[idx] && p2.tracks[idx].id;
+  if (!tid){ console.error('[App] removeActiveTrack: active track id missing'); return; }
+
+  // Remove instances on that track (v2 instances is an array)
+  if (Array.isArray(p2.instances)){
+    p2.instances = p2.instances.filter(inst => inst && inst.trackId !== tid);
+  }
+  p2.tracks.splice(idx, 1);
+
+  // Clamp active
+  const nextIdx = Math.max(0, Math.min(p2.tracks.length - 1, idx));
+  const nextId = p2.tracks[nextIdx] && p2.tracks[nextIdx].id;
+  this.state.activeTrackIndex = nextIdx;
+  this.state.activeTrackId = nextId || null;
+
+  if (typeof this.setProjectFromV2 === 'function') this.setProjectFromV2(p2);
+  else { this.project = p2; if (typeof this.persist === 'function') this.persist(); if (typeof this.render === 'function') this.render(); }
+},
+
+ensureTrackButtons(){
+  if (typeof document === 'undefined') return;
+  const kv = document.getElementById('kvTracks');
+  if (!kv) return;
+  const row = kv.parentElement;
+  if (!row) return;
+  if (row.querySelector('[data-act="addTrack"]')) return;
+
+  const wrap = document.createElement('span');
+  wrap.style.display = 'inline-flex';
+  wrap.style.gap = '6px';
+  wrap.style.marginLeft = '8px';
+
+  const btnAdd = document.createElement('button');
+  btnAdd.className = 'btn';
+  btnAdd.textContent = '+';
+  btnAdd.title = 'Add track';
+  btnAdd.setAttribute('data-act','addTrack');
+
+  const btnDel = document.createElement('button');
+  btnDel.className = 'btn';
+  btnDel.textContent = '−';
+  btnDel.title = 'Remove active track';
+  btnDel.setAttribute('data-act','removeTrack');
+
+  wrap.appendChild(btnAdd);
+  wrap.appendChild(btnDel);
+  row.appendChild(wrap);
+
+  btnAdd.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); this.addTrack(); });
+  btnDel.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); this.removeActiveTrack(); });
+},
+
+
+
     render(){
+      try{ this.ensureTrackButtons(); }catch(e){}
       // Inspector stats
       $('#kvTracks').textContent = String(this.project.tracks.length);
       $('#kvClips').textContent = String(this.project.clips.length);
