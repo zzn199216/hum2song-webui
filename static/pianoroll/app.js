@@ -14,6 +14,21 @@
   const LS_KEY_V1 = 'hum2song_studio_project_v1';
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
 
+  // --- debug gate (localStorage.h2s_debug === '1') ---
+  function _dbgEnabled(){
+    try{
+      return (typeof localStorage !== 'undefined') && (localStorage.h2s_debug === '1');
+    }catch(e){
+      return false;
+    }
+  }
+
+  function dbg(){
+    if (!_dbgEnabled()) return;
+    try{ console.log.apply(console, arguments); }catch(_){ }
+  }
+
+
   // --- storage is beats-only (ProjectDoc v2). UI remains v1 seconds until controllers are migrated. ---
   function _readLS(key){
     try{
@@ -196,8 +211,8 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     const t = new Date();
     const line = `[${t.toLocaleTimeString()}] ${msg}\n`;
     el.textContent = line + el.textContent;
-    // also console
-    console.log(msg);
+    // also console (debug-gated)
+    dbg(msg);
   }
 
   function downloadText(filename, text){
@@ -303,6 +318,24 @@ try{
   const app = {
     project: null,
     _projectV2: null,
+    // debug helper (gated by localStorage.h2s_debug === '1')
+    dbg: function(){ return dbg.apply(null, arguments); },
+
+    // v2-only commit path: write v2 truth to storage and refresh UI view
+    commitV2: function(projectV2, reason){
+      if (reason) this.dbg('[commitV2]', reason);
+      return this.setProjectFromV2(projectV2);
+    },
+
+    // v1->v2 migration commit path (legacy seconds UI -> beats truth)
+    persistFromV1: function(reason){
+      if (reason) this.dbg('[persistFromV1]', reason);
+      persist();
+      const p2 = this.getProjectV2();
+      if (p2 && _isProjectV2(p2)) this.project = _projectV2ToV1View(p2);
+      this.render();
+    },
+
 // Controllers (optional)
 agentCtrl: null,
 
@@ -484,7 +517,6 @@ try{
       persist: () => persist(),
       render: () => this.render(),
     });
-    if (localStorage && localStorage.h2s_debug === '1') console.log('[App] AgentController wired', { ok:true });
   }
 }catch(e){
   console.warn('AgentController init failed', e);

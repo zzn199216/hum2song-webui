@@ -38,8 +38,30 @@
     return false;
   }
 
+  function isDebugMoveEnabled(){
+    if (typeof window === 'undefined') return false;
+    try{
+      const u = new URL(window.location.href);
+      if (u.searchParams.get('debug_timeline_move') === '1') return true;
+    }catch(e){}
+    try{
+      return String(localStorage.getItem('h2s_timeline_debug_move') || '') === '1';
+    }catch(e){}
+    return false;
+  }
+
   function dbg(ctrl, ...args){
     if (!ctrl._debug) return;
+    console.log('[Timeline]', ...args);
+  }
+
+  function dbgMove(ctrl, ...args){
+    if (!ctrl._debugMove) return;
+    const now = Date.now();
+    const last = ctrl._dbgMoveLastMs || 0;
+    const every = ctrl._dbgMoveEveryMs || 120;
+    if (now - last < every) return;
+    ctrl._dbgMoveLastMs = now;
     console.log('[Timeline]', ...args);
   }
 
@@ -61,10 +83,21 @@
    * - labelWidthPx (default 120)
    */
   function create(config){
+    // Singleton guard: ensure only one Timeline controller instance is active.
+    // This prevents duplicated global listeners if the app re-inits.
+    if (typeof window !== 'undefined'){
+      try{
+        const prev = window.__h2s_timeline_singleton;
+        if (prev && typeof prev.destroy === 'function') prev.destroy();
+      }catch(e){}
+    }
     const ctrl = {
       VERSION,
       _cfg: config || {},
       _debug: (config && typeof config.debug === 'boolean') ? config.debug : isDebugEnabled(),
+      _debugMove: (config && typeof config.debugMove === 'boolean') ? config.debugMove : isDebugMoveEnabled(),
+      _dbgMoveEveryMs: 120,
+      _dbgMoveLastMs: 0,
       _bound: false,
       _tracksEl: config.tracksEl,
       _labelW: (config && typeof config.labelWidthPx === 'number') ? config.labelWidthPx : 120,
@@ -271,7 +304,7 @@
         // HARD RULE: never rebuild timeline while dragging (DOM replacement breaks capture/dblclick)
         const cand = state && state.dragCandidate;
         if (cand && cand.started){
-          dbg(ctrl, 'render() skipped because dragging is active');
+          dbgMove(ctrl, 'render() skipped because dragging is active');
           return;
         }
 
@@ -697,7 +730,7 @@
       // Update DOM in-place (NO full render!)
       cand.el.style.left = (ctrl._labelW + startSec * pxPerSec) + 'px';
 
-      dbg(ctrl, 'drag move', cand.instId, startSec.toFixed(3));
+      dbgMove(ctrl, 'drag move', cand.instId, startSec.toFixed(3));
     }
 
     function onPointerUp(ev){
@@ -734,6 +767,10 @@
     }
 
     ctrl.__testHooks = { instancePointerDown, onPointerMove, onPointerUp, onPointerCancel };
+
+    if (typeof window !== 'undefined'){
+      try{ window.__h2s_timeline_singleton = ctrl; }catch(e){}
+    }
 
     return ctrl;
   }

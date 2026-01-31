@@ -82,6 +82,20 @@
       return opts.project;
     }
 
+    function dbg(){
+      // Debug-gated logging.
+      // Prefer app.dbg (Patch A). Fallback to localStorage.h2s_debug gate.
+      try{
+        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
+        if (app && typeof app.dbg === 'function') return app.dbg.apply(app, arguments);
+      }catch(_){ /* ignore */ }
+      try{
+        if (typeof localStorage !== 'undefined' && localStorage.h2s_debug === '1'){
+          console.log.apply(console, arguments);
+        }
+      }catch(_){ /* ignore */ }
+    }
+
     function getProjectV2(){
       // Prefer v2 as the single source of truth.
       if (typeof opts.getProjectV2 === 'function') return opts.getProjectV2();
@@ -154,12 +168,23 @@
 
       // T3-4: Optimize (agent runner v0)
       if (act === 'optimize'){
+        // Important: bind this handler in capture phase so we can reliably intercept
+        // optimize clicks even if a fallback listener is added later.
+        // This also prevents double-handling (e.g. App fallback + controller).
+        try{ e.preventDefault(); e.stopPropagation(); }catch(_){ /* ignore */ }
         const fn = (app && typeof app.optimizeClip === 'function') ? app.optimizeClip : null;
         if (!fn){
           console.warn('[LibraryController] optimize requested but app.optimizeClip is not available');
           return;
         }
         Promise.resolve(fn.call(app, clipId)).then((res)=>{
+          if (res && res.ok && typeof res.ops === 'number'){
+            if (res.ops === 0){
+              dbg('[opt] no changes (0 ops)', { clipId, revisionId: res.revisionId });
+            }else{
+              dbg('[opt] applied ops', { clipId, ops: res.ops, revisionId: res.revisionId });
+            }
+          }
           if (res && res.ok === false){
             console.warn('[LibraryController] optimize returned not ok', res, { clipId });
           }
@@ -240,7 +265,21 @@
     }
 
     if (rootEl){
-      rootEl.addEventListener('click', _handleClick);
+      // Guard against duplicate bindings if create() is called multiple times.
+      // We store handler refs on the root element so we can safely rebind.
+      try{
+        const prev = rootEl.__h2sLibraryHandlers;
+        if (prev){
+          // removeEventListener must match the same capture flag used in addEventListener.
+          rootEl.removeEventListener('click', prev.click, true);
+          rootEl.removeEventListener('change', prev.change);
+        }
+      }catch(_){ /* ignore */ }
+      try{
+        rootEl.__h2sLibraryHandlers = { click: _handleClick, change: _handleChange };
+      }catch(_){ /* ignore */ }
+      // Use capture so Optimize can be handled even if a fallback listener is attached later.
+      rootEl.addEventListener('click', _handleClick, true);
       rootEl.addEventListener('change', _handleChange);
     }
 
