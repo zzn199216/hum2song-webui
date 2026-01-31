@@ -73,6 +73,17 @@
       const clip = project && project.clips && project.clips[cid];
       if (!clip) return { ok:false, error:'clip_not_found' };
 
+      // Capture previous head snapshot for revision chain
+      const prevRevisionId = clip.revisionId || null;
+      let prevSnapshot = null;
+      try {
+        prevSnapshot = _clone(clip);
+        // Avoid recursively storing history inside history
+        if (prevSnapshot && prevSnapshot.revisions) prevSnapshot.revisions = [];
+      } catch (e) {
+        prevSnapshot = null;
+      }
+
       // create new head revision first (never overwrite raw)
       const resNew = H2SProject.beginNewClipRevision(project, cid, { name: clip.name });
       if (!resNew || !resNew.ok){
@@ -80,6 +91,13 @@
       }
 
       const head = project.clips[cid];
+
+      // Link revision chain for ghost/history UX
+      if (prevRevisionId && !head.parentRevisionId) head.parentRevisionId = prevRevisionId;
+      if (Array.isArray(head.revisions) && prevSnapshot){
+        // store a snapshot of the previous head
+        head.revisions.push(prevSnapshot);
+      }
 
       const patch = buildPseudoAgentPatch(head);
       const valid = H2SAgentPatch.validatePatch(patch, { project, clip: head });
@@ -95,13 +113,34 @@
 
       const applied = H2SAgentPatch.applyPatchToClip(head, patch, { project });
 
+      // applyPatch may return a NEW clip; write back into current head
+      if (!applied || applied.ok === false){
+        head.meta = head.meta || {};
+        head.meta.agent = head.meta.agent || {};
+        head.meta.agent.lastError = (applied && applied.error) ? applied.error : 'applyPatch failed';
+        opts.setProjectFromV2(project);
+        return { ok:false, error: head.meta.agent.lastError };
+      }
+      if (applied && applied.clip){
+        if (applied.clip.score) head.score = applied.clip.score;
+        if (applied.clip.meta){
+          const keepAgent = head.meta && head.meta.agent ? _clone(head.meta.agent) : null;
+          head.meta = applied.clip.meta;
+          if (keepAgent){
+            head.meta = head.meta || {};
+            head.meta.agent = head.meta.agent || {};
+            Object.assign(head.meta.agent, keepAgent);
+          }
+        }
+      }
+
       if (H2SProject.recomputeClipMetaFromScoreBeat){
         H2SProject.recomputeClipMetaFromScoreBeat(head);
       }
 
       head.meta = head.meta || {};
       head.meta.agent = head.meta.agent || {};
-      head.meta.agent.optimizedFromRevisionId = head.parentRevisionId || null;
+      head.meta.agent.optimizedFromRevisionId = prevRevisionId || head.parentRevisionId || null;
       head.meta.agent.appliedAt = _now();
       head.meta.agent.patchOps = (patch.ops || []).length;
       if (H2SAgentPatch.summarizeAppliedPatch){

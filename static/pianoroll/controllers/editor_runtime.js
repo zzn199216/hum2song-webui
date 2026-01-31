@@ -312,6 +312,7 @@
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
       this.modalRequestDraw();
+      this.modalBindControls();
       log(`Open editor: ${clip.name}`);
     },
 
@@ -650,6 +651,158 @@
         if (idx >= 0) return { track:t, note:t.notes[idx], index: idx };
       }
       return null;
+    },
+
+
+    // ---- Insert/Delete note controls (buttons + keyboard) ----
+    modalBindControls(){
+      if (!this.__isBrowser) return;
+
+      // Use a global guard because EditorRuntime instances can be recreated on re-render.
+      const g = (typeof window !== 'undefined') ? window : global;
+      if (g && g.__h2s_editor_controls_bound) return;
+      if (g) g.__h2s_editor_controls_bound = true;
+
+      // Store handler refs on global so we can de-dup even if runtime is recreated.
+      g.__h2s_editor_handlers = g.__h2s_editor_handlers || {};
+      const H = g.__h2s_editor_handlers;
+
+      const getBtn = (ids) => {
+        for (const id of ids){
+          const el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+          if (el) return el;
+        }
+        return null;
+      };
+
+      const btnInsert = getBtn(['btnInsertNote','insertNoteBtn','btnInsertNoteBtn']);
+      const btnDelete = getBtn(['btnDeleteNote','btnDeleteNoteBtn','deleteNoteBtn']);
+
+      // Click: insert
+      if (btnInsert){
+        if (!H.onInsertClick){
+          H.onInsertClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              // Guard against duplicate click events in the same tick.
+              const now = Date.now();
+              if (H._lastInsertAt && (now - H._lastInsertAt) < 30) return;
+              H._lastInsertAt = now;
+              // Use the latest runtime instance (H2SApp.editorRt) if available.
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              rt.modalInsertNote();
+            }catch(e){}
+          };
+        }
+        btnInsert.removeEventListener('click', H.onInsertClick, true);
+        btnInsert.addEventListener('click', H.onInsertClick, true);
+      }
+
+      // Click: delete
+      if (btnDelete){
+        if (!H.onDeleteClick){
+          H.onDeleteClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              rt.modalDeleteSelectedNote();
+            }catch(e){}
+          };
+        }
+        btnDelete.removeEventListener('click', H.onDeleteClick, true);
+        btnDelete.addEventListener('click', H.onDeleteClick, true);
+      }
+
+      // Keyboard: Delete/Backspace remove selected note; Insert adds note.
+      if (typeof document !== 'undefined'){
+        if (!H.onKeyDown){
+          H.onKeyDown = (ev) => {
+            try{
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (!rt || !rt.state || !rt.state.modal || !rt.state.modal.show) return;
+              const k = String(ev.key || '');
+              if (k === 'Delete' || k === 'Backspace'){
+                ev.preventDefault();
+                rt.modalDeleteSelectedNote();
+                return;
+              }
+              if (k === 'Insert'){
+                ev.preventDefault();
+                rt.modalInsertNote();
+                return;
+              }
+            }catch(e){}
+          };
+        }
+        document.removeEventListener('keydown', H.onKeyDown, true);
+        document.addEventListener('keydown', H.onKeyDown, true);
+      }
+    },
+
+    modalInsertNote(){
+      if (!this.state.modal.show) return;
+      const score = this.state.modal.draftScore;
+      if (!score || !Array.isArray(score.tracks) || score.tracks.length === 0){
+        try { $('#editorStatus').textContent = 'Cannot insert: no track.'; } catch(e){}
+        return;
+      }
+      const t = score.tracks[0];
+      t.notes = Array.isArray(t.notes) ? t.notes : [];
+
+      const bpm = (this.project && this.project.bpm) ? this.project.bpm : 120;
+      const cell = this.state.modal.selectedCell;
+      const startSec = cell ? Number(cell.startSec) : Number(this.state.modal.cursorSec || 0);
+      const pitch = cell ? Number(cell.pitch) : Number(this.state.modal.pitchCenter || 60);
+
+      const durSec = Math.max(0.05, (this.modalSnapSec() || (60 / bpm) / 4)); // default ~1/16
+      const startQ = Math.max(0, this.modalQuantize(Math.max(0, startSec), null));
+
+      const makeId = () => {
+        if (H2SProject && typeof H2SProject.makeId === 'function') return H2SProject.makeId('note');
+        return 'note_' + Math.random().toString(16).slice(2, 10);
+      };
+
+      const note = {
+        id: makeId(),
+        pitch: H2SProject ? H2SProject.clamp(Math.round(pitch), 0, 127) : Math.max(0, Math.min(127, Math.round(pitch))),
+        velocity: 90,
+        start: startQ,
+        duration: durSec
+      };
+
+      t.notes.push(note);
+      // Keep notes in time order for predictable hit-test / rendering.
+      t.notes.sort((a,b) => (Number(a.start)||0) - (Number(b.start)||0));
+
+      this.state.modal.selectedNoteId = note.id;
+      this.state.modal.selectedCell = null;
+      this.state.modal.dirty = true;
+      try { $('#editorStatus').textContent = `Inserted note ${note.id} @ ${fmtSec(note.start)}.`; } catch(e){}
+      this.modalRequestDraw();
+    },
+
+    modalDeleteSelectedNote(){
+      if (!this.state.modal.show) return;
+      const id = this.state.modal.selectedNoteId;
+      if (!id){
+        try { $('#editorStatus').textContent = 'No note selected.'; } catch(e){}
+        return;
+      }
+      const found = this.modalFindNoteById(id);
+      if (!found) {
+        this.state.modal.selectedNoteId = null;
+        try { $('#editorStatus').textContent = 'Selected note not found.'; } catch(e){}
+        return;
+      }
+      try{
+        found.track.notes.splice(found.index, 1);
+      }catch(e){}
+      this.state.modal.selectedNoteId = null;
+      this.state.modal.dirty = true;
+      try { $('#editorStatus').textContent = 'Deleted note.'; } catch(e){}
+      this.modalRequestDraw();
     },
 
     modalHitTest(px, py){
