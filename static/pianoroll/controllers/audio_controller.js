@@ -79,8 +79,13 @@
           if (tAbs + nDur < startAt) continue;
 
           const tRel = tAbs - startAt;
-          const pitch = clamp(Math.round((n.pitch || 60) + instTrans), 0, 127);
-          const vel = clamp(Math.round(n.velocity || 100), 1, 127) / 127;
+	          const pitch = clamp(Math.round((n.pitch || 60) + instTrans), 0, 127);
+	          // Accept either MIDI velocity (1..127) or normalized velocity (0..1).
+	          // If velocity looks like MIDI, convert; otherwise treat as normalized.
+	          const rawV = (n.velocity == null ? 0.8 : Number(n.velocity));
+	          const vel = (rawV > 1.01)
+	            ? (clamp(Math.round(rawV), 1, 127) / 127)
+	            : clamp(rawV, 0.0, 1.0);
 
           events.push({ t: tRel, dur: nDur, pitch, vel });
           maxT = Math.max(maxT, tRel + nDur);
@@ -159,26 +164,23 @@ function _makeSynthByInstrument(name){
       }
     }
 
-    function stop(opts){
+    // Stop playback. If resetToStart=true, also reset playhead to 0.
+    function stop(resetToStart){
       _disposeTrackSynths();
       _cancelTimers();
       if (G.Tone){
         try{ G.Tone.Transport.stop(); G.Tone.Transport.cancel(); }catch(e){}
       }
-      // If playback ended naturally, reset playhead to the start for better UX.
-      if (opts && opts.resetToStart){
-        try{
-          const p = getProject && getProject();
-          if (p){
-            p.ui = p.ui || {};
-            p.ui.playheadSec = 0;
-          }
-        }catch(e){}
-        startAt = 0;
-        try{ onUpdatePlayhead(0); }catch(e){}
-      }
       playing = false;
       setTransportPlaying(false);
+      if (resetToStart){
+        // Reset UI playhead to the start after the natural end of playback.
+        try{
+          const p = getProject();
+          if (p && p.ui) p.ui.playheadSec = 0;
+        }catch(e){}
+        try{ onUpdatePlayhead(0); }catch(e){}
+      }
       onLog('Project stop.');
       try{ onStopped(); }catch(e){}
     }
@@ -262,7 +264,11 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
       if (absStart < startAt) continue;
       const t = absStart - startAt;
       const dur = Math.max(0.01, Number(n.durationSec || 0.1));
-      const vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
+      let vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
+// Normalize: some paths store velocity as MIDI 1..127, others as 0..1.
+// If it looks like MIDI, scale down.
+if (Number.isFinite(vel) && vel > 1.01) vel = vel / 127;
+vel = clamp(vel, 0.01, 1);
       if (t + dur > maxT) maxT = t + dur;
       G.Tone.Transport.schedule((time) => {
         try{
@@ -293,7 +299,8 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
       _startRaf();
 
       stopTimer = setTimeout(() => {
-        if (playing) stop({ resetToStart: true });
+        // Natural end: stop and reset playhead to start for better UX.
+        if (playing) stop(true);
       }, Math.ceil((maxT + 0.2) * 1000));
 
       return true;
@@ -332,7 +339,12 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
           maxT = Math.max(maxT, nStart + nDur);
           G.Tone.Transport.schedule((time) => {
             const pitch = clamp(Math.round(n.pitch || 60), 0, 127);
-            const vel = clamp(Math.round(n.velocity || 100), 1, 127) / 127;
+            // Accept either MIDI velocity (1..127) or normalized velocity (0..1).
+            const vRaw = (n.velocity == null) ? 100 : Number(n.velocity);
+            let vel;
+            if (!isFinite(vRaw)) vel = 0.8;
+            else if (vRaw <= 1.01) vel = clamp(vRaw, 0.0, 1.0);
+            else vel = clamp(Math.round(vRaw), 1, 127) / 127;
             synth.triggerAttackRelease(G.Tone.Frequency(pitch, 'midi'), nDur, time, vel);
           }, nStart);
         }

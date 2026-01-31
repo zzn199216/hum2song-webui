@@ -732,11 +732,15 @@ async modalPlay(){
       const rel = Math.max(0, (Number(n.start)||0) - startAt);
       const dur = Math.max(0, Number(n.duration)||0);
       maxT = Math.max(maxT, rel + dur);
-      Tone.Transport.schedule((time) => {
-        const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
-        const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127) / 127;
-        synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
-      }, rel);
+	      Tone.Transport.schedule((time) => {
+	        const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
+	        // Accept either MIDI velocity (1..127) or normalized (0..1)
+	        let vel = Number(n.velocity);
+	        if (!isFinite(vel)) vel = 0.8;
+	        if (vel > 1.01) vel = H2SProject.clamp(vel, 1, 127) / 127;
+	        else vel = H2SProject.clamp(vel, 0.05, 1.0);
+	        synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
+	      }, rel);
     }
   }
 
