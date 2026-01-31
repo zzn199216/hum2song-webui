@@ -701,90 +701,74 @@ modalTogglePlay(){
   return this.modalPlay();
 },
 
-modalPlay(){
+async modalPlay(){
+
   if (!this.state.modal.show) return;
-  const Tone = (typeof window !== 'undefined') ? window.Tone : null;
-  if (!Tone){
-    console.warn('[EditorRuntime] Tone.js not available');
+  if (this.state.modal.isPlaying){ this.modalStop(); return; }
+
+  const ok = await this.ensureTone();
+  if (!ok){ alert('Tone.js not available.'); return; }
+
+  // IMPORTANT: Tone.start() must be called from a user gesture (button click).
+  // modalPlay() is invoked by the Play button handler, so we can await safely here.
+  try { await Tone.start(); } catch(e){}
+
+  const score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+  const startAt = this.state.modal.cursorSec || 0;
+
+  const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+  this.state.modal.synth = synth;
+
+  Tone.Transport.stop();
+  Tone.Transport.cancel();
+  Tone.Transport.seconds = 0;
+  Tone.Transport.bpm.value = this.project.bpm || 120;
+
+  let maxT = 0;
+  for (const tr of (score.tracks || [])){
+    for (const n of (tr.notes || [])){
+      const end = (Number(n.start)||0) + (Number(n.duration)||0);
+      if (end < startAt) continue;
+      const rel = Math.max(0, (Number(n.start)||0) - startAt);
+      const dur = Math.max(0, Number(n.duration)||0);
+      maxT = Math.max(maxT, rel + dur);
+      Tone.Transport.schedule((time) => {
+        const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
+        const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127) / 127;
+        synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
+      }, rel);
+    }
+  }
+
+  // If no notes after cursor, treat as a no-op but still reset cursor to 0 for UX.
+  if (!(maxT > 0)){
+    this.state.modal.cursorSec = 0;
+    this.modalRequestDraw();
     return;
   }
 
-  // Resume AudioContext after a user gesture (Chrome autoplay policy).
-  try{
-    if (Tone.start && Tone.context && Tone.context.state !== 'running') Tone.start();
-  }catch(_){ /* no-op */ }
-
-  // Stop any previous playback.
-  if (this.state.modal.isPlaying) this.modalStop();
-
-  const score = this.state.modal.draftScore || { notes: [] };
-  const cursorSec = Number(this.state.modal.cursorSec || 0);
-  const st = (typeof H2SProject !== 'undefined' && H2SProject && typeof H2SProject.scoreStats === 'function')
-    ? H2SProject.scoreStats(score)
-    : { spanSec: 0 };
-  const maxT = Math.max(0, Number(st.spanSec || 0));
-
-  // Lazily create synth once.
-  if (!this._modalSynth){
-    try{
-      this._modalSynth = new Tone.PolySynth(Tone.Synth).toDestination();
-    }catch(e){
-      console.warn('[EditorRuntime] failed to create synth', e);
-      return;
-    }
-  }
-
-  // Dispose previous scheduled part.
-  if (this._modalPart){
-    try{ this._modalPart.dispose(); }catch(_){}
-    this._modalPart = null;
-  }
-
-  const events = [];
-  for (const n of (score.notes || [])){
-    const start = Number((n.startSec ?? n.start) || 0) - cursorSec;
-    const dur = Math.max(0.02, Number((n.durationSec ?? n.duration) || 0.1));
-    const p = (n.p ?? n.pitch);
-    if (p == null) continue;
-    if (!isFinite(start) || !isFinite(dur)) continue;
-    if (start < 0) continue;
-    let freq;
-    try{ freq = Tone.Frequency(p, 'midi').toFrequency(); }
-    catch(_){ continue; }
-    events.push({ time: start, freq, dur });
-  }
-
-  this._modalPart = new Tone.Part((time, v)=>{
-    try{ this._modalSynth.triggerAttackRelease(v.freq, v.dur, time); }catch(_){}
-  }, events).start(0);
-
-  // Start transport and a RAF to keep playhead UI in sync.
-  try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(_){}
-  Tone.Transport.seconds = 0;
-
-  const startAt = Tone.now() + 0.05;
-  Tone.Transport.start('+0.05');
-
+  Tone.Transport.start("+0.05");
   this.state.modal.isPlaying = true;
-  $('#editorStatus').textContent = 'Playing...';
+  try{ $('#editorStatus').textContent = 'Playing...'; }catch(e){}
 
-  const tick = ()=>{
+  // progress ticker (uses closure vars; do NOT reference them elsewhere)
+  const tick = () => {
     if (!this.state.modal.isPlaying) return;
-    const t = (Tone.now() - startAt) + cursorSec;
-    this.state.modal.playheadSec = t;
+    const sec = startAt + (Tone.Transport.seconds || 0);
+    this.state.modal.cursorSec = sec;
+    try{ $('#pillCursor').textContent = `Cursor: ${fmtSec(sec)}`; }catch(e){}
+    this.modalRequestDraw();
 
-    if (t >= maxT + 0.01){
+    // Auto-stop when finished, and reset to start.
+    if ((Tone.Transport.seconds || 0) >= maxT){
       this.modalStop();
-      this.state.modal.playheadSec = maxT;
+      this.state.modal.cursorSec = 0;
       this.modalRequestDraw();
       return;
     }
-
-    this.modalRequestDraw();
-    this._modalRAF = requestAnimationFrame(tick);
+    requestAnimationFrame(tick);
   };
-
-  this._modalRAF = requestAnimationFrame(tick);
+  requestAnimationFrame(tick);
 },
     modalPointerDown(ev){
       if (!this.state.modal.show) return;
@@ -918,62 +902,12 @@ modalPlay(){
     modalPointerUp(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
+      // finalize note drag/resize
       if (m.mode === 'drag_note' || m.mode === 'resize_note'){
         m.mode = 'none';
-        $('#editorStatus').textContent = 'Ready.';
+        try { $('#editorStatus').textContent = 'Ready.'; } catch(e){}
         this.modalRequestDraw();
       }
-      // NOTE: Timeline instance dragging is handled exclusively by TimelineController.
-      // Legacy global timeline-drag handler removed to avoid snap/drag conflicts.
-    },
-
-    async modalPlay(){
-      if (!this.state.modal.show) return;
-      if (this.state.modal.isPlaying){ this.modalStop(); return; }
-      const ok = await this.ensureTone();
-      if (!ok){ alert('Tone.js not available.'); return; }
-      await Tone.start();
-
-      const score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
-      const startAt = this.state.modal.cursorSec || 0;
-      const synth = new Tone.PolySynth(Tone.Synth).toDestination();
-      this.state.modal.synth = synth;
-
-      Tone.Transport.stop();
-      Tone.Transport.cancel();
-      Tone.Transport.seconds = 0;
-      Tone.Transport.bpm.value = this.project.bpm || 120;
-
-      let maxT = 0;
-      for (const tr of score.tracks || []){
-        for (const n of tr.notes || []){
-          const end = n.start + n.duration;
-          if (end < startAt) continue;
-          const rel = Math.max(0, n.start - startAt);
-          maxT = Math.max(maxT, rel + n.duration);
-          Tone.Transport.schedule((time) => {
-            const pitch = H2SProject.clamp(Math.round(n.pitch || 60), 0, 127);
-            const vel = H2SProject.clamp(Math.round(n.velocity || 100), 1, 127)/127;
-            synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), n.duration, time, vel);
-          }, rel);
-        }
-      }
-
-      Tone.Transport.start("+0.05");
-      this.state.modal.isPlaying = true;
-      $('#editorStatus').textContent = 'Playing...';
-
-      const tick = () => {
-        if (!this.state.modal.isPlaying) return;
-        const sec = startAt + (Tone.Transport.seconds || 0);
-        this.state.modal.cursorSec = sec;
-        $('#pillCursor').textContent = `Cursor: ${fmtSec(sec)}`;
-        this.modalRequestDraw();
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-
-      setTimeout(()=>{ if (this.state.modal.isPlaying) this.modalStop(); }, Math.ceil((maxT + 0.2) * 1000));
     },
 
     modalStop(){

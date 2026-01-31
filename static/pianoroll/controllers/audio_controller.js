@@ -159,11 +159,23 @@ function _makeSynthByInstrument(name){
       }
     }
 
-    function stop(){
+    function stop(opts){
       _disposeTrackSynths();
       _cancelTimers();
       if (G.Tone){
         try{ G.Tone.Transport.stop(); G.Tone.Transport.cancel(); }catch(e){}
+      }
+      // If playback ended naturally, reset playhead to the start for better UX.
+      if (opts && opts.resetToStart){
+        try{
+          const p = getProject && getProject();
+          if (p){
+            p.ui = p.ui || {};
+            p.ui.playheadSec = 0;
+          }
+        }catch(e){}
+        startAt = 0;
+        try{ onUpdatePlayhead(0); }catch(e){}
       }
       playing = false;
       setTransportPlaying(false);
@@ -250,11 +262,7 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
       if (absStart < startAt) continue;
       const t = absStart - startAt;
       const dur = Math.max(0.01, Number(n.durationSec || 0.1));
-      let vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
-// Normalize: some paths store velocity as MIDI 1..127, others as 0..1.
-// If it looks like MIDI, scale down.
-if (Number.isFinite(vel) && vel > 1.01) vel = vel / 127;
-vel = clamp(vel, 0.01, 1);
+      const vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
       if (t + dur > maxT) maxT = t + dur;
       G.Tone.Transport.schedule((time) => {
         try{
@@ -285,7 +293,7 @@ vel = clamp(vel, 0.01, 1);
       _startRaf();
 
       stopTimer = setTimeout(() => {
-        if (playing) stop();
+        if (playing) stop({ resetToStart: true });
       }, Math.ceil((maxT + 0.2) * 1000));
 
       return true;
