@@ -484,6 +484,7 @@ try{
       persist: () => persist(),
       render: () => this.render(),
     });
+    if (localStorage && localStorage.h2s_debug === '1') console.log('[App] AgentController wired', { ok:true });
   }
 }catch(e){
   console.warn('AgentController init failed', e);

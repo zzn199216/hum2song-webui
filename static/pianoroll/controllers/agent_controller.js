@@ -87,9 +87,9 @@
         head.meta = head.meta || {};
         head.meta.agent = head.meta.agent || {};
         head.meta.agent.lastError = (valid && valid.error) || 'Patch rejected';
+        // Persist v2 truth only. DO NOT call opts.persist() here because app.persist()
+        // re-migrates from the v1 view and can clobber v2-only fields/meta.
         opts.setProjectFromV2(project);
-        opts.persist();
-        opts.render();
         return { ok:false, error: (valid && valid.error) || 'Patch rejected' };
       }
 
@@ -110,9 +110,9 @@
         head.meta.agent.patchSummary = { ops: (patch.ops || []).length };
       }
 
+      // Persist v2 truth only. DO NOT call opts.persist() here because app.persist()
+      // re-migrates from the v1 view and can clobber v2-only fields/meta.
       opts.setProjectFromV2(project);
-      opts.persist();
-      opts.render();
       return { ok:true, revisionId: head.revisionId, ops: (patch.ops||[]).length };
     }
 
