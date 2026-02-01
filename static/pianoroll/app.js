@@ -685,7 +685,14 @@ $('#rngPitchCenter').addEventListener('input', () => {
         if(window.H2SEditorRuntime && window.H2SEditorRuntime.create){
           this.editorRt = window.H2SEditorRuntime.create({
             getProject: () => this.project,
+            // v2 truth (beats-only) — used by editor boundary (T1-5)
+            getProjectV2: () => this.getProjectV2(),
+            // Save writeback must go through app's v2 write entry
+            commitV2: (p2, reason) => this.commitV2(p2, reason || 'editor_save'),
+            // legacy/v1 migration writeback path (avoid clobbering v2-only fields)
+            persistFromV1: (reason) => this.persistFromV1(reason || 'editor_save_legacy'),
             getState: () => this.state,
+            // keep for backward compat (some editor code still calls persist on legacy paths)
             persist,
             render: () => this.render(),
             log,
