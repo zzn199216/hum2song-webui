@@ -73,54 +73,59 @@
       const clip = project && project.clips && project.clips[cid];
       if (!clip) return { ok:false, error:'clip_not_found' };
 
-      // Capture previous head snapshot for revision chain
-      const prevRevisionId = clip.revisionId || null;
-      let prevSnapshot = null;
-      try {
-        prevSnapshot = _clone(clip);
-        // Avoid recursively storing history inside history
-        if (prevSnapshot && prevSnapshot.revisions) prevSnapshot.revisions = [];
-      } catch (e) {
-        prevSnapshot = null;
+      const beforeRevisionId = clip.revisionId || null;
+
+      // Build patch against the current head FIRST.
+      // No-op Optimize must not create a new revision.
+      const patch = buildPseudoAgentPatch(clip);
+      const opsN = (patch && Array.isArray(patch.ops)) ? patch.ops.length : 0;
+
+      const valid = H2SAgentPatch.validatePatch(patch, { project, clip });
+      if (!valid || !valid.ok){
+        clip.meta = clip.meta || {};
+        clip.meta.agent = clip.meta.agent || {};
+        clip.meta.agent.lastError = (valid && valid.error) || 'Patch rejected';
+        opts.setProjectFromV2(project);
+        return { ok:false, error: clip.meta.agent.lastError };
       }
 
-      // create new head revision first (never overwrite raw)
+      // No-op: only update meta.agent for auditability (no revision bump).
+      if (opsN === 0){
+        clip.meta = clip.meta || {};
+        clip.meta.agent = clip.meta.agent || {};
+        clip.meta.agent.optimizedFromRevisionId = beforeRevisionId || null;
+        clip.meta.agent.appliedAt = _now();
+        clip.meta.agent.patchOps = 0;
+        clip.meta.agent.patchSummary = { ops: 0 };
+        opts.setProjectFromV2(project);
+        return { ok:true, noop:true, revisionId: clip.revisionId, ops: 0 };
+      }
+
+      // Mutating Optimize: create a new head revision so raw is preserved.
       const resNew = H2SProject.beginNewClipRevision(project, cid, { name: clip.name });
       if (!resNew || !resNew.ok){
         return { ok:false, error: (resNew && resNew.error) || 'beginNewClipRevision_failed' };
       }
 
       const head = project.clips[cid];
-
-      // Link revision chain for ghost/history UX
-      if (prevRevisionId && !head.parentRevisionId) head.parentRevisionId = prevRevisionId;
-      if (Array.isArray(head.revisions) && prevSnapshot){
-        // store a snapshot of the previous head
-        head.revisions.push(prevSnapshot);
-      }
-
-      const patch = buildPseudoAgentPatch(head);
-      const valid = H2SAgentPatch.validatePatch(patch, { project, clip: head });
-      if (!valid || !valid.ok){
-        head.meta = head.meta || {};
-        head.meta.agent = head.meta.agent || {};
-        head.meta.agent.lastError = (valid && valid.error) || 'Patch rejected';
-        // Persist v2 truth only. DO NOT call opts.persist() here because app.persist()
-        // re-migrates from the v1 view and can clobber v2-only fields/meta.
-        opts.setProjectFromV2(project);
-        return { ok:false, error: (valid && valid.error) || 'Patch rejected' };
-      }
-
       const applied = H2SAgentPatch.applyPatchToClip(head, patch, { project });
-
-      // applyPatch may return a NEW clip; write back into current head
       if (!applied || applied.ok === false){
+        // Best-effort rollback to the pre-opt head so we don't leave a broken revision.
+        try{
+          if (beforeRevisionId && H2SProject.applySnapshotToClipHead){
+            H2SProject.applySnapshotToClipHead(project, cid, beforeRevisionId);
+          }
+        }catch(e){}
+
+        const err = (applied && applied.error) ? applied.error : 'applyPatch failed';
         head.meta = head.meta || {};
         head.meta.agent = head.meta.agent || {};
-        head.meta.agent.lastError = (applied && applied.error) ? applied.error : 'applyPatch failed';
+        head.meta.agent.lastError = err;
         opts.setProjectFromV2(project);
-        return { ok:false, error: head.meta.agent.lastError };
+        return { ok:false, error: err };
       }
+
+      // applyPatch may return a NEW clip; write back into the current head
       if (applied && applied.clip){
         if (applied.clip.score) head.score = applied.clip.score;
         if (applied.clip.meta){
@@ -140,19 +145,17 @@
 
       head.meta = head.meta || {};
       head.meta.agent = head.meta.agent || {};
-      head.meta.agent.optimizedFromRevisionId = prevRevisionId || head.parentRevisionId || null;
+      head.meta.agent.optimizedFromRevisionId = beforeRevisionId || head.parentRevisionId || null;
       head.meta.agent.appliedAt = _now();
-      head.meta.agent.patchOps = (patch.ops || []).length;
+      head.meta.agent.patchOps = opsN;
       if (H2SAgentPatch.summarizeAppliedPatch){
         head.meta.agent.patchSummary = H2SAgentPatch.summarizeAppliedPatch(applied);
       } else {
-        head.meta.agent.patchSummary = { ops: (patch.ops || []).length };
+        head.meta.agent.patchSummary = { ops: opsN };
       }
 
-      // Persist v2 truth only. DO NOT call opts.persist() here because app.persist()
-      // re-migrates from the v1 view and can clobber v2-only fields/meta.
       opts.setProjectFromV2(project);
-      return { ok:true, revisionId: head.revisionId, ops: (patch.ops||[]).length };
+      return { ok:true, revisionId: head.revisionId, ops: opsN };
     }
 
     return { optimizeClip };

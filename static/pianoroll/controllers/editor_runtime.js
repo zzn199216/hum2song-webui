@@ -12,9 +12,6 @@
       const log = typeof opts.log === 'function' ? opts.log : function(){};
       const render = typeof opts.render === 'function' ? opts.render : function(){};
       const getProject = typeof opts.getProject === 'function' ? opts.getProject : function(){ return null; };
-      const getProjectV2 = typeof opts.getProjectV2 === 'function' ? opts.getProjectV2 : function(){ return null; };
-      const commitV2 = typeof opts.commitV2 === 'function' ? opts.commitV2 : null;
-      const persistFromV1 = typeof opts.persistFromV1 === 'function' ? opts.persistFromV1 : null;
       const getState = typeof opts.getState === 'function' ? opts.getState : function(){ return null; };
 
       const $ = opts.$ || (typeof document !== 'undefined' ? (sel)=>document.querySelector(sel) : null);
@@ -184,13 +181,13 @@
           }
         }
         if (clip){
-          clip.meta = Object.assign({}, meta0 || {}, {
+          clip.meta = {
             notes: count,
             pitchMin: minP,
             pitchMax: maxP,
             spanBeat: spanBeat,
             sourceTempoBpm: (meta0 && meta0.sourceTempoBpm != null) ? meta0.sourceTempoBpm : ((scoreBeat && scoreBeat.tempo_bpm != null) ? scoreBeat.tempo_bpm : null)
-          });
+          };
         }
       }
 
@@ -246,16 +243,11 @@
           });
         },
     openClipEditor(clipId){
-      // Prefer v2 truth clip if provided by app (beats-only); fallback to v1 view.
-      const p2 = getProjectV2();
-      const clipV2 = _findClip(p2, clipId);
-      const clip = clipV2 || _findClip(this.project, clipId);
+      const clip = _findClip(this.project, clipId);
       if (!clip) return;
 
-      this.state.modal._editingInV2 = !!clipV2;
-
-      const bpm = (p2 && p2.bpm) ? p2.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
-      const projectWantsBeat = !!((p2 && (p2.timebase === 'beat' || Number(p2.version) === 2)) || (this.project && (this.project.timebase === 'beat' || Number(this.project.version) === 2)));
+      const bpm = this.project && this.project.bpm ? this.project.bpm : 120;
+      const projectWantsBeat = !!(this.project && (this.project.timebase === 'beat' || Number(this.project.version) === 2));
       const clipScoreIsBeat = _isBeatScore(clip.score);
 
       // Editor always operates on a seconds-score draft to preserve the existing interaction feel.
@@ -306,7 +298,26 @@
       this.state.modal.mode = 'none';
 
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
-      const center = Math.round((st.minPitch + st.maxPitch) / 2);
+
+      // Robust pitch center: avoid a single extreme outlier hiding all notes.
+      // Use IQR center (mid of 25th/75th percentile), fallback to min/max center.
+      let center = Math.round((st.minPitch + st.maxPitch) / 2);
+      try {
+        const pitches = [];
+        for (const t of (this.state.modal.draftScore.tracks || [])){
+          for (const n of (t.notes || [])){
+            const p = Number(n.pitch);
+            if (Number.isFinite(p)) pitches.push(H2SProject.clamp(Math.round(p), 0, 127));
+          }
+        }
+        if (pitches.length){
+          pitches.sort((a,b)=>a-b);
+          const q = (pp) => pitches[Math.floor((pitches.length - 1) * pp)];
+          center = Math.round((q(0.25) + q(0.75)) / 2);
+        }
+      } catch (e) {
+        // ignore and keep fallback center
+      }
       this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
       $('#rngPitchCenter').value = this.state.modal.pitchCenter;
 
@@ -331,8 +342,7 @@
       const clipId = this.state.modal.clipId;
       const clip = _findClip(this.project, clipId);
 
-      const p2b = getProjectV2();
-      const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
+      const bpm = this.project && this.project.bpm ? this.project.bpm : 120;
       const storeAsBeat = !!(this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat);
 
       if (save && clip){
@@ -356,40 +366,18 @@
             }
           }
 
-          // Writeback must go through app's v2 entry when available.
-          const p2 = getProjectV2();
-          const canCommitV2 = !!(commitV2 && p2 && p2.clips && (p2.clips[clipId] || _findClip(p2, clipId)));
-          if (canCommitV2){
-            const clip2 = p2.clips[clipId] || _findClip(p2, clipId);
-            clip2.score = scoreBeat;
-            _recomputeClipMetaFromBeatScore(clip2, scoreBeat);
-            // NOTE: commitV2 will persist + rebuild v1 view + render.
-            let committed = false;
-            try { commitV2(p2, 'editor_save'); committed = true; } catch(e){}
-            if (committed) log('Saved clip changes (beats, v2).');
-            else {
-              // If commit fails for some reason, fall back to legacy persistence.
-              clip.score = scoreBeat;
-              _recomputeClipMetaFromBeatScore(clip, scoreBeat);
-              if (persistFromV1) persistFromV1('editor_save_legacy');
-              else { persist(); this.render(); }
-              log('Saved clip changes (beats, fallback).');
-            }
-          } else {
-            // Legacy fallback: update the currently-mounted clip and persist.
-            clip.score = scoreBeat;
-            _recomputeClipMetaFromBeatScore(clip, scoreBeat);
-            if (persistFromV1) persistFromV1('editor_save_legacy');
-            else { persist(); this.render(); }
-            log('Saved clip changes (beats).');
-          }
+          clip.score = scoreBeat;
+          _recomputeClipMetaFromBeatScore(clip, scoreBeat);
+          persist();
+          this.render();
+          log('Saved clip changes (beats).');
         } else {
           // Legacy seconds storage (v1)
           clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
           const st = H2SProject.scoreStats(clip.score);
-          clip.meta = Object.assign({}, (clip && clip.meta) ? clip.meta : {}, { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec });
-          if (persistFromV1) persistFromV1('editor_save_legacy');
-          else { persist(); this.render(); }
+          clip.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
+          persist();
+          this.render();
           log('Saved clip changes.');
         }
       } else {
@@ -405,7 +393,6 @@
       this.state.modal.mode = 'none';
       this.state.modal._sourceClipWasBeat = false;
       this.state.modal._projectWantsBeat = false;
-      this.state.modal._editingInV2 = false;
 
       $('#modal').classList.remove('show');
       $('#modal').setAttribute('aria-hidden', 'true');
@@ -465,19 +452,13 @@
 
     modalSnapSec(){
       const v = this.modalGetSnapValue();
-      const bpm = this.project.bpm || 120;
+      const bpm = (this.project && this.project.bpm) ? this.project.bpm : 120;
       if (v === 'off') return 0;
-      let denom = Number(v);
-      if (!Number.isFinite(denom) || denom <= 0) denom = 16;
-      // denom=16 -> 1/16 note = 4/16 beats = 0.25 beat (beat=quarter note)
-      const gridBeat = 4 / denom;
-      try{
-        if (H2SProject && typeof H2SProject.beatToSec === 'function'){
-          return H2SProject.beatToSec(gridBeat, bpm);
-        }
-      }catch(e){}
-      // fallback (should rarely hit in browser)
-      return (gridBeat * 60) / (Number(bpm) || 120);
+      const denom = Number(v);
+      if (!Number.isFinite(denom) || denom <= 0) return 0;
+      // denom=16 -> 1/16 note = (4/16) beats (since 1 beat = quarter note)
+      const beatStep = 4 / denom;
+      return H2SProject.beatToSec(beatStep, bpm);
     },
 
     modalQuantize(x, ev){
@@ -559,7 +540,7 @@
       // grid
       const pxPerSec = this.state.modal.pxPerSec;
       const bpm = (this.project && this.project.bpm) ? this.project.bpm : 120;
-      const gridSec = this.modalSnapSec() || (H2SProject && typeof H2SProject.beatToSec === 'function' ? H2SProject.beatToSec(0.25, bpm) : ((0.25*60)/(Number(bpm)||120))); // fallback 1/16
+      const gridSec = this.modalSnapSec() || H2SProject.beatToSec(0.25, bpm); // fallback 1/16
       const gridPx = gridSec * pxPerSec;
 
       // vertical rows
@@ -796,7 +777,7 @@
       const startSec = cell ? Number(cell.startSec) : Number(this.state.modal.cursorSec || 0);
       const pitch = cell ? Number(cell.pitch) : Number(this.state.modal.pitchCenter || 60);
 
-      const durSec = Math.max(0.05, (this.modalSnapSec() || (H2SProject && typeof H2SProject.beatToSec === 'function' ? H2SProject.beatToSec(0.25, bpm) : ((0.25*60)/(Number(bpm)||120))))); // default ~1/16
+      const durSec = Math.max(0.05, (this.modalSnapSec() || H2SProject.beatToSec(0.25, bpm))); // default ~1/16
       const startQ = Math.max(0, this.modalQuantize(Math.max(0, startSec), null));
 
       const makeId = () => {
