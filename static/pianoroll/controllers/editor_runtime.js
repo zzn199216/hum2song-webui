@@ -619,7 +619,8 @@ _bindPitchScrollHandlers(){
       const t = centerThumb ? (y - thumbH / 2) : y;
       const top = Math.max(0, Math.min(maxTop, t));
       const frac = maxTop > 0 ? (top / maxTop) : 0;
-      return Math.round(frac * maxMin);
+      // Invert mapping: dragging thumb DOWN should reveal LOWER pitches (like normal scroll)
+      return Math.round((1 - frac) * maxMin);
     };
 
     if (!H.onPitchBarDown){
@@ -707,7 +708,8 @@ modalUpdatePitchScrollbar(pitchMin, range){
     const thumbH = Math.max(18, Math.round(barH * (rows / 128)));
     const maxTop = Math.max(0, barH - thumbH);
     const frac = maxMin > 0 ? (H2SProject.clamp(pitchMin, 0, maxMin) / maxMin) : 0;
-    const top = Math.round(maxTop * frac);
+    // Invert mapping to match computePitchMinFromClientY
+    const top = Math.round(maxTop * (1 - frac));
 
     thumb.style.height = `${thumbH}px`;
     thumb.style.top = `${top}px`;
