@@ -34,6 +34,15 @@ const libView = require('../static/pianoroll/ui/library_view.js');
   assert(/data-act="remove"/.test(html), 'missing remove button');
   assert(/Remove/.test(html), 'remove label missing');
   pass('library view includes play/add/edit/remove');
+  // Optimize feedback contract: when meta.agent is present, card should show explicit result
+  const dummyClip2 = { id:'clip_x', name:'test', meta:{ agent:{ appliedAt: 123, patchOps: 0, patchSummary:{ops:0} } } };
+  const html2 = libView.clipCardInnerHTML(dummyClip2, dummyStats, fmtSec, escapeHtml);
+  assert(/Optimize:\s*No changes/.test(html2), 'missing optimize noop feedback');
+
+  const dummyClip3 = { id:'clip_x', name:'test', meta:{ agent:{ appliedAt: 123, patchOps: 3, patchSummary:{ops:3} } } };
+  const html3 = libView.clipCardInnerHTML(dummyClip3, dummyStats, fmtSec, escapeHtml);
+  assert(/Optimized/.test(html3) && /ops=3/.test(html3), 'missing optimize applied feedback');
+
 })();
 
 (function testTimelineViewContracts(){

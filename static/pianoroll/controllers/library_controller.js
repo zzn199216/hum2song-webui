@@ -254,12 +254,32 @@
     }
 
     function _handleChange(e){
-      // placeholder: could show preview info
+      // On revision select change, immediately activate the chosen revision (v2-only when available).
       const el = e.target;
       if (!el || !el.getAttribute) return;
       const act = el.getAttribute('data-act');
       if (act === 'revSelect'){
-        // no-op for now
+        const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
+        const revId = el.value;
+        if (!clipId || !revId) return;
+
+        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
+        const projectV2 = getProjectV2();
+        const targetProject = projectV2 || getProject();
+
+        if (!(P && typeof P.setClipActiveRevision === 'function')){
+          console.warn('[LibraryController] setClipActiveRevision not available');
+          return;
+        }
+
+        const res = P.setClipActiveRevision(targetProject, clipId, revId);
+        if (res && res.ok){
+          if (projectV2 && app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
+          _notifyChanged('clipRevision');
+          render();
+        }else{
+          console.warn('[LibraryController] setClipActiveRevision failed', res);
+        }
         return;
       }
     }

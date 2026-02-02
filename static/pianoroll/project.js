@@ -549,7 +549,30 @@ function ensureClipRevisionChain(clip){
 
   // Keep oldest->newest in storage; UI can sort differently.
   out.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0));
-  if (out.length > CLIP_REVISIONS_MAX) out.splice(0, out.length - CLIP_REVISIONS_MAX);
+
+  // Trim with a "pinned original" policy: if we have an original/root snapshot
+  // (parentRevisionId === null), keep it even when exceeding max.
+  if (out.length > CLIP_REVISIONS_MAX){
+    let rootIdx = -1;
+    for (let i=0; i<out.length; i++){
+      if (out[i] && out[i].parentRevisionId === null){
+        rootIdx = i;
+        break; // oldest-first, first null-parent is the earliest root
+      }
+    }
+    if (rootIdx >= 0){
+      const root = out[rootIdx];
+      out.splice(rootIdx, 1);
+      // keep newest (max-1) from remaining, then re-add root
+      const keepN = Math.max(0, CLIP_REVISIONS_MAX - 1);
+      const tail = keepN ? out.slice(Math.max(0, out.length - keepN)) : [];
+      out.length = 0;
+      out.push(root, ...tail);
+      out.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0));
+    } else {
+      out.splice(0, out.length - CLIP_REVISIONS_MAX);
+    }
+  }
 
   clip.revisions = out;
 
@@ -613,7 +636,7 @@ function listClipRevisions(clip){
     parentRevisionId: (r.parentRevisionId !== undefined && r.parentRevisionId !== null) ? String(r.parentRevisionId) : null,
     createdAt: isFiniteNumber(r.createdAt) ? Number(r.createdAt) : Date.now(),
     kind: r.kind,
-    label: (r.kind === 'head' ? 'Current' : 'Rev') + ' · ' + (_iso(r.createdAt) || String(r.createdAt || '')),
+    label: ((r.kind === 'head') ? 'Current' : (r.parentRevisionId === null ? 'Original' : 'Rev')) + ' · ' + (_iso(r.createdAt) || String(r.createdAt || '')),
   }));
 
   return { activeRevisionId: String(clip.revisionId || ''), items: out };

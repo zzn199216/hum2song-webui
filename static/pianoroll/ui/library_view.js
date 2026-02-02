@@ -76,6 +76,32 @@
         `</div>`
       );
     }
+    // Optimize feedback (shown after clicking Optimize, even when no-op)
+    let optStatusHtml = '';
+    try{
+      const agent = clip && clip.meta && clip.meta.agent;
+      if (agent){
+        const opsRaw = (agent.patchOps != null) ? agent.patchOps : (agent.patchSummary && agent.patchSummary.ops);
+        const ops = Number(opsRaw);
+        const hasInfo = (agent.appliedAt != null) || (agent.patchOps != null) || (agent.patchSummary && agent.patchSummary.ops != null) || agent.lastError;
+        if (hasInfo){
+          let msg = '';
+          if (agent.lastError){
+            msg = 'Error: ' + String(agent.lastError);
+          } else if (Number.isFinite(ops) && ops > 0){
+            msg = 'Optimized ✓ (ops=' + ops + ')';
+          } else {
+            msg = 'No changes (0 ops)';
+          }
+          optStatusHtml =
+            `<div class="clip-opt-status" data-role="optStatus" data-id="${id}" ` +
+            `style="margin-top:6px; font-size:12px; opacity:0.75;">` +
+            `Optimize: ${escapeHtml(msg)}` +
+            `</div>`;
+        }
+      }
+    }catch(_){ /* ignore */ }
+
 
     return (
       `<div class="clip-card" data-clip-id="${id}">` +
@@ -87,6 +113,7 @@
           `<button class="btn" data-act="edit" data-id="${id}">Edit</button><button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
           `<button class="btn" data-act="remove" data-id="${id}">Remove</button>` +
         `</div>` +
+        optStatusHtml +
         revHtml +
       `</div>`
     );
