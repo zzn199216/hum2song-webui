@@ -14,6 +14,16 @@
       const getProject = typeof opts.getProject === 'function' ? opts.getProject : function(){ return null; };
       const getState = typeof opts.getState === 'function' ? opts.getState : function(){ return null; };
 
+      const getProjectV2 = typeof opts.getProjectV2 === 'function'
+        ? opts.getProjectV2
+        : function(){ try{ const a = root && root.H2SApp; return (a && typeof a.getProjectV2 === 'function') ? a.getProjectV2() : null; } catch(e){ return null; } };
+      const commitV2 = typeof opts.commitV2 === 'function'
+        ? opts.commitV2
+        : ((root && root.H2SApp && typeof root.H2SApp.commitV2 === 'function') ? function(p, reason){ return root.H2SApp.commitV2(p, reason); } : null);
+      const persistFromV1 = typeof opts.persistFromV1 === 'function'
+        ? opts.persistFromV1
+        : ((root && root.H2SApp && typeof root.H2SApp.persistFromV1 === 'function') ? function(reason){ return root.H2SApp.persistFromV1(reason); } : null);
+
       const $ = opts.$ || (typeof document !== 'undefined' ? (sel)=>document.querySelector(sel) : null);
       const $$ = opts.$$ || (typeof document !== 'undefined' ? (sel)=>Array.from(document.querySelectorAll(sel)) : null);
       const fmtSec = opts.fmtSec || function(x){ return String(x); };
@@ -330,10 +340,12 @@
 
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
+      this.modalEnsurePitchScrollbar();
       this.modalRequestDraw();
       this.modalBindControls();
       log(`Open editor: ${clip.name}`);
     },
+
 
     closeModal(save){
       if (!this.state.modal.show) return;
@@ -342,7 +354,8 @@
       const clipId = this.state.modal.clipId;
       const clip = _findClip(this.project, clipId);
 
-      const bpm = this.project && this.project.bpm ? this.project.bpm : 120;
+      const p2b = getProjectV2();
+      const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
       const storeAsBeat = !!(this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat);
 
       if (save && clip){
@@ -359,25 +372,47 @@
                 if (!n) continue;
                 n.startBeat = _normalizeBeat(Math.max(0, Number(n.startBeat) || 0));
                 n.durationBeat = _normalizeBeat(Math.max(0, Number(n.durationBeat) || 0));
-                // keep pitch/vel in range
                 n.pitch = H2SProject.clamp(Number(n.pitch) || 0, 0, 127);
                 n.velocity = H2SProject.clamp(Number(n.velocity) || 80, 1, 127);
               }
             }
           }
 
-          clip.score = scoreBeat;
-          _recomputeClipMetaFromBeatScore(clip, scoreBeat);
-          persist();
-          this.render();
-          log('Saved clip changes (beats).');
+          // Writeback must go through app's v2 entry when available.
+          const p2 = getProjectV2();
+          const canCommitV2 = !!(commitV2 && p2 && p2.clips && (p2.clips[clipId] || _findClip(p2, clipId)));
+          if (canCommitV2){
+            const clip2 = p2.clips[clipId] || _findClip(p2, clipId);
+            clip2.score = scoreBeat;
+            _recomputeClipMetaFromBeatScore(clip2, scoreBeat);
+
+            let committed = false;
+            try { commitV2(p2, 'editor_save'); committed = true; } catch(e){}
+
+            if (committed) log('Saved clip changes (beats, v2).');
+            else {
+              // If commit fails for some reason, fall back to legacy persistence.
+              clip.score = scoreBeat;
+              _recomputeClipMetaFromBeatScore(clip, scoreBeat);
+              if (persistFromV1) persistFromV1('editor_save_legacy');
+              else { persist(); this.render(); }
+              log('Saved clip changes (beats, fallback).');
+            }
+          } else {
+            // Legacy fallback: update the currently-mounted clip and persist.
+            clip.score = scoreBeat;
+            _recomputeClipMetaFromBeatScore(clip, scoreBeat);
+            if (persistFromV1) persistFromV1('editor_save_legacy');
+            else { persist(); this.render(); }
+            log('Saved clip changes (beats).');
+          }
         } else {
           // Legacy seconds storage (v1)
           clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
           const st = H2SProject.scoreStats(clip.score);
-          clip.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
-          persist();
-          this.render();
+          clip.meta = Object.assign({}, (clip && clip.meta) ? clip.meta : {}, { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec });
+          if (persistFromV1) persistFromV1('editor_save_legacy');
+          else { persist(); this.render(); }
           log('Saved clip changes.');
         }
       } else {
@@ -393,10 +428,12 @@
       this.state.modal.mode = 'none';
       this.state.modal._sourceClipWasBeat = false;
       this.state.modal._projectWantsBeat = false;
+      this.state.modal.pitchScroll = null;
 
       $('#modal').classList.remove('show');
       $('#modal').setAttribute('aria-hidden', 'true');
     },
+
 
     modalTogglePlay(){
       if (this.state.modal.isPlaying) this.modalStop();
@@ -488,6 +525,195 @@
       $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
     },
 
+// Right-side vertical scrollbar for pitch view (so users can reach outlier notes).
+// Created dynamically inside #canvasWrap to avoid touching HTML/CSS files.
+modalEnsurePitchScrollbar(){
+  if (!this.__isBrowser) return;
+  try{
+    const wrap = $('#canvasWrap');
+    if (!wrap || typeof document === 'undefined') return;
+
+    // Ensure positioning context.
+    try{
+      const cs = window.getComputedStyle(wrap);
+      if (cs && cs.position === 'static') wrap.style.position = 'relative';
+    }catch(e){}
+
+    let bar = wrap.querySelector('.h2sPitchScroll');
+    if (!bar){
+      bar = document.createElement('div');
+      bar.className = 'h2sPitchScroll';
+      bar.style.position = 'absolute';
+      bar.style.right = '2px';
+      bar.style.top = '2px';
+      bar.style.bottom = '2px';
+      bar.style.width = '10px';
+      bar.style.background = 'rgba(255,255,255,.06)';
+      bar.style.border = '1px solid rgba(255,255,255,.10)';
+      bar.style.borderRadius = '8px';
+      bar.style.zIndex = '5';
+      bar.style.cursor = 'pointer';
+      bar.style.userSelect = 'none';
+
+      const thumb = document.createElement('div');
+      thumb.className = 'h2sPitchThumb';
+      thumb.style.position = 'absolute';
+      thumb.style.left = '1px';
+      thumb.style.right = '1px';
+      thumb.style.top = '0px';
+      thumb.style.height = '28px';
+      thumb.style.background = 'rgba(120,180,255,.45)';
+      thumb.style.border = '1px solid rgba(120,180,255,.80)';
+      thumb.style.borderRadius = '7px';
+      thumb.style.cursor = 'grab';
+      thumb.style.userSelect = 'none';
+
+      bar.appendChild(thumb);
+      wrap.appendChild(bar);
+    }
+
+    const thumb = bar.querySelector('.h2sPitchThumb');
+    this.state.modal.pitchScroll = { bar, thumb };
+    this._bindPitchScrollHandlers();
+  }catch(e){}
+},
+
+_applyPitchMin(pitchMin){
+  try{
+    const rows = this.state.modal.pitchViewRows;
+    const maxMin = Math.max(0, 127 - rows);
+    const pm = H2SProject.clamp(Math.round(pitchMin), 0, maxMin);
+    const half = Math.floor(rows / 2);
+    const center = pm + half;
+    this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
+    const rng = $('#rngPitchCenter');
+    if (rng) rng.value = this.state.modal.pitchCenter;
+    this.modalRequestDraw();
+  }catch(e){}
+},
+
+_bindPitchScrollHandlers(){
+  if (!this.__isBrowser) return;
+  try{
+    const g = (typeof window !== 'undefined') ? window : global;
+    if (!g) return;
+    g.__h2s_pitchscroll_handlers = g.__h2s_pitchscroll_handlers || {};
+    const H = g.__h2s_pitchscroll_handlers;
+
+    const getRt = () => (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+    const ps = (getRt().state && getRt().state.modal) ? getRt().state.modal.pitchScroll : null;
+    if (!ps || !ps.bar || !ps.thumb) return;
+
+    const bar = ps.bar;
+    const thumb = ps.thumb;
+
+    const computePitchMinFromClientY = (clientY, centerThumb) => {
+      const rt = getRt();
+      const rows = rt.state.modal.pitchViewRows;
+      const maxMin = Math.max(0, 127 - rows);
+      const rect = bar.getBoundingClientRect();
+      const barH = Math.max(1, rect.height || bar.clientHeight || 1);
+      const thumbH = Math.max(18, Math.round(barH * (rows / 128)));
+      const maxTop = Math.max(0, barH - thumbH);
+      const y = clientY - rect.top;
+      const t = centerThumb ? (y - thumbH / 2) : y;
+      const top = Math.max(0, Math.min(maxTop, t));
+      const frac = maxTop > 0 ? (top / maxTop) : 0;
+      return Math.round(frac * maxMin);
+    };
+
+    if (!H.onPitchBarDown){
+      H.onPitchBarDown = (ev) => {
+        try{
+          const rt = getRt();
+          if (!rt || !rt.state.modal.show) return;
+          // Ignore clicks that start on the thumb; thumb has its own drag handler.
+          if (ev.target && ev.target.classList && ev.target.classList.contains('h2sPitchThumb')) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const pm = computePitchMinFromClientY(ev.clientY, true);
+          rt._applyPitchMin(pm);
+        }catch(e){}
+      };
+    }
+    bar.removeEventListener('pointerdown', H.onPitchBarDown, true);
+    bar.addEventListener('pointerdown', H.onPitchBarDown, true);
+
+    if (!H.onPitchThumbDown){
+      H.onPitchThumbDown = (ev) => {
+        try{
+          const rt = getRt();
+          if (!rt || !rt.state.modal.show) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          thumb.setPointerCapture && thumb.setPointerCapture(ev.pointerId);
+          thumb.style.cursor = 'grabbing';
+          H._dragActive = true;
+          H._dragPointerId = ev.pointerId;
+        }catch(e){}
+      };
+    }
+    thumb.removeEventListener('pointerdown', H.onPitchThumbDown, true);
+    thumb.addEventListener('pointerdown', H.onPitchThumbDown, true);
+
+    if (!H.onPitchMove){
+      H.onPitchMove = (ev) => {
+        try{
+          if (!H._dragActive) return;
+          const rt = getRt();
+          if (!rt || !rt.state.modal.show) return;
+          const pm = computePitchMinFromClientY(ev.clientY, true);
+          rt._applyPitchMin(pm);
+        }catch(e){}
+      };
+    }
+    if (!H.onPitchUp){
+      H.onPitchUp = (ev) => {
+        try{
+          if (!H._dragActive) return;
+          if (H._dragPointerId != null && ev.pointerId !== H._dragPointerId) return;
+          H._dragActive = false;
+          H._dragPointerId = null;
+          try{ thumb.style.cursor = 'grab'; }catch(e){}
+        }catch(e){}
+      };
+    }
+    g.removeEventListener('pointermove', H.onPitchMove, true);
+    g.addEventListener('pointermove', H.onPitchMove, true);
+    g.removeEventListener('pointerup', H.onPitchUp, true);
+    g.addEventListener('pointerup', H.onPitchUp, true);
+    g.removeEventListener('pointercancel', H.onPitchUp, true);
+    g.addEventListener('pointercancel', H.onPitchUp, true);
+  }catch(e){}
+},
+
+modalUpdatePitchScrollbar(pitchMin, range){
+  if (!this.__isBrowser) return;
+  try{
+    const ps = this.state.modal.pitchScroll;
+    if (!ps || !ps.bar || !ps.thumb) return;
+    const bar = ps.bar;
+    const thumb = ps.thumb;
+
+    const rows = this.state.modal.pitchViewRows;
+    const maxMin = Math.max(0, 127 - rows);
+    if (range <= rows || maxMin <= 0){
+      bar.style.display = 'none';
+      return;
+    }
+    bar.style.display = 'block';
+
+    const barH = Math.max(1, bar.clientHeight || 1);
+    const thumbH = Math.max(18, Math.round(barH * (rows / 128)));
+    const maxTop = Math.max(0, barH - thumbH);
+    const frac = maxMin > 0 ? (H2SProject.clamp(pitchMin, 0, maxMin) / maxMin) : 0;
+    const top = Math.round(maxTop * frac);
+
+    thumb.style.height = `${thumbH}px`;
+    thumb.style.top = `${top}px`;
+  }catch(e){}
+},
+
     modalRequestDraw(){
       // coalesce draws
       if (this.state.modal.raf) return;
@@ -518,6 +744,10 @@
         pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
         pitchMax = pitchMin + rows;
       }
+
+
+            // Update right-side pitch scrollbar (only visible when range exceeds window)
+      this.modalUpdatePitchScrollbar(pitchMin, range);
 
       const padL = this.state.modal.padL;
       const padT = this.state.modal.padT;
@@ -849,6 +1079,7 @@
         pitchMax = pitchMin + rows;
       }
 
+
       const notes = this.modalAllNotes();
       // search from topmost (later notes last)
       for (let i=notes.length-1; i>=0; i--){
@@ -1006,6 +1237,7 @@ async modalPlay(){
         pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
         pitchMax = pitchMin + rows;
       }
+
       const rowH = this.state.modal.rowH;
       const row = Math.floor((py - padT) / rowH);
       const pitch = H2SProject.clamp(pitchMax - row, 0, 127);
