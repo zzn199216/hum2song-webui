@@ -17,12 +17,22 @@
       const getProjectV2 = typeof opts.getProjectV2 === 'function'
         ? opts.getProjectV2
         : function(){ try{ const a = root && root.H2SApp; return (a && typeof a.getProjectV2 === 'function') ? a.getProjectV2() : null; } catch(e){ return null; } };
-      const commitV2 = typeof opts.commitV2 === 'function'
-        ? opts.commitV2
-        : ((root && root.H2SApp && typeof root.H2SApp.commitV2 === 'function') ? function(p, reason){ return root.H2SApp.commitV2(p, reason); } : null);
-      const persistFromV1 = typeof opts.persistFromV1 === 'function'
-        ? opts.persistFromV1
-        : ((root && root.H2SApp && typeof root.H2SApp.persistFromV1 === 'function') ? function(reason){ return root.H2SApp.persistFromV1(reason); } : null);
+      function _getCommitV2(){
+        if (typeof opts.commitV2 === 'function') return opts.commitV2;
+        try{
+          const a = root && root.H2SApp;
+          if (a && typeof a.commitV2 === 'function') return function(p, reason){ return a.commitV2(p, reason); };
+        }catch(_){}
+        return null;
+      }
+      function _getPersistFromV1(){
+        if (typeof opts.persistFromV1 === 'function') return opts.persistFromV1;
+        try{
+          const a = root && root.H2SApp;
+          if (a && typeof a.persistFromV1 === 'function') return function(reason){ return a.persistFromV1(reason); };
+        }catch(_){}
+        return null;
+      }
 
       const $ = opts.$ || (typeof document !== 'undefined' ? (sel)=>document.querySelector(sel) : null);
       const $$ = opts.$$ || (typeof document !== 'undefined' ? (sel)=>Array.from(document.querySelectorAll(sel)) : null);
@@ -256,17 +266,30 @@
       const clip = _findClip(this.project, clipId);
       if (!clip) return;
 
-      const bpm = this.project && this.project.bpm ? this.project.bpm : 120;
-      const projectWantsBeat = !!(this.project && (this.project.timebase === 'beat' || Number(this.project.version) === 2));
-      const clipScoreIsBeat = _isBeatScore(clip.score);
+      // IMPORTANT:
+      // this.project is usually the legacy v1 *view* (seconds) even when the true store is v2 (beats).
+      // So we must derive "wants beat" from ProjectV2 if available.
+      const p2b = getProjectV2();
+      const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
+      const projectWantsBeat = !!(p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2));
+
+      // Prefer v2 clip score to detect the source timebase correctly.
+      let clip2 = null;
+      try{
+        if (p2b && p2b.clips){
+          clip2 = p2b.clips[clipId] || _findClip(p2b, clipId);
+        }
+      }catch(e){ clip2 = null; }
+      const srcScore = (clip2 && clip2.score) ? clip2.score : clip.score;
+      const clipScoreIsBeat = _isBeatScore(srcScore);
 
       // Editor always operates on a seconds-score draft to preserve the existing interaction feel.
       // If the stored score is beats, we convert beats->seconds on open, and seconds->beats on save.
       let savedScoreSec;
       if (clipScoreIsBeat){
-        try { savedScoreSec = _scoreBeatToSec(clip.score, bpm); } catch(e){ savedScoreSec = H2SProject.deepClone(clip.score); }
+        try { savedScoreSec = _scoreBeatToSec(srcScore, bpm); } catch(e){ savedScoreSec = H2SProject.deepClone(srcScore); }
       } else {
-        savedScoreSec = H2SProject.deepClone(clip.score);
+        savedScoreSec = H2SProject.deepClone(srcScore);
       }
 
       this.state.modal.show = true;
@@ -281,7 +304,15 @@
         const parentId = clip && clip.parentRevisionId;
         if (parentId && Array.isArray(clip.revisions)){
           const parent = clip.revisions.find(r => r && r.revisionId === parentId);
-          if (parent && parent.score) this.state.modal.ghostScore = H2SProject.deepClone(parent.score);
+          if (parent && parent.score){
+            const ps = parent.score;
+            if (_isBeatScore(ps)){
+              try { this.state.modal.ghostScore = _scoreBeatToSec(ps, bpm); }
+              catch(e){ this.state.modal.ghostScore = H2SProject.deepClone(ps); }
+            }else{
+              this.state.modal.ghostScore = H2SProject.deepClone(ps);
+            }
+          }
         }
       }catch(e){}
 
@@ -356,10 +387,19 @@
 
       const p2b = getProjectV2();
       const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
-      const storeAsBeat = !!(this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat);
+      // Extra guard: even if openClipEditor didn't tag the modal correctly (v1 view lacks timebase),
+      // we must still prefer beats when ProjectV2 exists.
+      const v2WantsBeat = !!(p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2));
+      const storeAsBeat = !!(v2WantsBeat || this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat);
 
-      if (save && clip){
-        if (storeAsBeat){
+      // These helpers may be injected (Node tests) or resolved from H2SApp (browser).
+      // IMPORTANT: keep them defined for the whole function; legacy branches also need them.
+      const commitV2 = _getCommitV2();
+      const persistFromV1 = _getPersistFromV1();
+
+      try{
+        if (save && clip){
+          if (storeAsBeat){
           // seconds draft -> beats score (normalize-on-write; no grid snap)
           const draftSec = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
           let scoreBeat = _scoreSecToBeat(draftSec, bpm);
@@ -406,7 +446,7 @@
             else { persist(); this.render(); }
             log('Saved clip changes (beats).');
           }
-        } else {
+          } else {
           // Legacy seconds storage (v1)
           clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
           const st = H2SProject.scoreStats(clip.score);
@@ -414,24 +454,26 @@
           if (persistFromV1) persistFromV1('editor_save_legacy');
           else { persist(); this.render(); }
           log('Saved clip changes.');
+          }
+        } else {
+          log('Canceled clip changes.');
         }
-      } else {
-        log('Canceled clip changes.');
+      } finally {
+        // Always clear modal state. Even if persistence throws, we must not leak draft state.
+        this.state.modal.show = false;
+        this.state.modal.clipId = null;
+        this.state.modal.draftScore = null;
+        this.state.modal.savedScore = null;
+        this.state.modal.selectedNoteId = null;
+        this.state.modal.selectedCell = null;
+        this.state.modal.mode = 'none';
+        this.state.modal._sourceClipWasBeat = false;
+        this.state.modal._projectWantsBeat = false;
+        this.state.modal.pitchScroll = null;
+
+        $('#modal').classList.remove('show');
+        $('#modal').setAttribute('aria-hidden', 'true');
       }
-
-      this.state.modal.show = false;
-      this.state.modal.clipId = null;
-      this.state.modal.draftScore = null;
-      this.state.modal.savedScore = null;
-      this.state.modal.selectedNoteId = null;
-      this.state.modal.selectedCell = null;
-      this.state.modal.mode = 'none';
-      this.state.modal._sourceClipWasBeat = false;
-      this.state.modal._projectWantsBeat = false;
-      this.state.modal.pitchScroll = null;
-
-      $('#modal').classList.remove('show');
-      $('#modal').setAttribute('aria-hidden', 'true');
     },
 
 
