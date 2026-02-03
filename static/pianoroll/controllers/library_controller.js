@@ -234,7 +234,8 @@
 
       // T3-1: activate selected revision
       if (act === 'revActivate'){
-        const sel = rootEl.querySelector(`select[data-act="revSelect"][data-id="${CSS && CSS.escape ? CSS.escape(clipId) : clipId}"]`)
+        const escId = (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') ? CSS.escape(clipId) : clipId;
+        const sel = rootEl.querySelector(`select[data-act="revSelect"][data-id="${escId}"]`)
                   || rootEl.querySelector(`select[data-act="revSelect"][data-id="${clipId}"]`);
         const revId = sel ? sel.value : null;
         if (!revId) return;
@@ -251,6 +252,7 @@
         }
         return;
       }
+
     }
 
     function _handleChange(e){
