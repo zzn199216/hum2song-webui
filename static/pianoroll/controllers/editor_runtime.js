@@ -6,6 +6,24 @@
       opts = opts || {};
       const root = (typeof window !== 'undefined') ? window : global;
       const H2SProject = opts.H2SProject || (root && root.H2SProject) || null;
+      const H2SApp = opts.H2SApp || (root && root.H2SApp) || (root && root.window && root.window.H2SApp) || null;
+
+      // Optional app-glue helpers (prefer injection; fall back to global H2SApp methods when present).
+      const getProjectV2 = (typeof opts.getProjectV2 === 'function') ? opts.getProjectV2 :
+        (H2SApp && typeof H2SApp.getProjectV2 === 'function') ? (()=>H2SApp.getProjectV2()) :
+        (root && typeof root.getProjectV2 === 'function') ? root.getProjectV2 :
+        function(){ return null; };
+
+      const commitV2 = (typeof opts.commitV2 === 'function') ? opts.commitV2 :
+        (H2SApp && typeof H2SApp.commitV2 === 'function') ? ((p, reason)=>H2SApp.commitV2(p, reason)) :
+        (root && typeof root.commitV2 === 'function') ? root.commitV2 :
+        null;
+
+      const persistFromV1 = (typeof opts.persistFromV1 === 'function') ? opts.persistFromV1 :
+        (H2SApp && typeof H2SApp.persistFromV1 === 'function') ? ((reason)=>H2SApp.persistFromV1(reason)) :
+        (root && typeof root.persistFromV1 === 'function') ? root.persistFromV1 :
+        null;
+
 
       // Dependency injection (keeps this file testable in Node)
       const persist = typeof opts.persist === 'function' ? opts.persist : function(){};
@@ -13,26 +31,6 @@
       const render = typeof opts.render === 'function' ? opts.render : function(){};
       const getProject = typeof opts.getProject === 'function' ? opts.getProject : function(){ return null; };
       const getState = typeof opts.getState === 'function' ? opts.getState : function(){ return null; };
-
-      const getProjectV2 = typeof opts.getProjectV2 === 'function'
-        ? opts.getProjectV2
-        : function(){ try{ const a = root && root.H2SApp; return (a && typeof a.getProjectV2 === 'function') ? a.getProjectV2() : null; } catch(e){ return null; } };
-      function _getCommitV2(){
-        if (typeof opts.commitV2 === 'function') return opts.commitV2;
-        try{
-          const a = root && root.H2SApp;
-          if (a && typeof a.commitV2 === 'function') return function(p, reason){ return a.commitV2(p, reason); };
-        }catch(_){}
-        return null;
-      }
-      function _getPersistFromV1(){
-        if (typeof opts.persistFromV1 === 'function') return opts.persistFromV1;
-        try{
-          const a = root && root.H2SApp;
-          if (a && typeof a.persistFromV1 === 'function') return function(reason){ return a.persistFromV1(reason); };
-        }catch(_){}
-        return null;
-      }
 
       const $ = opts.$ || (typeof document !== 'undefined' ? (sel)=>document.querySelector(sel) : null);
       const $$ = opts.$$ || (typeof document !== 'undefined' ? (sel)=>Array.from(document.querySelectorAll(sel)) : null);
@@ -266,30 +264,21 @@
       const clip = _findClip(this.project, clipId);
       if (!clip) return;
 
-      // IMPORTANT:
-      // this.project is usually the legacy v1 *view* (seconds) even when the true store is v2 (beats).
-      // So we must derive "wants beat" from ProjectV2 if available.
-      const p2b = getProjectV2();
+      const p2b = getProjectV2 && getProjectV2();
       const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
-      const projectWantsBeat = !!(p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2));
-
-      // Prefer v2 clip score to detect the source timebase correctly.
-      let clip2 = null;
-      try{
-        if (p2b && p2b.clips){
-          clip2 = p2b.clips[clipId] || _findClip(p2b, clipId);
-        }
-      }catch(e){ clip2 = null; }
-      const srcScore = (clip2 && clip2.score) ? clip2.score : clip.score;
-      const clipScoreIsBeat = _isBeatScore(srcScore);
+      const projectWantsBeat = !!(
+        (p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2)) ||
+        (this.project && (this.project.timebase === 'beat' || Number(this.project.version) === 2))
+      );
+      const clipScoreIsBeat = _isBeatScore(clip.score);
 
       // Editor always operates on a seconds-score draft to preserve the existing interaction feel.
       // If the stored score is beats, we convert beats->seconds on open, and seconds->beats on save.
       let savedScoreSec;
       if (clipScoreIsBeat){
-        try { savedScoreSec = _scoreBeatToSec(srcScore, bpm); } catch(e){ savedScoreSec = H2SProject.deepClone(srcScore); }
+        try { savedScoreSec = _scoreBeatToSec(clip.score, bpm); } catch(e){ savedScoreSec = H2SProject.deepClone(clip.score); }
       } else {
-        savedScoreSec = H2SProject.deepClone(srcScore);
+        savedScoreSec = H2SProject.deepClone(clip.score);
       }
 
       this.state.modal.show = true;
@@ -309,7 +298,7 @@
             if (_isBeatScore(ps)){
               try { this.state.modal.ghostScore = _scoreBeatToSec(ps, bpm); }
               catch(e){ this.state.modal.ghostScore = H2SProject.deepClone(ps); }
-            }else{
+            } else {
               this.state.modal.ghostScore = H2SProject.deepClone(ps);
             }
           }
@@ -339,26 +328,7 @@
       this.state.modal.mode = 'none';
 
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
-
-      // Robust pitch center: avoid a single extreme outlier hiding all notes.
-      // Use IQR center (mid of 25th/75th percentile), fallback to min/max center.
-      let center = Math.round((st.minPitch + st.maxPitch) / 2);
-      try {
-        const pitches = [];
-        for (const t of (this.state.modal.draftScore.tracks || [])){
-          for (const n of (t.notes || [])){
-            const p = Number(n.pitch);
-            if (Number.isFinite(p)) pitches.push(H2SProject.clamp(Math.round(p), 0, 127));
-          }
-        }
-        if (pitches.length){
-          pitches.sort((a,b)=>a-b);
-          const q = (pp) => pitches[Math.floor((pitches.length - 1) * pp)];
-          center = Math.round((q(0.25) + q(0.75)) / 2);
-        }
-      } catch (e) {
-        // ignore and keep fallback center
-      }
+      const center = Math.round((st.minPitch + st.maxPitch) / 2);
       this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
       $('#rngPitchCenter').value = this.state.modal.pitchCenter;
 
@@ -371,12 +341,10 @@
 
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
-      this.modalEnsurePitchScrollbar();
       this.modalRequestDraw();
       this.modalBindControls();
       log(`Open editor: ${clip.name}`);
     },
-
 
     closeModal(save){
       if (!this.state.modal.show) return;
@@ -385,21 +353,15 @@
       const clipId = this.state.modal.clipId;
       const clip = _findClip(this.project, clipId);
 
-      const p2b = getProjectV2();
+      const p2b = ((typeof getProjectV2 === 'function') ? getProjectV2() : null) || (((this.project && (this.project.timebase === 'beat' || Number(this.project.version) === 2))) ? this.project : null);
       const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
-      // Extra guard: even if openClipEditor didn't tag the modal correctly (v1 view lacks timebase),
-      // we must still prefer beats when ProjectV2 exists.
-      const v2WantsBeat = !!(p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2));
-      const storeAsBeat = !!(v2WantsBeat || this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat);
+      const wantsBeatNow = !!(p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2));
+      const storeAsBeat = !!(wantsBeatNow || this.state.modal._sourceClipWasBeat || this.state.modal._projectWantsBeat || _isBeatScore(clip && clip.score));
 
-      // These helpers may be injected (Node tests) or resolved from H2SApp (browser).
-      // IMPORTANT: keep them defined for the whole function; legacy branches also need them.
-      const commitV2 = _getCommitV2();
-      const persistFromV1 = _getPersistFromV1();
 
-      try{
-        if (save && clip){
-          if (storeAsBeat){
+
+      if (save && clip){
+        if (storeAsBeat){
           // seconds draft -> beats score (normalize-on-write; no grid snap)
           const draftSec = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
           let scoreBeat = _scoreSecToBeat(draftSec, bpm);
@@ -412,70 +374,72 @@
                 if (!n) continue;
                 n.startBeat = _normalizeBeat(Math.max(0, Number(n.startBeat) || 0));
                 n.durationBeat = _normalizeBeat(Math.max(0, Number(n.durationBeat) || 0));
+                // keep pitch/vel in range
                 n.pitch = H2SProject.clamp(Number(n.pitch) || 0, 0, 127);
                 n.velocity = H2SProject.clamp(Number(n.velocity) || 80, 1, 127);
               }
             }
           }
 
-          // Writeback must go through app's v2 entry when available.
-          const p2 = getProjectV2();
-          const canCommitV2 = !!(commitV2 && p2 && p2.clips && (p2.clips[clipId] || _findClip(p2, clipId)));
-          if (canCommitV2){
-            const clip2 = p2.clips[clipId] || _findClip(p2, clipId);
-            clip2.score = scoreBeat;
-            _recomputeClipMetaFromBeatScore(clip2, scoreBeat);
+          // Write back: always update the opened (legacy) clip object for immediate UI refresh.
+          clip.score = scoreBeat;
+          _recomputeClipMetaFromBeatScore(clip, scoreBeat);
 
-            let committed = false;
-            try { commitV2(p2, 'editor_save'); committed = true; } catch(e){}
-
-            if (committed) log('Saved clip changes (beats, v2).');
-            else {
-              // If commit fails for some reason, fall back to legacy persistence.
-              clip.score = scoreBeat;
-              _recomputeClipMetaFromBeatScore(clip, scoreBeat);
-              if (persistFromV1) persistFromV1('editor_save_legacy');
-              else { persist(); this.render(); }
-              log('Saved clip changes (beats, fallback).');
-            }
-          } else {
-            // Legacy fallback: update the currently-mounted clip and persist.
-            clip.score = scoreBeat;
-            _recomputeClipMetaFromBeatScore(clip, scoreBeat);
-            if (persistFromV1) persistFromV1('editor_save_legacy');
-            else { persist(); this.render(); }
-            log('Saved clip changes (beats).');
+          // If v2 exists, also write into ProjectDoc v2 clip map and persist via commitV2.
+          if (wantsBeatNow && p2b && p2b.clips && p2b.clips[clipId]) {
+            try {
+              const c2 = p2b.clips[clipId];
+              c2.score = scoreBeat;
+              _recomputeClipMetaFromBeatScore(c2, scoreBeat);
+            } catch(e){}
           }
+
+          // Persist preference: if commitV2 exists and we can resolve a v2 project, always use it.
+          if (typeof commitV2 === 'function') {
+            let p2save = null;
+            try { p2save = (typeof getProjectV2 === 'function') ? getProjectV2() : null; } catch(e) { p2save = null; }
+            if (!p2save) p2save = p2b;
+            if (p2save) {
+              commitV2(p2save, 'editor_save');
+            } else if (typeof persistFromV1 === 'function') {
+              persistFromV1('editor_save_legacy');
+            } else {
+              persist();
+            }
+          } else if (typeof persistFromV1 === 'function') {
+            persistFromV1('editor_save_legacy');
           } else {
+            persist();
+          }
+
+          this.render();
+          log('Saved clip changes (beats).');
+        } else {
           // Legacy seconds storage (v1)
           clip.score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
           const st = H2SProject.scoreStats(clip.score);
-          clip.meta = Object.assign({}, (clip && clip.meta) ? clip.meta : {}, { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec });
-          if (persistFromV1) persistFromV1('editor_save_legacy');
-          else { persist(); this.render(); }
+          clip.meta = { notes: st.count, pitchMin: st.minPitch, pitchMax: st.maxPitch, spanSec: st.spanSec };
+          persist();
+          this.render();
           log('Saved clip changes.');
-          }
-        } else {
-          log('Canceled clip changes.');
         }
-      } finally {
-        // Always clear modal state. Even if persistence throws, we must not leak draft state.
-        this.state.modal.show = false;
-        this.state.modal.clipId = null;
-        this.state.modal.draftScore = null;
-        this.state.modal.savedScore = null;
-        this.state.modal.selectedNoteId = null;
-        this.state.modal.selectedCell = null;
-        this.state.modal.mode = 'none';
-        this.state.modal._sourceClipWasBeat = false;
-        this.state.modal._projectWantsBeat = false;
-        this.state.modal.pitchScroll = null;
-
-        $('#modal').classList.remove('show');
-        $('#modal').setAttribute('aria-hidden', 'true');
+      } else {
+        log('Canceled clip changes.');
       }
-    },
 
+      this.state.modal.show = false;
+      this.state.modal.clipId = null;
+      this.state.modal.draftScore = null;
+      this.state.modal.savedScore = null;
+      this.state.modal.selectedNoteId = null;
+      this.state.modal.selectedCell = null;
+      this.state.modal.mode = 'none';
+      this.state.modal._sourceClipWasBeat = false;
+      this.state.modal._projectWantsBeat = false;
+
+      $('#modal').classList.remove('show');
+      $('#modal').setAttribute('aria-hidden', 'true');
+    },
 
     modalTogglePlay(){
       if (this.state.modal.isPlaying) this.modalStop();
@@ -531,13 +495,12 @@
 
     modalSnapSec(){
       const v = this.modalGetSnapValue();
-      const bpm = (this.project && this.project.bpm) ? this.project.bpm : 120;
+      const bpm = this.project.bpm || 120;
+      const beat = 60 / bpm; // quarter note
       if (v === 'off') return 0;
       const denom = Number(v);
-      if (!Number.isFinite(denom) || denom <= 0) return 0;
-      // denom=16 -> 1/16 note = (4/16) beats (since 1 beat = quarter note)
-      const beatStep = 4 / denom;
-      return H2SProject.beatToSec(beatStep, bpm);
+      // denom=16 -> 1/16 note = beat*(4/16)=beat/4
+      return beat * (4 / denom);
     },
 
     modalQuantize(x, ev){
@@ -566,197 +529,6 @@
       $('#pillCursor').textContent = `Cursor: ${fmtSec(this.state.modal.cursorSec)}`;
       $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
     },
-
-// Right-side vertical scrollbar for pitch view (so users can reach outlier notes).
-// Created dynamically inside #canvasWrap to avoid touching HTML/CSS files.
-modalEnsurePitchScrollbar(){
-  if (!this.__isBrowser) return;
-  try{
-    const wrap = $('#canvasWrap');
-    if (!wrap || typeof document === 'undefined') return;
-
-    // Ensure positioning context.
-    try{
-      const cs = window.getComputedStyle(wrap);
-      if (cs && cs.position === 'static') wrap.style.position = 'relative';
-    }catch(e){}
-
-    let bar = wrap.querySelector('.h2sPitchScroll');
-    if (!bar){
-      bar = document.createElement('div');
-      bar.className = 'h2sPitchScroll';
-      bar.style.position = 'absolute';
-      bar.style.right = '2px';
-      bar.style.top = '2px';
-      bar.style.bottom = '2px';
-      bar.style.width = '10px';
-      bar.style.background = 'rgba(255,255,255,.06)';
-      bar.style.border = '1px solid rgba(255,255,255,.10)';
-      bar.style.borderRadius = '8px';
-      bar.style.zIndex = '5';
-      bar.style.cursor = 'pointer';
-      bar.style.userSelect = 'none';
-
-      const thumb = document.createElement('div');
-      thumb.className = 'h2sPitchThumb';
-      thumb.style.position = 'absolute';
-      thumb.style.left = '1px';
-      thumb.style.right = '1px';
-      thumb.style.top = '0px';
-      thumb.style.height = '28px';
-      thumb.style.background = 'rgba(120,180,255,.45)';
-      thumb.style.border = '1px solid rgba(120,180,255,.80)';
-      thumb.style.borderRadius = '7px';
-      thumb.style.cursor = 'grab';
-      thumb.style.userSelect = 'none';
-
-      bar.appendChild(thumb);
-      wrap.appendChild(bar);
-    }
-
-    const thumb = bar.querySelector('.h2sPitchThumb');
-    this.state.modal.pitchScroll = { bar, thumb };
-    this._bindPitchScrollHandlers();
-  }catch(e){}
-},
-
-_applyPitchMin(pitchMin){
-  try{
-    const rows = this.state.modal.pitchViewRows;
-    const maxMin = Math.max(0, 127 - rows);
-    const pm = H2SProject.clamp(Math.round(pitchMin), 0, maxMin);
-    const half = Math.floor(rows / 2);
-    const center = pm + half;
-    this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
-    const rng = $('#rngPitchCenter');
-    if (rng) rng.value = this.state.modal.pitchCenter;
-    this.modalRequestDraw();
-  }catch(e){}
-},
-
-_bindPitchScrollHandlers(){
-  if (!this.__isBrowser) return;
-  try{
-    const g = (typeof window !== 'undefined') ? window : global;
-    if (!g) return;
-    g.__h2s_pitchscroll_handlers = g.__h2s_pitchscroll_handlers || {};
-    const H = g.__h2s_pitchscroll_handlers;
-
-    const getRt = () => (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
-    const ps = (getRt().state && getRt().state.modal) ? getRt().state.modal.pitchScroll : null;
-    if (!ps || !ps.bar || !ps.thumb) return;
-
-    const bar = ps.bar;
-    const thumb = ps.thumb;
-
-    const computePitchMinFromClientY = (clientY, centerThumb) => {
-      const rt = getRt();
-      const rows = rt.state.modal.pitchViewRows;
-      const maxMin = Math.max(0, 127 - rows);
-      const rect = bar.getBoundingClientRect();
-      const barH = Math.max(1, rect.height || bar.clientHeight || 1);
-      const thumbH = Math.max(18, Math.round(barH * (rows / 128)));
-      const maxTop = Math.max(0, barH - thumbH);
-      const y = clientY - rect.top;
-      const t = centerThumb ? (y - thumbH / 2) : y;
-      const top = Math.max(0, Math.min(maxTop, t));
-      const frac = maxTop > 0 ? (top / maxTop) : 0;
-      // Invert mapping: dragging thumb DOWN should reveal LOWER pitches (like normal scroll)
-      return Math.round((1 - frac) * maxMin);
-    };
-
-    if (!H.onPitchBarDown){
-      H.onPitchBarDown = (ev) => {
-        try{
-          const rt = getRt();
-          if (!rt || !rt.state.modal.show) return;
-          // Ignore clicks that start on the thumb; thumb has its own drag handler.
-          if (ev.target && ev.target.classList && ev.target.classList.contains('h2sPitchThumb')) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          const pm = computePitchMinFromClientY(ev.clientY, true);
-          rt._applyPitchMin(pm);
-        }catch(e){}
-      };
-    }
-    bar.removeEventListener('pointerdown', H.onPitchBarDown, true);
-    bar.addEventListener('pointerdown', H.onPitchBarDown, true);
-
-    if (!H.onPitchThumbDown){
-      H.onPitchThumbDown = (ev) => {
-        try{
-          const rt = getRt();
-          if (!rt || !rt.state.modal.show) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          thumb.setPointerCapture && thumb.setPointerCapture(ev.pointerId);
-          thumb.style.cursor = 'grabbing';
-          H._dragActive = true;
-          H._dragPointerId = ev.pointerId;
-        }catch(e){}
-      };
-    }
-    thumb.removeEventListener('pointerdown', H.onPitchThumbDown, true);
-    thumb.addEventListener('pointerdown', H.onPitchThumbDown, true);
-
-    if (!H.onPitchMove){
-      H.onPitchMove = (ev) => {
-        try{
-          if (!H._dragActive) return;
-          const rt = getRt();
-          if (!rt || !rt.state.modal.show) return;
-          const pm = computePitchMinFromClientY(ev.clientY, true);
-          rt._applyPitchMin(pm);
-        }catch(e){}
-      };
-    }
-    if (!H.onPitchUp){
-      H.onPitchUp = (ev) => {
-        try{
-          if (!H._dragActive) return;
-          if (H._dragPointerId != null && ev.pointerId !== H._dragPointerId) return;
-          H._dragActive = false;
-          H._dragPointerId = null;
-          try{ thumb.style.cursor = 'grab'; }catch(e){}
-        }catch(e){}
-      };
-    }
-    g.removeEventListener('pointermove', H.onPitchMove, true);
-    g.addEventListener('pointermove', H.onPitchMove, true);
-    g.removeEventListener('pointerup', H.onPitchUp, true);
-    g.addEventListener('pointerup', H.onPitchUp, true);
-    g.removeEventListener('pointercancel', H.onPitchUp, true);
-    g.addEventListener('pointercancel', H.onPitchUp, true);
-  }catch(e){}
-},
-
-modalUpdatePitchScrollbar(pitchMin, range){
-  if (!this.__isBrowser) return;
-  try{
-    const ps = this.state.modal.pitchScroll;
-    if (!ps || !ps.bar || !ps.thumb) return;
-    const bar = ps.bar;
-    const thumb = ps.thumb;
-
-    const rows = this.state.modal.pitchViewRows;
-    const maxMin = Math.max(0, 127 - rows);
-    if (range <= rows || maxMin <= 0){
-      bar.style.display = 'none';
-      return;
-    }
-    bar.style.display = 'block';
-
-    const barH = Math.max(1, bar.clientHeight || 1);
-    const thumbH = Math.max(18, Math.round(barH * (rows / 128)));
-    const maxTop = Math.max(0, barH - thumbH);
-    const frac = maxMin > 0 ? (H2SProject.clamp(pitchMin, 0, maxMin) / maxMin) : 0;
-    // Invert mapping to match computePitchMinFromClientY
-    const top = Math.round(maxTop * (1 - frac));
-
-    thumb.style.height = `${thumbH}px`;
-    thumb.style.top = `${top}px`;
-  }catch(e){}
-},
 
     modalRequestDraw(){
       // coalesce draws
@@ -789,10 +561,6 @@ modalUpdatePitchScrollbar(pitchMin, range){
         pitchMax = pitchMin + rows;
       }
 
-
-            // Update right-side pitch scrollbar (only visible when range exceeds window)
-      this.modalUpdatePitchScrollbar(pitchMin, range);
-
       const padL = this.state.modal.padL;
       const padT = this.state.modal.padT;
 
@@ -813,8 +581,7 @@ modalUpdatePitchScrollbar(pitchMin, range){
 
       // grid
       const pxPerSec = this.state.modal.pxPerSec;
-      const bpm = (this.project && this.project.bpm) ? this.project.bpm : 120;
-      const gridSec = this.modalSnapSec() || H2SProject.beatToSec(0.25, bpm); // fallback 1/16
+      const gridSec = this.modalSnapSec() || (60/(this.project.bpm||120))/4; // fallback 1/16
       const gridPx = gridSec * pxPerSec;
 
       // vertical rows
@@ -1051,7 +818,7 @@ modalUpdatePitchScrollbar(pitchMin, range){
       const startSec = cell ? Number(cell.startSec) : Number(this.state.modal.cursorSec || 0);
       const pitch = cell ? Number(cell.pitch) : Number(this.state.modal.pitchCenter || 60);
 
-      const durSec = Math.max(0.05, (this.modalSnapSec() || H2SProject.beatToSec(0.25, bpm))); // default ~1/16
+      const durSec = Math.max(0.05, (this.modalSnapSec() || (60 / bpm) / 4)); // default ~1/16
       const startQ = Math.max(0, this.modalQuantize(Math.max(0, startSec), null));
 
       const makeId = () => {
@@ -1122,7 +889,6 @@ modalUpdatePitchScrollbar(pitchMin, range){
         pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
         pitchMax = pitchMin + rows;
       }
-
 
       const notes = this.modalAllNotes();
       // search from topmost (later notes last)
@@ -1281,7 +1047,6 @@ async modalPlay(){
         pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
         pitchMax = pitchMin + rows;
       }
-
       const rowH = this.state.modal.rowH;
       const row = Math.floor((py - padT) / rowH);
       const pitch = H2SProject.clamp(pitchMax - row, 0, 127);
