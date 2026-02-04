@@ -80,7 +80,7 @@
       const patch = buildPseudoAgentPatch(clip);
       const opsN = (patch && Array.isArray(patch.ops)) ? patch.ops.length : 0;
 
-      const valid = H2SAgentPatch.validatePatch(patch, { project, clip });
+      const valid = H2SAgentPatch.validatePatch(patch, clip);
       if (!valid || !valid.ok){
         clip.meta = clip.meta || {};
         clip.meta.agent = clip.meta.agent || {};
@@ -149,7 +149,7 @@
       head.meta.agent.appliedAt = _now();
       head.meta.agent.patchOps = opsN;
       if (H2SAgentPatch.summarizeAppliedPatch){
-        head.meta.agent.patchSummary = H2SAgentPatch.summarizeAppliedPatch(applied);
+        head.meta.agent.patchSummary = H2SAgentPatch.summarizeAppliedPatch(applied, patch);
       } else {
         head.meta.agent.patchSummary = { ops: opsN };
       }

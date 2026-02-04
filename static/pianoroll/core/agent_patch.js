@@ -495,10 +495,93 @@
     return { ok:true, patch:{ version:1, ops:inv } };
   }
 
+  function summarizeAppliedPatch(x, opts){
+    const maxExamples = (opts && isFiniteNumber(opts.maxExamples)) ? Number(opts.maxExamples) : 6;
+
+    if (!x || typeof x !== 'object') return { ops: 0 };
+
+    // Accept: applyPatchToClip result, appliedPatch object, or patch-like with ops.
+    const ap = (x.appliedPatch && Array.isArray(x.appliedPatch.ops)) ? x.appliedPatch
+      : (Array.isArray(x.ops) ? x
+      : ((x.patch && Array.isArray(x.patch.ops)) ? x.patch : null));
+
+    if (!ap) return { ops: 0 };
+
+    const ops = Array.isArray(ap.ops) ? ap.ops : [];
+    const byOp = {};
+    const clamp = { pitch: 0, velocity: 0, startBeat: 0, durationBeat: 0 };
+    const examples = [];
+
+    const inPitchRange = (v)=> isFiniteNumber(v) && v >= 0 && v <= 127;
+    const inVelRange = (v)=> isFiniteNumber(v) && v >= 0 && v <= 127;
+
+    for (let i=0; i<ops.length; i++){
+      const op = ops[i] || {};
+      const kind = String(op.op || 'unknown');
+      byOp[kind] = (byOp[kind] || 0) + 1;
+
+      const before = op.before || null;
+      const after = op.after || null;
+
+      // Detect clamps/fixes.
+      if (before && after){
+        if (has(before,'pitch') && has(after,'pitch')){
+          const b = Number(before.pitch), a = Number(after.pitch);
+          if (b !== a && !inPitchRange(b) && inPitchRange(a)) clamp.pitch++;
+        }
+        if (has(before,'velocity') && has(after,'velocity')){
+          const b = Number(before.velocity), a = Number(after.velocity);
+          if (b !== a && !inVelRange(b) && inVelRange(a)) clamp.velocity++;
+        }
+        if (has(before,'startBeat') && has(after,'startBeat')){
+          const b = Number(before.startBeat), a = Number(after.startBeat);
+          if (b !== a && (!isFiniteNumber(b) || b < 0) && (isFiniteNumber(a) && a >= 0)) clamp.startBeat++;
+        }
+        if (has(before,'durationBeat') && has(after,'durationBeat')){
+          const b = Number(before.durationBeat), a = Number(after.durationBeat);
+          if (b !== a && (!isFiniteNumber(b) || b <= 0) && (isFiniteNumber(a) && a > 0)) clamp.durationBeat++;
+        }
+      }
+
+      // Examples: keep small and readable.
+      if (examples.length < maxExamples){
+        if (before && after){
+          const changes = {};
+          const fields = ['pitch','velocity','startBeat','durationBeat'];
+          for (let f=0; f<fields.length; f++){
+            const k = fields[f];
+            if (has(before,k) && has(after,k) && before[k] !== after[k]){
+              changes[k] = [before[k], after[k]];
+            }
+          }
+          if (Object.keys(changes).length){
+            examples.push({ op: kind, noteId: op.noteId || null, changes });
+          }
+        } else if (kind === 'addNote' && after){
+          examples.push({ op: kind, noteId: op.noteId || null, after });
+        } else if (kind === 'deleteNote' && before){
+          examples.push({ op: kind, noteId: op.noteId || null, before });
+        } else if (kind === 'moveNote' && before && after){
+          examples.push({ op: kind, noteId: op.noteId || null, deltaBeat: op.deltaBeat || op.delta || null });
+        }
+      }
+    }
+
+    return {
+      ops: ops.length,
+      byOp,
+      clamp,
+      examples
+    };
+  }
+
+
+
   const API = {
     validatePatch,
     applyPatchToClip,
     invertAppliedPatch,
+    summarizeAppliedPatch,
   };
 
   ROOT.H2SAgentPatch = API;
