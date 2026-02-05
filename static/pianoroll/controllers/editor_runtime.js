@@ -57,6 +57,16 @@
         ctx.closePath();
       }
 
+      // ---- Pitch view sizing / scroll policy ----
+      // Enable native vertical scrolling only when pitch range is large enough.
+      // Keeps the default view big/readable for normal clips.
+      const PITCH_SCROLL_THRESHOLD = 36;
+      const PITCH_ROWS_FULL = 128;
+      const PITCH_PAD_T = 20;
+      const PITCH_PAD_B = 10;
+      const PITCH_ROW_H_BASE = 18; // bigger by default; zoom can adjust
+      const PITCH_ZOOM_LEVELS = [1, 1.25, 1.5];
+
       // --- Beats v2 boundary helpers (storage beat, editor works in seconds) ---
       function _firstNote(score){
         try {
@@ -332,6 +342,14 @@
       this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
       $('#rngPitchCenter').value = this.state.modal.pitchCenter;
 
+      // Pitch zoom (visual size). Remember across sessions.
+      // Levels: 1.0 -> normal, 1.25 -> bigger default, 1.5 -> extra big.
+      try{
+        const z0 = (typeof localStorage !== 'undefined') ? Number(localStorage.getItem('h2s_editor_pitch_zoom') || '1.25') : 1.25;
+        const z = (isFinite(z0) && z0 > 0) ? z0 : 1.25;
+        this.state.modal.pitchZoom = z;
+      }catch(e){ this.state.modal.pitchZoom = 1.25; }
+
       $('#modalTitle').textContent = `Editing: ${clip.name}`;
       $('#modalSub').textContent = `notes ${st.count} | pitch ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | span ${fmtSec(st.spanSec)}`;
       $('#modal').classList.add('show');
@@ -341,6 +359,7 @@
 
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
+      this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
       this.modalRequestDraw();
       this.modalBindControls();
       log(`Open editor: ${clip.name}`);
@@ -516,9 +535,52 @@
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
       const span = Math.max(4, st.spanSec);
       const w = Math.max(1200, Math.ceil(span * this.state.modal.pxPerSec) + 140);
-      const h = Math.max(420, wrap.clientHeight - 2);
+
+      // Pitch view policy:
+      // - If pitch range (padded) exceeds visible rows -> enable native vertical scrolling over full 0..127.
+      // - Else -> keep a readable view (no vertical scroll).
+      const pitchSpan = (st.count > 0) ? (st.maxPitch - st.minPitch + 1) : 0;
+      // draw() adds top/bottom pad=2 rows (≈ +4 rows); count them so we don't "almost fit but no scroll".
+      const pitchSpanPadded = pitchSpan > 0 ? (pitchSpan + 4) : 0;
+
+      const wrapH = Math.max(320, wrap.clientHeight - 2);
+
+      // Visual row size (zoom)
+      const ROW_H = Math.max(12, Math.round(16 * (Number(this.state.modal.pitchZoom || 1))));
+      this.state.modal.rowH = ROW_H;
+
+      const rowsCanFit = Math.max(12, Math.floor((wrapH - PITCH_PAD_T - PITCH_PAD_B) / ROW_H));
+      const visibleRows = Math.min(PITCH_SCROLL_THRESHOLD, rowsCanFit);
+
+      const wantVScroll = pitchSpanPadded > visibleRows;
+      this.state.modal.usePitchVScroll = !!wantVScroll;
+
+      // Non-scroll mode: use visibleRows as the view (don't artificially shrink further).
+      this.state.modal.pitchViewRows = wantVScroll ? PITCH_ROWS_FULL : visibleRows;
+
+      // canvas: width is content-based; height depends on scroll policy.
       canvas.width = w;
-      canvas.height = h;
+      if (wantVScroll){
+        const wantH = PITCH_PAD_T + PITCH_PAD_B + (PITCH_ROWS_FULL * ROW_H);
+        canvas.height = Math.max(wrapH, wantH);
+      } else {
+        canvas.height = wrapH;
+      }
+    },
+
+    // When vertical pitch scrolling is enabled, scroll so pitchCenter sits near the viewport center.
+    modalAutoScrollPitchToCenter(){
+      if (!this.state.modal.show) return;
+      if (!this.state.modal.usePitchVScroll) return;
+      const wrap = $('#canvasWrap');
+      const canvas = $('#canvas');
+      if (!wrap || !canvas) return;
+      const rowH = Number(this.state.modal.rowH) || 16;
+      const pitch = (this.state.modal.pitchCenter != null) ? Number(this.state.modal.pitchCenter) : 60;
+      const y = (this.state.modal.padT || PITCH_PAD_T) + (127 - pitch) * rowH;
+      const target = y - (wrap.clientHeight / 2);
+      const maxScroll = Math.max(0, (canvas.height || 0) - wrap.clientHeight);
+      wrap.scrollTop = Math.max(0, Math.min(maxScroll, target));
     },
 
     modalUpdateRightPanel(){
@@ -546,29 +608,35 @@
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
 
       // Determine pitch window
+      const useVScroll = !!this.state.modal.usePitchVScroll;
       const rows = this.state.modal.pitchViewRows;
       let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        // auto-fit with small padding
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
+      if (useVScroll){
+        pitchMin = 0;
+        pitchMax = 127;
       } else {
-        const half = Math.floor(rows / 2);
-        const c = this.state.modal.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          // auto-fit with small padding
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = this.state.modal.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
 
       const padL = this.state.modal.padL;
       const padT = this.state.modal.padT;
 
       // row height
-      const usableH = canvas.height - padT - 10;
+      // We keep a stable row height (controlled by pitch zoom) and vary how many
+      // rows we display in no-scroll mode.
       const totalRows = (pitchMax - pitchMin + 1);
-      const rowH = Math.max(12, Math.min(22, Math.floor(usableH / totalRows)));
-      this.state.modal.rowH = rowH;
+      const rowH = Math.max(10, Number(this.state.modal.rowH) || 16);
 
       // background
       ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -790,6 +858,21 @@
                 rt.modalDeleteSelectedNote();
                 return;
               }
+              if ((k === 'z' || k === 'Z') && !ev.ctrlKey && !ev.metaKey && !ev.altKey){
+                ev.preventDefault();
+                const levels = [1.0, 1.25, 1.5];
+                const cur = Number(rt.state.modal.pitchZoom || 1.25);
+                let idx = levels.findIndex(v => Math.abs(v - cur) < 0.001);
+                if (idx < 0) idx = 1;
+                const next = levels[(idx + 1) % levels.length];
+                rt.state.modal.pitchZoom = next;
+                try { localStorage.setItem('h2s_editor_pitch_zoom', String(next)); } catch(e){}
+                rt.modalResizeCanvasToContent();
+                rt.modalAutoScrollPitchToCenter();
+                rt.modalRequestDraw();
+                try{ $('#editorStatus').textContent = `Pitch zoom = ${next}x (press Z to cycle)`; }catch(e){}
+                return;
+              }
               if (k === 'Insert'){
                 ev.preventDefault();
                 rt.modalInsertNote();
@@ -876,18 +959,22 @@
       const rowH = this.state.modal.rowH;
 
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
-      const rows = this.state.modal.pitchViewRows;
       let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
+      if (this.state.modal.usePitchVScroll){
+        pitchMin = 0; pitchMax = 127;
       } else {
-        const half = Math.floor(rows / 2);
-        const c = this.state.modal.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+        const rows = this.state.modal.pitchViewRows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = this.state.modal.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
 
       const notes = this.modalAllNotes();
@@ -994,9 +1081,10 @@ async modalPlay(){
       const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
-      // account for scroll
-      const px = (ev.clientX - rect.left) + wrap.scrollLeft;
-      const py = (ev.clientY - rect.top) + wrap.scrollTop;
+      const scaleX = rect.width ? (canvas.width / rect.width) : 1;
+      const scaleY = rect.height ? (canvas.height / rect.height) : 1;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
 
       // HIT TEST FIRST (fix: note operations have priority)
       const hit = this.modalHitTest(px, py);
@@ -1034,18 +1122,24 @@ async modalPlay(){
 
       // pitch from y
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const useVScroll = !!this.state.modal.usePitchVScroll;
       const rows = this.state.modal.pitchViewRows;
       let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
+      if (useVScroll){
+        pitchMin = 0;
+        pitchMax = 127;
       } else {
-        const half = Math.floor(rows / 2);
-        const c = this.state.modal.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = this.state.modal.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
       const rowH = this.state.modal.rowH;
       const row = Math.floor((py - padT) / rowH);
@@ -1066,26 +1160,31 @@ async modalPlay(){
       const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
-      const px = (ev.clientX - rect.left) + wrap.scrollLeft;
-      const py = (ev.clientY - rect.top) + wrap.scrollTop;
+      const scaleX = rect.width ? (canvas.width / rect.width) : 1;
+      const scaleY = rect.height ? (canvas.height / rect.height) : 1;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
 
       const found = this.modalFindNoteById(m.drag.noteId);
       if (!found) return;
 
       // derive pitch window for mapping y->pitch
-      const st = H2SProject.scoreStats(this.state.modal.draftScore);
-      const rows = m.pitchViewRows;
-      let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
-      } else {
-        const half = Math.floor(rows / 2);
-        const c = m.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+      let pitchMin = 0;
+      let pitchMax = 127;
+      if (!m.usePitchVScroll){
+        const st = H2SProject.scoreStats(this.state.modal.draftScore);
+        const rows = m.pitchViewRows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = m.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
 
       const dx = px - m.drag.startX;
