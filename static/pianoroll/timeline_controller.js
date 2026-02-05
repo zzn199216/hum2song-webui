@@ -557,8 +557,20 @@
             if (!clip) continue;
 
             const st = (window.H2SProject && window.H2SProject.scoreStats) ? window.H2SProject.scoreStats(clip.score) : {count:0, spanSec:1};
-            const w = Math.max(80, (st.spanSec || 1) * pxPerSec);
-            const x = ctrl._labelW + (inst.startSec || 0) * pxPerSec;
+
+            // v2 beats-only clips carry meta.spanBeat and instances may carry startBeat.
+            // Timeline pixels are in seconds (pxPerSec), so convert beats -> seconds via bpm when available.
+            const bpm = (typeof proj.bpm === 'number' && isFinite(proj.bpm) && proj.bpm > 0)
+              ? proj.bpm
+              : (window.H2SApp && typeof window.H2SApp.getProjectV2 === 'function' && window.H2SApp.getProjectV2().bpm) ? window.H2SApp.getProjectV2().bpm : 120;
+
+            const spanBeat = (clip && clip.meta && typeof clip.meta.spanBeat === 'number' && isFinite(clip.meta.spanBeat)) ? clip.meta.spanBeat : null;
+            const spanSec = (spanBeat != null) ? (spanBeat * 60 / bpm) : (st.spanSec || 1);
+
+            const startSec = (typeof inst.startBeat === 'number' && isFinite(inst.startBeat)) ? (inst.startBeat * 60 / bpm) : (inst.startSec || 0);
+
+            const w = Math.max(80, (isFinite(spanSec) ? spanSec : 1) * pxPerSec);
+            const x = ctrl._labelW + (isFinite(startSec) ? startSec : 0) * pxPerSec;
 
             const el = document.createElement('div');
             el.className = 'instance';
