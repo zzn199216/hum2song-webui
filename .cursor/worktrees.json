@@ -1,0 +1,6 @@
+{
+  "setup-worktree": [
+    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"try { if ($env:CONDA_DEFAULT_ENV) { conda deactivate; conda deactivate } } catch {} ; if (Test-Path .\\venv\\Scripts\\Activate.ps1) { .\\venv\\Scripts\\Activate.ps1 } elseif (Test-Path ..\\hum2song-mvp\\venv\\Scripts\\Activate.ps1) { ..\\hum2song-mvp\\venv\\Scripts\\Activate.ps1 } else { Write-Host 'No venv found' }\"",
+    "npm install"
+  ]
+}
