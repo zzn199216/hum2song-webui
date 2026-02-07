@@ -494,14 +494,19 @@ getOptimizeOptions(clipId){
   return this._lastOptimizeOptions || null;
 },
 
-async optimizeClip(clipId){
+// PR-5e: optOverride = one-shot options for this call only; does NOT modify stored per-clip options.
+async optimizeClip(clipId, optOverride){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
     console.warn('[App] optimizeClip called but agent controller is not available');
     try{ alert('Optimize unavailable: agent controller not initialized. Check console for details.'); }catch(_){}
     return {ok:false, error:'no_agent_controller'};
   }
-  // PR-3: agent controller reads options via getOptimizeOptions() callback
-  return await this.agentCtrl.optimizeClip(clipId);
+  let options = optOverride;
+  if (options && typeof options === 'object') {
+    const preset = options.requestedPresetId != null ? options.requestedPresetId : options.presetId != null ? options.presetId : options.preset;
+    options = { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: options.userPrompt != null ? options.userPrompt : null };
+  }
+  return await this.agentCtrl.optimizeClip(clipId, options);
 },
 
 // PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).

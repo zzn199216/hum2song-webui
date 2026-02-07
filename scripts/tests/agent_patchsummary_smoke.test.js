@@ -220,6 +220,40 @@ async function testPatchSummarySmoke(){
   assert(String(head5c.parentRevisionId || '') === parentBefore5c, 'PR-5c: parentRevisionId unchanged');
   assert(Object.keys(head5c.revisions || {}).length === revKeysBefore5c, 'PR-5c: revCount unchanged');
 
+  // PR-5e: one-shot optOverride must not mutate stored options; no-op must not call beginNewClipRevision/commitV2
+  mockApp.setOptimizeOptions({ requestedPresetId: 'dynamics_accent' }, cid5c);
+  assert(mockApp.getOptimizePresetForClip(cid5c) === 'dynamics_accent', 'PR-5e: stored preset set to dynamics_accent');
+  const revBefore5e = String(project.clips[cid5c].revisionId || '');
+  const parentBefore5e = String(project.clips[cid5c].parentRevisionId || '');
+  const revKeysBefore5e = Object.keys(project.clips[cid5c].revisions || {}).length;
+  let begin5e = 0;
+  let commit5e = 0;
+  const origBegin5e = globalThis.H2SProject.beginNewClipRevision;
+  globalThis.H2SProject.beginNewClipRevision = function(...args) {
+    begin5e++;
+    return origBegin5e.apply(this, args);
+  };
+  const ctrl5e = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+    getOptimizeOptions: (c) => mockApp.getOptimizeOptions(c),
+    commitV2: () => { commit5e++; },
+  });
+  const res5ePromise = ctrl5e.optimizeClip(cid5c, { requestedPresetId: 'noop' });
+  const res5e = (res5ePromise && typeof res5ePromise.then === 'function') ? await res5ePromise : res5ePromise;
+  globalThis.H2SProject.beginNewClipRevision = origBegin5e;
+  assert(res5e && res5e.ok === true && res5e.ops === 0, 'PR-5e: one-shot noop override must return ops===0');
+  assert(typeof (res5e.patchSummary && res5e.patchSummary.ops) === 'number', 'PR-5e: patchSummary.ops must be number');
+  const head5e = project.clips[cid5c];
+  assert(String(head5e.revisionId || '') === revBefore5e, 'PR-5e: revisionId unchanged');
+  assert(String(head5e.parentRevisionId || '') === parentBefore5e, 'PR-5e: parentRevisionId unchanged');
+  assert(Object.keys(head5e.revisions || {}).length === revKeysBefore5e, 'PR-5e: revCount unchanged');
+  assert(mockApp.getOptimizePresetForClip(cid5c) === 'dynamics_accent', 'PR-5e: stored preset must remain dynamics_accent');
+  assert(begin5e === 0, 'PR-5e: beginNewClipRevision must not be called on no-op');
+  assert(commit5e === 0, 'PR-5e: commitV2 must not be called on no-op');
+
   console.log('PASS agent patchSummary smoke');
 }
 
@@ -292,9 +326,79 @@ async function testPersistReloadRevchain() {
   console.log('PASS persist/reload revchain consistency');
 }
 
+async function testRollbackRevchain() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SProject = globalThis.H2SProject;
+
+  let project = {
+    version: 2,
+    timebase: 'beat',
+    bpm: 120,
+    tracks: [{ id: 'trk_0', name: 'Track 1', instrument: 'default', gainDb: 0, muted: false, trackId: 'trk_0' }],
+    clips: {},
+    clipOrder: [],
+    instances: [],
+    ui: { pxPerBeat: 120, playheadBeat: 0 },
+  };
+
+  const scoreBeat = {
+    version: 2,
+    tempo_bpm: 120,
+    time_signature: '4/4',
+    tracks: [{ id: 't0', name: 'ch0', program: 0, channel: 0, notes: [{ id: 'n0', pitch: 60, velocity: 90, startBeat: 0, durationBeat: 1 }] }],
+  };
+  const clip = H2SProject.createClipFromScoreBeat(scoreBeat, { id: 'clip_rollback', name: 'rollback' });
+  project.clips[clip.id] = clip;
+  project.clipOrder.push(clip.id);
+  if (H2SProject.normalizeProjectRevisionChains) H2SProject.normalizeProjectRevisionChains(project);
+
+  const cid = clip.id;
+  assertRevchainConsistent(project, 'PR-5d baseline');
+
+  const rev0 = String(project.clips[cid].revisionId || '');
+  const parent0 = String(project.clips[cid].parentRevisionId || '');
+  const count0 = Object.keys(project.clips[cid].revisions || {}).length;
+
+  project.clips[cid].score.tracks[0].notes[0].pitch = 999;
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+  const resPromise = ctrl.optimizeClip(cid);
+  const res = (resPromise && typeof resPromise.then === 'function') ? await resPromise : resPromise;
+  assert(res && res.ok && res.ops > 0, 'PR-5d: optimize must apply ops');
+
+  const rev1 = String(project.clips[cid].revisionId || '');
+  const parent1 = String(project.clips[cid].parentRevisionId || '');
+  const count1 = Object.keys(project.clips[cid].revisions || {}).length;
+  assert(rev1 !== rev0, 'PR-5d: after optimize head must change (rev1 != rev0)');
+  assert(parent1 === rev0, 'PR-5d: after optimize parent1 must equal rev0');
+  assert(count1 >= 2, 'PR-5d: revisions must contain both');
+  assertRevchainConsistent(project, 'PR-5d after optimize');
+
+  const rb = H2SProject.rollbackClipRevision(project, cid);
+  assert(rb && rb.ok, 'PR-5d: rollback must return ok');
+
+  const headAfter = project.clips[cid];
+  assert(String(headAfter.revisionId || '') === rev0, 'PR-5d: after rollback head must be rev0');
+  assert(String(headAfter.parentRevisionId || '') === parent0, 'PR-5d: after rollback parent must match pre-optimize parent0');
+  const headEntry = headAfter.revisions && headAfter.revisions[headAfter.revisionId];
+  assert(headEntry, 'PR-5d: head entry must exist in revisions');
+  assert(String(headEntry.parentRevisionId || '') === parent0, 'PR-5d: headEntry.parentRevisionId must match parent0');
+  assertRevchainConsistent(project, 'PR-5d after rollback');
+
+  console.log('PASS rollback revchain semantics');
+}
+
 (async () => {
   await testPatchSummarySmoke();
   await testPersistReloadRevchain();
+  await testRollbackRevchain();
 })().catch((e) => {
   console.error(e);
   process.exit(1);
