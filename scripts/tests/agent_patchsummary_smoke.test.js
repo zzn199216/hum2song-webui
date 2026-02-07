@@ -395,10 +395,121 @@ async function testRollbackRevchain() {
   console.log('PASS rollback revchain semantics');
 }
 
+async function testOptPresetPersistReload() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SProject = globalThis.H2SProject;
+
+  let project = {
+    version: 2,
+    timebase: 'beat',
+    bpm: 120,
+    tracks: [{ id: 'trk_0', name: 'Track 1', instrument: 'default', gainDb: 0, muted: false, trackId: 'trk_0' }],
+    clips: {},
+    clipOrder: [],
+    instances: [],
+    ui: { pxPerBeat: 120, playheadBeat: 0 },
+  };
+
+  const scoreBeat = {
+    version: 2,
+    tempo_bpm: 120,
+    time_signature: '4/4',
+    tracks: [{ id: 't0', name: 'ch0', program: 0, channel: 0, notes: [{ id: 'n0', pitch: 60, velocity: 90, startBeat: 0, durationBeat: 1 }] }],
+  };
+  const clip = H2SProject.createClipFromScoreBeat(scoreBeat, { id: 'clip_opt_persist', name: 'opt_persist' });
+  project.clips[clip.id] = clip;
+  project.clipOrder.push(clip.id);
+  if (H2SProject.normalizeProjectRevisionChains) H2SProject.normalizeProjectRevisionChains(project);
+
+  const cid = clip.id;
+  const mockStorage = {};
+  const mockApp = {
+    _optPresetByClipId: {},
+    _optOptionsByClipId: {},
+    _lastOptimizeOptions: null,
+    setOptimizeOptions(arg0, arg1) {
+      let cidArg = null;
+      let opts = null;
+      if (typeof arg0 === 'string') {
+        cidArg = arg0;
+        opts = (arg1 && typeof arg1 === 'object') ? arg1 : null;
+      } else if (typeof arg1 === 'string') {
+        cidArg = arg1;
+        opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+      } else {
+        opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+      }
+      const preset = opts && (opts.requestedPresetId != null ? opts.requestedPresetId : opts.presetId != null ? opts.presetId : opts.preset);
+      const normalizedOpts = opts ? { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: opts.userPrompt != null ? opts.userPrompt : null } : null;
+      this._lastOptimizeOptions = normalizedOpts;
+      if (cidArg) {
+        this._optPresetByClipId[cidArg] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
+        this._optOptionsByClipId[cidArg] = normalizedOpts;
+        mockStorage[cidArg] = normalizedOpts;
+      }
+    },
+    getOptimizeOptions(clipId) {
+      if (clipId && this._optOptionsByClipId[clipId] != null) return this._optOptionsByClipId[clipId];
+      if (clipId && mockStorage[clipId] != null) {
+        this._optOptionsByClipId[clipId] = mockStorage[clipId];
+        this._optPresetByClipId[clipId] = (mockStorage[clipId].requestedPresetId != null) ? mockStorage[clipId].requestedPresetId : null;
+        return mockStorage[clipId];
+      }
+      return this._lastOptimizeOptions || null;
+    },
+    getOptimizePresetForClip(clipId) {
+      const opts = this.getOptimizeOptions(clipId);
+      return (opts && opts.requestedPresetId != null) ? opts.requestedPresetId : null;
+    },
+    simulateReload() {
+      this._optPresetByClipId = {};
+      this._optOptionsByClipId = {};
+      for (const k of Object.keys(mockStorage)) {
+        this._optOptionsByClipId[k] = mockStorage[k];
+        this._optPresetByClipId[k] = (mockStorage[k].requestedPresetId != null) ? mockStorage[k].requestedPresetId : null;
+      }
+    },
+  };
+
+  mockApp.setOptimizeOptions({ requestedPresetId: 'noop' }, cid);
+  assert(mockApp.getOptimizePresetForClip(cid) === 'noop', 'PR-5f: stored preset set to noop');
+
+  mockApp.simulateReload();
+  assert(mockApp.getOptimizePresetForClip(cid) === 'noop', 'PR-5f: after reload getOptimizePresetForClip must still return noop');
+
+  const revBefore = String(project.clips[cid].revisionId || '');
+  const parentBefore = String(project.clips[cid].parentRevisionId || '');
+  const revKeysBefore = Object.keys(project.clips[cid].revisions || {}).length;
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+    getOptimizeOptions: (c) => mockApp.getOptimizeOptions(c),
+  });
+  const resPromise = ctrl.optimizeClip(cid);
+  const res = (resPromise && typeof resPromise.then === 'function') ? await resPromise : resPromise;
+  assert(res && res.ok && res.ops === 0, 'PR-5f: optimizeClip(cid) after reload must use stored noop and return ops===0');
+  const head = project.clips[cid];
+  assert(String(head.revisionId || '') === revBefore, 'PR-5f: revisionId unchanged');
+  assert(String(head.parentRevisionId || '') === parentBefore, 'PR-5f: parentRevisionId unchanged');
+  assert(Object.keys(head.revisions || {}).length === revKeysBefore, 'PR-5f: revCount unchanged');
+
+  const resOverride = await (ctrl.optimizeClip(cid, { requestedPresetId: 'dynamics_accent' }));
+  assert(resOverride && resOverride.ok, 'PR-5f: one-shot override optimize should succeed');
+  assert(mockApp.getOptimizePresetForClip(cid) === 'noop', 'PR-5f: stored preset must remain noop after one-shot override');
+
+  console.log('PASS optimize preset persist/reload');
+}
+
 (async () => {
   await testPatchSummarySmoke();
   await testPersistReloadRevchain();
   await testRollbackRevchain();
+  await testOptPresetPersistReload();
 })().catch((e) => {
   console.error(e);
   process.exit(1);

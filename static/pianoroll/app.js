@@ -13,6 +13,7 @@
   };
   const LS_KEY_V1 = 'hum2song_studio_project_v1';
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
+  const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
 
   // --- debug gate (localStorage.h2s_debug === '1') ---
   function _dbgEnabled(){
@@ -484,13 +485,31 @@ setOptimizeOptions(arg0, arg1){
   if (cid) {
     this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
     this._optOptionsByClipId[cid] = normalizedOpts;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const map = _readLS(LS_KEY_OPT_OPTIONS) || {};
+        map[cid] = normalizedOpts;
+        _writeLS(LS_KEY_OPT_OPTIONS, map);
+      } catch (e) { console.warn('[App] persist opt options failed', e); }
+    }
   }
 },
 getOptimizePresetForClip(clipId){
-  return (this._optPresetByClipId && this._optPresetByClipId[clipId] != null) ? this._optPresetByClipId[clipId] : null;
+  const opts = this.getOptimizeOptions(clipId);
+  return (opts && opts.requestedPresetId != null) ? opts.requestedPresetId : null;
 },
 getOptimizeOptions(clipId){
   if (clipId && this._optOptionsByClipId && this._optOptionsByClipId[clipId] != null) return this._optOptionsByClipId[clipId];
+  if (clipId && typeof localStorage !== 'undefined') {
+    try {
+      const map = _readLS(LS_KEY_OPT_OPTIONS);
+      if (map && typeof map === 'object' && map[clipId] != null) {
+        this._optOptionsByClipId[clipId] = map[clipId];
+        this._optPresetByClipId[clipId] = (map[clipId].requestedPresetId != null) ? map[clipId].requestedPresetId : null;
+        return map[clipId];
+      }
+    } catch (e) { console.warn('[App] read opt options failed', e); }
+  }
   return this._lastOptimizeOptions || null;
 },
 
@@ -589,6 +608,20 @@ try{
   }
 }catch(e){
   console.warn('AgentController init failed', e);
+}
+
+// PR-5f: hydrate per-clip optimize options from localStorage (survives hard refresh)
+if (typeof localStorage !== 'undefined') {
+  try {
+    const stored = _readLS(LS_KEY_OPT_OPTIONS);
+    if (stored && typeof stored === 'object') {
+      this._optOptionsByClipId = Object.assign({}, this._optOptionsByClipId, stored);
+      for (const cid of Object.keys(stored)) {
+        const o = stored[cid];
+        this._optPresetByClipId[cid] = (o && o.requestedPresetId != null) ? o.requestedPresetId : null;
+      }
+    }
+  } catch (e) { console.warn('[App] hydrate opt options failed', e); }
 }
 
 // Ensure minimal structure
