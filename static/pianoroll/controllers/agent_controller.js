@@ -19,12 +19,15 @@
     DYNAMICS_ACCENT: 'dynamics_accent',
     DYNAMICS_LEVEL: 'dynamics_level',
     DURATION_GENTLE: 'duration_gentle',
+    /** PR-5b: deterministic no-op for tests; returns empty patch. */
+    NOOP: 'noop',
   };
   /** Allowlist: only these preset IDs may run; unknown → fallback to safe_stub_v0. */
   const SAFE_PRESET_ALLOWLIST = {
     [PRESET_IDS.DYNAMICS_ACCENT]: true,
     [PRESET_IDS.DYNAMICS_LEVEL]: true,
     [PRESET_IDS.DURATION_GENTLE]: true,
+    [PRESET_IDS.NOOP]: true,
   };
 
   function _opsByOp(ops){
@@ -204,6 +207,7 @@
     if (id === PRESET_IDS.DYNAMICS_ACCENT) return _buildPresetDynamicsAccent(clip);
     if (id === PRESET_IDS.DYNAMICS_LEVEL) return _buildPresetDynamicsLevel(clip);
     if (id === PRESET_IDS.DURATION_GENTLE) return _buildPresetDurationGentle(clip);
+    if (id === PRESET_IDS.NOOP) return { patch: { version: 1, clipId: clip && clip.id, ops: [] }, examples: [] };
     return _buildSafeStubPatch(clip);
   }
 

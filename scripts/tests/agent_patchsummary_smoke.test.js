@@ -115,7 +115,7 @@ async function testPatchSummarySmoke(){
   const revInfo = globalThis.H2SProject.listClipRevisions(head);
   assert(revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 2, 'listClipRevisions should show 2+ versions');
 
-  // ops===0: rev/parent must not change.
+  // PR-5b: Deterministic no-op (requestedPresetId: 'noop' returns empty patch).
   const scoreBeatOk = { version: 2, tempo_bpm: 120, time_signature: '4/4', tracks: [{ id: 't0', name: 'ch0', program: 0, channel: 0, notes: [{ id: 'n1', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 0.5 }] }] };
   const clip0 = globalThis.H2SProject.createClipFromScoreBeat(scoreBeatOk, { id: 'clip_ops0', name: 'ops0' });
   project.clips[clip0.id] = clip0;
@@ -123,20 +123,112 @@ async function testPatchSummarySmoke(){
   if (globalThis.H2SProject.normalizeProjectRevisionChains) globalThis.H2SProject.normalizeProjectRevisionChains(project);
   const revBefore0 = String(project.clips[clip0.id].revisionId || '');
   const parentBefore0 = String(project.clips[clip0.id].parentRevisionId || '');
-  const resZeroPromise = ctrl.optimizeClip(clip0.id);
+  const revKeysBefore0 = Object.keys(project.clips[clip0.id].revisions || {}).length;
+
+  let beginNewClipRevisionCalls = 0;
+  let commitV2Calls = 0;
+  const origBegin = globalThis.H2SProject.beginNewClipRevision;
+  globalThis.H2SProject.beginNewClipRevision = function(...args) {
+    beginNewClipRevisionCalls++;
+    return origBegin.apply(this, args);
+  };
+  const ctrlNoop = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+    commitV2: (reason) => { commitV2Calls++; },
+  });
+  const resZeroPromise = ctrlNoop.optimizeClip(clip0.id, { requestedPresetId: 'noop' });
   const resZero = (resZeroPromise && typeof resZeroPromise.then === 'function') ? await resZeroPromise : resZeroPromise;
-  assert(resZero && resZero.ok, 'second optimize should succeed');
+  globalThis.H2SProject.beginNewClipRevision = origBegin;
+
+  assert(resZero && resZero.ok === true, 'no-op optimize should ok');
+  assert(resZero.ops === 0, 'no-op must return ops===0 deterministically');
+  assert(typeof (resZero.patchSummary && resZero.patchSummary.ops) === 'number', 'patchSummary.ops must exist and be number');
+  assert(resZero.patchSummary.ops === 0, 'patchSummary.ops must be 0');
   const head0 = project.clips[clip0.id];
-  if (resZero.ops === 0) {
-    assert(String(head0.revisionId || '') === revBefore0, 'ops=0: revisionId must be unchanged');
-    assert(String(head0.parentRevisionId || '') === parentBefore0, 'ops=0: parentRevisionId must be unchanged');
-  }
+  assert(String(head0.revisionId || '') === revBefore0, 'no-op: revisionId must be unchanged');
+  assert(String(head0.parentRevisionId || '') === parentBefore0, 'no-op: parentRevisionId must be unchanged');
+  assert(Object.keys(head0.revisions || {}).length === revKeysBefore0, 'no-op: revisions key count unchanged');
+  assert(beginNewClipRevisionCalls === 0, 'no-op must not call beginNewClipRevision');
+  assert(commitV2Calls === 0, 'no-op must not call commitV2');
 
   console.log('PASS agent patchSummary smoke');
 }
 
+function assertRevchainConsistent(project, label) {
+  if (!project || !project.clips || typeof project.clips !== 'object') return;
+  for (const cid of Object.keys(project.clips)) {
+    const clip = project.clips[cid];
+    assert(!Array.isArray(clip.revisions), label + ': clip.revisions must not be Array');
+    assert(clip.revisions && typeof clip.revisions === 'object', label + ': clip.revisions must be object');
+    assert(clip.revisionId != null && clip.revisions[clip.revisionId], label + ': clip.revisions[clip.revisionId] must exist');
+    if (clip.parentRevisionId != null && clip.parentRevisionId !== '') {
+      assert(clip.revisions[clip.parentRevisionId], label + ': clip.revisions[parentRevisionId] must exist when parent set');
+    }
+  }
+}
+
+async function testPersistReloadRevchain() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+
+  let project = {
+    version: 2,
+    timebase: 'beat',
+    bpm: 120,
+    tracks: [{ id: 'trk_0', name: 'Track 1', instrument: 'default', gainDb: 0, muted: false, trackId: 'trk_0' }],
+    clips: {},
+    clipOrder: [],
+    instances: [],
+    ui: { pxPerBeat: 120, playheadBeat: 0 },
+  };
+
+  const scoreBeat = {
+    version: 2,
+    tempo_bpm: 120,
+    time_signature: '4/4',
+    tracks: [{ id: 't0', name: 'ch0', program: 0, channel: 0, notes: [{ id: 'n0', pitch: 60, velocity: 90, startBeat: 0, durationBeat: 1 }] }],
+  };
+  const clip = globalThis.H2SProject.createClipFromScoreBeat(scoreBeat, { id: 'clip_reload', name: 'reload' });
+  project.clips[clip.id] = clip;
+  project.clipOrder.push(clip.id);
+  if (globalThis.H2SProject.normalizeProjectRevisionChains) globalThis.H2SProject.normalizeProjectRevisionChains(project);
+
+  assertRevchainConsistent(project, 'after normalize');
+
+  project.clips[clip.id].score.tracks[0].notes[0].pitch = 999;
+  let persistedState = null;
+  const persistFn = () => { persistedState = JSON.parse(JSON.stringify(project)); };
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: persistFn,
+    render: () => {},
+  });
+  const resPromise = ctrl.optimizeClip(clip.id);
+  const res = (resPromise && typeof resPromise.then === 'function') ? await resPromise : resPromise;
+  assert(res && res.ok && res.ops > 0, 'optimize should apply ops');
+  assertRevchainConsistent(project, 'after optimize');
+
+  persistFn();
+  assert(persistedState != null, 'persisted state must be captured');
+
+  const reloaded = JSON.parse(JSON.stringify(persistedState));
+  if (globalThis.H2SProject.normalizeProjectRevisionChains) globalThis.H2SProject.normalizeProjectRevisionChains(reloaded);
+  project = reloaded;
+
+  assertRevchainConsistent(project, 'after reload');
+
+  console.log('PASS persist/reload revchain consistency');
+}
+
 (async () => {
   await testPatchSummarySmoke();
+  await testPersistReloadRevchain();
 })().catch((e) => {
   console.error(e);
   process.exit(1);
