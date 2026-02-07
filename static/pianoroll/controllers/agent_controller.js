@@ -217,8 +217,9 @@
      *  When called with one arg (e.g. from App), options are taken from opts.getOptimizeOptions() or ROOT.__h2s_optimize_options.
      */
     function optimizeClip(clipId, options){
+      const cidForOptions = String(clipId || '');
       if (options === undefined && opts.getOptimizeOptions && typeof opts.getOptimizeOptions === 'function') {
-        options = opts.getOptimizeOptions();
+        options = opts.getOptimizeOptions(cidForOptions);
       }
       if (options === undefined && typeof ROOT !== 'undefined' && ROOT.__h2s_optimize_options !== undefined) {
         options = ROOT.__h2s_optimize_options;

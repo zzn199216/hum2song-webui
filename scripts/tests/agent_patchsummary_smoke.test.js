@@ -154,6 +154,72 @@ async function testPatchSummarySmoke(){
   assert(beginNewClipRevisionCalls === 0, 'no-op must not call beginNewClipRevision');
   assert(commitV2Calls === 0, 'no-op must not call commitV2');
 
+  // PR-5c: setOptimizeOptions order-agnostic; getOptimizeOptions(clipId) flows to optimizeClip; noop preset => ops===0
+  const mockApp = {
+    _optPresetByClipId: {},
+    _optOptionsByClipId: {},
+    _lastOptimizeOptions: null,
+    setOptimizeOptions(arg0, arg1) {
+      let cid = null;
+      let opts = null;
+      if (typeof arg0 === 'string') {
+        cid = arg0;
+        opts = (arg1 && typeof arg1 === 'object') ? arg1 : null;
+      } else if (typeof arg1 === 'string') {
+        cid = arg1;
+        opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+      } else {
+        opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+      }
+      const preset = opts && (opts.requestedPresetId != null ? opts.requestedPresetId : opts.presetId != null ? opts.presetId : opts.preset);
+      const normalizedOpts = opts ? { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: opts.userPrompt != null ? opts.userPrompt : null } : null;
+      this._lastOptimizeOptions = normalizedOpts;
+      if (cid) {
+        this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
+        this._optOptionsByClipId[cid] = normalizedOpts;
+      }
+    },
+    getOptimizePresetForClip(clipId) {
+      return (this._optPresetByClipId && this._optPresetByClipId[clipId] != null) ? this._optPresetByClipId[clipId] : null;
+    },
+    getOptimizeOptions(clipId) {
+      if (clipId && this._optOptionsByClipId && this._optOptionsByClipId[clipId] != null) return this._optOptionsByClipId[clipId];
+      return this._lastOptimizeOptions || null;
+    },
+  };
+  const ctrlApp = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+    getOptimizeOptions: (cid) => mockApp.getOptimizeOptions(cid),
+  });
+  const cid5c = clip0.id;
+
+  mockApp._optPresetByClipId = {};
+  mockApp._optOptionsByClipId = {};
+  mockApp._lastOptimizeOptions = null;
+  mockApp.setOptimizeOptions(cid5c, { requestedPresetId: 'noop' });
+  assert(mockApp.getOptimizePresetForClip(cid5c) === 'noop', 'PR-5c: setOptimizeOptions(cid, options) must set preset');
+
+  mockApp._optPresetByClipId = {};
+  mockApp._optOptionsByClipId = {};
+  mockApp._lastOptimizeOptions = null;
+  mockApp.setOptimizeOptions({ requestedPresetId: 'noop' }, cid5c);
+  assert(mockApp.getOptimizePresetForClip(cid5c) === 'noop', 'PR-5c: setOptimizeOptions(options, cid) must set preset');
+
+  mockApp.setOptimizeOptions({ requestedPresetId: 'noop' }, cid5c);
+  const revBefore5c = String(project.clips[cid5c].revisionId || '');
+  const parentBefore5c = String(project.clips[cid5c].parentRevisionId || '');
+  const revKeysBefore5c = Object.keys(project.clips[cid5c].revisions || {}).length;
+  const res5cPromise = ctrlApp.optimizeClip(cid5c);
+  const res5c = (res5cPromise && typeof res5cPromise.then === 'function') ? await res5cPromise : res5cPromise;
+  assert(res5c && res5c.ok === true && res5c.ops === 0, 'PR-5c: optimizeClip(cid) must use stored noop preset and return ops===0');
+  const head5c = project.clips[cid5c];
+  assert(String(head5c.revisionId || '') === revBefore5c, 'PR-5c: revisionId unchanged after optimizeClip with noop');
+  assert(String(head5c.parentRevisionId || '') === parentBefore5c, 'PR-5c: parentRevisionId unchanged');
+  assert(Object.keys(head5c.revisions || {}).length === revKeysBefore5c, 'PR-5c: revCount unchanged');
+
   console.log('PASS agent patchSummary smoke');
 }
 

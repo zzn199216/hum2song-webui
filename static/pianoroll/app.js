@@ -335,6 +335,7 @@ try{
     _projectV2: null,
     _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
     _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
+    _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
     // debug helper (gated by localStorage.h2s_debug === '1')
     dbg: function(){ return dbg.apply(null, arguments); },
 
@@ -464,15 +465,33 @@ setTrackMuted(trackId, muted){
 
 
 
-setOptimizeOptions(options, clipId){
-  // PR-3: Set app-level state for optimize options (used by agent controller via getOptimizeOptions)
-  this._lastOptimizeOptions = (options && typeof options === 'object') ? options : null;
-  if (clipId && options && options.requestedPresetId != null) {
-    this._optPresetByClipId[clipId] = options.requestedPresetId || null;
+// PR-5c: order-agnostic (cid, options) or (options, cid); normalize requestedPresetId / presetId / preset
+setOptimizeOptions(arg0, arg1){
+  let cid = null;
+  let opts = null;
+  if (typeof arg0 === 'string') {
+    cid = arg0;
+    opts = (arg1 && typeof arg1 === 'object') ? arg1 : null;
+  } else if (typeof arg1 === 'string') {
+    cid = arg1;
+    opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+  } else {
+    opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+  }
+  const preset = opts && (opts.requestedPresetId != null ? opts.requestedPresetId : opts.presetId != null ? opts.presetId : opts.preset);
+  const normalizedOpts = opts ? { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: opts.userPrompt != null ? opts.userPrompt : null } : null;
+  this._lastOptimizeOptions = normalizedOpts;
+  if (cid) {
+    this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
+    this._optOptionsByClipId[cid] = normalizedOpts;
   }
 },
 getOptimizePresetForClip(clipId){
   return (this._optPresetByClipId && this._optPresetByClipId[clipId] != null) ? this._optPresetByClipId[clipId] : null;
+},
+getOptimizeOptions(clipId){
+  if (clipId && this._optOptionsByClipId && this._optOptionsByClipId[clipId] != null) return this._optOptionsByClipId[clipId];
+  return this._lastOptimizeOptions || null;
 },
 
 async optimizeClip(clipId){
@@ -553,14 +572,14 @@ try{
   const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
   if (ROOT.H2SAgentController && typeof ROOT.H2SAgentController.create === 'function'){
     // AgentController expects v2 hooks + persist/render callbacks
-    // PR-3: Pass getOptimizeOptions so agent controller can read lastOptimizeOptions
+    // PR-3/PR-5c: Pass getOptimizeOptions(clipId) so agent controller gets per-clip preset
     this.agentCtrl = ROOT.H2SAgentController.create({
       app: this,
       getProjectV2: () => this.getProjectV2(),
       setProjectFromV2: (p2) => this.setProjectFromV2(p2),
       persist: () => persist(),
       render: () => this.render(),
-      getOptimizeOptions: () => this._lastOptimizeOptions || null,
+      getOptimizeOptions: (clipId) => this.getOptimizeOptions(clipId),
     });
   }
 }catch(e){
