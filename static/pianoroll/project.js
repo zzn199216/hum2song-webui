@@ -489,12 +489,15 @@
   function recomputeClipMetaFromScoreBeat(clip){
     if (!clip) return clip;
     const st = recomputeScoreBeatStats(clip.score);
+    const oldMeta = clip.meta;
     if (!clip.meta) clip.meta = {};
     // FROZEN: these are derived fields and must be consistent with score.
     clip.meta.notes = st.count;
     clip.meta.pitchMin = st.pitchMin;
     clip.meta.pitchMax = st.pitchMax;
     clip.meta.spanBeat = st.spanBeat;
+    // Preserve meta.agent (e.g. patchSummary) so optimize results persist.
+    if (oldMeta && oldMeta.agent) clip.meta.agent = oldMeta.agent;
     return clip;
   }
 
@@ -1095,6 +1098,8 @@ function beginNewClipRevision(project, clipId, opts){
       recomputeClipMetaFromScoreBeat(clip2);
       // restore non-derived meta field
       clip2.meta.sourceTempoBpm = sourceTempoBpm;
+      // Preserve meta.agent (e.g. patchSummary) when re-building v2 from v1 view (persist path).
+      if (c.meta && c.meta.agent) clip2.meta.agent = c.meta.agent;
 
       clips[clip2.id] = clip2;
       clipOrder.push(clip2.id);

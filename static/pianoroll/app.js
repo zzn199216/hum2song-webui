@@ -318,6 +318,8 @@ try{
   const app = {
     project: null,
     _projectV2: null,
+    _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
+    _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
     // debug helper (gated by localStorage.h2s_debug === '1')
     dbg: function(){ return dbg.apply(null, arguments); },
 
@@ -444,12 +446,24 @@ setTrackMuted(trackId, muted){
 
 
 
+setOptimizeOptions(options, clipId){
+  // PR-3: Set app-level state for optimize options (used by agent controller via getOptimizeOptions)
+  this._lastOptimizeOptions = (options && typeof options === 'object') ? options : null;
+  if (clipId && options && options.requestedPresetId != null) {
+    this._optPresetByClipId[clipId] = options.requestedPresetId || null;
+  }
+},
+getOptimizePresetForClip(clipId){
+  return (this._optPresetByClipId && this._optPresetByClipId[clipId] != null) ? this._optPresetByClipId[clipId] : null;
+},
+
 async optimizeClip(clipId){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
     console.warn('[App] optimizeClip called but agent controller is not available');
     try{ alert('Optimize unavailable: agent controller not initialized. Check console for details.'); }catch(_){}
     return {ok:false, error:'no_agent_controller'};
   }
+  // PR-3: agent controller reads options via getOptimizeOptions() callback
   return await this.agentCtrl.optimizeClip(clipId);
 },
 
@@ -510,12 +524,14 @@ try{
   const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
   if (ROOT.H2SAgentController && typeof ROOT.H2SAgentController.create === 'function'){
     // AgentController expects v2 hooks + persist/render callbacks
+    // PR-3: Pass getOptimizeOptions so agent controller can read lastOptimizeOptions
     this.agentCtrl = ROOT.H2SAgentController.create({
       app: this,
       getProjectV2: () => this.getProjectV2(),
       setProjectFromV2: (p2) => this.setProjectFromV2(p2),
       persist: () => persist(),
       render: () => this.render(),
+      getOptimizeOptions: () => this._lastOptimizeOptions || null,
     });
   }
 }catch(e){

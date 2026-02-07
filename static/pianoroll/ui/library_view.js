@@ -71,13 +71,14 @@
     }
   }
 
-function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo){
+function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset){
     clip = clip || {};
     stats = stats || {};
     fmtSec = (typeof fmtSec === 'function') ? fmtSec : _defaultFmtSec;
     escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
 
     const id = escapeHtml(clip.id || '');
+    const presetVal = (selectedPreset != null && selectedPreset !== '') ? String(selectedPreset) : '';
     const name = escapeHtml(clip.name || 'Untitled');
     const notes = Number(stats.count ?? stats.notes ?? 0) || 0;
     const spanSec = Number(stats.spanSec ?? 0) || 0;
@@ -174,6 +175,30 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo){
 
           const when = _fmtTs(agent.appliedAt);
 
+          // PR-3: Display executedPreset, ops, reason from patchSummary (compute BEFORE using in template)
+          let presetBadge = '';
+          let reasonBadge = '';
+          try{
+            if (agent.patchSummary && typeof agent.patchSummary === 'object'){
+              const ps = agent.patchSummary;
+              const execPreset = ps.executedPreset || ps.preset || '';
+              if (execPreset && execPreset !== 'pseudo_v0'){
+                presetBadge = `Preset: ${escapeHtml(execPreset)}`;
+              }
+              const reason = ps.reason;
+              if (reason && reason !== 'empty_ops' && reason !== 'ok'){
+                reasonBadge = `reason: ${escapeHtml(String(reason))}`;
+              }
+            }
+          }catch(_){ /* ignore */ }
+          
+          const badgeParts = [
+            presetBadge,
+            `ops: ${ops}`,
+            reasonBadge
+          ].filter(Boolean);
+          const badgeText = badgeParts.length > 0 ? ` | ${badgeParts.join(' | ')}` : '';
+
           let detailHtml = '';
           try{
             if (agent.patchSummary && typeof agent.patchSummary === 'object'){
@@ -187,11 +212,11 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo){
                 `</details>`;
             }
           }catch(_){ /* ignore */ }
-
+          
           optStatusHtml =
             `<div class="clip-opt-status" data-role="optStatus" data-id="${id}" ` +
             `style="margin-top:6px; font-size:12px; opacity:0.75;">` +
-            `Optimize: ${escapeHtml(msg)}` +
+            `Optimize: ${escapeHtml(msg)}${badgeText}` +
             (when ? ` · ${escapeHtml(when)}` : ``) +
             `</div>` +
             detailHtml;
@@ -206,10 +231,17 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo){
         `<div class="clip-title">${name}</div>` +
         `<div class="clip-sub">${notes} notes · ${fmtSec(spanSec)}</div>` +
         revLine +
-        `<div class="clip-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">` +
+        `<div class="clip-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">` +
           `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
           `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
-          `<button class="btn" data-act="edit" data-id="${id}">Edit</button><button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
+          `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
+          `<select data-act="optimizePreset" data-id="${id}" style="padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit;">` +
+            `<option value=""${presetVal === '' ? ' selected' : ''}>Default</option>` +
+            `<option value="dynamics_accent"${presetVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
+            `<option value="dynamics_level"${presetVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
+            `<option value="duration_gentle"${presetVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
+          `</select>` +
+          `<button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
           `<button class="btn" data-act="remove" data-id="${id}">Remove</button>` +
         `</div>` +
         optStatusHtml +
