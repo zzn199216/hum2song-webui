@@ -37,6 +37,21 @@
       const fmtSec = opts.fmtSec || function(x){ return String(x); };
       const escapeHtml = opts.escapeHtml || function(s){ return String(s||''); };
 
+      // PR-4: Build Optimize status line from clip.meta.agent.patchSummary (Node-safe, no DOM).
+      function _editorOptStatusText(agent){
+        if (!agent || typeof agent !== 'object') return '';
+        const ps = agent.patchSummary;
+        if (!ps || typeof ps !== 'object') return '';
+        const execPreset = ps.executedPreset || ps.preset || '';
+        const ops = Number(ps.ops);
+        const reason = ps.reason;
+        const parts = [];
+        if (execPreset && execPreset !== 'pseudo_v0') parts.push('Preset: ' + String(execPreset));
+        parts.push('ops: ' + (Number.isFinite(ops) ? ops : 0));
+        if (reason && reason !== 'empty_ops' && reason !== 'ok') parts.push('reason: ' + String(reason));
+        return parts.length ? parts.join(' | ') : '';
+      }
+
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
       // may be out of scope, causing a runtime ReferenceError and resulting in a blank
@@ -325,6 +340,20 @@
         }
       }catch(e){}
 
+      // PR-4: Editor Optimize UI — preset dropdown and status line
+      try{
+        if (typeof document !== 'undefined' && $){
+          const app = (root && root.H2SApp) ? root.H2SApp : null;
+          const sel = $('#editorOptimizePreset');
+          if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
+            const preset = app.getOptimizePresetForClip(clipId);
+            sel.value = (preset != null && preset !== '') ? String(preset) : '';
+          }
+          const statusEl = $('#editorOptStatus');
+          if (statusEl) statusEl.textContent = _editorOptStatusText(clip.meta && clip.meta.agent) || '';
+        }
+      }catch(e){}
+
       // Remember source timebase for save boundary.
       this.state.modal._sourceClipWasBeat = !!clipScoreIsBeat;
       this.state.modal._projectWantsBeat = !!projectWantsBeat;
@@ -592,6 +621,25 @@
       $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
     },
 
+    // PR-4: Update Editor Optimize preset dropdown and status from current clip (e.g. after Optimize).
+    modalUpdateEditorOptimizeUI(){
+      if (typeof document === 'undefined' || !$) return;
+      const clipId = this.state.modal && this.state.modal.clipId;
+      if (!clipId) return;
+      const app = (root && root.H2SApp) ? root.H2SApp : null;
+      const p2 = getProjectV2 && getProjectV2();
+      const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+      try{
+        const sel = $('#editorOptimizePreset');
+        if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
+          const preset = app.getOptimizePresetForClip(clipId);
+          sel.value = (preset != null && preset !== '') ? String(preset) : '';
+        }
+        const statusEl = $('#editorOptStatus');
+        if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
+      }catch(e){}
+    },
+
     modalRequestDraw(){
       // coalesce draws
       if (this.state.modal.raf) return;
@@ -843,6 +891,58 @@
         }
         btnDelete.removeEventListener('click', H.onDeleteClick, true);
         btnDelete.addEventListener('click', H.onDeleteClick, true);
+      }
+
+      // PR-4: Click Optimize — set options from dropdown, run optimize, then refresh status
+      const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
+      if (btnOptimize){
+        if (!H.onOptimizeClick){
+          H.onOptimizeClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.optimizeClip !== 'function') return;
+              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
+              Promise.resolve(app.optimizeClip(clipId)).then(function(){
+                try{ rt.modalUpdateEditorOptimizeUI(); }catch(e){}
+                const p2 = getProjectV2 && getProjectV2();
+                const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
+                if (el && clip && clip.meta && clip.meta.agent){
+                  if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
+                  else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
+                }
+              }).catch(function(){});
+            }catch(e){}
+          };
+        }
+        btnOptimize.removeEventListener('click', H.onOptimizeClick, true);
+        btnOptimize.addEventListener('click', H.onOptimizeClick, true);
+      }
+
+      // PR-4: Preset dropdown change — store selection per clip so it persists
+      const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+      if (selPreset){
+        if (!H.onPresetChange){
+          H.onPresetChange = (ev) => {
+            try{
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              const val = (ev.target && ev.target.value) ? String(ev.target.value).trim() : null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: null }, clipId);
+            }catch(e){}
+          };
+        }
+        selPreset.removeEventListener('change', H.onPresetChange);
+        selPreset.addEventListener('change', H.onPresetChange);
       }
 
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.
