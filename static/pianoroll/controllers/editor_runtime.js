@@ -52,6 +52,13 @@
         return parts.length ? parts.join(' | ') : '';
       }
 
+      // PR-5: Short revision id for UI (Node-safe, no DOM).
+      function _shortRev(rid){
+        if (rid == null || rid === '') return '-';
+        const s = String(rid);
+        return s.length > 6 ? s.slice(-6) : s;
+      }
+
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
       // may be out of scope, causing a runtime ReferenceError and resulting in a blank
@@ -354,6 +361,23 @@
         }
       }catch(e){}
 
+      // PR-5: Editor revision UI — Rev/Parent labels and Undo Optimize button state
+      try{
+        if (typeof document !== 'undefined' && $){
+          const revEl = $('#editorRevId');
+          const parentEl = $('#editorParentRevId');
+          const undoStatusEl = $('#editorUndoStatus');
+          const undoBtn = $('#btnEditorUndoOptimize');
+          if (revEl) revEl.textContent = _shortRev(clip.revisionId);
+          if (parentEl) parentEl.textContent = _shortRev(clip.parentRevisionId);
+          const canUndo = !!(clip.parentRevisionId && String(clip.parentRevisionId).trim());
+          if (undoBtn){
+            undoBtn.disabled = !canUndo;
+          }
+          if (undoStatusEl) undoStatusEl.textContent = canUndo ? '' : 'No previous revision';
+        }
+      }catch(e){}
+
       // Remember source timebase for save boundary.
       this.state.modal._sourceClipWasBeat = !!clipScoreIsBeat;
       this.state.modal._projectWantsBeat = !!projectWantsBeat;
@@ -637,6 +661,54 @@
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
+      }catch(e){}
+    },
+
+    // PR-5: Update Rev/Parent labels and Undo Optimize button from current clip.
+    modalUpdateEditorRevisionUI(){
+      if (typeof document === 'undefined' || !$) return;
+      const clipId = this.state.modal && this.state.modal.clipId;
+      if (!clipId) return;
+      const p2 = getProjectV2 && getProjectV2();
+      const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+      if (!clip) return;
+      try{
+        const revEl = $('#editorRevId');
+        const parentEl = $('#editorParentRevId');
+        const undoStatusEl = $('#editorUndoStatus');
+        const undoBtn = $('#btnEditorUndoOptimize');
+        if (revEl) revEl.textContent = _shortRev(clip.revisionId);
+        if (parentEl) parentEl.textContent = _shortRev(clip.parentRevisionId);
+        const canUndo = !!(clip.parentRevisionId && String(clip.parentRevisionId).trim());
+        if (undoBtn) undoBtn.disabled = !canUndo;
+        if (undoStatusEl) undoStatusEl.textContent = canUndo ? '' : 'No previous revision';
+      }catch(e){}
+    },
+
+    // PR-5: Reload editor draft from current clip (e.g. after rollback); redraw and update revision/optimize UI.
+    modalRefreshDraftFromClip(){
+      if (typeof document === 'undefined' || !$) return;
+      const clipId = this.state.modal && this.state.modal.clipId;
+      if (!clipId) return;
+      const p2 = getProjectV2 && getProjectV2();
+      const bpm = (p2 && p2.bpm) ? p2.bpm : (this.project && this.project.bpm) ? this.project.bpm : 120;
+      const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+      if (!clip || !clip.score) return;
+      try{
+        let draftSec;
+        if (_isBeatScore(clip.score)){
+          try { draftSec = _scoreBeatToSec(clip.score, bpm); } catch(e){ draftSec = H2SProject.deepClone(clip.score); }
+        } else {
+          draftSec = H2SProject.deepClone(clip.score);
+        }
+        this.state.modal.draftScore = H2SProject.deepClone(draftSec);
+        this.state.modal.savedScore = H2SProject.deepClone(draftSec);
+        this.modalUpdateRightPanel();
+        this.modalResizeCanvasToContent();
+        this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+        this.modalRequestDraw();
+        this.modalUpdateEditorOptimizeUI();
+        this.modalUpdateEditorRevisionUI();
       }catch(e){}
     },
 
@@ -943,6 +1015,28 @@
         }
         selPreset.removeEventListener('change', H.onPresetChange);
         selPreset.addEventListener('change', H.onPresetChange);
+      }
+
+      // PR-5: Undo Optimize — rollback to parent revision, then refresh editor
+      const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
+      if (btnUndo){
+        if (!H.onUndoClick){
+          H.onUndoClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.rollbackClipRevision !== 'function') return;
+              const res = app.rollbackClipRevision(clipId);
+              if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
+            }catch(e){}
+          };
+        }
+        btnUndo.removeEventListener('click', H.onUndoClick, true);
+        btnUndo.addEventListener('click', H.onUndoClick, true);
       }
 
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.

@@ -73,6 +73,7 @@ async function testPatchSummarySmoke(){
   const clip = globalThis.H2SProject.createClipFromScoreBeat(scoreBeat, { id:'clip_smoke', name:'smoke' });
   project.clips[clip.id] = clip;
   project.clipOrder.push(clip.id);
+  if (globalThis.H2SProject.normalizeProjectRevisionChains) globalThis.H2SProject.normalizeProjectRevisionChains(project);
 
   const ctrl = AgentController.create({
     getProjectV2: () => project,
@@ -101,13 +102,35 @@ async function testPatchSummarySmoke(){
   assert(head.meta.agent.patchOps === 1, 'patchOps should be 1');
   assert(head.meta.agent.patchSummary && head.meta.agent.patchSummary.ops === 1, 'patchSummary.ops should be 1');
 
-  // Revision chain should reference previous head (either via parentRevisionId or history list).
+  // PR-5 semantic: after Optimize, parentRevisionId MUST equal the previous active revisionId (so Undo works).
   const parent = String(head.parentRevisionId || '');
-  const histHasPrev = (head.revisions || []).some(r => String(r.revisionId || '') === prevRev);
-  assert(parent === prevRev || histHasPrev, 'revision chain should reference previous head');
+  assert(parent === prevRev, 'parentRevisionId must equal previous revisionId (parentMatchesRev0)');
+
+  // Revisions must be object map (not Array); no dangling refs.
+  assert(!Array.isArray(head.revisions), 'clip.revisions must not be Array');
+  assert(head.revisions && typeof head.revisions === 'object', 'clip.revisions must be object');
+  assert(head.revisions[head.revisionId], 'clip.revisions[clip.revisionId] must exist');
+  if (head.parentRevisionId != null && head.parentRevisionId !== '') assert(head.revisions[head.parentRevisionId], 'clip.revisions[parentRevisionId] must exist when parent set');
 
   const revInfo = globalThis.H2SProject.listClipRevisions(head);
   assert(revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 2, 'listClipRevisions should show 2+ versions');
+
+  // ops===0: rev/parent must not change.
+  const scoreBeatOk = { version: 2, tempo_bpm: 120, time_signature: '4/4', tracks: [{ id: 't0', name: 'ch0', program: 0, channel: 0, notes: [{ id: 'n1', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 0.5 }] }] };
+  const clip0 = globalThis.H2SProject.createClipFromScoreBeat(scoreBeatOk, { id: 'clip_ops0', name: 'ops0' });
+  project.clips[clip0.id] = clip0;
+  project.clipOrder.push(clip0.id);
+  if (globalThis.H2SProject.normalizeProjectRevisionChains) globalThis.H2SProject.normalizeProjectRevisionChains(project);
+  const revBefore0 = String(project.clips[clip0.id].revisionId || '');
+  const parentBefore0 = String(project.clips[clip0.id].parentRevisionId || '');
+  const resZeroPromise = ctrl.optimizeClip(clip0.id);
+  const resZero = (resZeroPromise && typeof resZeroPromise.then === 'function') ? await resZeroPromise : resZeroPromise;
+  assert(resZero && resZero.ok, 'second optimize should succeed');
+  const head0 = project.clips[clip0.id];
+  if (resZero.ops === 0) {
+    assert(String(head0.revisionId || '') === revBefore0, 'ops=0: revisionId must be unchanged');
+    assert(String(head0.parentRevisionId || '') === parentBefore0, 'ops=0: parentRevisionId must be unchanged');
+  }
 
   console.log('PASS agent patchSummary smoke');
 }

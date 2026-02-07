@@ -283,6 +283,21 @@ try{
       if (typeof t.muted !== 'boolean') t.muted = false;
     }
   }
+  // Preserve clip revision chain (revisionId, parentRevisionId, revisions) so Undo Optimize works.
+  if (prevV2 && prevV2.clips && typeof prevV2.clips === 'object' && p2.clips && typeof p2.clips === 'object'){
+    for (const cid of Object.keys(p2.clips)){
+      const prevClip = prevV2.clips[cid];
+      if (!prevClip) continue;
+      const dst = p2.clips[cid];
+      if (dst && prevClip.revisionId != null) dst.revisionId = prevClip.revisionId;
+      if (dst && prevClip.parentRevisionId !== undefined) dst.parentRevisionId = prevClip.parentRevisionId;
+      if (dst && prevClip.revisions != null) dst.revisions = prevClip.revisions;
+      if (dst && prevClip.updatedAt != null) dst.updatedAt = prevClip.updatedAt;
+    }
+  }
+  if (typeof window !== 'undefined' && window.H2SProject && typeof window.H2SProject.normalizeProjectRevisionChains === 'function'){
+    window.H2SProject.normalizeProjectRevisionChains(p2);
+  }
 } catch(e){
       console.warn('[persist] v2 merge failed', e);
     }
@@ -377,6 +392,9 @@ getProjectV2(){
 setProjectFromV2(projectV2){
   // Persist v2 beats-only doc, then refresh derived v1 view for UI/controllers.
   if (!projectV2) return {ok:false, error:'no_project_v2'};
+  if (typeof window !== 'undefined' && window.H2SProject && typeof window.H2SProject.normalizeProjectRevisionChains === 'function'){
+    window.H2SProject.normalizeProjectRevisionChains(projectV2);
+  }
   // Normalize legacy track schema on write.
   if (Array.isArray(projectV2.tracks)) {
     for (const t of projectV2.tracks) {
@@ -465,6 +483,17 @@ async optimizeClip(clipId){
   }
   // PR-3: agent controller reads options via getOptimizeOptions() callback
   return await this.agentCtrl.optimizeClip(clipId);
+},
+
+// PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
+rollbackClipRevision(clipId){
+  const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+  if (!P || typeof P.rollbackClipRevision !== 'function') return { ok: false, reason: 'no_rollback' };
+  const p2 = this.getProjectV2();
+  if (!p2 || !p2.clips || !p2.clips[clipId]) return { ok: false, reason: 'clip_not_found' };
+  const res = P.rollbackClipRevision(p2, clipId);
+  if (res && res.ok && res.changed) this.setProjectFromV2(p2);
+  return res || { ok: false, reason: 'rollback_failed' };
 },
 
     state: {
