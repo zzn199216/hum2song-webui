@@ -937,6 +937,35 @@
         return null;
       };
 
+      // PR-6d: disable/enable all optimize controls during async action; null-safe
+      const setOptimizeControlsDisabled = (disabled) => {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return;
+        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt'];
+        for (const id of ids) {
+          const el = doc.getElementById(id);
+          if (!el) continue;
+          if (id === 'editorOptimizePrompt') el.readOnly = !!disabled;
+          else el.disabled = !!disabled;
+        }
+      };
+      const setEditorOptStatus = (text) => {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return;
+        const el = doc.getElementById('editorOptStatus');
+        if (el) el.textContent = text || '';
+      };
+      const statusFromResult = (res, clip) => {
+        if (!res) return '';
+        if (res.ok) {
+          const ps = clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary;
+          const preset = (ps && (ps.executedPreset || ps.executedSource)) ? String(ps.executedPreset || ps.executedSource) : '';
+          const promptSrc = (ps && ps.executedUserPromptSource) ? String(ps.executedUserPromptSource) : 'default';
+          return 'ok, ops=' + (res.ops ?? 0) + ' (preset=' + preset + ', prompt=' + promptSrc + ')';
+        }
+        return 'failed: ' + (res.reason || 'unknown');
+      };
+
       const btnInsert = getBtn(['btnInsertNote','insertNoteBtn','btnInsertNoteBtn']);
       const btnDelete = getBtn(['btnDeleteNote','btnDeleteNoteBtn','deleteNoteBtn']);
 
@@ -977,7 +1006,7 @@
         btnDelete.addEventListener('click', H.onDeleteClick, true);
       }
 
-      // PR-4/PR-6b: Click Optimize — read preset + prompt from UI, persist, run optimize (no override), show result, best-effort auto-play once
+      // PR-4/PR-6b/PR-6d: Click Optimize — read preset + prompt, persist, run (no override), show result, disable during run
       const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
       if (btnOptimize){
         if (!H.onOptimizeClick){
@@ -996,19 +1025,20 @@
               const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
               const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
               if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              setEditorOptStatus('running...');
+              setOptimizeControlsDisabled(true);
               Promise.resolve(app.optimizeClip(clipId)).then(function(res){
                 try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
-                const statusEl = (typeof document !== 'undefined') ? document.getElementById('editorOptStatus') : null;
-                if (statusEl && res && typeof res.ok !== 'undefined') statusEl.textContent = res.ok ? ('ok, ops=' + (res.ops ?? 0)) : (res.reason || 'failed');
+                setEditorOptStatus(statusFromResult(res, clip));
                 const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
                 if (el && clip && clip.meta && clip.meta.agent){
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
                 if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
-              }).catch(function(){});
+              }).catch(function(err){ setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error')); }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };
         }
@@ -1038,7 +1068,7 @@
         selPreset.addEventListener('change', H.onPresetChange);
       }
 
-      // PR-5/PR-6b: Undo Optimize (Rollback) — rollback to parent revision, refresh editor and revision/optimize UI
+      // PR-5/PR-6b/PR-6d: Undo Optimize (Rollback) — disable during run, refresh UI, status
       const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
       if (btnUndo){
         if (!H.onUndoClick){
@@ -1051,17 +1081,23 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.rollbackClipRevision !== 'function') return;
-              const res = app.rollbackClipRevision(clipId);
-              if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
-              else if (res && !res.ok) { try{ const statusEl = document.getElementById('editorOptStatus'); if (statusEl) statusEl.textContent = res.reason || 'Rollback failed'; }catch(e){} }
-            }catch(e){}
+              setEditorOptStatus('running...');
+              setOptimizeControlsDisabled(true);
+              try {
+                const res = app.rollbackClipRevision(clipId);
+                setEditorOptStatus(res && res.ok ? 'ok (rollback)' : ('failed: ' + (res && res.reason ? res.reason : 'Rollback failed')));
+                if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
+              } finally {
+                setOptimizeControlsDisabled(false);
+              }
+            }catch(e){ setEditorOptStatus('failed: ' + (e && e.message ? e.message : 'error')); setOptimizeControlsDisabled(false); }
           };
         }
         btnUndo.removeEventListener('click', H.onUndoClick, true);
         btnUndo.addEventListener('click', H.onUndoClick, true);
       }
 
-      // PR-6b: Regenerate — one-shot override (does not overwrite stored options)
+      // PR-6b/PR-6d: Regenerate — one-shot override, disable during run, status from patchSummary
       const btnRegenerate = (typeof document !== 'undefined') ? document.getElementById('btnEditorRegenerateOptimize') : null;
       if (btnRegenerate){
         if (!H.onRegenerateClick){
@@ -1079,11 +1115,14 @@
               const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
               const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
               const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              setEditorOptStatus('running...');
+              setOptimizeControlsDisabled(true);
               Promise.resolve(app.optimizeClip(clipId, { requestedPresetId: presetId || null, userPrompt: promptVal })).then(function(res){
                 try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
-                const statusEl = document.getElementById('editorOptStatus');
-                if (statusEl && res && typeof res.ok !== 'undefined') statusEl.textContent = res.ok ? ('ok, ops=' + (res.ops ?? 0)) : (res.reason || 'failed');
-              }).catch(function(){});
+                const p2 = getProjectV2 && getProjectV2();
+                const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                setEditorOptStatus(statusFromResult(res, clip));
+              }).catch(function(err){ setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error')); }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };
         }
