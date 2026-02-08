@@ -569,6 +569,14 @@
             </select>
             <span class="pill">Pitch view</span>
             <input id="rngPitchCenter" type="range" min="0" max="127" value="60" style="width:160px;" />
+            <span class="pill" style="margin-left:8px;">Preset</span>
+            <select id="editorOptimizePreset" class="btn" style="padding:6px 8px; font-size:13px;">
+              <option value="">Default</option>
+              <option value="dynamics_accent">Dynamics Accent</option>
+              <option value="dynamics_level">Dynamics Level</option>
+              <option value="duration_gentle">Duration Gentle</option>
+            </select>
+            <button id="btnEditorOptimize" class="btn" type="button">Optimize</button>
           </div>
           <div id="canvasWrap" class="editorCanvasWrap">
             <canvas id="canvas" width="1400" height="540"></canvas>
@@ -589,6 +597,13 @@
             </div>
           </div>
           <div class="hr"></div>
+          <div class="help" style="font-size:12px; opacity:0.85; margin-bottom:4px;">
+            <span>Rev: <span id="editorRevId">-</span></span>
+            <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
+          </div>
+          <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-bottom:4px;">Undo Optimize</button>
+          <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-bottom:4px;"></div>
+          <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
           <div class="help" id="editorStatus">Ready.</div>
         </div>
       </div>

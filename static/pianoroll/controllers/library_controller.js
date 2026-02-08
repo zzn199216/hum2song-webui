@@ -124,11 +124,14 @@
         rootEl.innerHTML = view.emptyMessage();
         return;
       }
+      const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
+      const getPresetForClip = (app && typeof app.getOptimizePresetForClip === 'function') ? app.getOptimizePresetForClip.bind(app) : null;
       let html = '';
       for (const clip of clips){
         const stats = _clipStats(project, clip);
         const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
-        html += view.clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo);
+        const selectedPreset = getPresetForClip ? getPresetForClip(clip.id) : null;
+        html += view.clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset);
       }
       rootEl.innerHTML = html;
     }
@@ -172,6 +175,18 @@
         // optimize clicks even if a fallback listener is added later.
         // This also prevents double-handling (e.g. App fallback + controller).
         try{ e.preventDefault(); e.stopPropagation(); }catch(_){ /* ignore */ }
+        
+        // PR-3: Read preset from card (robust: .clip-card then single [data-act="optimizePreset"])
+        const cardEl = (e.target && e.target.closest) ? e.target.closest('.clip-card') : null;
+        const presetSel = cardEl ? cardEl.querySelector('[data-act="optimizePreset"]') : null;
+        const presetId = (presetSel && presetSel.value) ? String(presetSel.value).trim() : null;
+        if (app && typeof app.setOptimizeOptions === 'function'){
+          app.setOptimizeOptions({
+            requestedPresetId: presetId || null,
+            userPrompt: null,
+          }, clipId);
+        }
+        
         const fn = (app && typeof app.optimizeClip === 'function') ? app.optimizeClip : null;
         if (!fn){
           console.warn('[LibraryController] optimize requested but app.optimizeClip is not available');
@@ -256,10 +271,22 @@
     }
 
     function _handleChange(e){
-      // On revision select change, immediately activate the chosen revision (v2-only when available).
       const el = e.target;
       if (!el || !el.getAttribute) return;
       const act = el.getAttribute('data-act');
+
+      // PR-3: Preset dropdown change — store per-clip so dropdown persists and Optimize uses it
+      if (act === 'optimizePreset'){
+        const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
+        const presetId = (el.value && String(el.value).trim()) || null;
+        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
+        if (clipId && app && typeof app.setOptimizeOptions === 'function'){
+          app.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, clipId);
+        }
+        return;
+      }
+
+      // On revision select change, immediately activate the chosen revision (v2-only when available).
       if (act === 'revSelect'){
         const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
         const revId = el.value;

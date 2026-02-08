@@ -489,19 +489,22 @@
   function recomputeClipMetaFromScoreBeat(clip){
     if (!clip) return clip;
     const st = recomputeScoreBeatStats(clip.score);
+    const oldMeta = clip.meta;
     if (!clip.meta) clip.meta = {};
     // FROZEN: these are derived fields and must be consistent with score.
     clip.meta.notes = st.count;
     clip.meta.pitchMin = st.pitchMin;
     clip.meta.pitchMax = st.pitchMax;
     clip.meta.spanBeat = st.spanBeat;
+    // Preserve meta.agent (e.g. patchSummary) so optimize results persist.
+    if (oldMeta && oldMeta.agent) clip.meta.agent = oldMeta.agent;
     return clip;
   }
 
 /* -------------------- T3-1 clip revisions (version chain) -------------------- */
 
-// Store previous clip heads inside clip.revisions[] so clip.id remains stable for instances.
-// Each revision stores score+meta snapshot and can be activated (rollback) safely.
+// clip.revisions is a plain object map: { [revisionId]: snapshot }. NOT an Array.
+// Ensures revisions[clip.revisionId] and revisions[clip.parentRevisionId] exist (no dangling refs).
 const CLIP_REVISIONS_MAX = 40;
 
 function _iso(ts){
@@ -510,6 +513,59 @@ function _iso(ts){
     if (isFiniteNumber(ts) && !isNaN(d.getTime())) return d.toISOString().slice(0,19).replace('T',' ');
   }catch(e){}
   return '';
+}
+
+// Convert array to map; ensure no dangling revisionId/parentRevisionId; ensure head entry exists.
+function normalizeClipRevisionChain(clip){
+  if (!clip) return clip;
+  let revMap = clip.revisions;
+  if (Array.isArray(revMap)){
+    const next = {};
+    for (const r of revMap){
+      if (!r || typeof r !== 'object') continue;
+      const rid = String(r.revisionId || r.id || '');
+      if (!rid) continue;
+      next[rid] = {
+        revisionId: rid,
+        parentRevisionId: (r.parentRevisionId !== undefined && r.parentRevisionId !== null) ? String(r.parentRevisionId) : null,
+        createdAt: isFiniteNumber(r.createdAt) ? Number(r.createdAt) : Date.now(),
+        name: (typeof r.name === 'string') ? r.name : String(r.name ?? (clip.name || '')),
+        score: ensureScoreBeatIds(r.score),
+        meta: (r.meta && typeof r.meta === 'object') ? r.meta : null,
+      };
+    }
+    revMap = next;
+  }
+  if (!revMap || typeof revMap !== 'object' || Array.isArray(revMap)) revMap = {};
+  clip.revisions = revMap;
+
+  if (!clip.revisionId || String(clip.revisionId).trim() === '') clip.revisionId = uid('rev_');
+  const rid = String(clip.revisionId);
+  if (clip.parentRevisionId === undefined) clip.parentRevisionId = null;
+  clip.parentRevisionId = (clip.parentRevisionId !== null && clip.parentRevisionId !== '') ? String(clip.parentRevisionId) : null;
+
+  if (!clip.revisions[rid]){
+    clip.revisions[rid] = {
+      revisionId: rid,
+      parentRevisionId: clip.parentRevisionId,
+      createdAt: isFiniteNumber(clip.updatedAt) ? Number(clip.updatedAt) : Date.now(),
+      name: (typeof clip.name === 'string') ? clip.name : String(clip.name ?? ''),
+      score: ensureScoreBeatIds(deepClone(clip.score || { version:2, tracks:[] })),
+      meta: deepClone(clip.meta || {}),
+    };
+  }
+  if (clip.parentRevisionId != null && clip.parentRevisionId !== '' && !clip.revisions[clip.parentRevisionId])
+    clip.parentRevisionId = null;
+
+  return clip;
+}
+
+function normalizeProjectRevisionChains(p2){
+  if (!p2 || !p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) return;
+  for (const cid of Object.keys(p2.clips)){
+    const clip = p2.clips[cid];
+    if (clip) normalizeClipRevisionChain(clip);
+  }
 }
 
   function getTimelineSnapBeat(project){
@@ -528,57 +584,34 @@ function _iso(ts){
 
 function ensureClipRevisionChain(clip){
   if (!clip) return clip;
-  if (!Array.isArray(clip.revisions)) clip.revisions = [];
+  normalizeClipRevisionChain(clip);
 
-  const out = [];
-  const seen = new Set();
-  for (const r of clip.revisions){
-    if (!r || typeof r !== 'object') continue;
-    const rid = String(r.revisionId || '');
-    if (!rid || seen.has(rid)) continue;
-    seen.add(rid);
-        out.push({
-      revisionId: rid,
-      parentRevisionId: (r.parentRevisionId !== undefined && r.parentRevisionId !== null) ? String(r.parentRevisionId) : null,
-      createdAt: isFiniteNumber(r.createdAt) ? Number(r.createdAt) : Date.now(),
-      name: (typeof r.name === 'string') ? r.name : String(r.name ?? (clip.name || '')),
-      score: ensureScoreBeatIds(r.score),
-      meta: (r.meta && typeof r.meta === 'object') ? r.meta : null,
-    });
-  }
-
-  // Keep oldest->newest in storage; UI can sort differently.
+  const revMap = clip.revisions;
+  let out = Object.keys(revMap).map(k => revMap[k]).filter(r => r && r.revisionId);
+  out = out.filter((r, i, a) => a.findIndex(x => String(x.revisionId) === String(r.revisionId)) === i);
   out.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0));
 
-  // Trim with a "pinned original" policy: if we have an original/root snapshot
-  // (parentRevisionId === null), keep it even when exceeding max.
   if (out.length > CLIP_REVISIONS_MAX){
-    let rootIdx = -1;
-    for (let i=0; i<out.length; i++){
-      if (out[i] && out[i].parentRevisionId === null){
-        rootIdx = i;
-        break; // oldest-first, first null-parent is the earliest root
-      }
-    }
+    let rootIdx = out.findIndex(r => r && r.parentRevisionId === null);
     if (rootIdx >= 0){
       const root = out[rootIdx];
       out.splice(rootIdx, 1);
-      // keep newest (max-1) from remaining, then re-add root
       const keepN = Math.max(0, CLIP_REVISIONS_MAX - 1);
-      const tail = keepN ? out.slice(Math.max(0, out.length - keepN)) : [];
-      out.length = 0;
-      out.push(root, ...tail);
+      out = keepN ? out.slice(Math.max(0, out.length - keepN)) : [];
+      out.push(root);
       out.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0));
     } else {
-      out.splice(0, out.length - CLIP_REVISIONS_MAX);
+      out = out.slice(out.length - CLIP_REVISIONS_MAX);
     }
   }
 
-  clip.revisions = out;
+  clip.revisions = {};
+  for (const r of out) clip.revisions[String(r.revisionId)] = r;
 
   if (!clip.revisionId) clip.revisionId = uid('rev_');
   if (clip.parentRevisionId === undefined) clip.parentRevisionId = null;
-  clip.parentRevisionId = (clip.parentRevisionId !== null) ? String(clip.parentRevisionId) : null;
+  clip.parentRevisionId = (clip.parentRevisionId !== null && clip.parentRevisionId !== '') ? String(clip.parentRevisionId) : null;
+  if (clip.parentRevisionId != null && !clip.revisions[clip.parentRevisionId]) clip.parentRevisionId = null;
 
   if (!isFiniteNumber(clip.updatedAt)) clip.updatedAt = isFiniteNumber(clip.createdAt) ? clip.createdAt : Date.now();
 
@@ -626,7 +659,9 @@ function listClipRevisions(clip){
   const items = [];
   const head = snapshotClipHead(clip);
   if (head) items.push({ ...head, kind: 'head' });
-  for (const r of (clip.revisions || [])) items.push({ ...r, kind: 'history' });
+  const revList = (clip.revisions && typeof clip.revisions === 'object' && !Array.isArray(clip.revisions))
+    ? Object.values(clip.revisions) : [];
+  for (const r of revList) items.push({ ...r, kind: 'history' });
 
   // UI uses newest-first.
   items.sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
@@ -656,13 +691,12 @@ function setClipActiveRevision(project, clipId, revisionId){
   ensureClipRevisionChain(clip);
   if (String(clip.revisionId || '') === rid) return { ok:true, changed:false };
 
-  const idx = (clip.revisions || []).findIndex(r => String(r.revisionId || '') === rid);
-  if (idx < 0) return { ok:false, error:'revision_not_found' };
+  const target = (clip.revisions && clip.revisions[rid]) ? clip.revisions[rid] : null;
+  if (!target) return { ok:false, error:'revision_not_found' };
 
   const cur = snapshotClipHead(clip);
-  const target = clip.revisions[idx];
-  clip.revisions.splice(idx, 1);
-  if (cur) clip.revisions.push(cur);
+  if (cur) clip.revisions[String(cur.revisionId)] = cur;
+  delete clip.revisions[rid];
 
   applySnapshotToClipHead(clip, target);
   ensureClipRevisionChain(clip);
@@ -671,6 +705,7 @@ function setClipActiveRevision(project, clipId, revisionId){
 }
 
 // Start a new revision: snapshot current head into history, then update revisionId.
+// REQUIRED: new parentRevisionId MUST equal the previous active revisionId (so Undo works).
 // Callers may then mutate clip.score and clip.meta, and finally recompute meta.
 function beginNewClipRevision(project, clipId, opts){
   const p = project;
@@ -680,13 +715,21 @@ function beginNewClipRevision(project, clipId, opts){
   if (!p.clips || !p.clips[cid]) return { ok:false, error:'clip_not_found' };
 
   const clip = p.clips[cid];
+  // Capture previous revisionId BEFORE any mutation (semantic requirement for Undo).
+  const prevRevId = (clip.revisionId != null && String(clip.revisionId).trim() !== '') ? String(clip.revisionId) : '';
+
+  normalizeClipRevisionChain(clip);
   ensureClipRevisionChain(clip);
 
   const snap = snapshotClipHead(clip);
-  if (snap) clip.revisions.push(snap);
+  const newRevId = uid('rev_');
+  if (snap){
+    if (!clip.revisions) clip.revisions = {};
+    clip.revisions[String(snap.revisionId)] = snap;
+  }
 
-  clip.parentRevisionId = String(clip.revisionId || (snap && snap.revisionId) || uid('rev_'));
-  clip.revisionId = uid('rev_');
+  clip.parentRevisionId = (prevRevId !== '') ? prevRevId : null;
+  clip.revisionId = newRevId;
   clip.updatedAt = Date.now();
 
   // Reset A/B pair (ephemeral UI helper). Safe if persisted.
@@ -713,7 +756,7 @@ function beginNewClipRevision(project, clipId, opts){
       updatedAt: (opts && isFiniteNumber(opts.updatedAt)) ? Number(opts.updatedAt) : ((opts && isFiniteNumber(opts.createdAt)) ? Number(opts.createdAt) : Date.now()),
       revisionId: (opts && opts.revisionId) ? String(opts.revisionId) : uid('rev_'),
       parentRevisionId: (opts && opts.parentRevisionId !== undefined && opts.parentRevisionId !== null) ? String(opts.parentRevisionId) : null,
-      revisions: (opts && Array.isArray(opts.revisions)) ? opts.revisions : [],
+      revisions: (opts && opts.revisions && typeof opts.revisions === 'object' && !Array.isArray(opts.revisions)) ? opts.revisions : {},
       sourceTaskId: (opts && opts.sourceTaskId) ? String(opts.sourceTaskId) : null,
       score: s,
       meta: {
@@ -811,10 +854,12 @@ function beginNewClipRevision(project, clipId, opts){
       const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
       recomputeClipMetaFromScoreBeat(clip);
       if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+      normalizeClipRevisionChain(clip);
       ensureClipRevisionChain(clip);
       // remove v1 fields if they exist
       if (clip.meta && 'spanSec' in clip.meta) delete clip.meta.spanSec;
     }
+    normalizeProjectRevisionChains(project);
     repairClipOrderV2(project);
 
     // instances
@@ -1095,6 +1140,8 @@ function beginNewClipRevision(project, clipId, opts){
       recomputeClipMetaFromScoreBeat(clip2);
       // restore non-derived meta field
       clip2.meta.sourceTempoBpm = sourceTempoBpm;
+      // Preserve meta.agent (e.g. patchSummary) when re-building v2 from v1 view (persist path).
+      if (c.meta && c.meta.agent) clip2.meta.agent = c.meta.agent;
 
       clips[clip2.id] = clip2;
       clipOrder.push(clip2.id);
@@ -1402,6 +1449,8 @@ function toggleClipAB(projectV2, clipId){
 
 
     // clip revisions (T3-1)
+    normalizeClipRevisionChain,
+    normalizeProjectRevisionChains,
     ensureClipRevisionChain,
     snapshotClipHead,
     rollbackClipRevision,

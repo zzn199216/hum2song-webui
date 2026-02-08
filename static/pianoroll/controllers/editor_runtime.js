@@ -37,6 +37,28 @@
       const fmtSec = opts.fmtSec || function(x){ return String(x); };
       const escapeHtml = opts.escapeHtml || function(s){ return String(s||''); };
 
+      // PR-4: Build Optimize status line from clip.meta.agent.patchSummary (Node-safe, no DOM).
+      function _editorOptStatusText(agent){
+        if (!agent || typeof agent !== 'object') return '';
+        const ps = agent.patchSummary;
+        if (!ps || typeof ps !== 'object') return '';
+        const execPreset = ps.executedPreset || ps.preset || '';
+        const ops = Number(ps.ops);
+        const reason = ps.reason;
+        const parts = [];
+        if (execPreset && execPreset !== 'pseudo_v0') parts.push('Preset: ' + String(execPreset));
+        parts.push('ops: ' + (Number.isFinite(ops) ? ops : 0));
+        if (reason && reason !== 'empty_ops' && reason !== 'ok') parts.push('reason: ' + String(reason));
+        return parts.length ? parts.join(' | ') : '';
+      }
+
+      // PR-5: Short revision id for UI (Node-safe, no DOM).
+      function _shortRev(rid){
+        if (rid == null || rid === '') return '-';
+        const s = String(rid);
+        return s.length > 6 ? s.slice(-6) : s;
+      }
+
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
       // may be out of scope, causing a runtime ReferenceError and resulting in a blank
@@ -56,6 +78,16 @@
         ctx.arcTo(x, y, x + w, y, rr);
         ctx.closePath();
       }
+
+      // ---- Pitch view sizing / scroll policy ----
+      // Enable native vertical scrolling only when pitch range is large enough.
+      // Keeps the default view big/readable for normal clips.
+      const PITCH_SCROLL_THRESHOLD = 36;
+      const PITCH_ROWS_FULL = 128;
+      const PITCH_PAD_T = 20;
+      const PITCH_PAD_B = 10;
+      const PITCH_ROW_H_BASE = 18; // bigger by default; zoom can adjust
+      const PITCH_ZOOM_LEVELS = [1, 1.25, 1.5];
 
       // --- Beats v2 boundary helpers (storage beat, editor works in seconds) ---
       function _firstNote(score){
@@ -315,6 +347,37 @@
         }
       }catch(e){}
 
+      // PR-4: Editor Optimize UI — preset dropdown and status line
+      try{
+        if (typeof document !== 'undefined' && $){
+          const app = (root && root.H2SApp) ? root.H2SApp : null;
+          const sel = $('#editorOptimizePreset');
+          if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
+            const preset = app.getOptimizePresetForClip(clipId);
+            sel.value = (preset != null && preset !== '') ? String(preset) : '';
+          }
+          const statusEl = $('#editorOptStatus');
+          if (statusEl) statusEl.textContent = _editorOptStatusText(clip.meta && clip.meta.agent) || '';
+        }
+      }catch(e){}
+
+      // PR-5: Editor revision UI — Rev/Parent labels and Undo Optimize button state
+      try{
+        if (typeof document !== 'undefined' && $){
+          const revEl = $('#editorRevId');
+          const parentEl = $('#editorParentRevId');
+          const undoStatusEl = $('#editorUndoStatus');
+          const undoBtn = $('#btnEditorUndoOptimize');
+          if (revEl) revEl.textContent = _shortRev(clip.revisionId);
+          if (parentEl) parentEl.textContent = _shortRev(clip.parentRevisionId);
+          const canUndo = !!(clip.parentRevisionId && String(clip.parentRevisionId).trim());
+          if (undoBtn){
+            undoBtn.disabled = !canUndo;
+          }
+          if (undoStatusEl) undoStatusEl.textContent = canUndo ? '' : 'No previous revision';
+        }
+      }catch(e){}
+
       // Remember source timebase for save boundary.
       this.state.modal._sourceClipWasBeat = !!clipScoreIsBeat;
       this.state.modal._projectWantsBeat = !!projectWantsBeat;
@@ -332,6 +395,14 @@
       this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
       $('#rngPitchCenter').value = this.state.modal.pitchCenter;
 
+      // Pitch zoom (visual size). Remember across sessions.
+      // Levels: 1.0 -> normal, 1.25 -> bigger default, 1.5 -> extra big.
+      try{
+        const z0 = (typeof localStorage !== 'undefined') ? Number(localStorage.getItem('h2s_editor_pitch_zoom') || '1.25') : 1.25;
+        const z = (isFinite(z0) && z0 > 0) ? z0 : 1.25;
+        this.state.modal.pitchZoom = z;
+      }catch(e){ this.state.modal.pitchZoom = 1.25; }
+
       $('#modalTitle').textContent = `Editing: ${clip.name}`;
       $('#modalSub').textContent = `notes ${st.count} | pitch ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | span ${fmtSec(st.spanSec)}`;
       $('#modal').classList.add('show');
@@ -341,6 +412,7 @@
 
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
+      this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
       this.modalRequestDraw();
       this.modalBindControls();
       log(`Open editor: ${clip.name}`);
@@ -516,9 +588,52 @@
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
       const span = Math.max(4, st.spanSec);
       const w = Math.max(1200, Math.ceil(span * this.state.modal.pxPerSec) + 140);
-      const h = Math.max(420, wrap.clientHeight - 2);
+
+      // Pitch view policy:
+      // - If pitch range (padded) exceeds visible rows -> enable native vertical scrolling over full 0..127.
+      // - Else -> keep a readable view (no vertical scroll).
+      const pitchSpan = (st.count > 0) ? (st.maxPitch - st.minPitch + 1) : 0;
+      // draw() adds top/bottom pad=2 rows (≈ +4 rows); count them so we don't "almost fit but no scroll".
+      const pitchSpanPadded = pitchSpan > 0 ? (pitchSpan + 4) : 0;
+
+      const wrapH = Math.max(320, wrap.clientHeight - 2);
+
+      // Visual row size (zoom)
+      const ROW_H = Math.max(12, Math.round(16 * (Number(this.state.modal.pitchZoom || 1))));
+      this.state.modal.rowH = ROW_H;
+
+      const rowsCanFit = Math.max(12, Math.floor((wrapH - PITCH_PAD_T - PITCH_PAD_B) / ROW_H));
+      const visibleRows = Math.min(PITCH_SCROLL_THRESHOLD, rowsCanFit);
+
+      const wantVScroll = pitchSpanPadded > visibleRows;
+      this.state.modal.usePitchVScroll = !!wantVScroll;
+
+      // Non-scroll mode: use visibleRows as the view (don't artificially shrink further).
+      this.state.modal.pitchViewRows = wantVScroll ? PITCH_ROWS_FULL : visibleRows;
+
+      // canvas: width is content-based; height depends on scroll policy.
       canvas.width = w;
-      canvas.height = h;
+      if (wantVScroll){
+        const wantH = PITCH_PAD_T + PITCH_PAD_B + (PITCH_ROWS_FULL * ROW_H);
+        canvas.height = Math.max(wrapH, wantH);
+      } else {
+        canvas.height = wrapH;
+      }
+    },
+
+    // When vertical pitch scrolling is enabled, scroll so pitchCenter sits near the viewport center.
+    modalAutoScrollPitchToCenter(){
+      if (!this.state.modal.show) return;
+      if (!this.state.modal.usePitchVScroll) return;
+      const wrap = $('#canvasWrap');
+      const canvas = $('#canvas');
+      if (!wrap || !canvas) return;
+      const rowH = Number(this.state.modal.rowH) || 16;
+      const pitch = (this.state.modal.pitchCenter != null) ? Number(this.state.modal.pitchCenter) : 60;
+      const y = (this.state.modal.padT || PITCH_PAD_T) + (127 - pitch) * rowH;
+      const target = y - (wrap.clientHeight / 2);
+      const maxScroll = Math.max(0, (canvas.height || 0) - wrap.clientHeight);
+      wrap.scrollTop = Math.max(0, Math.min(maxScroll, target));
     },
 
     modalUpdateRightPanel(){
@@ -528,6 +643,73 @@
       $('#kvClipSpan').textContent = fmtSec(st.spanSec);
       $('#pillCursor').textContent = `Cursor: ${fmtSec(this.state.modal.cursorSec)}`;
       $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
+    },
+
+    // PR-4: Update Editor Optimize preset dropdown and status from current clip (e.g. after Optimize).
+    modalUpdateEditorOptimizeUI(){
+      if (typeof document === 'undefined' || !$) return;
+      const clipId = this.state.modal && this.state.modal.clipId;
+      if (!clipId) return;
+      const app = (root && root.H2SApp) ? root.H2SApp : null;
+      const p2 = getProjectV2 && getProjectV2();
+      const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+      try{
+        const sel = $('#editorOptimizePreset');
+        if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
+          const preset = app.getOptimizePresetForClip(clipId);
+          sel.value = (preset != null && preset !== '') ? String(preset) : '';
+        }
+        const statusEl = $('#editorOptStatus');
+        if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
+      }catch(e){}
+    },
+
+    // PR-5: Update Rev/Parent labels and Undo Optimize button from current clip.
+    modalUpdateEditorRevisionUI(){
+      if (typeof document === 'undefined' || !$) return;
+      const clipId = this.state.modal && this.state.modal.clipId;
+      if (!clipId) return;
+      const p2 = getProjectV2 && getProjectV2();
+      const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+      if (!clip) return;
+      try{
+        const revEl = $('#editorRevId');
+        const parentEl = $('#editorParentRevId');
+        const undoStatusEl = $('#editorUndoStatus');
+        const undoBtn = $('#btnEditorUndoOptimize');
+        if (revEl) revEl.textContent = _shortRev(clip.revisionId);
+        if (parentEl) parentEl.textContent = _shortRev(clip.parentRevisionId);
+        const canUndo = !!(clip.parentRevisionId && String(clip.parentRevisionId).trim());
+        if (undoBtn) undoBtn.disabled = !canUndo;
+        if (undoStatusEl) undoStatusEl.textContent = canUndo ? '' : 'No previous revision';
+      }catch(e){}
+    },
+
+    // PR-5: Reload editor draft from current clip (e.g. after rollback); redraw and update revision/optimize UI.
+    modalRefreshDraftFromClip(){
+      if (typeof document === 'undefined' || !$) return;
+      const clipId = this.state.modal && this.state.modal.clipId;
+      if (!clipId) return;
+      const p2 = getProjectV2 && getProjectV2();
+      const bpm = (p2 && p2.bpm) ? p2.bpm : (this.project && this.project.bpm) ? this.project.bpm : 120;
+      const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+      if (!clip || !clip.score) return;
+      try{
+        let draftSec;
+        if (_isBeatScore(clip.score)){
+          try { draftSec = _scoreBeatToSec(clip.score, bpm); } catch(e){ draftSec = H2SProject.deepClone(clip.score); }
+        } else {
+          draftSec = H2SProject.deepClone(clip.score);
+        }
+        this.state.modal.draftScore = H2SProject.deepClone(draftSec);
+        this.state.modal.savedScore = H2SProject.deepClone(draftSec);
+        this.modalUpdateRightPanel();
+        this.modalResizeCanvasToContent();
+        this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+        this.modalRequestDraw();
+        this.modalUpdateEditorOptimizeUI();
+        this.modalUpdateEditorRevisionUI();
+      }catch(e){}
     },
 
     modalRequestDraw(){
@@ -546,29 +728,35 @@
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
 
       // Determine pitch window
+      const useVScroll = !!this.state.modal.usePitchVScroll;
       const rows = this.state.modal.pitchViewRows;
       let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        // auto-fit with small padding
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
+      if (useVScroll){
+        pitchMin = 0;
+        pitchMax = 127;
       } else {
-        const half = Math.floor(rows / 2);
-        const c = this.state.modal.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          // auto-fit with small padding
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = this.state.modal.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
 
       const padL = this.state.modal.padL;
       const padT = this.state.modal.padT;
 
       // row height
-      const usableH = canvas.height - padT - 10;
+      // We keep a stable row height (controlled by pitch zoom) and vary how many
+      // rows we display in no-scroll mode.
       const totalRows = (pitchMax - pitchMin + 1);
-      const rowH = Math.max(12, Math.min(22, Math.floor(usableH / totalRows)));
-      this.state.modal.rowH = rowH;
+      const rowH = Math.max(10, Number(this.state.modal.rowH) || 16);
 
       // background
       ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -777,6 +965,80 @@
         btnDelete.addEventListener('click', H.onDeleteClick, true);
       }
 
+      // PR-4: Click Optimize — set options from dropdown, run optimize, then refresh status
+      const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
+      if (btnOptimize){
+        if (!H.onOptimizeClick){
+          H.onOptimizeClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.optimizeClip !== 'function') return;
+              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
+              Promise.resolve(app.optimizeClip(clipId)).then(function(){
+                try{ rt.modalUpdateEditorOptimizeUI(); }catch(e){}
+                const p2 = getProjectV2 && getProjectV2();
+                const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
+                if (el && clip && clip.meta && clip.meta.agent){
+                  if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
+                  else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
+                }
+              }).catch(function(){});
+            }catch(e){}
+          };
+        }
+        btnOptimize.removeEventListener('click', H.onOptimizeClick, true);
+        btnOptimize.addEventListener('click', H.onOptimizeClick, true);
+      }
+
+      // PR-4: Preset dropdown change — store selection per clip so it persists
+      const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+      if (selPreset){
+        if (!H.onPresetChange){
+          H.onPresetChange = (ev) => {
+            try{
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              const val = (ev.target && ev.target.value) ? String(ev.target.value).trim() : null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: null }, clipId);
+            }catch(e){}
+          };
+        }
+        selPreset.removeEventListener('change', H.onPresetChange);
+        selPreset.addEventListener('change', H.onPresetChange);
+      }
+
+      // PR-5: Undo Optimize — rollback to parent revision, then refresh editor
+      const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
+      if (btnUndo){
+        if (!H.onUndoClick){
+          H.onUndoClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.rollbackClipRevision !== 'function') return;
+              const res = app.rollbackClipRevision(clipId);
+              if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
+            }catch(e){}
+          };
+        }
+        btnUndo.removeEventListener('click', H.onUndoClick, true);
+        btnUndo.addEventListener('click', H.onUndoClick, true);
+      }
+
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.
       if (typeof document !== 'undefined'){
         if (!H.onKeyDown){
@@ -788,6 +1050,21 @@
               if (k === 'Delete' || k === 'Backspace'){
                 ev.preventDefault();
                 rt.modalDeleteSelectedNote();
+                return;
+              }
+              if ((k === 'z' || k === 'Z') && !ev.ctrlKey && !ev.metaKey && !ev.altKey){
+                ev.preventDefault();
+                const levels = [1.0, 1.25, 1.5];
+                const cur = Number(rt.state.modal.pitchZoom || 1.25);
+                let idx = levels.findIndex(v => Math.abs(v - cur) < 0.001);
+                if (idx < 0) idx = 1;
+                const next = levels[(idx + 1) % levels.length];
+                rt.state.modal.pitchZoom = next;
+                try { localStorage.setItem('h2s_editor_pitch_zoom', String(next)); } catch(e){}
+                rt.modalResizeCanvasToContent();
+                rt.modalAutoScrollPitchToCenter();
+                rt.modalRequestDraw();
+                try{ $('#editorStatus').textContent = `Pitch zoom = ${next}x (press Z to cycle)`; }catch(e){}
                 return;
               }
               if (k === 'Insert'){
@@ -876,18 +1153,22 @@
       const rowH = this.state.modal.rowH;
 
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
-      const rows = this.state.modal.pitchViewRows;
       let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
+      if (this.state.modal.usePitchVScroll){
+        pitchMin = 0; pitchMax = 127;
       } else {
-        const half = Math.floor(rows / 2);
-        const c = this.state.modal.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+        const rows = this.state.modal.pitchViewRows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = this.state.modal.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
 
       const notes = this.modalAllNotes();
@@ -994,9 +1275,10 @@ async modalPlay(){
       const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
-      // account for scroll
-      const px = (ev.clientX - rect.left) + wrap.scrollLeft;
-      const py = (ev.clientY - rect.top) + wrap.scrollTop;
+      const scaleX = rect.width ? (canvas.width / rect.width) : 1;
+      const scaleY = rect.height ? (canvas.height / rect.height) : 1;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
 
       // HIT TEST FIRST (fix: note operations have priority)
       const hit = this.modalHitTest(px, py);
@@ -1034,18 +1316,24 @@ async modalPlay(){
 
       // pitch from y
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const useVScroll = !!this.state.modal.usePitchVScroll;
       const rows = this.state.modal.pitchViewRows;
       let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
+      if (useVScroll){
+        pitchMin = 0;
+        pitchMax = 127;
       } else {
-        const half = Math.floor(rows / 2);
-        const c = this.state.modal.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = this.state.modal.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
       const rowH = this.state.modal.rowH;
       const row = Math.floor((py - padT) / rowH);
@@ -1066,26 +1354,31 @@ async modalPlay(){
       const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
-      const px = (ev.clientX - rect.left) + wrap.scrollLeft;
-      const py = (ev.clientY - rect.top) + wrap.scrollTop;
+      const scaleX = rect.width ? (canvas.width / rect.width) : 1;
+      const scaleY = rect.height ? (canvas.height / rect.height) : 1;
+      const px = (ev.clientX - rect.left) * scaleX;
+      const py = (ev.clientY - rect.top) * scaleY;
 
       const found = this.modalFindNoteById(m.drag.noteId);
       if (!found) return;
 
       // derive pitch window for mapping y->pitch
-      const st = H2SProject.scoreStats(this.state.modal.draftScore);
-      const rows = m.pitchViewRows;
-      let pitchMin, pitchMax;
-      const range = st.maxPitch - st.minPitch + 1;
-      if (range <= rows){
-        const pad = 2;
-        pitchMin = Math.max(0, st.minPitch - pad);
-        pitchMax = Math.min(127, st.maxPitch + pad);
-      } else {
-        const half = Math.floor(rows / 2);
-        const c = m.pitchCenter;
-        pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
-        pitchMax = pitchMin + rows;
+      let pitchMin = 0;
+      let pitchMax = 127;
+      if (!m.usePitchVScroll){
+        const st = H2SProject.scoreStats(this.state.modal.draftScore);
+        const rows = m.pitchViewRows;
+        const range = st.maxPitch - st.minPitch + 1;
+        if (range <= rows){
+          const pad = 2;
+          pitchMin = Math.max(0, st.minPitch - pad);
+          pitchMax = Math.min(127, st.maxPitch + pad);
+        } else {
+          const half = Math.floor(rows / 2);
+          const c = m.pitchCenter;
+          pitchMin = H2SProject.clamp(c - half, 0, 127 - rows);
+          pitchMax = pitchMin + rows;
+        }
       }
 
       const dx = px - m.drag.startX;

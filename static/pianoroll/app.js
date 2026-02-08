@@ -13,6 +13,7 @@
   };
   const LS_KEY_V1 = 'hum2song_studio_project_v1';
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
+  const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
 
   // --- debug gate (localStorage.h2s_debug === '1') ---
   function _dbgEnabled(){
@@ -283,6 +284,21 @@ try{
       if (typeof t.muted !== 'boolean') t.muted = false;
     }
   }
+  // Preserve clip revision chain (revisionId, parentRevisionId, revisions) so Undo Optimize works.
+  if (prevV2 && prevV2.clips && typeof prevV2.clips === 'object' && p2.clips && typeof p2.clips === 'object'){
+    for (const cid of Object.keys(p2.clips)){
+      const prevClip = prevV2.clips[cid];
+      if (!prevClip) continue;
+      const dst = p2.clips[cid];
+      if (dst && prevClip.revisionId != null) dst.revisionId = prevClip.revisionId;
+      if (dst && prevClip.parentRevisionId !== undefined) dst.parentRevisionId = prevClip.parentRevisionId;
+      if (dst && prevClip.revisions != null) dst.revisions = prevClip.revisions;
+      if (dst && prevClip.updatedAt != null) dst.updatedAt = prevClip.updatedAt;
+    }
+  }
+  if (typeof window !== 'undefined' && window.H2SProject && typeof window.H2SProject.normalizeProjectRevisionChains === 'function'){
+    window.H2SProject.normalizeProjectRevisionChains(p2);
+  }
 } catch(e){
       console.warn('[persist] v2 merge failed', e);
     }
@@ -318,6 +334,9 @@ try{
   const app = {
     project: null,
     _projectV2: null,
+    _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
+    _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
+    _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
     // debug helper (gated by localStorage.h2s_debug === '1')
     dbg: function(){ return dbg.apply(null, arguments); },
 
@@ -375,6 +394,9 @@ getProjectV2(){
 setProjectFromV2(projectV2){
   // Persist v2 beats-only doc, then refresh derived v1 view for UI/controllers.
   if (!projectV2) return {ok:false, error:'no_project_v2'};
+  if (typeof window !== 'undefined' && window.H2SProject && typeof window.H2SProject.normalizeProjectRevisionChains === 'function'){
+    window.H2SProject.normalizeProjectRevisionChains(projectV2);
+  }
   // Normalize legacy track schema on write.
   if (Array.isArray(projectV2.tracks)) {
     for (const t of projectV2.tracks) {
@@ -444,13 +466,77 @@ setTrackMuted(trackId, muted){
 
 
 
-async optimizeClip(clipId){
+// PR-5c: order-agnostic (cid, options) or (options, cid); normalize requestedPresetId / presetId / preset
+setOptimizeOptions(arg0, arg1){
+  let cid = null;
+  let opts = null;
+  if (typeof arg0 === 'string') {
+    cid = arg0;
+    opts = (arg1 && typeof arg1 === 'object') ? arg1 : null;
+  } else if (typeof arg1 === 'string') {
+    cid = arg1;
+    opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+  } else {
+    opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
+  }
+  const preset = opts && (opts.requestedPresetId != null ? opts.requestedPresetId : opts.presetId != null ? opts.presetId : opts.preset);
+  const normalizedOpts = opts ? { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: opts.userPrompt != null ? opts.userPrompt : null } : null;
+  this._lastOptimizeOptions = normalizedOpts;
+  if (cid) {
+    this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
+    this._optOptionsByClipId[cid] = normalizedOpts;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const map = _readLS(LS_KEY_OPT_OPTIONS) || {};
+        map[cid] = normalizedOpts;
+        _writeLS(LS_KEY_OPT_OPTIONS, map);
+      } catch (e) { console.warn('[App] persist opt options failed', e); }
+    }
+  }
+},
+getOptimizePresetForClip(clipId){
+  const opts = this.getOptimizeOptions(clipId);
+  return (opts && opts.requestedPresetId != null) ? opts.requestedPresetId : null;
+},
+getOptimizeOptions(clipId){
+  if (clipId && this._optOptionsByClipId && this._optOptionsByClipId[clipId] != null) return this._optOptionsByClipId[clipId];
+  if (clipId && typeof localStorage !== 'undefined') {
+    try {
+      const map = _readLS(LS_KEY_OPT_OPTIONS);
+      if (map && typeof map === 'object' && map[clipId] != null) {
+        this._optOptionsByClipId[clipId] = map[clipId];
+        this._optPresetByClipId[clipId] = (map[clipId].requestedPresetId != null) ? map[clipId].requestedPresetId : null;
+        return map[clipId];
+      }
+    } catch (e) { console.warn('[App] read opt options failed', e); }
+  }
+  return this._lastOptimizeOptions || null;
+},
+
+// PR-5e: optOverride = one-shot options for this call only; does NOT modify stored per-clip options.
+async optimizeClip(clipId, optOverride){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
     console.warn('[App] optimizeClip called but agent controller is not available');
     try{ alert('Optimize unavailable: agent controller not initialized. Check console for details.'); }catch(_){}
     return {ok:false, error:'no_agent_controller'};
   }
-  return await this.agentCtrl.optimizeClip(clipId);
+  let options = optOverride;
+  if (options && typeof options === 'object') {
+    const preset = options.requestedPresetId != null ? options.requestedPresetId : options.presetId != null ? options.presetId : options.preset;
+    options = { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: options.userPrompt != null ? options.userPrompt : null };
+  }
+  return await this.agentCtrl.optimizeClip(clipId, options);
+},
+
+// PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
+rollbackClipRevision(clipId){
+  const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+  if (!P || typeof P.rollbackClipRevision !== 'function') return { ok: false, reason: 'no_rollback' };
+  const p2 = this.getProjectV2();
+  if (!p2 || !p2.clips || !p2.clips[clipId]) return { ok: false, reason: 'clip_not_found' };
+  const res = P.rollbackClipRevision(p2, clipId);
+  if (res && res.ok && res.changed) this.setProjectFromV2(p2);
+  return res || { ok: false, reason: 'rollback_failed' };
 },
 
     state: {
@@ -510,16 +596,32 @@ try{
   const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
   if (ROOT.H2SAgentController && typeof ROOT.H2SAgentController.create === 'function'){
     // AgentController expects v2 hooks + persist/render callbacks
+    // PR-3/PR-5c: Pass getOptimizeOptions(clipId) so agent controller gets per-clip preset
     this.agentCtrl = ROOT.H2SAgentController.create({
       app: this,
       getProjectV2: () => this.getProjectV2(),
       setProjectFromV2: (p2) => this.setProjectFromV2(p2),
       persist: () => persist(),
       render: () => this.render(),
+      getOptimizeOptions: (clipId) => this.getOptimizeOptions(clipId),
     });
   }
 }catch(e){
   console.warn('AgentController init failed', e);
+}
+
+// PR-5f: hydrate per-clip optimize options from localStorage (survives hard refresh)
+if (typeof localStorage !== 'undefined') {
+  try {
+    const stored = _readLS(LS_KEY_OPT_OPTIONS);
+    if (stored && typeof stored === 'object') {
+      this._optOptionsByClipId = Object.assign({}, this._optOptionsByClipId, stored);
+      for (const cid of Object.keys(stored)) {
+        const o = stored[cid];
+        this._optPresetByClipId[cid] = (o && o.requestedPresetId != null) ? o.requestedPresetId : null;
+      }
+    }
+  } catch (e) { console.warn('[App] hydrate opt options failed', e); }
 }
 
 // Ensure minimal structure
