@@ -630,6 +630,23 @@
             <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
               <span>Rev: <span id="editorRevId">-</span></span>
               <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
+              <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
+                <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
+                <div class="col" style="gap:6px;">
+                  <label class="muted" style="margin:0;">Base URL</label>
+                  <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                  <label class="muted" style="margin:0;">Model</label>
+                  <input id="editorLlmModel" type="text" placeholder="Model name" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                  <label class="muted" style="margin:0;">Auth Token</label>
+                  <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                  <div class="row" style="margin-top:4px;">
+                    <button id="btnEditorLlmSave" type="button" class="btn mini">Save</button>
+                    <button id="btnEditorLlmReset" type="button" class="btn mini">Reset</button>
+                  </div>
+                  <div id="editorLlmConfigWarning" class="muted" style="display:none;">LLM config module not loaded.</div>
+                  <div id="editorLlmConfigStatus" class="muted" style="min-height:1em;"></div>
+                </div>
+              </div>
             </div>
           </details>
           <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
@@ -653,6 +670,7 @@
   <script src="/static/pianoroll/ui/selection_view.js"></script>
   <script src="/static/pianoroll/controllers/selection_controller.js"></script>
   <script src="/static/pianoroll/controllers/audio_controller.js"></script>
+  <script src="/static/pianoroll/llm_config.js"></script>
   <script src="/static/pianoroll/controllers/editor_runtime.js"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/app.js"></script>

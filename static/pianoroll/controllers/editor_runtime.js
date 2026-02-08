@@ -383,6 +383,38 @@
         }
       }catch(e){}
 
+      // PR-7a-3: Populate LLM Settings from H2S_LLM_CONFIG; if missing, show warning and disable Save/Reset
+      try{
+        if (typeof document !== 'undefined' && $){
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+          const baseEl = document.getElementById('editorLlmBaseUrl');
+          const modelEl = document.getElementById('editorLlmModel');
+          const tokenEl = document.getElementById('editorLlmAuthToken');
+          const saveBtn = document.getElementById('btnEditorLlmSave');
+          const resetBtn = document.getElementById('btnEditorLlmReset');
+          const warnEl = document.getElementById('editorLlmConfigWarning');
+          const statusEl = document.getElementById('editorLlmConfigStatus');
+          if (api && typeof api.loadLlmConfig === 'function'){
+            const cfg = api.loadLlmConfig();
+            if (baseEl) baseEl.value = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
+            if (modelEl) modelEl.value = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+            if (tokenEl) tokenEl.value = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
+            if (statusEl) statusEl.textContent = '';
+            if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
+            if (saveBtn) saveBtn.disabled = false;
+            if (resetBtn) resetBtn.disabled = false;
+          } else {
+            if (baseEl) baseEl.value = '';
+            if (modelEl) modelEl.value = '';
+            if (tokenEl) tokenEl.value = '';
+            if (statusEl) statusEl.textContent = '';
+            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM config module not loaded.'; }
+            if (saveBtn) saveBtn.disabled = true;
+            if (resetBtn) resetBtn.disabled = true;
+          }
+        }
+      }catch(e){}
+
       // Remember source timebase for save boundary.
       this.state.modal._sourceClipWasBeat = !!clipScoreIsBeat;
       this.state.modal._projectWantsBeat = !!projectWantsBeat;
@@ -1152,6 +1184,63 @@
         }
         btnResetPrompt.removeEventListener('click', H.onResetPromptClick, true);
         btnResetPrompt.addEventListener('click', H.onResetPromptClick, true);
+      }
+
+      // PR-7a-3: LLM Settings Save — write to hum2song_studio_llm_config; show "Saved"
+      const btnLlmSave = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmSave') : null;
+      if (btnLlmSave){
+        if (!H.onLlmSaveClick){
+          H.onLlmSaveClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+              if (!api || typeof api.saveLlmConfig !== 'function') return;
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const modelEl = doc.getElementById('editorLlmModel');
+              const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const statusEl = doc.getElementById('editorLlmConfigStatus');
+              const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value) : '';
+              const model = (modelEl && modelEl.value != null) ? String(modelEl.value) : '';
+              const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+              api.saveLlmConfig({ baseUrl: baseUrl, model: model, authToken: authToken });
+              if (statusEl) statusEl.textContent = 'Saved';
+            }catch(e){}
+          };
+        }
+        btnLlmSave.removeEventListener('click', H.onLlmSaveClick, true);
+        btnLlmSave.addEventListener('click', H.onLlmSaveClick, true);
+      }
+
+      // PR-7a-3: LLM Settings Reset — resetLlmConfig(); clear inputs; show "Config reset"
+      const btnLlmReset = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmReset') : null;
+      if (btnLlmReset){
+        if (!H.onLlmResetClick){
+          H.onLlmResetClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+              if (!api || typeof api.resetLlmConfig !== 'function') return;
+              api.resetLlmConfig();
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (doc){
+                const baseEl = doc.getElementById('editorLlmBaseUrl');
+                const modelEl = doc.getElementById('editorLlmModel');
+                const tokenEl = doc.getElementById('editorLlmAuthToken');
+                const statusEl = doc.getElementById('editorLlmConfigStatus');
+                if (baseEl) baseEl.value = '';
+                if (modelEl) modelEl.value = '';
+                if (tokenEl) tokenEl.value = '';
+                if (statusEl) statusEl.textContent = 'Config reset';
+              }
+            }catch(e){}
+          };
+        }
+        btnLlmReset.removeEventListener('click', H.onLlmResetClick, true);
+        btnLlmReset.addEventListener('click', H.onLlmResetClick, true);
       }
 
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.
