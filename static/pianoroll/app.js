@@ -711,6 +711,9 @@ $('#rngPitchCenter').addEventListener('input', () => {
 
       window.addEventListener('keydown', (ev) => {
         if (!this.state.modal.show) return;
+        const path = (ev.composedPath && ev.composedPath()) || (ev.target ? [ev.target] : []);
+        const inInput = path.some((el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+        if (inInput) return;
         if (ev.key === 'Escape'){ this.closeModal(false); ev.preventDefault(); }
         if (ev.key === 'Delete' || ev.key === 'Backspace'){ this.modalDeleteSelectedNote(); ev.preventDefault(); }
         if (ev.key === ' '){ this.modalTogglePlay(); ev.preventDefault(); }

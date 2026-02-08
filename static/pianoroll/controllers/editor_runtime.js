@@ -347,7 +347,7 @@
         }
       }catch(e){}
 
-      // PR-4: Editor Optimize UI — preset dropdown and status line
+      // PR-4/PR-6b: Editor Optimize UI — preset, prompt, status line
       try{
         if (typeof document !== 'undefined' && $){
           const app = (root && root.H2SApp) ? root.H2SApp : null;
@@ -355,6 +355,11 @@
           if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
             const preset = app.getOptimizePresetForClip(clipId);
             sel.value = (preset != null && preset !== '') ? String(preset) : '';
+          }
+          const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+          if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
+            const opts = app.getOptimizeOptions(clipId);
+            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
           }
           const statusEl = $('#editorOptStatus');
           if (statusEl) statusEl.textContent = _editorOptStatusText(clip.meta && clip.meta.agent) || '';
@@ -645,7 +650,7 @@
       $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
     },
 
-    // PR-4: Update Editor Optimize preset dropdown and status from current clip (e.g. after Optimize).
+    // PR-4/PR-6b: Update Editor Optimize preset, prompt, and status from current clip (e.g. after Optimize).
     modalUpdateEditorOptimizeUI(){
       if (typeof document === 'undefined' || !$) return;
       const clipId = this.state.modal && this.state.modal.clipId;
@@ -658,6 +663,13 @@
         if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
           const preset = app.getOptimizePresetForClip(clipId);
           sel.value = (preset != null && preset !== '') ? String(preset) : '';
+        }
+        const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+        if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
+          if (document.activeElement !== promptEl){
+            const opts = app.getOptimizeOptions(clipId);
+            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
+          }
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
@@ -965,7 +977,7 @@
         btnDelete.addEventListener('click', H.onDeleteClick, true);
       }
 
-      // PR-4: Click Optimize — set options from dropdown, run optimize, then refresh status
+      // PR-4/PR-6b: Click Optimize — read preset + prompt from UI, persist, run optimize (no override), show result, best-effort auto-play once
       const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
       if (btnOptimize){
         if (!H.onOptimizeClick){
@@ -979,17 +991,23 @@
               const app = g.H2SApp;
               if (!app || typeof app.optimizeClip !== 'function') return;
               const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
               const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
-              Promise.resolve(app.optimizeClip(clipId)).then(function(){
-                try{ rt.modalUpdateEditorOptimizeUI(); }catch(e){}
+              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              Promise.resolve(app.optimizeClip(clipId)).then(function(res){
+                try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                const statusEl = (typeof document !== 'undefined') ? document.getElementById('editorOptStatus') : null;
+                if (statusEl && res && typeof res.ok !== 'undefined') statusEl.textContent = res.ok ? ('ok, ops=' + (res.ops ?? 0)) : (res.reason || 'failed');
                 const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
                 if (el && clip && clip.meta && clip.meta.agent){
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
+                if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
               }).catch(function(){});
             }catch(e){}
           };
@@ -998,7 +1016,7 @@
         btnOptimize.addEventListener('click', H.onOptimizeClick, true);
       }
 
-      // PR-4: Preset dropdown change — store selection per clip so it persists
+      // PR-4/PR-6b: Preset dropdown change — store preset + current prompt per clip
       const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
       if (selPreset){
         if (!H.onPresetChange){
@@ -1009,7 +1027,10 @@
               if (!clipId) return;
               const app = g.H2SApp;
               const val = (ev.target && ev.target.value) ? String(ev.target.value).trim() : null;
-              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: null }, clipId);
+              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: promptVal }, clipId);
             }catch(e){}
           };
         }
@@ -1017,7 +1038,7 @@
         selPreset.addEventListener('change', H.onPresetChange);
       }
 
-      // PR-5: Undo Optimize — rollback to parent revision, then refresh editor
+      // PR-5/PR-6b: Undo Optimize (Rollback) — rollback to parent revision, refresh editor and revision/optimize UI
       const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
       if (btnUndo){
         if (!H.onUndoClick){
@@ -1032,6 +1053,7 @@
               if (!app || typeof app.rollbackClipRevision !== 'function') return;
               const res = app.rollbackClipRevision(clipId);
               if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
+              else if (res && !res.ok) { try{ const statusEl = document.getElementById('editorOptStatus'); if (statusEl) statusEl.textContent = res.reason || 'Rollback failed'; }catch(e){} }
             }catch(e){}
           };
         }
@@ -1039,11 +1061,67 @@
         btnUndo.addEventListener('click', H.onUndoClick, true);
       }
 
+      // PR-6b: Regenerate — one-shot override (does not overwrite stored options)
+      const btnRegenerate = (typeof document !== 'undefined') ? document.getElementById('btnEditorRegenerateOptimize') : null;
+      if (btnRegenerate){
+        if (!H.onRegenerateClick){
+          H.onRegenerateClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.optimizeClip !== 'function') return;
+              const sel = document.getElementById('editorOptimizePreset');
+              const promptEl = document.getElementById('editorOptimizePrompt');
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              Promise.resolve(app.optimizeClip(clipId, { requestedPresetId: presetId || null, userPrompt: promptVal })).then(function(res){
+                try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
+                const statusEl = document.getElementById('editorOptStatus');
+                if (statusEl && res && typeof res.ok !== 'undefined') statusEl.textContent = res.ok ? ('ok, ops=' + (res.ops ?? 0)) : (res.reason || 'failed');
+              }).catch(function(){});
+            }catch(e){}
+          };
+        }
+        btnRegenerate.removeEventListener('click', H.onRegenerateClick, true);
+        btnRegenerate.addEventListener('click', H.onRegenerateClick, true);
+      }
+
+      // PR-6b: Reset to default prompt — clear prompt UI and persist (preset unchanged)
+      const btnResetPrompt = (typeof document !== 'undefined') ? document.getElementById('btnEditorResetOptimizePrompt') : null;
+      if (btnResetPrompt){
+        if (!H.onResetPromptClick){
+          H.onResetPromptClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              const promptEl = document.getElementById('editorOptimizePrompt');
+              if (promptEl) promptEl.value = '';
+              const sel = document.getElementById('editorOptimizePreset');
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
+            }catch(e){}
+          };
+        }
+        btnResetPrompt.removeEventListener('click', H.onResetPromptClick, true);
+        btnResetPrompt.addEventListener('click', H.onResetPromptClick, true);
+      }
+
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.
       if (typeof document !== 'undefined'){
         if (!H.onKeyDown){
           H.onKeyDown = (ev) => {
             try{
+              const t = ev.target || document.activeElement;
+              if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
               const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
               if (!rt || !rt.state || !rt.state.modal || !rt.state.modal.show) return;
               const k = String(ev.key || '');

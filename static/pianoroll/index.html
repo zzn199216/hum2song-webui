@@ -188,6 +188,23 @@
       font-weight:800;
       width:72px;
     }
+    /* PR-6c: Optimize prompt textarea — multi-line, scrollable, resize wins over any global */
+    #editorOptimizePrompt{
+      width:100%;
+      min-height:110px;
+      height:110px;
+      resize:vertical;
+      overflow:auto;
+      box-sizing:border-box;
+      padding:6px;
+      font-size:12px;
+      margin-bottom:6px;
+      font-family:inherit;
+      color:var(--text);
+      background:rgba(0,0,0,.2);
+      border:1px solid var(--border);
+      border-radius:10px;
+    }
     .transport .hint{ color:var(--muted); font-size:12px; margin-left:auto; }
 
     .timeline{
@@ -572,6 +589,7 @@
             <span class="pill" style="margin-left:8px;">Preset</span>
             <select id="editorOptimizePreset" class="btn" style="padding:6px 8px; font-size:13px;">
               <option value="">Default</option>
+              <option value="noop">No-op</option>
               <option value="dynamics_accent">Dynamics Accent</option>
               <option value="dynamics_level">Dynamics Level</option>
               <option value="duration_gentle">Duration Gentle</option>
@@ -586,25 +604,35 @@
           <div class="kv"><b>Notes</b><span id="kvClipNotes">0</span></div>
           <div class="kv"><b>Pitch</b><span id="kvClipPitch">-</span></div>
           <div class="kv"><b>Span</b><span id="kvClipSpan">-</span></div>
-          <div class="help">
-            <div style="font-weight:900; margin-bottom:6px;">How to edit (MVP)</div>
-            <div>1) Click empty grid: set cursor and choose a cell.</div>
-            <div>2) Press <span class="kbd">Insert Note</span>: add a default note at the selected cell.</div>
-            <div>3) Click a note: select; drag to move; drag the right edge to resize.</div>
-            <div>4) Press <span class="kbd">Delete</span>: delete selected note.</div>
-            <div style="margin-top:8px; color:rgba(255,255,255,.62);">
-              Cancel discards changes; Save writes back into the clip.
+          <details class="help" style="margin-bottom:8px;">
+            <summary style="cursor:pointer; font-weight:700;">Help</summary>
+            <div style="margin-top:6px; padding-left:4px;">
+              <div style="font-weight:900; margin-bottom:6px;">How to edit (MVP)</div>
+              <div>1) Click empty grid: set cursor and choose a cell.</div>
+              <div>2) Press <span class="kbd">Insert Note</span>: add a default note at the selected cell.</div>
+              <div>3) Click a note: select; drag to move; drag the right edge to resize.</div>
+              <div>4) Press <span class="kbd">Delete</span>: delete selected note.</div>
+              <div style="margin-top:8px; color:rgba(255,255,255,.62);">
+                Cancel discards changes; Save writes back into the clip.
+              </div>
             </div>
-          </div>
+          </details>
           <div class="hr"></div>
-          <div class="help" style="font-size:12px; opacity:0.85; margin-bottom:4px;">
-            <span>Rev: <span id="editorRevId">-</span></span>
-            <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
-          </div>
-          <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-bottom:4px;">Undo Optimize</button>
-          <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-bottom:4px;"></div>
+          <div class="help" style="font-size:11px; opacity:0.85; margin-bottom:2px;">Prompt (blank = default)</div>
+          <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
+          <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
+          <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
+          <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
+          <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
           <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
-          <div class="help" id="editorStatus">Ready.</div>
+          <details class="help" style="margin-top:8px;">
+            <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
+            <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
+              <span>Rev: <span id="editorRevId">-</span></span>
+              <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
+            </div>
+          </details>
+          <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
         </div>
       </div>
     </div>

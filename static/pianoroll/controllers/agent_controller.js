@@ -14,6 +14,21 @@
   const DEFAULT_OPT_SOURCE = 'safe_stub_v0';
   const SAFE_STUB_PRESET = 'alt_110_80';
 
+  /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
+  const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
+
+  /** PR-6a: resolve executed prompt and source for patchSummary trace. */
+  function resolveOptimizeUserPrompt(opts){
+    const raw = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? String(opts.userPrompt).trim() : '';
+    if (raw === '') {
+      const prompt = DEFAULT_OPTIMIZE_USER_PROMPT;
+      const preview = prompt.length > 40 ? prompt.slice(0, 37) + '...' : prompt;
+      return { prompt, source: 'default', preview };
+    }
+    const preview = raw.length > 40 ? raw.slice(0, 37) + '...' : raw;
+    return { prompt: raw, source: 'user', preview };
+  }
+
   /** Safe preset IDs (PR-2A). Only velocity and optional durationBeat allowed. */
   const PRESET_IDS = {
     DYNAMICS_ACCENT: 'dynamics_accent',
@@ -236,6 +251,7 @@
       if (userPrompt !== null && userPrompt.length > 0) {
         optsIn._promptLen = userPrompt.length;
       }
+      const promptInfo = resolveOptimizeUserPrompt(optsIn);
 
       const beforeRevisionId = clip.revisionId || null;
 
@@ -259,6 +275,7 @@
       }
 
       const opsN = patch.ops.length;
+      const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
       const patchSummaryBase = {
         requestedSource: requestedPresetId,
         requestedPresetId: requestedPresetId,
@@ -266,6 +283,9 @@
         executedPreset: executedPreset,
         source: executedSource,
         preset: executedPreset,
+        requestedUserPrompt,
+        executedUserPromptSource: promptInfo.source,
+        executedUserPromptPreview: promptInfo.preview,
       };
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
       if (requestedPresetId && !SAFE_PRESET_ALLOWLIST[requestedPresetId]) patchSummaryBase.reason = 'unknown_preset_fallback';
