@@ -147,6 +147,15 @@ curl -L \
 
 ---
 
+## Gateway-first LLM setup
+
+For the Studio LLM (Optimize) feature:
+
+- **Recommended:** Use an OpenAI-compatible gateway endpoint (e.g. a local or self-hosted proxy). The frontend stores only **base URL**, **model**, and an optional **gateway auth token** — not the provider’s real API key.
+- **Security:** Do not put provider API keys in the browser. For public deployments, use a gateway or backend proxy so keys stay server-side. Keep `.env` and `.env.local` out of version control.
+
+---
+
 ## 测试
 
 运行所有测试：
