@@ -374,7 +374,8 @@
       }
 
       // PR-8B-2: Inner async function for one attempt (with optional fix hint for retry)
-      async function attemptOnce(attemptIndex, extraFixHint){
+      // PR-8C: Capture debug data (rawText, extractedJson, validateErrors) for final attempt
+      async function attemptOnce(attemptIndex, extraFixHint, debugCapture){
         let userContent = baseUserContent;
         if (attemptIndex === 2 && extraFixHint){
           const fixPrefix = 'The previous output was invalid for this reason: ' + extraFixHint + '\n\nFix the JSON patch ONLY.\nOutput EXACTLY ONE JSON object in a single ```json``` block. No commentary.\nEnsure it matches the required schema and uses only Allowed noteIds.\n\n---\n\n';
@@ -388,16 +389,20 @@
         try {
           const res = await client.callChatCompletions(cfg, messages, { temperature: 0.2, timeoutMs: 20000 });
           const text = (res && typeof res.text === 'string') ? res.text : '';
+          if (debugCapture) debugCapture.rawText = text;
           const patchObj = client.extractJsonObject(text);
           if (!patchObj || typeof patchObj !== 'object'){
+            if (debugCapture) debugCapture.extractedJson = null;
             return { ok: false, reason: 'llm_no_valid_json', detail: 'no_json' };
           }
+          if (debugCapture) debugCapture.extractedJson = JSON.stringify(patchObj, null, 2);
           if (!Array.isArray(patchObj.ops)) patchObj.ops = [];
           if (patchObj.version == null) patchObj.version = 1;
           if (patchObj.clipId == null) patchObj.clipId = clip && clip.id;
 
           const opsN = patchObj.ops.length;
           if (opsN === 0){
+            if (debugCapture) debugCapture.validateErrors = [];
             return {
               ok: true,
               ops: 0,
@@ -416,6 +421,7 @@
           if (!valid || !valid.ok){
             const firstError = (valid && valid.errors && valid.errors[0]) ? valid.errors[0] : 'patch_rejected';
             const errorCodes = (valid && valid.errors && Array.isArray(valid.errors)) ? valid.errors.slice(0, 3).join(', ') : firstError;
+            if (debugCapture) debugCapture.validateErrors = (valid && valid.errors && Array.isArray(valid.errors)) ? valid.errors.slice(0, 10) : [firstError];
             return {
               ok: false,
               reason: 'patch_rejected',
@@ -424,6 +430,7 @@
               opsN: opsN,
             };
           }
+          if (debugCapture) debugCapture.validateErrors = [];
 
           const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
           if (!applied || !applied.clip){
@@ -457,13 +464,31 @@
           return { ok: true, ops: opsN };
         } catch(err){
           const msg = (err && err.message) ? String(err.message) : 'llm_request_failed';
+          // PR-8C: Capture error in debug if available
+          if (debugCapture && typeof debugCapture === 'object'){
+            if (!debugCapture.rawText || debugCapture.rawText === '') debugCapture.rawText = (err && err.message) ? String(err.message) : 'llm_request_failed';
+            if (!debugCapture.validateErrors || !Array.isArray(debugCapture.validateErrors)) debugCapture.validateErrors = [];
+            if (msg && !debugCapture.validateErrors.includes(msg)) debugCapture.validateErrors.push(msg);
+          }
           return fail(msg, { reason: msg });
         }
       }
 
       // PR-8B-2: Retry logic - only retry for JSON extraction or validation failures
-      return attemptOnce(1, null).then(function(res1){
-        if (res1.ok) return res1;
+      // PR-8C: Capture debug data for final attempt
+      const debugCapture = { rawText: '', extractedJson: null, validateErrors: [] };
+      return attemptOnce(1, null, debugCapture).then(function(res1){
+        if (res1.ok){
+          const out = Object.assign({}, res1);
+          out.llmDebug = {
+            attemptCount: 1,
+            reason: res1.reason || 'ok',
+            rawText: debugCapture.rawText || '',
+            extractedJson: debugCapture.extractedJson || null,
+            errors: debugCapture.validateErrors || [],
+          };
+          return out;
+        }
         if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
           let fixDetail = '';
           if (res1.reason === 'llm_no_valid_json'){
@@ -472,9 +497,32 @@
             fixDetail = (res1.detail && typeof res1.detail === 'string') ? res1.detail : 'patch validation failed';
             if (fixDetail.length > 200) fixDetail = fixDetail.slice(0, 197) + '...';
           }
-          return attemptOnce(2, fixDetail);
+          // Reset debug capture for second attempt
+          debugCapture.rawText = '';
+          debugCapture.extractedJson = null;
+          debugCapture.validateErrors = [];
+          return attemptOnce(2, fixDetail, debugCapture).then(function(res2){
+            const out = Object.assign({}, res2);
+            out.llmDebug = {
+              attemptCount: 2,
+              reason: res2.reason || 'ok',
+              rawText: debugCapture.rawText || '',
+              extractedJson: debugCapture.extractedJson || null,
+              errors: debugCapture.validateErrors || [],
+            };
+            return out;
+          });
         }
-        return res1;
+        // No retry - return first attempt with debug
+        const out = Object.assign({}, res1);
+        out.llmDebug = {
+          attemptCount: 1,
+          reason: res1.reason || 'unknown',
+          rawText: debugCapture.rawText || '',
+          extractedJson: debugCapture.extractedJson || null,
+          errors: debugCapture.validateErrors || [],
+        };
+        return out;
       });
     }
 

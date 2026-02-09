@@ -383,6 +383,55 @@
         }
       }catch(e){}
 
+      // PR-8C: Load and display LLM debug data from localStorage
+      function loadLlmDebugUI(){
+        if (typeof document === 'undefined' || typeof localStorage === 'undefined') return;
+        try{
+          const raw = localStorage.getItem('hum2song_studio_llm_debug_last');
+          if (!raw || raw === '') {
+            const rawEl = document.getElementById('editorLlmDebugRaw');
+            const extractedEl = document.getElementById('editorLlmDebugExtracted');
+            const errorsEl = document.getElementById('editorLlmDebugErrors');
+            if (rawEl) rawEl.value = '';
+            if (extractedEl) extractedEl.value = '';
+            if (errorsEl) errorsEl.value = '';
+            return;
+          }
+          const debug = JSON.parse(raw);
+          const rawEl = document.getElementById('editorLlmDebugRaw');
+          const extractedEl = document.getElementById('editorLlmDebugExtracted');
+          const errorsEl = document.getElementById('editorLlmDebugErrors');
+          if (rawEl) rawEl.value = (debug.rawText && typeof debug.rawText === 'string') ? debug.rawText : '';
+          if (extractedEl) extractedEl.value = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+          const errText = (debug.errors && Array.isArray(debug.errors)) ? debug.errors.join(', ') : '';
+          const attemptText = (debug.attemptCount != null) ? 'Attempt: ' + String(debug.attemptCount) : '';
+          const reasonText = (debug.reason && typeof debug.reason === 'string') ? 'Reason: ' + debug.reason : '';
+          const parts = [attemptText, reasonText, errText].filter(function(s){ return s && s.trim() !== ''; });
+          if (errorsEl) errorsEl.value = parts.join(' | ');
+        }catch(e){}
+      }
+
+      // PR-8C: Save LLM debug data to localStorage (truncate to 4000 chars per field)
+      function saveLlmDebug(clipId, llmDebug){
+        if (typeof localStorage === 'undefined' || !llmDebug || typeof llmDebug !== 'object') return;
+        try{
+          const rawText = (llmDebug.rawText && typeof llmDebug.rawText === 'string') ? llmDebug.rawText : '';
+          const extractedJson = (llmDebug.extractedJson && typeof llmDebug.extractedJson === 'string') ? llmDebug.extractedJson : '';
+          const errors = (llmDebug.errors && Array.isArray(llmDebug.errors)) ? llmDebug.errors : [];
+          const debug = {
+            ts: Date.now(),
+            clipId: (clipId && typeof clipId === 'string') ? clipId : '',
+            attemptCount: (llmDebug.attemptCount != null) ? Number(llmDebug.attemptCount) : 1,
+            reason: (llmDebug.reason && typeof llmDebug.reason === 'string') ? llmDebug.reason : '',
+            rawText: rawText.length > 4000 ? rawText.slice(0, 4000) : rawText,
+            extractedJson: extractedJson.length > 4000 ? extractedJson.slice(0, 4000) : extractedJson,
+            errors: errors.slice(0, 20),
+          };
+          localStorage.setItem('hum2song_studio_llm_debug_last', JSON.stringify(debug));
+          loadLlmDebugUI();
+        }catch(e){}
+      }
+
       // PR-7a-3: Populate LLM Settings from H2S_LLM_CONFIG; if missing, show warning and disable Save/Reset
       try{
         if (typeof document !== 'undefined' && $){
@@ -418,6 +467,8 @@
             if (resetBtn) resetBtn.disabled = true;
             if (testBtn) testBtn.disabled = true;
           }
+          // PR-8C: Load LLM debug data on modal open
+          loadLlmDebugUI();
         }
       }catch(e){}
 
@@ -1089,6 +1140,10 @@
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
+                // PR-8C: Save LLM debug data if present (llm_v0 only)
+                if (presetId === 'llm_v0' && res && res.llmDebug){
+                  saveLlmDebug(clipId, res.llmDebug);
+                }
                 if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
               }).catch(function(err){
                 const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
@@ -1179,6 +1234,10 @@
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip));
+                // PR-8C: Save LLM debug data if present (llm_v0 only)
+                if (presetId === 'llm_v0' && res && res.llmDebug){
+                  saveLlmDebug(clipId, res.llmDebug);
+                }
               }).catch(function(err){
                 const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
                 const presetId = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
@@ -1271,6 +1330,33 @@
         }
         btnLlmReset.removeEventListener('click', H.onLlmResetClick, true);
         btnLlmReset.addEventListener('click', H.onLlmResetClick, true);
+      }
+
+      // PR-8C: Clear Debug — remove localStorage key and clear UI
+      const btnLlmDebugClear = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmDebugClear') : null;
+      if (btnLlmDebugClear){
+        if (!H.onLlmDebugClearClick){
+          H.onLlmDebugClearClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (typeof localStorage !== 'undefined'){
+                try { localStorage.removeItem('hum2song_studio_llm_debug_last'); } catch(_){}
+              }
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (doc){
+                const rawEl = doc.getElementById('editorLlmDebugRaw');
+                const extractedEl = doc.getElementById('editorLlmDebugExtracted');
+                const errorsEl = doc.getElementById('editorLlmDebugErrors');
+                if (rawEl) rawEl.value = '';
+                if (extractedEl) extractedEl.value = '';
+                if (errorsEl) errorsEl.value = '';
+              }
+            }catch(e){}
+          };
+        }
+        btnLlmDebugClear.removeEventListener('click', H.onLlmDebugClearClick, true);
+        btnLlmDebugClear.addEventListener('click', H.onLlmDebugClearClick, true);
       }
 
       // PR-7b-3: Test Connection — ping gateway with current inputs; show friendly status (no revision, no secrets).

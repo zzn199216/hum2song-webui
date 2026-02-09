@@ -650,6 +650,22 @@
                   <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                 </div>
               </div>
+              <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
+                <details class="help" style="margin-top:0;">
+                  <summary style="cursor:pointer; font-weight:700;">LLM Debug</summary>
+                  <div style="margin-top:6px; font-size:11px; opacity:0.85;">
+                    <div class="row" style="margin-bottom:6px;">
+                      <button id="btnEditorLlmDebugClear" type="button" class="btn mini">Clear Debug</button>
+                    </div>
+                    <label class="muted" style="margin:0; display:block;">Last raw output:</label>
+                    <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                    <label class="muted" style="margin:8px 0 0; display:block;">Last extracted patch:</label>
+                    <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                    <label class="muted" style="margin:8px 0 0; display:block;">Errors + attempt:</label>
+                    <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                  </div>
+                </details>
+              </div>
             </div>
           </details>
           <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
