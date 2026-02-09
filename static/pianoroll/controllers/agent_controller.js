@@ -36,6 +36,8 @@
     DURATION_GENTLE: 'duration_gentle',
     /** PR-5b: deterministic no-op for tests; returns empty patch. */
     NOOP: 'noop',
+    /** PR-7b-2: LLM gateway; returns patch from OpenAI-compatible chat completions. */
+    LLM_V0: 'llm_v0',
   };
   /** Allowlist: only these preset IDs may run; unknown → fallback to safe_stub_v0. */
   const SAFE_PRESET_ALLOWLIST = {
@@ -43,6 +45,7 @@
     [PRESET_IDS.DYNAMICS_LEVEL]: true,
     [PRESET_IDS.DURATION_GENTLE]: true,
     [PRESET_IDS.NOOP]: true,
+    [PRESET_IDS.LLM_V0]: true,
   };
 
   function _opsByOp(ops){
@@ -227,6 +230,128 @@
   }
 
   function create(opts){
+    /** PR-7b-2: Run optimize with llm_v0 preset (async). Returns Promise<result>. */
+    function _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId){
+      const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
+      const patchSummaryBase = {
+        requestedSource: requestedPresetId,
+        requestedPresetId: requestedPresetId,
+        executedSource: 'llm_v0',
+        executedPreset: 'llm_v0',
+        source: 'llm_v0',
+        preset: 'llm_v0',
+        requestedUserPrompt: requestedUserPrompt,
+        executedUserPromptSource: promptInfo.source,
+        executedUserPromptPreview: promptInfo.preview,
+      };
+      if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
+
+      function fail(reason, summaryExtras){
+        return {
+          ok: false,
+          reason: reason,
+          patchSummary: Object.assign({}, patchSummaryBase, {
+            status: 'failed',
+            reason: String(reason),
+            ops: 0,
+            byOp: {},
+            examples: [],
+          }, summaryExtras || {}),
+        };
+      }
+
+      const cfg = (ROOT.H2S_LLM_CONFIG && typeof ROOT.H2S_LLM_CONFIG.loadLlmConfig === 'function')
+        ? ROOT.H2S_LLM_CONFIG.loadLlmConfig()
+        : null;
+      if (!cfg || typeof cfg.baseUrl !== 'string' || !cfg.baseUrl.trim() || typeof cfg.model !== 'string' || !cfg.model.trim()){
+        return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }));
+      }
+
+      const systemMsg = 'You must output exactly one JSON object. Prefer wrapping it in a ```json ... ``` code block. The object must have an "ops" array of patch operations (e.g. setNote with noteId, before, after). No other text.';
+      const userContent = promptInfo.prompt + '\n\nClip has a score with tracks and notes. Output only the patch JSON.';
+      const messages = [
+        { role: 'system', content: systemMsg },
+        { role: 'user', content: userContent },
+      ];
+
+      const client = ROOT.H2S_LLM_CLIENT;
+      if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
+        return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }));
+      }
+
+      return client.callChatCompletions(cfg, messages, { temperature: 0.2, timeoutMs: 20000 })
+        .then(function(res){
+          const text = (res && typeof res.text === 'string') ? res.text : '';
+          const patchObj = client.extractJsonObject(text);
+          if (!patchObj || typeof patchObj !== 'object'){
+            return fail('llm_no_valid_json', { reason: 'llm_no_valid_json' });
+          }
+          if (!Array.isArray(patchObj.ops)) patchObj.ops = [];
+          if (patchObj.version == null) patchObj.version = 1;
+          if (patchObj.clipId == null) patchObj.clipId = clip && clip.id;
+
+          const opsN = patchObj.ops.length;
+          if (opsN === 0){
+            return {
+              ok: true,
+              ops: 0,
+              patchSummary: Object.assign({}, patchSummaryBase, {
+                status: 'ok',
+                noChanges: true,
+                reason: 'empty_ops',
+                ops: 0,
+                byOp: {},
+                examples: [],
+              }),
+            };
+          }
+
+          const valid = H2SAgentPatch.validatePatch(patchObj, clip);
+          if (!valid || !valid.ok){
+            const reason = (valid && valid.errors && valid.errors[0]) ? valid.errors[0] : 'patch_rejected';
+            return fail(reason, {
+              ops: opsN,
+              byOp: _opsByOp(patchObj.ops),
+            });
+          }
+
+          const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
+          if (!applied || !applied.clip){
+            return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops) });
+          }
+
+          const resNew = H2SProject.beginNewClipRevision(project, cid, { name: clip.name });
+          if (!resNew || !resNew.ok){
+            return fail('beginNewClipRevision_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops) });
+          }
+
+          const head = project.clips[cid];
+          head.score = applied.clip.score;
+          if (typeof H2SProject.recomputeClipMetaFromScoreBeat === 'function') H2SProject.recomputeClipMetaFromScoreBeat(head);
+
+          head.meta = head.meta || {};
+          head.meta.agent = {
+            optimizedFromRevisionId: beforeRevisionId,
+            appliedAt: _now(),
+            patchOps: opsN,
+            patchSummary: Object.assign({}, patchSummaryBase, {
+              status: 'ok',
+              ops: opsN,
+              byOp: _opsByOp(patchObj.ops),
+              examples: [],
+            }),
+          };
+
+          opts.setProjectFromV2(project);
+          if (typeof opts.commitV2 === 'function') opts.commitV2('agent_optimize');
+          return { ok: true, ops: opsN };
+        })
+        .catch(function(err){
+          const msg = (err && err.message) ? String(err.message) : 'llm_request_failed';
+          return fail(msg, { reason: msg });
+        });
+    }
+
     /** @param {string} clipId
      *  @param {{ requestedPresetId?: string, userPrompt?: string }} options - optional; do not store full userPrompt in meta
      *  When called with one arg (e.g. from App), options are taken from opts.getOptimizeOptions() or ROOT.__h2s_optimize_options.
@@ -267,6 +392,9 @@
       } else {
         const inAllowlist = requestedPresetId && SAFE_PRESET_ALLOWLIST[requestedPresetId];
         const effectivePresetId = inAllowlist ? requestedPresetId : SAFE_STUB_PRESET;
+        if (effectivePresetId === PRESET_IDS.LLM_V0){
+          return _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId);
+        }
         const res = _buildPatchFromPreset(clip, effectivePresetId);
         patch = res.patch;
         examples = res.examples || [];
