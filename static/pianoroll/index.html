@@ -431,10 +431,21 @@
     .editorRight{
       width: 280px;
       flex-shrink:0;
+      height:100%;
       border-radius:14px;
       border:1px solid rgba(255,255,255,.10);
       background: rgba(0,0,0,.16);
       padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .editor-right-scroll{
+      flex: 1 1 auto;
+      min-height:0;
+      overflow-y:auto;
+      overflow-x:hidden;
+      padding-right:6px;
       display:flex;
       flex-direction:column;
       gap:10px;
@@ -602,77 +613,79 @@
           </div>
         </div>
         <div class="editorRight">
-          <div class="kv"><b>Notes</b><span id="kvClipNotes">0</span></div>
-          <div class="kv"><b>Pitch</b><span id="kvClipPitch">-</span></div>
-          <div class="kv"><b>Span</b><span id="kvClipSpan">-</span></div>
-          <details class="help" style="margin-bottom:8px;">
-            <summary style="cursor:pointer; font-weight:700;">Help</summary>
-            <div style="margin-top:6px; padding-left:4px;">
-              <div style="font-weight:900; margin-bottom:6px;">How to edit (MVP)</div>
-              <div>1) Click empty grid: set cursor and choose a cell.</div>
-              <div>2) Press <span class="kbd">Insert Note</span>: add a default note at the selected cell.</div>
-              <div>3) Click a note: select; drag to move; drag the right edge to resize.</div>
-              <div>4) Press <span class="kbd">Delete</span>: delete selected note.</div>
-              <div style="margin-top:8px; color:rgba(255,255,255,.62);">
-                Cancel discards changes; Save writes back into the clip.
-              </div>
-            </div>
-          </details>
-          <div class="hr"></div>
-          <div class="help" style="font-size:11px; opacity:0.85; margin-bottom:2px;">Prompt (blank = default)</div>
-          <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
-          <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
-          <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
-          <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
-          <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
-          <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
-          <details class="help" style="margin-top:8px;">
-            <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
-            <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
-              <span>Rev: <span id="editorRevId">-</span></span>
-              <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
-              <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
-                <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
-                <div class="col" style="gap:6px;">
-                  <label class="muted" style="margin:0;">Base URL</label>
-                  <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                  <label class="muted" style="margin:0;">Model</label>
-                  <input id="editorLlmModel" type="text" placeholder="Model name" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                  <label class="muted" style="margin:0;">Auth Token</label>
-                  <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                  <label style="margin:4px 0 0; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
-                    <input id="editorLlmVelocityOnly" type="checkbox" checked style="margin:0; cursor:pointer;" />
-                    <span>Velocity-only (Safe mode)</span>
-                  </label>
-                  <div class="row" style="margin-top:4px;">
-                    <button id="btnEditorLlmSave" type="button" class="btn mini">Save</button>
-                    <button id="btnEditorLlmReset" type="button" class="btn mini">Reset</button>
-                    <button id="btnEditorLlmTest" type="button" class="btn mini">Test Connection</button>
-                  </div>
-                  <div id="editorLlmConfigWarning" class="muted" style="display:none;">LLM config module not loaded.</div>
-                  <div id="editorLlmConfigStatus" class="muted" style="min-height:1em;"></div>
-                  <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
+          <div id="editorRightScroll" class="editor-right-scroll">
+            <div class="kv"><b>Notes</b><span id="kvClipNotes">0</span></div>
+            <div class="kv"><b>Pitch</b><span id="kvClipPitch">-</span></div>
+            <div class="kv"><b>Span</b><span id="kvClipSpan">-</span></div>
+            <details class="help" style="margin-bottom:8px;">
+              <summary style="cursor:pointer; font-weight:700;">Help</summary>
+              <div style="margin-top:6px; padding-left:4px;">
+                <div style="font-weight:900; margin-bottom:6px;">How to edit (MVP)</div>
+                <div>1) Click empty grid: set cursor and choose a cell.</div>
+                <div>2) Press <span class="kbd">Insert Note</span>: add a default note at the selected cell.</div>
+                <div>3) Click a note: select; drag to move; drag the right edge to resize.</div>
+                <div>4) Press <span class="kbd">Delete</span>: delete selected note.</div>
+                <div style="margin-top:8px; color:rgba(255,255,255,.62);">
+                  Cancel discards changes; Save writes back into the clip.
                 </div>
               </div>
-              <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
-                <details class="help" style="margin-top:0;">
-                  <summary style="cursor:pointer; font-weight:700;">LLM Debug</summary>
-                  <div style="margin-top:6px; font-size:11px; opacity:0.85;">
-                    <div class="row" style="margin-bottom:6px;">
-                      <button id="btnEditorLlmDebugClear" type="button" class="btn mini">Clear Debug</button>
+            </details>
+            <div class="hr"></div>
+            <div class="help" style="font-size:11px; opacity:0.85; margin-bottom:2px;">Prompt (blank = default)</div>
+            <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
+            <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
+            <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
+            <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
+            <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
+            <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
+            <details class="help" style="margin-top:8px;">
+              <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
+              <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
+                <span>Rev: <span id="editorRevId">-</span></span>
+                <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
+                <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
+                  <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
+                  <div class="col" style="gap:6px;">
+                    <label class="muted" style="margin:0;">Base URL</label>
+                    <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label class="muted" style="margin:0;">Model</label>
+                    <input id="editorLlmModel" type="text" placeholder="Model name" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label class="muted" style="margin:0;">Auth Token</label>
+                    <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label style="margin:4px 0 0; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+                      <input id="editorLlmVelocityOnly" type="checkbox" checked style="margin:0; cursor:pointer;" />
+                      <span>Velocity-only (Safe mode)</span>
+                    </label>
+                    <div class="row" style="margin-top:4px;">
+                      <button id="btnEditorLlmSave" type="button" class="btn mini">Save</button>
+                      <button id="btnEditorLlmReset" type="button" class="btn mini">Reset</button>
+                      <button id="btnEditorLlmTest" type="button" class="btn mini">Test Connection</button>
                     </div>
-                    <label class="muted" style="margin:0; display:block;">Last raw output:</label>
-                    <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                    <label class="muted" style="margin:8px 0 0; display:block;">Last extracted patch:</label>
-                    <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                    <label class="muted" style="margin:8px 0 0; display:block;">Errors + attempt:</label>
-                    <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                    <div id="editorLlmConfigWarning" class="muted" style="display:none;">LLM config module not loaded.</div>
+                    <div id="editorLlmConfigStatus" class="muted" style="min-height:1em;"></div>
+                    <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                   </div>
-                </details>
+                </div>
+                <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
+                  <details class="help" style="margin-top:0;">
+                    <summary style="cursor:pointer; font-weight:700;">LLM Debug</summary>
+                    <div style="margin-top:6px; font-size:11px; opacity:0.85;">
+                      <div class="row" style="margin-bottom:6px;">
+                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini">Clear Debug</button>
+                      </div>
+                      <label class="muted" style="margin:0; display:block;">Last raw output:</label>
+                      <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                      <label class="muted" style="margin:8px 0 0; display:block;">Last extracted patch:</label>
+                      <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                      <label class="muted" style="margin:8px 0 0; display:block;">Errors + attempt:</label>
+                      <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
+                    </div>
+                  </details>
+                </div>
               </div>
-            </div>
-          </details>
-          <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
+            </details>
+            <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
+          </div>
         </div>
       </div>
     </div>
