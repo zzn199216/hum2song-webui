@@ -392,25 +392,31 @@
           const tokenEl = document.getElementById('editorLlmAuthToken');
           const saveBtn = document.getElementById('btnEditorLlmSave');
           const resetBtn = document.getElementById('btnEditorLlmReset');
+          const testBtn = document.getElementById('btnEditorLlmTest');
           const warnEl = document.getElementById('editorLlmConfigWarning');
           const statusEl = document.getElementById('editorLlmConfigStatus');
+          const testStatusEl = document.getElementById('editorLlmTestStatus');
           if (api && typeof api.loadLlmConfig === 'function'){
             const cfg = api.loadLlmConfig();
             if (baseEl) baseEl.value = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
             if (modelEl) modelEl.value = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
             if (tokenEl) tokenEl.value = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
             if (statusEl) statusEl.textContent = '';
+            if (testStatusEl) testStatusEl.textContent = '';
             if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
             if (saveBtn) saveBtn.disabled = false;
             if (resetBtn) resetBtn.disabled = false;
+            if (testBtn) testBtn.disabled = !(typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT && typeof globalThis.H2S_LLM_CLIENT.callChatCompletions === 'function');
           } else {
             if (baseEl) baseEl.value = '';
             if (modelEl) modelEl.value = '';
             if (tokenEl) tokenEl.value = '';
             if (statusEl) statusEl.textContent = '';
-            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM config module not loaded.'; }
+            if (testStatusEl) testStatusEl.textContent = '';
+            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
             if (saveBtn) saveBtn.disabled = true;
             if (resetBtn) resetBtn.disabled = true;
+            if (testBtn) testBtn.disabled = true;
           }
         }
       }catch(e){}
@@ -987,6 +993,18 @@
         const el = doc.getElementById('editorOptStatus');
         if (el) el.textContent = text || '';
       };
+      // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
+      const llmFriendlyReason = (reason) => {
+        const r = (reason != null && typeof reason === 'string') ? reason : '';
+        if (/llm_config_missing|llm_client_not_loaded/i.test(r)) return 'Please configure Base URL and Model in Advanced → LLM Settings.';
+        if (/llm_no_valid_json/i.test(r)) return 'LLM response did not contain a valid JSON patch.';
+        if (/patch_rejected|ops_not_array|op\[/.test(r)) return 'Patch validation failed (LLM output not accepted).';
+        if (/timeout|request timeout/i.test(r)) return 'LLM request timed out.';
+        if (/401|403|Unauthorized/i.test(r)) return 'Unauthorized (check token).';
+        if (/404|not found/i.test(r)) return 'Endpoint not found (check Base URL).';
+        if (r) return r;
+        return 'LLM optimize failed.';
+      };
       const statusFromResult = (res, clip) => {
         if (!res) return '';
         if (res.ok) {
@@ -995,6 +1013,8 @@
           const promptSrc = (ps && ps.executedUserPromptSource) ? String(ps.executedUserPromptSource) : 'default';
           return 'ok, ops=' + (res.ops ?? 0) + ' (preset=' + preset + ', prompt=' + promptSrc + ')';
         }
+        const ps = res.patchSummary;
+        if (ps && String(ps.executedPreset || '') === 'llm_v0') return 'failed: ' + llmFriendlyReason(res.reason);
         return 'failed: ' + (res.reason || 'unknown');
       };
 
@@ -1070,7 +1090,12 @@
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
                 if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
-              }).catch(function(err){ setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error')); }).finally(function(){ setOptimizeControlsDisabled(false); });
+              }).catch(function(err){
+                const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+                const presetId = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
+                if (presetId === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message));
+                else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
+              }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };
         }
@@ -1154,7 +1179,12 @@
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip));
-              }).catch(function(err){ setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error')); }).finally(function(){ setOptimizeControlsDisabled(false); });
+              }).catch(function(err){
+                const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+                const presetId = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
+                if (presetId === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message));
+                else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
+              }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };
         }
@@ -1241,6 +1271,58 @@
         }
         btnLlmReset.removeEventListener('click', H.onLlmResetClick, true);
         btnLlmReset.addEventListener('click', H.onLlmResetClick, true);
+      }
+
+      // PR-7b-3: Test Connection — ping gateway with current inputs; show friendly status (no revision, no secrets).
+      const btnLlmTest = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmTest') : null;
+      if (btnLlmTest){
+        if (!H.onLlmTestClick){
+          H.onLlmTestClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const testStatusEl = doc.getElementById('editorLlmTestStatus');
+              const setTestStatus = (txt) => { if (testStatusEl) testStatusEl.textContent = txt || ''; };
+              const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+              const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+              if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){
+                setTestStatus('LLM module not loaded.');
+                return;
+              }
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const modelEl = doc.getElementById('editorLlmModel');
+              const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+              const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+              const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+              if (!baseUrl || !model){
+                setTestStatus('Please set Base URL and Model first');
+                return;
+              }
+              setTestStatus('Testing...');
+              const cfg = { baseUrl: baseUrl, model: model, authToken: authToken };
+              const messages = [
+                { role: 'system', content: 'Reply with exactly: ok' },
+                { role: 'user', content: 'ping' },
+              ];
+              client.callChatCompletions(cfg, messages, { timeoutMs: 8000 })
+                .then(function(){
+                  setTestStatus('Connection OK');
+                })
+                .catch(function(err){
+                  const msg = (err && err.message) ? String(err.message) : '';
+                  if (/401|403|Unauthorized/i.test(msg)) setTestStatus('Unauthorized (check token)');
+                  else if (/404|not found/i.test(msg)) setTestStatus('Endpoint not found (check Base URL)');
+                  else if (/timeout|request timeout/i.test(msg)) setTestStatus('Timeout (gateway unreachable?)');
+                  else setTestStatus('Connection failed');
+                });
+            }catch(e){}
+          };
+        }
+        btnLlmTest.removeEventListener('click', H.onLlmTestClick, true);
+        btnLlmTest.addEventListener('click', H.onLlmTestClick, true);
       }
 
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.
