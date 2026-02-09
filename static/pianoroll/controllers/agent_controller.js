@@ -267,8 +267,107 @@
         return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }));
       }
 
-      const systemMsg = 'You must output exactly one JSON object. Prefer wrapping it in a ```json ... ``` code block. The object must have an "ops" array of patch operations (e.g. setNote with noteId, before, after). No other text.';
-      const userContent = promptInfo.prompt + '\n\nClip has a score with tracks and notes. Output only the patch JSON.';
+      // PR-8B-1: Extract clip metadata and noteIds for structured hint
+      const score = clip && clip.score;
+      const tracks = (score && Array.isArray(score.tracks)) ? score.tracks : [];
+      let noteCount = 0;
+      let noteIds = [];
+      let pitchMin = null;
+      let pitchMax = null;
+      let maxSpanBeat = 0;
+      for (const tr of tracks){
+        const notes = Array.isArray(tr.notes) ? tr.notes : [];
+        for (const n of notes){
+          if (n && n.id){
+            if (noteIds.length < 80) noteIds.push(String(n.id));
+            noteCount += 1;
+            const p = Number(n.pitch);
+            if (isFinite(p) && p >= 0 && p <= 127){
+              if (pitchMin == null || p < pitchMin) pitchMin = p;
+              if (pitchMax == null || p > pitchMax) pitchMax = p;
+            }
+            const sb = Number(n.startBeat);
+            const db = Number(n.durationBeat);
+            if (isFinite(sb) && isFinite(db) && db > 0){
+              const end = sb + db;
+              if (end > maxSpanBeat) maxSpanBeat = end;
+            }
+          }
+        }
+      }
+      const meta = clip && clip.meta;
+      const finalNoteCount = (meta && typeof meta.notes === 'number') ? meta.notes : noteCount;
+      const finalPitchMin = (meta && typeof meta.pitchMin === 'number') ? meta.pitchMin : pitchMin;
+      const finalPitchMax = (meta && typeof meta.pitchMax === 'number') ? meta.pitchMax : pitchMax;
+      const finalSpanBeat = (meta && typeof meta.spanBeat === 'number') ? meta.spanBeat : maxSpanBeat;
+      const p2 = opts.getProjectV2 && typeof opts.getProjectV2 === 'function' ? opts.getProjectV2() : project;
+      const bpm = (p2 && typeof p2.bpm === 'number' && p2.bpm > 0) ? p2.bpm : 120;
+
+      // PR-8B-1: Strict system prompt matching validatePatch schema exactly
+      const systemMsg = 'You are a music patch generator. Output EXACTLY ONE JSON object wrapped in a single ```json ... ``` code block. No other text before or after the code block.\n\n' +
+        'Required patch structure:\n' +
+        '{\n' +
+        '  "version": 1,\n' +
+        '  "clipId": "<string>",\n' +
+        '  "ops": [\n' +
+        '    {\n' +
+        '      "op": "setNote",\n' +
+        '      "noteId": "<string>",\n' +
+        '      "pitch": <0-127>,\n' +
+        '      "startBeat": <number >= 0>,\n' +
+        '      "durationBeat": <number > 0>,\n' +
+        '      "velocity": <1-127>\n' +
+        '    }\n' +
+        '  ]\n' +
+        '}\n\n' +
+        'Allowed op types (field names must match exactly):\n' +
+        '- setNote: REQUIRED: op (string), noteId (string). At least ONE of: pitch (0-127), velocity (1-127), startBeat (>=0), durationBeat (>0)\n' +
+        '- addNote: REQUIRED: op (string), trackId (string), note (object with: pitch 0-127, startBeat >=0, durationBeat >0, velocity 1-127). Optional: note.id (string)\n' +
+        '- deleteNote: REQUIRED: op (string), noteId (string)\n' +
+        '- moveNote: REQUIRED: op (string), noteId (string), deltaBeat (number)\n\n' +
+        'All numeric fields must be finite numbers within stated ranges.\n\n' +
+        'Example (setNote):\n' +
+        '{\n' +
+        '  "version": 1,\n' +
+        '  "clipId": "clip_abc123",\n' +
+        '  "ops": [\n' +
+        '    {\n' +
+        '      "op": "setNote",\n' +
+        '      "noteId": "note_xyz",\n' +
+        '      "velocity": 90\n' +
+        '    }\n' +
+        '  ]\n' +
+        '}';
+
+      // PR-8B-1: User message with structured clip hint including allowed noteIds
+      let clipHint = '\n\n---\n\nClip context (beats-only):\n';
+      clipHint += '- clipId: ' + (clip && clip.id ? String(clip.id) : 'unknown') + '\n';
+      clipHint += '- notes: ' + String(finalNoteCount) + '\n';
+      if (finalPitchMin != null && finalPitchMax != null){
+        clipHint += '- pitch range: ' + String(finalPitchMin) + ' to ' + String(finalPitchMax) + ' (MIDI 0-127)\n';
+      } else {
+        clipHint += '- pitch range: unknown\n';
+      }
+      if (finalSpanBeat > 0){
+        clipHint += '- span: ' + String(finalSpanBeat) + ' beats\n';
+      } else {
+        clipHint += '- span: unknown\n';
+      }
+      clipHint += '- bpm: ' + String(bpm) + '\n';
+      if (noteIds.length > 0){
+        clipHint += '\nAllowed noteIds (use ONLY these for setNote/moveNote/deleteNote):\n';
+        clipHint += noteIds.slice(0, 80).join(', ') + '\n';
+        if (finalNoteCount > 80){
+          clipHint += '\n(Clip has ' + String(finalNoteCount) + ' notes total; only modify noteIds from the allowed list above. Do not invent ids.)\n';
+        } else {
+          clipHint += '\nIf you use setNote/moveNote/deleteNote, noteId MUST be chosen from the Allowed noteIds list above.\n';
+        }
+      } else {
+        clipHint += '\nNo notes found in clip. Use addNote to create new notes.\n';
+      }
+      clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
+
+      const userContent = promptInfo.prompt + clipHint;
       const messages = [
         { role: 'system', content: systemMsg },
         { role: 'user', content: userContent },
