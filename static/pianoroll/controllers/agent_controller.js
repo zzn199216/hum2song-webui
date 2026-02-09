@@ -367,23 +367,30 @@
       }
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
-      const userContent = promptInfo.prompt + clipHint;
-      const messages = [
-        { role: 'system', content: systemMsg },
-        { role: 'user', content: userContent },
-      ];
-
+      const baseUserContent = promptInfo.prompt + clipHint;
       const client = ROOT.H2S_LLM_CLIENT;
       if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
         return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }));
       }
 
-      return client.callChatCompletions(cfg, messages, { temperature: 0.2, timeoutMs: 20000 })
-        .then(function(res){
+      // PR-8B-2: Inner async function for one attempt (with optional fix hint for retry)
+      async function attemptOnce(attemptIndex, extraFixHint){
+        let userContent = baseUserContent;
+        if (attemptIndex === 2 && extraFixHint){
+          const fixPrefix = 'The previous output was invalid for this reason: ' + extraFixHint + '\n\nFix the JSON patch ONLY.\nOutput EXACTLY ONE JSON object in a single ```json``` block. No commentary.\nEnsure it matches the required schema and uses only Allowed noteIds.\n\n---\n\n';
+          userContent = fixPrefix + baseUserContent;
+        }
+        const messages = [
+          { role: 'system', content: systemMsg },
+          { role: 'user', content: userContent },
+        ];
+
+        try {
+          const res = await client.callChatCompletions(cfg, messages, { temperature: 0.2, timeoutMs: 20000 });
           const text = (res && typeof res.text === 'string') ? res.text : '';
           const patchObj = client.extractJsonObject(text);
           if (!patchObj || typeof patchObj !== 'object'){
-            return fail('llm_no_valid_json', { reason: 'llm_no_valid_json' });
+            return { ok: false, reason: 'llm_no_valid_json', detail: 'no_json' };
           }
           if (!Array.isArray(patchObj.ops)) patchObj.ops = [];
           if (patchObj.version == null) patchObj.version = 1;
@@ -407,11 +414,15 @@
 
           const valid = H2SAgentPatch.validatePatch(patchObj, clip);
           if (!valid || !valid.ok){
-            const reason = (valid && valid.errors && valid.errors[0]) ? valid.errors[0] : 'patch_rejected';
-            return fail(reason, {
-              ops: opsN,
-              byOp: _opsByOp(patchObj.ops),
-            });
+            const firstError = (valid && valid.errors && valid.errors[0]) ? valid.errors[0] : 'patch_rejected';
+            const errorCodes = (valid && valid.errors && Array.isArray(valid.errors)) ? valid.errors.slice(0, 3).join(', ') : firstError;
+            return {
+              ok: false,
+              reason: 'patch_rejected',
+              detail: errorCodes,
+              patchObj: patchObj,
+              opsN: opsN,
+            };
           }
 
           const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
@@ -444,11 +455,27 @@
           opts.setProjectFromV2(project);
           if (typeof opts.commitV2 === 'function') opts.commitV2('agent_optimize');
           return { ok: true, ops: opsN };
-        })
-        .catch(function(err){
+        } catch(err){
           const msg = (err && err.message) ? String(err.message) : 'llm_request_failed';
           return fail(msg, { reason: msg });
-        });
+        }
+      }
+
+      // PR-8B-2: Retry logic - only retry for JSON extraction or validation failures
+      return attemptOnce(1, null).then(function(res1){
+        if (res1.ok) return res1;
+        if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
+          let fixDetail = '';
+          if (res1.reason === 'llm_no_valid_json'){
+            fixDetail = 'no valid JSON object found';
+          } else if (res1.reason === 'patch_rejected'){
+            fixDetail = (res1.detail && typeof res1.detail === 'string') ? res1.detail : 'patch validation failed';
+            if (fixDetail.length > 200) fixDetail = fixDetail.slice(0, 197) + '...';
+          }
+          return attemptOnce(2, fixDetail);
+        }
+        return res1;
+      });
     }
 
     /** @param {string} clipId
