@@ -640,6 +640,10 @@
                   <input id="editorLlmModel" type="text" placeholder="Model name" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
                   <label class="muted" style="margin:0;">Auth Token</label>
                   <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                  <label style="margin:4px 0 0; display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px;">
+                    <input id="editorLlmVelocityOnly" type="checkbox" checked style="margin:0; cursor:pointer;" />
+                    <span>Velocity-only (Safe mode)</span>
+                  </label>
                   <div class="row" style="margin-top:4px;">
                     <button id="btnEditorLlmSave" type="button" class="btn mini">Save</button>
                     <button id="btnEditorLlmReset" type="button" class="btn mini">Reset</button>

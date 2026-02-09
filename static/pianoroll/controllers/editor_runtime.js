@@ -439,6 +439,7 @@
           const baseEl = document.getElementById('editorLlmBaseUrl');
           const modelEl = document.getElementById('editorLlmModel');
           const tokenEl = document.getElementById('editorLlmAuthToken');
+          const velocityOnlyEl = document.getElementById('editorLlmVelocityOnly');
           const saveBtn = document.getElementById('btnEditorLlmSave');
           const resetBtn = document.getElementById('btnEditorLlmReset');
           const testBtn = document.getElementById('btnEditorLlmTest');
@@ -450,6 +451,8 @@
             if (baseEl) baseEl.value = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
             if (modelEl) modelEl.value = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
             if (tokenEl) tokenEl.value = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
+            // PR-8D: Populate velocity-only checkbox (default true if missing)
+            if (velocityOnlyEl) velocityOnlyEl.checked = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
             if (statusEl) statusEl.textContent = '';
             if (testStatusEl) testStatusEl.textContent = '';
             if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
@@ -460,6 +463,8 @@
             if (baseEl) baseEl.value = '';
             if (modelEl) modelEl.value = '';
             if (tokenEl) tokenEl.value = '';
+            // PR-8D: Default checkbox to checked if module not loaded
+            if (velocityOnlyEl) velocityOnlyEl.checked = true;
             if (statusEl) statusEl.textContent = '';
             if (testStatusEl) testStatusEl.textContent = '';
             if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
@@ -1290,11 +1295,14 @@
               const baseEl = doc.getElementById('editorLlmBaseUrl');
               const modelEl = doc.getElementById('editorLlmModel');
               const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const velocityOnlyEl = doc.getElementById('editorLlmVelocityOnly');
               const statusEl = doc.getElementById('editorLlmConfigStatus');
               const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value) : '';
               const model = (modelEl && modelEl.value != null) ? String(modelEl.value) : '';
               const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
-              api.saveLlmConfig({ baseUrl: baseUrl, model: model, authToken: authToken });
+              // PR-8D: Include velocityOnly checkbox value in save
+              const velocityOnly = (velocityOnlyEl && velocityOnlyEl.checked === true) ? true : false;
+              api.saveLlmConfig({ baseUrl: baseUrl, model: model, authToken: authToken, velocityOnly: velocityOnly });
               if (statusEl) statusEl.textContent = 'Saved';
             }catch(e){}
           };
@@ -1319,10 +1327,13 @@
                 const baseEl = doc.getElementById('editorLlmBaseUrl');
                 const modelEl = doc.getElementById('editorLlmModel');
                 const tokenEl = doc.getElementById('editorLlmAuthToken');
+                const velocityOnlyEl = doc.getElementById('editorLlmVelocityOnly');
                 const statusEl = doc.getElementById('editorLlmConfigStatus');
                 if (baseEl) baseEl.value = '';
                 if (modelEl) modelEl.value = '';
                 if (tokenEl) tokenEl.value = '';
+                // PR-8D: Reset checkbox to default (checked = true)
+                if (velocityOnlyEl) velocityOnlyEl.checked = true;
                 if (statusEl) statusEl.textContent = 'Config reset';
               }
             }catch(e){}

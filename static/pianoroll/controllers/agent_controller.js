@@ -267,6 +267,9 @@
         return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }));
       }
 
+      // PR-8D: Determine safe mode (velocity-only) - default ON if missing
+      const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+
       // PR-8B-1: Extract clip metadata and noteIds for structured hint
       const score = clip && clip.score;
       const tracks = (score && Array.isArray(score.tracks)) ? score.tracks : [];
@@ -304,40 +307,78 @@
       const bpm = (p2 && typeof p2.bpm === 'number' && p2.bpm > 0) ? p2.bpm : 120;
 
       // PR-8B-1: Strict system prompt matching validatePatch schema exactly
-      const systemMsg = 'You are a music patch generator. Output EXACTLY ONE JSON object wrapped in a single ```json ... ``` code block. No other text before or after the code block.\n\n' +
-        'Required patch structure:\n' +
-        '{\n' +
-        '  "version": 1,\n' +
-        '  "clipId": "<string>",\n' +
-        '  "ops": [\n' +
-        '    {\n' +
-        '      "op": "setNote",\n' +
-        '      "noteId": "<string>",\n' +
-        '      "pitch": <0-127>,\n' +
-        '      "startBeat": <number >= 0>,\n' +
-        '      "durationBeat": <number > 0>,\n' +
-        '      "velocity": <1-127>\n' +
-        '    }\n' +
-        '  ]\n' +
-        '}\n\n' +
-        'Allowed op types (field names must match exactly):\n' +
-        '- setNote: REQUIRED: op (string), noteId (string). At least ONE of: pitch (0-127), velocity (1-127), startBeat (>=0), durationBeat (>0)\n' +
-        '- addNote: REQUIRED: op (string), trackId (string), note (object with: pitch 0-127, startBeat >=0, durationBeat >0, velocity 1-127). Optional: note.id (string)\n' +
-        '- deleteNote: REQUIRED: op (string), noteId (string)\n' +
-        '- moveNote: REQUIRED: op (string), noteId (string), deltaBeat (number)\n\n' +
-        'All numeric fields must be finite numbers within stated ranges.\n\n' +
-        'Example (setNote):\n' +
-        '{\n' +
-        '  "version": 1,\n' +
-        '  "clipId": "clip_abc123",\n' +
-        '  "ops": [\n' +
-        '    {\n' +
-        '      "op": "setNote",\n' +
-        '      "noteId": "note_xyz",\n' +
-        '      "velocity": 90\n' +
-        '    }\n' +
-        '  ]\n' +
-        '}';
+      // PR-8D: Adjust prompt for safe mode (velocity-only) vs normal mode
+      let systemMsg;
+      if (safeMode){
+        // Safe mode: ONLY setNote ops, ONLY velocity field allowed
+        systemMsg = 'You are a music patch generator. Output EXACTLY ONE JSON object wrapped in a single ```json ... ``` code block. No other text before or after the code block.\n\n' +
+          'SAFE MODE (Velocity-only): You MUST output ONLY setNote operations that change ONLY velocity. No other op types or fields are allowed.\n\n' +
+          'Required patch structure:\n' +
+          '{\n' +
+          '  "version": 1,\n' +
+          '  "clipId": "<string>",\n' +
+          '  "ops": [\n' +
+          '    {\n' +
+          '      "op": "setNote",\n' +
+          '      "noteId": "<string>",\n' +
+          '      "velocity": <1-127>\n' +
+          '    }\n' +
+          '  ]\n' +
+          '}\n\n' +
+          'Allowed op type (ONLY):\n' +
+          '- setNote: REQUIRED: op (string, must be "setNote"), noteId (string), velocity (1-127)\n' +
+          '  FORBIDDEN: Do NOT include pitch, startBeat, or durationBeat fields\n' +
+          '  FORBIDDEN: Do NOT use addNote, deleteNote, or moveNote op types\n\n' +
+          'All numeric fields must be finite numbers within stated ranges.\n\n' +
+          'Example (setNote with velocity only):\n' +
+          '{\n' +
+          '  "version": 1,\n' +
+          '  "clipId": "clip_abc123",\n' +
+          '  "ops": [\n' +
+          '    {\n' +
+          '      "op": "setNote",\n' +
+          '      "noteId": "note_xyz",\n' +
+          '      "velocity": 90\n' +
+          '    }\n' +
+          '  ]\n' +
+          '}';
+      } else {
+        // Normal mode: all 4 op types allowed (PR-8B-1 contract)
+        systemMsg = 'You are a music patch generator. Output EXACTLY ONE JSON object wrapped in a single ```json ... ``` code block. No other text before or after the code block.\n\n' +
+          'Required patch structure:\n' +
+          '{\n' +
+          '  "version": 1,\n' +
+          '  "clipId": "<string>",\n' +
+          '  "ops": [\n' +
+          '    {\n' +
+          '      "op": "setNote",\n' +
+          '      "noteId": "<string>",\n' +
+          '      "pitch": <0-127>,\n' +
+          '      "startBeat": <number >= 0>,\n' +
+          '      "durationBeat": <number > 0>,\n' +
+          '      "velocity": <1-127>\n' +
+          '    }\n' +
+          '  ]\n' +
+          '}\n\n' +
+          'Allowed op types (field names must match exactly):\n' +
+          '- setNote: REQUIRED: op (string), noteId (string). At least ONE of: pitch (0-127), velocity (1-127), startBeat (>=0), durationBeat (>0)\n' +
+          '- addNote: REQUIRED: op (string), trackId (string), note (object with: pitch 0-127, startBeat >=0, durationBeat >0, velocity 1-127). Optional: note.id (string)\n' +
+          '- deleteNote: REQUIRED: op (string), noteId (string)\n' +
+          '- moveNote: REQUIRED: op (string), noteId (string), deltaBeat (number)\n\n' +
+          'All numeric fields must be finite numbers within stated ranges.\n\n' +
+          'Example (setNote):\n' +
+          '{\n' +
+          '  "version": 1,\n' +
+          '  "clipId": "clip_abc123",\n' +
+          '  "ops": [\n' +
+          '    {\n' +
+          '      "op": "setNote",\n' +
+          '      "noteId": "note_xyz",\n' +
+          '      "velocity": 90\n' +
+          '    }\n' +
+          '  ]\n' +
+          '}';
+      }
 
       // PR-8B-1: User message with structured clip hint including allowed noteIds
       let clipHint = '\n\n---\n\nClip context (beats-only):\n';
@@ -415,6 +456,40 @@
                 examples: [],
               }),
             };
+          }
+
+          // PR-8D: Safe mode enforcement (velocity-only) - reject disallowed ops/fields before validatePatch
+          if (safeMode){
+            const errors = [];
+            for (let i = 0; i < patchObj.ops.length; i++){
+              const op = patchObj.ops[i];
+              if (!op || typeof op !== 'object') continue;
+              const opType = op.op;
+              // Reject any op type other than setNote
+              if (opType !== 'setNote'){
+                errors.push('disallowed_op:' + String(opType));
+                continue;
+              }
+              // For setNote, reject if it contains pitch, startBeat, or durationBeat
+              if (op.pitch != null || op.startBeat != null || op.durationBeat != null){
+                const disallowedFields = [];
+                if (op.pitch != null) disallowedFields.push('pitch');
+                if (op.startBeat != null) disallowedFields.push('startBeat');
+                if (op.durationBeat != null) disallowedFields.push('durationBeat');
+                errors.push('disallowed_field:' + disallowedFields.join(','));
+              }
+            }
+            if (errors.length > 0){
+              const errorCodes = errors.slice(0, 3).join(', ');
+              if (debugCapture) debugCapture.validateErrors = errors.slice(0, 10);
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: errorCodes,
+                patchObj: patchObj,
+                opsN: opsN,
+              };
+            }
           }
 
           const valid = H2SAgentPatch.validatePatch(patchObj, clip);
