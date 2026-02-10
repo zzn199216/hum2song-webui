@@ -474,6 +474,14 @@
     .editor-llm-checkbox span{
       flex:1;
     }
+    /* PR-8L: Model select dropdown readability — dark text on white dropdown, light text on dark control */
+    #editorLlmModelSelect{
+      color: rgba(255,255,255,.90);
+    }
+    #editorLlmModelSelect option{
+      background: #fff;
+      color: #111;
+    }
     .help{
       color:rgba(255,255,255,.72);
       font-size:12px;
