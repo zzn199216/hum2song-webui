@@ -1061,16 +1061,44 @@
         if (r) return r;
         return 'LLM optimize failed.';
       };
-      const statusFromResult = (res, clip) => {
+      // PR-8G: Mode label for llm_v0 status (read from stored LLM config; no new persistence).
+      const getLlmModeLabel = (presetId) => {
+        if (presetId !== 'llm_v0') return '';
+        try {
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (!api) return '';
+          const cfg = api.loadLlmConfig();
+          const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+          return safeMode ? ' [Safe mode]' : ' [Full mode]';
+        } catch (_) { return ''; }
+      };
+      const statusFromResult = (res, clip, presetId) => {
         if (!res) return '';
         if (res.ok) {
           const ps = clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary;
           const preset = (ps && (ps.executedPreset || ps.executedSource)) ? String(ps.executedPreset || ps.executedSource) : '';
           const promptSrc = (ps && ps.executedUserPromptSource) ? String(ps.executedUserPromptSource) : 'default';
+          if (preset === 'llm_v0') {
+            const modeLabel = getLlmModeLabel('llm_v0');
+            const byOp = (ps && ps.byOp && typeof ps.byOp === 'object') ? ps.byOp : {};
+            const opTypes = Object.keys(byOp).filter(function(k){ return byOp[k] > 0; }).join(', ') || 'setNote';
+            const ops = res.ops ?? 0;
+            let line = 'ok, ops=' + ops + ' (' + opTypes + ')' + modeLabel;
+            const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
+            const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+            if (safeMode) line += ' velocity-only';
+            return line;
+          }
           return 'ok, ops=' + (res.ops ?? 0) + ' (preset=' + preset + ', prompt=' + promptSrc + ')';
         }
+        if (presetId === 'llm_v0') {
+          const detail = (res.detail != null && typeof res.detail === 'string') ? res.detail : '';
+          const isSafeModeRejection = res.reason === 'patch_rejected' && (detail.indexOf('disallowed_op') >= 0 || detail.indexOf('disallowed_field') >= 0);
+          const msg = isSafeModeRejection ? 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.' : llmFriendlyReason(res.reason);
+          return 'failed: ' + msg + getLlmModeLabel('llm_v0');
+        }
         const ps = res.patchSummary;
-        if (ps && String(ps.executedPreset || '') === 'llm_v0') return 'failed: ' + llmFriendlyReason(res.reason);
+        if (ps && String(ps.executedPreset || '') === 'llm_v0') return 'failed: ' + llmFriendlyReason(res.reason) + getLlmModeLabel('llm_v0');
         return 'failed: ' + (res.reason || 'unknown');
       };
 
@@ -1139,7 +1167,7 @@
                 try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
-                setEditorOptStatus(statusFromResult(res, clip));
+                setEditorOptStatus(statusFromResult(res, clip, presetId));
                 const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
                 if (el && clip && clip.meta && clip.meta.agent){
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
@@ -1152,8 +1180,8 @@
                 if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
               }).catch(function(err){
                 const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
-                const presetId = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
-                if (presetId === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message));
+                const presetIdErr = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
+                if (presetIdErr === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message) + getLlmModeLabel('llm_v0'));
                 else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
               }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
@@ -1238,15 +1266,15 @@
                 try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
-                setEditorOptStatus(statusFromResult(res, clip));
+                setEditorOptStatus(statusFromResult(res, clip, presetId));
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);
                 }
               }).catch(function(err){
                 const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
-                const presetId = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
-                if (presetId === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message));
+                const presetIdErr = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
+                if (presetIdErr === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message) + getLlmModeLabel('llm_v0'));
                 else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
               }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
