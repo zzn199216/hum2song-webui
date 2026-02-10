@@ -383,6 +383,63 @@
         }
       }catch(e){}
 
+      // PR-8H: Compute verifiable summary (changedNotes + fieldsTouched) from debug object
+      function computeLlmDebugSummary(debug){
+        if (!debug || typeof debug !== 'object') return '';
+        const attempts = (debug.attemptCount != null) ? Number(debug.attemptCount) : 1;
+        const reason = (debug.reason != null && typeof debug.reason === 'string') ? debug.reason : 'unknown';
+        let modeLabel = '';
+        try{
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api){
+            const cfg = api.loadLlmConfig();
+            modeLabel = (cfg && cfg.velocityOnly === false) ? ' [Full mode]' : ' [Safe mode]';
+          }
+        }catch(_){}
+        const extractedStr = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+        let opsTotal = 0;
+        const opsByType = {};
+        const noteIds = new Set();
+        const fieldsTouched = new Set();
+        let addedNoId = 0;
+        let parsed = false;
+        if (extractedStr){
+          try{
+            const patch = JSON.parse(extractedStr);
+            const ops = (patch && Array.isArray(patch.ops)) ? patch.ops : [];
+            opsTotal = ops.length;
+            for (let i = 0; i < ops.length; i++){
+              const op = ops[i];
+              if (!op || typeof op !== 'object') continue;
+              const opType = op.op;
+              opsByType[opType] = (opsByType[opType] || 0) + 1;
+              if (opType === 'setNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+                if (op.velocity != null) fieldsTouched.add('velocity');
+                if (op.pitch != null) fieldsTouched.add('pitch');
+                if (op.startBeat != null || op.durationBeat != null) fieldsTouched.add('timing');
+              } else if (opType === 'moveNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+                fieldsTouched.add('timing');
+              } else if (opType === 'deleteNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+              } else if (opType === 'addNote'){
+                if (op.note && op.note.id) noteIds.add(String(op.note.id));
+                else addedNoId++;
+                fieldsTouched.add('pitch');
+                fieldsTouched.add('timing');
+                fieldsTouched.add('velocity');
+              }
+            }
+            parsed = true;
+          }catch(_){}
+        }
+        const opsTypesStr = Object.keys(opsByType).length ? Object.keys(opsByType).map(function(k){ return k + '=' + opsByType[k]; }).join(', ') : (opsTotal > 0 ? '?' : '0');
+        const changedNotesStr = parsed ? String(noteIds.size + addedNoId) : '(unknown)';
+        const fieldsStr = parsed ? (fieldsTouched.size ? Array.from(fieldsTouched).sort().join(', ') : '-') : '?';
+        return 'attempts=' + attempts + ' reason=' + reason + modeLabel + ' ops=' + opsTotal + ' (' + opsTypesStr + ') changedNotes=' + changedNotesStr + ' fieldsTouched=' + fieldsStr;
+      }
+
       // PR-8C: Load and display LLM debug data from localStorage
       function loadLlmDebugUI(){
         if (typeof document === 'undefined' || typeof localStorage === 'undefined') return;
@@ -403,11 +460,13 @@
           const errorsEl = document.getElementById('editorLlmDebugErrors');
           if (rawEl) rawEl.value = (debug.rawText && typeof debug.rawText === 'string') ? debug.rawText : '';
           if (extractedEl) extractedEl.value = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+          const summaryLine = computeLlmDebugSummary(debug);
           const errText = (debug.errors && Array.isArray(debug.errors)) ? debug.errors.join(', ') : '';
           const attemptText = (debug.attemptCount != null) ? 'Attempt: ' + String(debug.attemptCount) : '';
           const reasonText = (debug.reason && typeof debug.reason === 'string') ? 'Reason: ' + debug.reason : '';
           const parts = [attemptText, reasonText, errText].filter(function(s){ return s && s.trim() !== ''; });
-          if (errorsEl) errorsEl.value = parts.join(' | ');
+          const detailLine = parts.join(' | ');
+          if (errorsEl) errorsEl.value = summaryLine + (detailLine ? '\n' + detailLine : '');
         }catch(e){}
       }
 
