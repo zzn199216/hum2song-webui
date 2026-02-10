@@ -673,7 +673,15 @@
                     <label class="muted" style="margin:0;">Base URL</label>
                     <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
                     <label class="muted" style="margin:0;">Model</label>
-                    <input id="editorLlmModel" type="text" placeholder="Model name" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <select id="editorLlmModelSelect" class="btn" style="width:100%; padding:6px; font-size:12px; margin-bottom:4px;">
+                      <option value="">(Select a model...)</option>
+                    </select>
+                    <datalist id="editorLlmModelList"></datalist>
+                    <div class="row" style="gap:6px; align-items:center;">
+                      <input id="editorLlmModel" type="text" list="editorLlmModelList" placeholder="Model name" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                      <button id="btnEditorLlmLoadModels" type="button" class="btn mini">Load Models</button>
+                    </div>
+                    <div id="editorLlmModelLoadStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                     <label class="muted" style="margin:0;">Auth Token</label>
                     <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
                     <div class="editor-llm-row">
@@ -732,6 +740,7 @@
   <script src="/static/pianoroll/ui/selection_view.js"></script>
   <script src="/static/pianoroll/controllers/selection_controller.js"></script>
   <script src="/static/pianoroll/controllers/audio_controller.js"></script>
+  <script src="/static/pianoroll/llm_defaults.js"></script>
   <script src="/static/pianoroll/llm_config.js"></script>
   <script src="/static/pianoroll/llm_client.js"></script>
   <script src="/static/pianoroll/controllers/editor_runtime.js"></script>

@@ -159,8 +159,79 @@
       });
   }
 
+  /**
+   * List model ids from gateway GET /v1/models (OpenAI-compatible).
+   * @param {object} cfg - { baseUrl: string, authToken?: string }
+   * @param {object} [opts] - { timeoutMs?: number }
+   * @returns {Promise<{ ids: string[], raw?: object }>}
+   */
+  function listModels(cfg, opts) {
+    opts = opts || {};
+    var baseUrl = (cfg && typeof cfg.baseUrl === "string") ? cfg.baseUrl : "";
+    if (!baseUrl || !baseUrl.trim()) {
+      return Promise.reject(new Error("LLM client: baseUrl is required"));
+    }
+    var base = normalizeBaseUrl(baseUrl);
+    var url = base + "/models";
+    var timeoutMs = typeof opts.timeoutMs === "number" && opts.timeoutMs > 0
+      ? opts.timeoutMs
+      : 8000;
+    var headers = {};
+    if (cfg && typeof cfg.authToken === "string" && cfg.authToken.trim() !== "") {
+      headers["Authorization"] = "Bearer " + cfg.authToken.trim();
+    }
+    var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timeoutId = null;
+    if (controller && typeof setTimeout !== "undefined") {
+      timeoutId = setTimeout(function () {
+        try { controller.abort(); } catch (_) {}
+      }, timeoutMs);
+    }
+    var init = {
+      method: "GET",
+      headers: headers,
+      signal: controller ? controller.signal : undefined,
+    };
+    if (typeof fetch === "undefined") {
+      if (timeoutId) clearTimeout(timeoutId);
+      return Promise.reject(new Error("LLM client: fetch is not available"));
+    }
+    return fetch(url, init)
+      .then(function (res) {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (!res.ok) throw new Error("LLM client: request failed " + res.status);
+        return res.text();
+      })
+      .then(function (rawText) {
+        var raw = null;
+        try {
+          raw = JSON.parse(rawText);
+        } catch (_) {
+          return { ids: [], raw: null };
+        }
+        var ids = [];
+        if (raw && typeof raw.data === "object" && Array.isArray(raw.data)) {
+          for (var i = 0; i < raw.data.length; i++) {
+            var item = raw.data[i];
+            if (item && typeof item.id === "string" && item.id.trim() !== "") {
+              ids.push(item.id.trim());
+            }
+          }
+        }
+        return { ids: ids, raw: raw };
+      })
+      .catch(function (err) {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (err && err.name === "AbortError") {
+          throw new Error("LLM client: request timeout");
+        }
+        throw err;
+      });
+  }
+
   globalThis.H2S_LLM_CLIENT = {
     extractJsonObject: extractJsonObject,
     callChatCompletions: callChatCompletions,
+    listModels: listModels,
   };
 })();

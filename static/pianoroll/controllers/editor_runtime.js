@@ -497,14 +497,31 @@
           const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
           const baseEl = document.getElementById('editorLlmBaseUrl');
           const modelEl = document.getElementById('editorLlmModel');
+          const modelSelectEl = document.getElementById('editorLlmModelSelect');
           const tokenEl = document.getElementById('editorLlmAuthToken');
           const velocityOnlyEl = document.getElementById('editorLlmVelocityOnly');
           const saveBtn = document.getElementById('btnEditorLlmSave');
           const resetBtn = document.getElementById('btnEditorLlmReset');
           const testBtn = document.getElementById('btnEditorLlmTest');
+          const loadModelsBtn = document.getElementById('btnEditorLlmLoadModels');
+          const modelLoadStatusEl = document.getElementById('editorLlmModelLoadStatus');
           const warnEl = document.getElementById('editorLlmConfigWarning');
           const statusEl = document.getElementById('editorLlmConfigStatus');
           const testStatusEl = document.getElementById('editorLlmTestStatus');
+          // PR-8J/8K: Populate Model select dropdown from defaults (fallback to hardcoded list)
+          if (modelSelectEl){
+            modelSelectEl.innerHTML = '<option value="">(Select a model...)</option>';
+            try{
+              const defaults = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_DEFAULTS) ? globalThis.H2S_LLM_DEFAULTS : null;
+              const suggestions = (defaults && Array.isArray(defaults.modelSuggestions)) ? defaults.modelSuggestions : ['gpt-4o-mini', 'gpt-4.1-mini', 'deepseek-chat', 'deepseek-reasoner', 'deepseek/deepseek-chat', 'deepseek/deepseek-reasoner'];
+              for (var i = 0; i < suggestions.length; i++){
+                var opt = document.createElement('option');
+                opt.value = suggestions[i];
+                opt.textContent = suggestions[i];
+                modelSelectEl.appendChild(opt);
+              }
+            }catch(_){}
+          }
           if (api && typeof api.loadLlmConfig === 'function'){
             const cfg = api.loadLlmConfig();
             if (baseEl) baseEl.value = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
@@ -514,10 +531,13 @@
             if (velocityOnlyEl) velocityOnlyEl.checked = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
             if (statusEl) statusEl.textContent = '';
             if (testStatusEl) testStatusEl.textContent = '';
+            if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
             if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
             if (saveBtn) saveBtn.disabled = false;
             if (resetBtn) resetBtn.disabled = false;
+            const hasClient = typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT && typeof globalThis.H2S_LLM_CLIENT.listModels === 'function';
             if (testBtn) testBtn.disabled = !(typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT && typeof globalThis.H2S_LLM_CLIENT.callChatCompletions === 'function');
+            if (loadModelsBtn) loadModelsBtn.disabled = !hasClient;
           } else {
             if (baseEl) baseEl.value = '';
             if (modelEl) modelEl.value = '';
@@ -526,10 +546,12 @@
             if (velocityOnlyEl) velocityOnlyEl.checked = true;
             if (statusEl) statusEl.textContent = '';
             if (testStatusEl) testStatusEl.textContent = '';
+            if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
             if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
             if (saveBtn) saveBtn.disabled = true;
             if (resetBtn) resetBtn.disabled = true;
             if (testBtn) testBtn.disabled = true;
+            if (loadModelsBtn) loadModelsBtn.disabled = true;
           }
           // PR-8C: Load LLM debug data on modal open
           loadLlmDebugUI();
@@ -1398,7 +1420,7 @@
         btnLlmSave.addEventListener('click', H.onLlmSaveClick, true);
       }
 
-      // PR-7a-3: LLM Settings Reset — resetLlmConfig(); clear inputs; show "Config reset"
+      // PR-7a-3: LLM Settings Reset — resetLlmConfig(); set inputs to runtime defaults; show "Config reset"
       const btnLlmReset = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmReset') : null;
       if (btnLlmReset){
         if (!H.onLlmResetClick){
@@ -1408,19 +1430,21 @@
               ev.stopPropagation();
               const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
               if (!api || typeof api.resetLlmConfig !== 'function') return;
-              api.resetLlmConfig();
+              const defaults = api.resetLlmConfig();
               const doc = typeof document !== 'undefined' ? document : null;
               if (doc){
                 const baseEl = doc.getElementById('editorLlmBaseUrl');
                 const modelEl = doc.getElementById('editorLlmModel');
                 const tokenEl = doc.getElementById('editorLlmAuthToken');
                 const velocityOnlyEl = doc.getElementById('editorLlmVelocityOnly');
+                const modelSelectEl = doc.getElementById('editorLlmModelSelect');
                 const statusEl = doc.getElementById('editorLlmConfigStatus');
-                if (baseEl) baseEl.value = '';
-                if (modelEl) modelEl.value = '';
+                // PR-8J: Set inputs to runtime defaults (not empty)
+                if (baseEl) baseEl.value = (defaults && typeof defaults.baseUrl === 'string') ? defaults.baseUrl : '';
+                if (modelEl) modelEl.value = (defaults && typeof defaults.model === 'string') ? defaults.model : '';
                 if (tokenEl) tokenEl.value = '';
-                // PR-8D: Reset checkbox to default (checked = true)
-                if (velocityOnlyEl) velocityOnlyEl.checked = true;
+                if (velocityOnlyEl) velocityOnlyEl.checked = (defaults && typeof defaults.velocityOnly === 'boolean') ? defaults.velocityOnly : true;
+                if (modelSelectEl) modelSelectEl.value = '';
                 if (statusEl) statusEl.textContent = 'Config reset';
               }
             }catch(e){}
@@ -1428,6 +1452,24 @@
         }
         btnLlmReset.removeEventListener('click', H.onLlmResetClick, true);
         btnLlmReset.addEventListener('click', H.onLlmResetClick, true);
+      }
+
+      // PR-8J: Model select dropdown — selecting an option sets the text input value
+      const modelSelectEl = (typeof document !== 'undefined') ? document.getElementById('editorLlmModelSelect') : null;
+      if (modelSelectEl){
+        if (!H.onLlmModelSelectChange){
+          H.onLlmModelSelectChange = (ev) => {
+            try{
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const modelEl = doc.getElementById('editorLlmModel');
+              const selectedValue = (ev.target && ev.target.value) ? String(ev.target.value) : '';
+              if (modelEl && selectedValue) modelEl.value = selectedValue;
+            }catch(e){}
+          };
+        }
+        modelSelectEl.removeEventListener('change', H.onLlmModelSelectChange, true);
+        modelSelectEl.addEventListener('change', H.onLlmModelSelectChange, true);
       }
 
       // PR-8C: Clear Debug — remove localStorage key and clear UI
@@ -1507,6 +1549,76 @@
         }
         btnLlmTest.removeEventListener('click', H.onLlmTestClick, true);
         btnLlmTest.addEventListener('click', H.onLlmTestClick, true);
+      }
+
+      // PR-8I: Load Models — GET /v1/models, populate datalist (no Save required; use editorLlmModelLoadStatus only).
+      const btnLlmLoadModels = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmLoadModels') : null;
+      if (btnLlmLoadModels){
+        if (!H.onLlmLoadModelsClick){
+          H.onLlmLoadModelsClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const statusEl = doc.getElementById('editorLlmModelLoadStatus');
+              const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt || ''; };
+              const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+              if (!client || typeof client.listModels !== 'function'){
+                setStatus('LLM module not loaded.');
+                return;
+              }
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+              const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+              if (!baseUrl){
+                setStatus('Please set Base URL first');
+                return;
+              }
+              setStatus('Loading...');
+              const cfg = { baseUrl: baseUrl, authToken: authToken };
+              client.listModels(cfg, { timeoutMs: 8000 })
+                .then(function(res){
+                  const ids = (res && Array.isArray(res.ids)) ? res.ids : [];
+                  const cap = 200;
+                  const listEl = doc.getElementById('editorLlmModelList');
+                  if (listEl){
+                    listEl.innerHTML = '';
+                    for (var i = 0; i < ids.length && i < cap; i++){
+                      var opt = doc.createElement('option');
+                      opt.value = ids[i];
+                      listEl.appendChild(opt);
+                    }
+                  }
+                  // PR-8J: Also refresh select dropdown with first 50 loaded models (keep placeholder at top)
+                  const selectEl = doc.getElementById('editorLlmModelSelect');
+                  if (selectEl){
+                    const currentValue = selectEl.value;
+                    selectEl.innerHTML = '<option value="">(Select a model...)</option>';
+                    const selectCap = 50;
+                    for (var j = 0; j < ids.length && j < selectCap; j++){
+                      var opt2 = doc.createElement('option');
+                      opt2.value = ids[j];
+                      opt2.textContent = ids[j];
+                      selectEl.appendChild(opt2);
+                    }
+                    if (currentValue) selectEl.value = currentValue;
+                  }
+                  setStatus('Loaded ' + ids.length + ' models');
+                })
+                .catch(function(err){
+                  const msg = (err && err.message) ? String(err.message) : '';
+                  if (/401|403|Unauthorized/i.test(msg)) setStatus('Unauthorized (check token)');
+                  else if (/404|not found/i.test(msg)) setStatus('Endpoint not found (check Base URL)');
+                  else if (/timeout|request timeout/i.test(msg)) setStatus('Timeout (gateway unreachable?)');
+                  else setStatus('Failed to load models');
+                });
+            }catch(e){}
+          };
+        }
+        btnLlmLoadModels.removeEventListener('click', H.onLlmLoadModelsClick, true);
+        btnLlmLoadModels.addEventListener('click', H.onLlmLoadModelsClick, true);
       }
 
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.

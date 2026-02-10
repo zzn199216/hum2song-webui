@@ -11,21 +11,37 @@
   // PR-8D: Default safe mode ON (velocity-only)
   const DEFAULTS = { baseUrl: "", model: "", authToken: "", velocityOnly: true };
 
+  // PR-8J: Get runtime defaults (merge internal DEFAULTS with H2S_LLM_DEFAULTS if present)
+  function getRuntimeDefaults() {
+    var runtime = Object.assign({}, DEFAULTS);
+    try {
+      var extDefaults = (typeof globalThis !== "undefined" && globalThis.H2S_LLM_DEFAULTS) ? globalThis.H2S_LLM_DEFAULTS : null;
+      if (extDefaults && typeof extDefaults === "object") {
+        if (typeof extDefaults.baseUrl === "string") runtime.baseUrl = extDefaults.baseUrl;
+        if (typeof extDefaults.model === "string") runtime.model = extDefaults.model;
+        if (typeof extDefaults.velocityOnly === "boolean") runtime.velocityOnly = extDefaults.velocityOnly;
+        // DO NOT take authToken from defaults (security: no secrets in defaults file)
+      }
+    } catch (_) {}
+    return runtime;
+  }
+
   function loadLlmConfig() {
-    if (typeof localStorage === "undefined") return Object.assign({}, DEFAULTS);
+    var runtimeDefaults = getRuntimeDefaults();
+    if (typeof localStorage === "undefined") return runtimeDefaults;
     try {
       var raw = localStorage.getItem(KEY);
-      if (raw == null || raw === "") return Object.assign({}, DEFAULTS);
+      if (raw == null || raw === "") return runtimeDefaults;
       var parsed = JSON.parse(raw);
-      // PR-8D: Merge defaults for backward compatibility (old configs without velocityOnly default to true)
+      // PR-8J: Merge runtime defaults with stored config (stored takes precedence)
       return {
-        baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : "",
-        model: typeof parsed.model === "string" ? parsed.model : "",
+        baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : runtimeDefaults.baseUrl,
+        model: typeof parsed.model === "string" ? parsed.model : runtimeDefaults.model,
         authToken: typeof parsed.authToken === "string" ? parsed.authToken : "",
-        velocityOnly: typeof parsed.velocityOnly === "boolean" ? parsed.velocityOnly : true,
+        velocityOnly: typeof parsed.velocityOnly === "boolean" ? parsed.velocityOnly : runtimeDefaults.velocityOnly,
       };
     } catch (_) {
-      return Object.assign({}, DEFAULTS);
+      return runtimeDefaults;
     }
   }
 
@@ -44,15 +60,17 @@
   }
 
   function resetLlmConfig() {
-    if (typeof localStorage === "undefined") return;
+    if (typeof localStorage === "undefined") return getRuntimeDefaults();
     try {
       localStorage.removeItem(KEY);
     } catch (_) {}
+    return getRuntimeDefaults();
   }
 
   globalThis.H2S_LLM_CONFIG = {
     loadLlmConfig: loadLlmConfig,
     saveLlmConfig: saveLlmConfig,
     resetLlmConfig: resetLlmConfig,
+    getRuntimeDefaults: getRuntimeDefaults,
   };
 })();
