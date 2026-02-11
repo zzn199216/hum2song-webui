@@ -347,7 +347,7 @@
         }
       }catch(e){}
 
-      // PR-4: Editor Optimize UI — preset dropdown and status line
+      // PR-4/PR-6b: Editor Optimize UI — preset, prompt, status line
       try{
         if (typeof document !== 'undefined' && $){
           const app = (root && root.H2SApp) ? root.H2SApp : null;
@@ -355,6 +355,11 @@
           if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
             const preset = app.getOptimizePresetForClip(clipId);
             sel.value = (preset != null && preset !== '') ? String(preset) : '';
+          }
+          const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+          if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
+            const opts = app.getOptimizeOptions(clipId);
+            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
           }
           const statusEl = $('#editorOptStatus');
           if (statusEl) statusEl.textContent = _editorOptStatusText(clip.meta && clip.meta.agent) || '';
@@ -375,6 +380,181 @@
             undoBtn.disabled = !canUndo;
           }
           if (undoStatusEl) undoStatusEl.textContent = canUndo ? '' : 'No previous revision';
+        }
+      }catch(e){}
+
+      // PR-8H: Compute verifiable summary (changedNotes + fieldsTouched) from debug object
+      function computeLlmDebugSummary(debug){
+        if (!debug || typeof debug !== 'object') return '';
+        const attempts = (debug.attemptCount != null) ? Number(debug.attemptCount) : 1;
+        const reason = (debug.reason != null && typeof debug.reason === 'string') ? debug.reason : 'unknown';
+        let modeLabel = '';
+        try{
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api){
+            const cfg = api.loadLlmConfig();
+            modeLabel = (cfg && cfg.velocityOnly === false) ? ' [Full mode]' : ' [Safe mode]';
+          }
+        }catch(_){}
+        const extractedStr = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+        let opsTotal = 0;
+        const opsByType = {};
+        const noteIds = new Set();
+        const fieldsTouched = new Set();
+        let addedNoId = 0;
+        let parsed = false;
+        if (extractedStr){
+          try{
+            const patch = JSON.parse(extractedStr);
+            const ops = (patch && Array.isArray(patch.ops)) ? patch.ops : [];
+            opsTotal = ops.length;
+            for (let i = 0; i < ops.length; i++){
+              const op = ops[i];
+              if (!op || typeof op !== 'object') continue;
+              const opType = op.op;
+              opsByType[opType] = (opsByType[opType] || 0) + 1;
+              if (opType === 'setNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+                if (op.velocity != null) fieldsTouched.add('velocity');
+                if (op.pitch != null) fieldsTouched.add('pitch');
+                if (op.startBeat != null || op.durationBeat != null) fieldsTouched.add('timing');
+              } else if (opType === 'moveNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+                fieldsTouched.add('timing');
+              } else if (opType === 'deleteNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+              } else if (opType === 'addNote'){
+                if (op.note && op.note.id) noteIds.add(String(op.note.id));
+                else addedNoId++;
+                fieldsTouched.add('pitch');
+                fieldsTouched.add('timing');
+                fieldsTouched.add('velocity');
+              }
+            }
+            parsed = true;
+          }catch(_){}
+        }
+        const opsTypesStr = Object.keys(opsByType).length ? Object.keys(opsByType).map(function(k){ return k + '=' + opsByType[k]; }).join(', ') : (opsTotal > 0 ? '?' : '0');
+        const changedNotesStr = parsed ? String(noteIds.size + addedNoId) : '(unknown)';
+        const fieldsStr = parsed ? (fieldsTouched.size ? Array.from(fieldsTouched).sort().join(', ') : '-') : '?';
+        return 'attempts=' + attempts + ' reason=' + reason + modeLabel + ' ops=' + opsTotal + ' (' + opsTypesStr + ') changedNotes=' + changedNotesStr + ' fieldsTouched=' + fieldsStr;
+      }
+
+      // PR-8C: Load and display LLM debug data from localStorage
+      function loadLlmDebugUI(){
+        if (typeof document === 'undefined' || typeof localStorage === 'undefined') return;
+        try{
+          const raw = localStorage.getItem('hum2song_studio_llm_debug_last');
+          if (!raw || raw === '') {
+            const rawEl = document.getElementById('editorLlmDebugRaw');
+            const extractedEl = document.getElementById('editorLlmDebugExtracted');
+            const errorsEl = document.getElementById('editorLlmDebugErrors');
+            if (rawEl) rawEl.value = '';
+            if (extractedEl) extractedEl.value = '';
+            if (errorsEl) errorsEl.value = '';
+            return;
+          }
+          const debug = JSON.parse(raw);
+          const rawEl = document.getElementById('editorLlmDebugRaw');
+          const extractedEl = document.getElementById('editorLlmDebugExtracted');
+          const errorsEl = document.getElementById('editorLlmDebugErrors');
+          if (rawEl) rawEl.value = (debug.rawText && typeof debug.rawText === 'string') ? debug.rawText : '';
+          if (extractedEl) extractedEl.value = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+          const summaryLine = computeLlmDebugSummary(debug);
+          const errText = (debug.errors && Array.isArray(debug.errors)) ? debug.errors.join(', ') : '';
+          const attemptText = (debug.attemptCount != null) ? 'Attempt: ' + String(debug.attemptCount) : '';
+          const reasonText = (debug.reason && typeof debug.reason === 'string') ? 'Reason: ' + debug.reason : '';
+          const parts = [attemptText, reasonText, errText].filter(function(s){ return s && s.trim() !== ''; });
+          const detailLine = parts.join(' | ');
+          if (errorsEl) errorsEl.value = summaryLine + (detailLine ? '\n' + detailLine : '');
+        }catch(e){}
+      }
+
+      // PR-8C: Save LLM debug data to localStorage (truncate to 4000 chars per field)
+      function saveLlmDebug(clipId, llmDebug){
+        if (typeof localStorage === 'undefined' || !llmDebug || typeof llmDebug !== 'object') return;
+        try{
+          const rawText = (llmDebug.rawText && typeof llmDebug.rawText === 'string') ? llmDebug.rawText : '';
+          const extractedJson = (llmDebug.extractedJson && typeof llmDebug.extractedJson === 'string') ? llmDebug.extractedJson : '';
+          const errors = (llmDebug.errors && Array.isArray(llmDebug.errors)) ? llmDebug.errors : [];
+          const debug = {
+            ts: Date.now(),
+            clipId: (clipId && typeof clipId === 'string') ? clipId : '',
+            attemptCount: (llmDebug.attemptCount != null) ? Number(llmDebug.attemptCount) : 1,
+            reason: (llmDebug.reason && typeof llmDebug.reason === 'string') ? llmDebug.reason : '',
+            rawText: rawText.length > 4000 ? rawText.slice(0, 4000) : rawText,
+            extractedJson: extractedJson.length > 4000 ? extractedJson.slice(0, 4000) : extractedJson,
+            errors: errors.slice(0, 20),
+          };
+          localStorage.setItem('hum2song_studio_llm_debug_last', JSON.stringify(debug));
+          loadLlmDebugUI();
+        }catch(e){}
+      }
+
+      // PR-7a-3: Populate LLM Settings from H2S_LLM_CONFIG; if missing, show warning and disable Save/Reset
+      try{
+        if (typeof document !== 'undefined' && $){
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+          const baseEl = document.getElementById('editorLlmBaseUrl');
+          const modelEl = document.getElementById('editorLlmModel');
+          const modelSelectEl = document.getElementById('editorLlmModelSelect');
+          const tokenEl = document.getElementById('editorLlmAuthToken');
+          const velocityOnlyEl = document.getElementById('editorLlmVelocityOnly');
+          const saveBtn = document.getElementById('btnEditorLlmSave');
+          const resetBtn = document.getElementById('btnEditorLlmReset');
+          const testBtn = document.getElementById('btnEditorLlmTest');
+          const loadModelsBtn = document.getElementById('btnEditorLlmLoadModels');
+          const modelLoadStatusEl = document.getElementById('editorLlmModelLoadStatus');
+          const warnEl = document.getElementById('editorLlmConfigWarning');
+          const statusEl = document.getElementById('editorLlmConfigStatus');
+          const testStatusEl = document.getElementById('editorLlmTestStatus');
+          // PR-8J/8K: Populate Model select dropdown from defaults (fallback to hardcoded list)
+          if (modelSelectEl){
+            modelSelectEl.innerHTML = '<option value="">(Select a model...)</option>';
+            try{
+              const defaults = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_DEFAULTS) ? globalThis.H2S_LLM_DEFAULTS : null;
+              const suggestions = (defaults && Array.isArray(defaults.modelSuggestions)) ? defaults.modelSuggestions : ['gpt-4o-mini', 'gpt-4.1-mini', 'deepseek-chat', 'deepseek-reasoner', 'deepseek/deepseek-chat', 'deepseek/deepseek-reasoner'];
+              for (var i = 0; i < suggestions.length; i++){
+                var opt = document.createElement('option');
+                opt.value = suggestions[i];
+                opt.textContent = suggestions[i];
+                modelSelectEl.appendChild(opt);
+              }
+            }catch(_){}
+          }
+          if (api && typeof api.loadLlmConfig === 'function'){
+            const cfg = api.loadLlmConfig();
+            if (baseEl) baseEl.value = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
+            if (modelEl) modelEl.value = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+            if (tokenEl) tokenEl.value = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
+            // PR-8D: Populate velocity-only checkbox (default true if missing)
+            if (velocityOnlyEl) velocityOnlyEl.checked = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+            if (statusEl) statusEl.textContent = '';
+            if (testStatusEl) testStatusEl.textContent = '';
+            if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
+            if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
+            if (saveBtn) saveBtn.disabled = false;
+            if (resetBtn) resetBtn.disabled = false;
+            const hasClient = typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT && typeof globalThis.H2S_LLM_CLIENT.listModels === 'function';
+            if (testBtn) testBtn.disabled = !(typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT && typeof globalThis.H2S_LLM_CLIENT.callChatCompletions === 'function');
+            if (loadModelsBtn) loadModelsBtn.disabled = !hasClient;
+          } else {
+            if (baseEl) baseEl.value = '';
+            if (modelEl) modelEl.value = '';
+            if (tokenEl) tokenEl.value = '';
+            // PR-8D: Default checkbox to checked if module not loaded
+            if (velocityOnlyEl) velocityOnlyEl.checked = true;
+            if (statusEl) statusEl.textContent = '';
+            if (testStatusEl) testStatusEl.textContent = '';
+            if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
+            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
+            if (saveBtn) saveBtn.disabled = true;
+            if (resetBtn) resetBtn.disabled = true;
+            if (testBtn) testBtn.disabled = true;
+            if (loadModelsBtn) loadModelsBtn.disabled = true;
+          }
+          // PR-8C: Load LLM debug data on modal open
+          loadLlmDebugUI();
         }
       }catch(e){}
 
@@ -645,7 +825,7 @@
       $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
     },
 
-    // PR-4: Update Editor Optimize preset dropdown and status from current clip (e.g. after Optimize).
+    // PR-4/PR-6b: Update Editor Optimize preset, prompt, and status from current clip (e.g. after Optimize).
     modalUpdateEditorOptimizeUI(){
       if (typeof document === 'undefined' || !$) return;
       const clipId = this.state.modal && this.state.modal.clipId;
@@ -658,6 +838,13 @@
         if (sel && app && typeof app.getOptimizePresetForClip === 'function'){
           const preset = app.getOptimizePresetForClip(clipId);
           sel.value = (preset != null && preset !== '') ? String(preset) : '';
+        }
+        const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+        if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
+          if (document.activeElement !== promptEl){
+            const opts = app.getOptimizeOptions(clipId);
+            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
+          }
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
@@ -925,6 +1112,77 @@
         return null;
       };
 
+      // PR-6d: disable/enable all optimize controls during async action; null-safe
+      const setOptimizeControlsDisabled = (disabled) => {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return;
+        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt'];
+        for (const id of ids) {
+          const el = doc.getElementById(id);
+          if (!el) continue;
+          if (id === 'editorOptimizePrompt') el.readOnly = !!disabled;
+          else el.disabled = !!disabled;
+        }
+      };
+      const setEditorOptStatus = (text) => {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return;
+        const el = doc.getElementById('editorOptStatus');
+        if (el) el.textContent = text || '';
+      };
+      // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
+      const llmFriendlyReason = (reason) => {
+        const r = (reason != null && typeof reason === 'string') ? reason : '';
+        if (/llm_config_missing|llm_client_not_loaded/i.test(r)) return 'Please configure Base URL and Model in Advanced → LLM Settings.';
+        if (/llm_no_valid_json/i.test(r)) return 'LLM response did not contain a valid JSON patch.';
+        if (/patch_rejected|ops_not_array|op\[/.test(r)) return 'Patch validation failed (LLM output not accepted).';
+        if (/timeout|request timeout/i.test(r)) return 'LLM request timed out.';
+        if (/401|403|Unauthorized/i.test(r)) return 'Unauthorized (check token).';
+        if (/404|not found/i.test(r)) return 'Endpoint not found (check Base URL).';
+        if (r) return r;
+        return 'LLM optimize failed.';
+      };
+      // PR-8G: Mode label for llm_v0 status (read from stored LLM config; no new persistence).
+      const getLlmModeLabel = (presetId) => {
+        if (presetId !== 'llm_v0') return '';
+        try {
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (!api) return '';
+          const cfg = api.loadLlmConfig();
+          const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+          return safeMode ? ' [Safe mode]' : ' [Full mode]';
+        } catch (_) { return ''; }
+      };
+      const statusFromResult = (res, clip, presetId) => {
+        if (!res) return '';
+        if (res.ok) {
+          const ps = clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary;
+          const preset = (ps && (ps.executedPreset || ps.executedSource)) ? String(ps.executedPreset || ps.executedSource) : '';
+          const promptSrc = (ps && ps.executedUserPromptSource) ? String(ps.executedUserPromptSource) : 'default';
+          if (preset === 'llm_v0') {
+            const modeLabel = getLlmModeLabel('llm_v0');
+            const byOp = (ps && ps.byOp && typeof ps.byOp === 'object') ? ps.byOp : {};
+            const opTypes = Object.keys(byOp).filter(function(k){ return byOp[k] > 0; }).join(', ') || 'setNote';
+            const ops = res.ops ?? 0;
+            let line = 'ok, ops=' + ops + ' (' + opTypes + ')' + modeLabel;
+            const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
+            const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+            if (safeMode) line += ' velocity-only';
+            return line;
+          }
+          return 'ok, ops=' + (res.ops ?? 0) + ' (preset=' + preset + ', prompt=' + promptSrc + ')';
+        }
+        if (presetId === 'llm_v0') {
+          const detail = (res.detail != null && typeof res.detail === 'string') ? res.detail : '';
+          const isSafeModeRejection = res.reason === 'patch_rejected' && (detail.indexOf('disallowed_op') >= 0 || detail.indexOf('disallowed_field') >= 0);
+          const msg = isSafeModeRejection ? 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.' : llmFriendlyReason(res.reason);
+          return 'failed: ' + msg + getLlmModeLabel('llm_v0');
+        }
+        const ps = res.patchSummary;
+        if (ps && String(ps.executedPreset || '') === 'llm_v0') return 'failed: ' + llmFriendlyReason(res.reason) + getLlmModeLabel('llm_v0');
+        return 'failed: ' + (res.reason || 'unknown');
+      };
+
       const btnInsert = getBtn(['btnInsertNote','insertNoteBtn','btnInsertNoteBtn']);
       const btnDelete = getBtn(['btnDeleteNote','btnDeleteNoteBtn','deleteNoteBtn']);
 
@@ -965,7 +1223,7 @@
         btnDelete.addEventListener('click', H.onDeleteClick, true);
       }
 
-      // PR-4: Click Optimize — set options from dropdown, run optimize, then refresh status
+      // PR-4/PR-6b/PR-6d: Click Optimize — read preset + prompt, persist, run (no override), show result, disable during run
       const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
       if (btnOptimize){
         if (!H.onOptimizeClick){
@@ -979,18 +1237,34 @@
               const app = g.H2SApp;
               if (!app || typeof app.optimizeClip !== 'function') return;
               const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
               const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
-              Promise.resolve(app.optimizeClip(clipId)).then(function(){
-                try{ rt.modalUpdateEditorOptimizeUI(); }catch(e){}
+              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              setEditorOptStatus('running...');
+              setOptimizeControlsDisabled(true);
+              Promise.resolve(app.optimizeClip(clipId)).then(function(res){
+                try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                setEditorOptStatus(statusFromResult(res, clip, presetId));
                 const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
                 if (el && clip && clip.meta && clip.meta.agent){
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
-              }).catch(function(){});
+                // PR-8C: Save LLM debug data if present (llm_v0 only)
+                if (presetId === 'llm_v0' && res && res.llmDebug){
+                  saveLlmDebug(clipId, res.llmDebug);
+                }
+                if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
+              }).catch(function(err){
+                const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+                const presetIdErr = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
+                if (presetIdErr === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message) + getLlmModeLabel('llm_v0'));
+                else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
+              }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };
         }
@@ -998,7 +1272,7 @@
         btnOptimize.addEventListener('click', H.onOptimizeClick, true);
       }
 
-      // PR-4: Preset dropdown change — store selection per clip so it persists
+      // PR-4/PR-6b: Preset dropdown change — store preset + current prompt per clip
       const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
       if (selPreset){
         if (!H.onPresetChange){
@@ -1009,7 +1283,10 @@
               if (!clipId) return;
               const app = g.H2SApp;
               const val = (ev.target && ev.target.value) ? String(ev.target.value).trim() : null;
-              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: null }, clipId);
+              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: promptVal }, clipId);
             }catch(e){}
           };
         }
@@ -1017,7 +1294,7 @@
         selPreset.addEventListener('change', H.onPresetChange);
       }
 
-      // PR-5: Undo Optimize — rollback to parent revision, then refresh editor
+      // PR-5/PR-6b/PR-6d: Undo Optimize (Rollback) — disable during run, refresh UI, status
       const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
       if (btnUndo){
         if (!H.onUndoClick){
@@ -1030,13 +1307,318 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.rollbackClipRevision !== 'function') return;
-              const res = app.rollbackClipRevision(clipId);
-              if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
-            }catch(e){}
+              setEditorOptStatus('running...');
+              setOptimizeControlsDisabled(true);
+              try {
+                const res = app.rollbackClipRevision(clipId);
+                setEditorOptStatus(res && res.ok ? 'ok (rollback)' : ('failed: ' + (res && res.reason ? res.reason : 'Rollback failed')));
+                if (res && res.ok && res.changed) rt.modalRefreshDraftFromClip();
+              } finally {
+                setOptimizeControlsDisabled(false);
+              }
+            }catch(e){ setEditorOptStatus('failed: ' + (e && e.message ? e.message : 'error')); setOptimizeControlsDisabled(false); }
           };
         }
         btnUndo.removeEventListener('click', H.onUndoClick, true);
         btnUndo.addEventListener('click', H.onUndoClick, true);
+      }
+
+      // PR-6b/PR-6d: Regenerate — one-shot override, disable during run, status from patchSummary
+      const btnRegenerate = (typeof document !== 'undefined') ? document.getElementById('btnEditorRegenerateOptimize') : null;
+      if (btnRegenerate){
+        if (!H.onRegenerateClick){
+          H.onRegenerateClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.optimizeClip !== 'function') return;
+              const sel = document.getElementById('editorOptimizePreset');
+              const promptEl = document.getElementById('editorOptimizePrompt');
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              setEditorOptStatus('running...');
+              setOptimizeControlsDisabled(true);
+              Promise.resolve(app.optimizeClip(clipId, { requestedPresetId: presetId || null, userPrompt: promptVal })).then(function(res){
+                try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
+                const p2 = getProjectV2 && getProjectV2();
+                const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                setEditorOptStatus(statusFromResult(res, clip, presetId));
+                // PR-8C: Save LLM debug data if present (llm_v0 only)
+                if (presetId === 'llm_v0' && res && res.llmDebug){
+                  saveLlmDebug(clipId, res.llmDebug);
+                }
+              }).catch(function(err){
+                const selPreset = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+                const presetIdErr = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
+                if (presetIdErr === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message) + getLlmModeLabel('llm_v0'));
+                else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
+              }).finally(function(){ setOptimizeControlsDisabled(false); });
+            }catch(e){}
+          };
+        }
+        btnRegenerate.removeEventListener('click', H.onRegenerateClick, true);
+        btnRegenerate.addEventListener('click', H.onRegenerateClick, true);
+      }
+
+      // PR-6b: Reset to default prompt — clear prompt UI and persist (preset unchanged)
+      const btnResetPrompt = (typeof document !== 'undefined') ? document.getElementById('btnEditorResetOptimizePrompt') : null;
+      if (btnResetPrompt){
+        if (!H.onResetPromptClick){
+          H.onResetPromptClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : this;
+              const clipId = rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              const promptEl = document.getElementById('editorOptimizePrompt');
+              if (promptEl) promptEl.value = '';
+              const sel = document.getElementById('editorOptimizePreset');
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
+            }catch(e){}
+          };
+        }
+        btnResetPrompt.removeEventListener('click', H.onResetPromptClick, true);
+        btnResetPrompt.addEventListener('click', H.onResetPromptClick, true);
+      }
+
+      // PR-7a-3: LLM Settings Save — write to hum2song_studio_llm_config; show "Saved"
+      const btnLlmSave = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmSave') : null;
+      if (btnLlmSave){
+        if (!H.onLlmSaveClick){
+          H.onLlmSaveClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+              if (!api || typeof api.saveLlmConfig !== 'function') return;
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const modelEl = doc.getElementById('editorLlmModel');
+              const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const velocityOnlyEl = doc.getElementById('editorLlmVelocityOnly');
+              const statusEl = doc.getElementById('editorLlmConfigStatus');
+              const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value) : '';
+              const model = (modelEl && modelEl.value != null) ? String(modelEl.value) : '';
+              const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+              // PR-8D: Include velocityOnly checkbox value in save
+              const velocityOnly = (velocityOnlyEl && velocityOnlyEl.checked === true) ? true : false;
+              api.saveLlmConfig({ baseUrl: baseUrl, model: model, authToken: authToken, velocityOnly: velocityOnly });
+              if (statusEl) statusEl.textContent = 'Saved';
+            }catch(e){}
+          };
+        }
+        btnLlmSave.removeEventListener('click', H.onLlmSaveClick, true);
+        btnLlmSave.addEventListener('click', H.onLlmSaveClick, true);
+      }
+
+      // PR-7a-3: LLM Settings Reset — resetLlmConfig(); set inputs to runtime defaults; show "Config reset"
+      const btnLlmReset = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmReset') : null;
+      if (btnLlmReset){
+        if (!H.onLlmResetClick){
+          H.onLlmResetClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+              if (!api || typeof api.resetLlmConfig !== 'function') return;
+              const defaults = api.resetLlmConfig();
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (doc){
+                const baseEl = doc.getElementById('editorLlmBaseUrl');
+                const modelEl = doc.getElementById('editorLlmModel');
+                const tokenEl = doc.getElementById('editorLlmAuthToken');
+                const velocityOnlyEl = doc.getElementById('editorLlmVelocityOnly');
+                const modelSelectEl = doc.getElementById('editorLlmModelSelect');
+                const statusEl = doc.getElementById('editorLlmConfigStatus');
+                // PR-8J: Set inputs to runtime defaults (not empty)
+                if (baseEl) baseEl.value = (defaults && typeof defaults.baseUrl === 'string') ? defaults.baseUrl : '';
+                if (modelEl) modelEl.value = (defaults && typeof defaults.model === 'string') ? defaults.model : '';
+                if (tokenEl) tokenEl.value = '';
+                if (velocityOnlyEl) velocityOnlyEl.checked = (defaults && typeof defaults.velocityOnly === 'boolean') ? defaults.velocityOnly : true;
+                if (modelSelectEl) modelSelectEl.value = '';
+                if (statusEl) statusEl.textContent = 'Config reset';
+              }
+            }catch(e){}
+          };
+        }
+        btnLlmReset.removeEventListener('click', H.onLlmResetClick, true);
+        btnLlmReset.addEventListener('click', H.onLlmResetClick, true);
+      }
+
+      // PR-8J: Model select dropdown — selecting an option sets the text input value
+      const modelSelectEl = (typeof document !== 'undefined') ? document.getElementById('editorLlmModelSelect') : null;
+      if (modelSelectEl){
+        if (!H.onLlmModelSelectChange){
+          H.onLlmModelSelectChange = (ev) => {
+            try{
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const modelEl = doc.getElementById('editorLlmModel');
+              const selectedValue = (ev.target && ev.target.value) ? String(ev.target.value) : '';
+              if (modelEl && selectedValue) modelEl.value = selectedValue;
+            }catch(e){}
+          };
+        }
+        modelSelectEl.removeEventListener('change', H.onLlmModelSelectChange, true);
+        modelSelectEl.addEventListener('change', H.onLlmModelSelectChange, true);
+      }
+
+      // PR-8C: Clear Debug — remove localStorage key and clear UI
+      const btnLlmDebugClear = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmDebugClear') : null;
+      if (btnLlmDebugClear){
+        if (!H.onLlmDebugClearClick){
+          H.onLlmDebugClearClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (typeof localStorage !== 'undefined'){
+                try { localStorage.removeItem('hum2song_studio_llm_debug_last'); } catch(_){}
+              }
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (doc){
+                const rawEl = doc.getElementById('editorLlmDebugRaw');
+                const extractedEl = doc.getElementById('editorLlmDebugExtracted');
+                const errorsEl = doc.getElementById('editorLlmDebugErrors');
+                if (rawEl) rawEl.value = '';
+                if (extractedEl) extractedEl.value = '';
+                if (errorsEl) errorsEl.value = '';
+              }
+            }catch(e){}
+          };
+        }
+        btnLlmDebugClear.removeEventListener('click', H.onLlmDebugClearClick, true);
+        btnLlmDebugClear.addEventListener('click', H.onLlmDebugClearClick, true);
+      }
+
+      // PR-7b-3: Test Connection — ping gateway with current inputs; show friendly status (no revision, no secrets).
+      const btnLlmTest = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmTest') : null;
+      if (btnLlmTest){
+        if (!H.onLlmTestClick){
+          H.onLlmTestClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const testStatusEl = doc.getElementById('editorLlmTestStatus');
+              const setTestStatus = (txt) => { if (testStatusEl) testStatusEl.textContent = txt || ''; };
+              const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+              const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+              if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){
+                setTestStatus('LLM module not loaded.');
+                return;
+              }
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const modelEl = doc.getElementById('editorLlmModel');
+              const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+              const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+              const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+              if (!baseUrl || !model){
+                setTestStatus('Please set Base URL and Model first');
+                return;
+              }
+              setTestStatus('Testing...');
+              const cfg = { baseUrl: baseUrl, model: model, authToken: authToken };
+              const messages = [
+                { role: 'system', content: 'Reply with exactly: ok' },
+                { role: 'user', content: 'ping' },
+              ];
+              client.callChatCompletions(cfg, messages, { timeoutMs: 8000 })
+                .then(function(){
+                  setTestStatus('Connection OK');
+                })
+                .catch(function(err){
+                  const msg = (err && err.message) ? String(err.message) : '';
+                  if (/401|403|Unauthorized/i.test(msg)) setTestStatus('Unauthorized (check token)');
+                  else if (/404|not found/i.test(msg)) setTestStatus('Endpoint not found (check Base URL)');
+                  else if (/timeout|request timeout/i.test(msg)) setTestStatus('Timeout (gateway unreachable?)');
+                  else setTestStatus('Connection failed');
+                });
+            }catch(e){}
+          };
+        }
+        btnLlmTest.removeEventListener('click', H.onLlmTestClick, true);
+        btnLlmTest.addEventListener('click', H.onLlmTestClick, true);
+      }
+
+      // PR-8I: Load Models — GET /v1/models, populate datalist (no Save required; use editorLlmModelLoadStatus only).
+      const btnLlmLoadModels = (typeof document !== 'undefined') ? document.getElementById('btnEditorLlmLoadModels') : null;
+      if (btnLlmLoadModels){
+        if (!H.onLlmLoadModelsClick){
+          H.onLlmLoadModelsClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const statusEl = doc.getElementById('editorLlmModelLoadStatus');
+              const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt || ''; };
+              const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+              if (!client || typeof client.listModels !== 'function'){
+                setStatus('LLM module not loaded.');
+                return;
+              }
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const tokenEl = doc.getElementById('editorLlmAuthToken');
+              const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+              const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+              if (!baseUrl){
+                setStatus('Please set Base URL first');
+                return;
+              }
+              setStatus('Loading...');
+              const cfg = { baseUrl: baseUrl, authToken: authToken };
+              client.listModels(cfg, { timeoutMs: 8000 })
+                .then(function(res){
+                  const ids = (res && Array.isArray(res.ids)) ? res.ids : [];
+                  const cap = 200;
+                  const listEl = doc.getElementById('editorLlmModelList');
+                  if (listEl){
+                    listEl.innerHTML = '';
+                    for (var i = 0; i < ids.length && i < cap; i++){
+                      var opt = doc.createElement('option');
+                      opt.value = ids[i];
+                      listEl.appendChild(opt);
+                    }
+                  }
+                  // PR-8J: Also refresh select dropdown with first 50 loaded models (keep placeholder at top)
+                  const selectEl = doc.getElementById('editorLlmModelSelect');
+                  if (selectEl){
+                    const currentValue = selectEl.value;
+                    selectEl.innerHTML = '<option value="">(Select a model...)</option>';
+                    const selectCap = 50;
+                    for (var j = 0; j < ids.length && j < selectCap; j++){
+                      var opt2 = doc.createElement('option');
+                      opt2.value = ids[j];
+                      opt2.textContent = ids[j];
+                      selectEl.appendChild(opt2);
+                    }
+                    if (currentValue) selectEl.value = currentValue;
+                  }
+                  setStatus('Loaded ' + ids.length + ' models');
+                })
+                .catch(function(err){
+                  const msg = (err && err.message) ? String(err.message) : '';
+                  if (/401|403|Unauthorized/i.test(msg)) setStatus('Unauthorized (check token)');
+                  else if (/404|not found/i.test(msg)) setStatus('Endpoint not found (check Base URL)');
+                  else if (/timeout|request timeout/i.test(msg)) setStatus('Timeout (gateway unreachable?)');
+                  else setStatus('Failed to load models');
+                });
+            }catch(e){}
+          };
+        }
+        btnLlmLoadModels.removeEventListener('click', H.onLlmLoadModelsClick, true);
+        btnLlmLoadModels.addEventListener('click', H.onLlmLoadModelsClick, true);
       }
 
       // Keyboard: Delete/Backspace remove selected note; Insert adds note.
@@ -1044,6 +1626,8 @@
         if (!H.onKeyDown){
           H.onKeyDown = (ev) => {
             try{
+              const t = ev.target || document.activeElement;
+              if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
               const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
               if (!rt || !rt.state || !rt.state.modal || !rt.state.modal.show) return;
               const k = String(ev.key || '');

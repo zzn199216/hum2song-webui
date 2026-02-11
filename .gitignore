@@ -13,7 +13,9 @@ __pycache__/
 
 # --- Env files ---
 .env
+.env.local
 .env.*
+.env.*.local
 !.env.example
 
 # --- Test/Tool cache ---
