@@ -7,6 +7,7 @@
  * - baseUrl: default gateway endpoint (e.g., "https://your-gateway.example.com")
  * - model: optional default model name
  * - velocityOnly: safe mode default (true = ON, false = OFF)
+ * - gatewayPresetDefault: optional default gateway preset id (\"custom\" | \"deepseek\" | \"ollama\")
  * - modelSuggestions: array of common model names for dropdown
  */
 (function () {
@@ -16,6 +17,8 @@
     baseUrl: "",              // deployers can set e.g. "https://your-gateway.example.com"
     model: "",                // optional default model
     velocityOnly: true,       // safe mode default
+    // Optional default gateway preset: "custom" | "deepseek" | "ollama"
+    gatewayPresetDefault: "custom",
     modelSuggestions: [
       // Common OpenAI-style small models
       "gpt-4o-mini",

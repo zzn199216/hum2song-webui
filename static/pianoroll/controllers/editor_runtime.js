@@ -498,6 +498,7 @@
           const baseEl = document.getElementById('editorLlmBaseUrl');
           const modelEl = document.getElementById('editorLlmModel');
           const modelSelectEl = document.getElementById('editorLlmModelSelect');
+          const gatewayPresetEl = document.getElementById('editorLlmGatewayPreset');
           const tokenEl = document.getElementById('editorLlmAuthToken');
           const velocityOnlyEl = document.getElementById('editorLlmVelocityOnly');
           const saveBtn = document.getElementById('btnEditorLlmSave');
@@ -522,10 +523,34 @@
               }
             }catch(_){}
           }
+          const defaultsObj = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_DEFAULTS) ? globalThis.H2S_LLM_DEFAULTS : null;
+          const runtimePreset = (defaultsObj && typeof defaultsObj.gatewayPresetDefault === 'string') ? String(defaultsObj.gatewayPresetDefault).toLowerCase() : 'custom';
+          const DEEPSEEK_URL = 'https://api.deepseek.com/v1';
+          const OLLAMA_URL = 'http://localhost:11434/v1';
+
           if (api && typeof api.loadLlmConfig === 'function'){
             const cfg = api.loadLlmConfig();
-            if (baseEl) baseEl.value = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
-            if (modelEl) modelEl.value = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+            let baseVal = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
+            let modelVal = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+            let presetVal = 'custom';
+
+            if (baseVal){
+              if (baseVal === DEEPSEEK_URL) presetVal = 'deepseek';
+              else if (baseVal === OLLAMA_URL) presetVal = 'ollama';
+            } else {
+              if (runtimePreset === 'deepseek'){
+                presetVal = 'deepseek';
+                baseVal = DEEPSEEK_URL;
+                if (!modelVal) modelVal = 'deepseek-chat';
+              } else if (runtimePreset === 'ollama'){
+                presetVal = 'ollama';
+                baseVal = OLLAMA_URL;
+              }
+            }
+
+            if (baseEl) baseEl.value = baseVal;
+            if (modelEl) modelEl.value = modelVal;
+            if (gatewayPresetEl) gatewayPresetEl.value = presetVal;
             if (tokenEl) tokenEl.value = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
             // PR-8D: Populate velocity-only checkbox (default true if missing)
             if (velocityOnlyEl) velocityOnlyEl.checked = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
@@ -547,6 +572,7 @@
             if (statusEl) statusEl.textContent = '';
             if (testStatusEl) testStatusEl.textContent = '';
             if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
+            if (gatewayPresetEl) gatewayPresetEl.value = 'custom';
             if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
             if (saveBtn) saveBtn.disabled = true;
             if (resetBtn) resetBtn.disabled = true;
@@ -1470,6 +1496,35 @@
         }
         modelSelectEl.removeEventListener('change', H.onLlmModelSelectChange, true);
         modelSelectEl.addEventListener('change', H.onLlmModelSelectChange, true);
+      }
+
+      // PR-8M: Gateway Preset select — auto-fill Base URL (and optional Model) without saving
+      const gatewayPresetEl = (typeof document !== 'undefined') ? document.getElementById('editorLlmGatewayPreset') : null;
+      if (gatewayPresetEl){
+        if (!H.onLlmGatewayPresetChange){
+          H.onLlmGatewayPresetChange = (ev) => {
+            try{
+              const doc = typeof document !== 'undefined' ? document : null;
+              if (!doc) return;
+              const baseEl = doc.getElementById('editorLlmBaseUrl');
+              const modelEl = doc.getElementById('editorLlmModel');
+              const val = (ev.target && ev.target.value) ? String(ev.target.value) : 'custom';
+              if (val === 'deepseek'){
+                if (baseEl) baseEl.value = 'https://api.deepseek.com/v1';
+                if (modelEl){
+                  const currentModel = (modelEl.value != null) ? String(modelEl.value).trim() : '';
+                  if (!currentModel) modelEl.value = 'deepseek-chat';
+                }
+              } else if (val === 'ollama'){
+                if (baseEl) baseEl.value = 'http://localhost:11434/v1';
+              } else {
+                // Custom: do not change existing values
+              }
+            }catch(e){}
+          };
+        }
+        gatewayPresetEl.removeEventListener('change', H.onLlmGatewayPresetChange, true);
+        gatewayPresetEl.addEventListener('change', H.onLlmGatewayPresetChange, true);
       }
 
       // PR-8C: Clear Debug — remove localStorage key and clear UI
