@@ -122,6 +122,112 @@
         return null;
       }
 
+      // PR-8C/8H: LLM debug helpers (must be in create() scope so modalBindControls handlers can access them)
+      function computeLlmDebugSummary(debug){
+        if (!debug || typeof debug !== 'object') return '';
+        const attempts = (debug.attemptCount != null) ? Number(debug.attemptCount) : 1;
+        const reason = (debug.reason != null && typeof debug.reason === 'string') ? debug.reason : 'unknown';
+        let modeLabel = '';
+        try{
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api){
+            const cfg = api.loadLlmConfig();
+            modeLabel = (cfg && cfg.velocityOnly === false) ? ' [Full mode]' : ' [Safe mode]';
+          }
+        }catch(_){}
+        const extractedStr = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+        let opsTotal = 0;
+        const opsByType = {};
+        const noteIds = new Set();
+        const fieldsTouched = new Set();
+        let addedNoId = 0;
+        let parsed = false;
+        if (extractedStr){
+          try{
+            const patch = JSON.parse(extractedStr);
+            const ops = (patch && Array.isArray(patch.ops)) ? patch.ops : [];
+            opsTotal = ops.length;
+            for (let i = 0; i < ops.length; i++){
+              const op = ops[i];
+              if (!op || typeof op !== 'object') continue;
+              const opType = op.op;
+              opsByType[opType] = (opsByType[opType] || 0) + 1;
+              if (opType === 'setNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+                if (op.velocity != null) fieldsTouched.add('velocity');
+                if (op.pitch != null) fieldsTouched.add('pitch');
+                if (op.startBeat != null || op.durationBeat != null) fieldsTouched.add('timing');
+              } else if (opType === 'moveNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+                fieldsTouched.add('timing');
+              } else if (opType === 'deleteNote'){
+                if (op.noteId) noteIds.add(String(op.noteId));
+              } else if (opType === 'addNote'){
+                if (op.note && op.note.id) noteIds.add(String(op.note.id));
+                else addedNoId++;
+                fieldsTouched.add('pitch');
+                fieldsTouched.add('timing');
+                fieldsTouched.add('velocity');
+              }
+            }
+            parsed = true;
+          }catch(_){}
+        }
+        const opsTypesStr = Object.keys(opsByType).length ? Object.keys(opsByType).map(function(k){ return k + '=' + opsByType[k]; }).join(', ') : (opsTotal > 0 ? '?' : '0');
+        const changedNotesStr = parsed ? String(noteIds.size + addedNoId) : '(unknown)';
+        const fieldsStr = parsed ? (fieldsTouched.size ? Array.from(fieldsTouched).sort().join(', ') : '-') : '?';
+        return 'attempts=' + attempts + ' reason=' + reason + modeLabel + ' ops=' + opsTotal + ' (' + opsTypesStr + ') changedNotes=' + changedNotesStr + ' fieldsTouched=' + fieldsStr;
+      }
+
+      function loadLlmDebugUI(){
+        if (typeof document === 'undefined' || typeof localStorage === 'undefined') return;
+        try{
+          const raw = localStorage.getItem('hum2song_studio_llm_debug_last');
+          if (!raw || raw === ''){
+            const rawEl = document.getElementById('editorLlmDebugRaw');
+            const extractedEl = document.getElementById('editorLlmDebugExtracted');
+            const errorsEl = document.getElementById('editorLlmDebugErrors');
+            if (rawEl) rawEl.value = '';
+            if (extractedEl) extractedEl.value = '';
+            if (errorsEl) errorsEl.value = '';
+            return;
+          }
+          const debug = JSON.parse(raw);
+          const rawEl = document.getElementById('editorLlmDebugRaw');
+          const extractedEl = document.getElementById('editorLlmDebugExtracted');
+          const errorsEl = document.getElementById('editorLlmDebugErrors');
+          if (rawEl) rawEl.value = (debug.rawText && typeof debug.rawText === 'string') ? debug.rawText : '';
+          if (extractedEl) extractedEl.value = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
+          const summaryLine = computeLlmDebugSummary(debug);
+          const errText = (debug.errors && Array.isArray(debug.errors)) ? debug.errors.join(', ') : '';
+          const attemptText = (debug.attemptCount != null) ? 'Attempt: ' + String(debug.attemptCount) : '';
+          const reasonText = (debug.reason && typeof debug.reason === 'string') ? 'Reason: ' + debug.reason : '';
+          const parts = [attemptText, reasonText, errText].filter(function(s){ return s && s.trim() !== ''; });
+          const detailLine = parts.join(' | ');
+          if (errorsEl) errorsEl.value = summaryLine + (detailLine ? '\n' + detailLine : '');
+        }catch(e){}
+      }
+
+      function saveLlmDebug(clipId, llmDebug){
+        if (typeof localStorage === 'undefined' || !llmDebug || typeof llmDebug !== 'object') return;
+        try{
+          const rawText = (llmDebug.rawText && typeof llmDebug.rawText === 'string') ? llmDebug.rawText : '';
+          const extractedJson = (llmDebug.extractedJson && typeof llmDebug.extractedJson === 'string') ? llmDebug.extractedJson : '';
+          const errors = (llmDebug.errors && Array.isArray(llmDebug.errors)) ? llmDebug.errors : [];
+          const debug = {
+            ts: Date.now(),
+            clipId: (clipId && typeof clipId === 'string') ? clipId : '',
+            attemptCount: (llmDebug.attemptCount != null) ? Number(llmDebug.attemptCount) : 1,
+            reason: (llmDebug.reason && typeof llmDebug.reason === 'string') ? llmDebug.reason : '',
+            rawText: rawText.length > 4000 ? rawText.slice(0, 4000) : rawText,
+            extractedJson: extractedJson.length > 4000 ? extractedJson.slice(0, 4000) : extractedJson,
+            errors: errors.slice(0, 20),
+          };
+          localStorage.setItem('hum2song_studio_llm_debug_last', JSON.stringify(debug));
+          loadLlmDebugUI();
+        }catch(e){}
+      }
+
       function _beatToSec(beat, bpm){
         const b = Number(beat) || 0;
         const t = Number(bpm) || 120;
@@ -581,6 +687,43 @@
           }
           // PR-8C: Load LLM debug data on modal open
           loadLlmDebugUI();
+          // Bind Gateway Preset change handler on every modal open (ensures handler fires when preset changes)
+          const g = (typeof window !== 'undefined') ? window : global;
+          if (g) g.__h2s_editor_handlers = g.__h2s_editor_handlers || {};
+          const H = g ? g.__h2s_editor_handlers : {};
+          const applyPresetFill = function(presetValue){
+            const doc = typeof document !== 'undefined' ? document : null;
+            if (!doc) return;
+            const b = doc.getElementById('editorLlmBaseUrl');
+            const m = doc.getElementById('editorLlmModel');
+            if (presetValue === 'deepseek'){
+              if (b) b.value = 'https://api.deepseek.com/v1';
+              if (m){
+                const cur = (m.value != null) ? String(m.value).trim() : '';
+                if (!cur) m.value = 'deepseek-chat';
+              }
+            } else if (presetValue === 'ollama'){
+              if (b) b.value = 'http://localhost:11434/v1';
+            }
+          };
+          if (!H.onLlmGatewayPresetChange){
+            H.onLlmGatewayPresetChange = function(ev){
+              try{
+                const val = (ev.target && ev.target.value) ? String(ev.target.value) : 'custom';
+                applyPresetFill(val);
+              }catch(e){}
+            };
+          }
+          if (gatewayPresetEl){
+            gatewayPresetEl.removeEventListener('change', H.onLlmGatewayPresetChange, true);
+            gatewayPresetEl.addEventListener('change', H.onLlmGatewayPresetChange, true);
+            // Prefill if preset is deepseek/ollama but Base URL is still empty (covers UI default edge case)
+            if (baseEl){
+              const pv = (gatewayPresetEl.value && String(gatewayPresetEl.value)) ? String(gatewayPresetEl.value) : '';
+              const baseEmpty = !(baseEl.value != null && String(baseEl.value).trim());
+              if ((pv === 'deepseek' || pv === 'ollama') && baseEmpty) applyPresetFill(pv);
+            }
+          }
         }
       }catch(e){}
 
