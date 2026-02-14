@@ -408,7 +408,10 @@
       }
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
-      const baseUserContent = promptInfo.prompt + clipHint;
+      let baseUserContent = promptInfo.prompt + clipHint;
+      if (!safeMode){
+        baseUserContent = 'User prompt may require pitch/timing changes; do not respond with velocity-only unless explicitly requested.\n\n' + baseUserContent;
+      }
       const client = ROOT.H2S_LLM_CLIENT;
       if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
         return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }));
@@ -550,7 +553,7 @@
       }
 
       // PR-8B-2: Retry logic - only retry for JSON extraction or validation failures
-      // PR-8C: Capture debug data for final attempt
+      // PR-8C: Capture debug data for final attempt (incl. safeModeResolved for console-friendly verification)
       const debugCapture = { rawText: '', extractedJson: null, validateErrors: [] };
       return attemptOnce(1, null, debugCapture).then(function(res1){
         if (res1.ok){
@@ -561,6 +564,7 @@
             rawText: debugCapture.rawText || '',
             extractedJson: debugCapture.extractedJson || null,
             errors: debugCapture.validateErrors || [],
+            safeModeResolved: safeMode,
           };
           return out;
         }
@@ -584,6 +588,7 @@
               rawText: debugCapture.rawText || '',
               extractedJson: debugCapture.extractedJson || null,
               errors: debugCapture.validateErrors || [],
+              safeModeResolved: safeMode,
             };
             return out;
           });
@@ -596,6 +601,7 @@
           rawText: debugCapture.rawText || '',
           extractedJson: debugCapture.extractedJson || null,
           errors: debugCapture.validateErrors || [],
+          safeModeResolved: safeMode,
         };
         return out;
       });

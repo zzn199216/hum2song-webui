@@ -128,13 +128,17 @@
         const attempts = (debug.attemptCount != null) ? Number(debug.attemptCount) : 1;
         const reason = (debug.reason != null && typeof debug.reason === 'string') ? debug.reason : 'unknown';
         let modeLabel = '';
-        try{
-          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
-          if (api){
-            const cfg = api.loadLlmConfig();
-            modeLabel = (cfg && cfg.velocityOnly === false) ? ' [Full mode]' : ' [Safe mode]';
-          }
-        }catch(_){}
+        if (typeof debug.safeModeResolved === 'boolean'){
+          modeLabel = debug.safeModeResolved ? ' [Safe mode]' : ' [Full mode]';
+        } else {
+          try{
+            const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+            if (api){
+              const cfg = api.loadLlmConfig();
+              modeLabel = (cfg && cfg.velocityOnly === false) ? ' [Full mode]' : ' [Safe mode]';
+            }
+          }catch(_){}
+        }
         const extractedStr = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
         let opsTotal = 0;
         const opsByType = {};
@@ -219,6 +223,7 @@
             clipId: (clipId && typeof clipId === 'string') ? clipId : '',
             attemptCount: (llmDebug.attemptCount != null) ? Number(llmDebug.attemptCount) : 1,
             reason: (llmDebug.reason && typeof llmDebug.reason === 'string') ? llmDebug.reason : '',
+            safeModeResolved: typeof llmDebug.safeModeResolved === 'boolean' ? llmDebug.safeModeResolved : undefined,
             rawText: rawText.length > 4000 ? rawText.slice(0, 4000) : rawText,
             extractedJson: extractedJson.length > 4000 ? extractedJson.slice(0, 4000) : extractedJson,
             errors: errors.slice(0, 20),
@@ -465,7 +470,8 @@
           const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
           if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
             const opts = app.getOptimizeOptions(clipId);
-            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
+            const stored = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
+            promptEl.value = stored;
           }
           const statusEl = $('#editorOptStatus');
           if (statusEl) statusEl.textContent = _editorOptStatusText(clip.meta && clip.meta.agent) || '';
@@ -488,114 +494,6 @@
           if (undoStatusEl) undoStatusEl.textContent = canUndo ? '' : 'No previous revision';
         }
       }catch(e){}
-
-      // PR-8H: Compute verifiable summary (changedNotes + fieldsTouched) from debug object
-      function computeLlmDebugSummary(debug){
-        if (!debug || typeof debug !== 'object') return '';
-        const attempts = (debug.attemptCount != null) ? Number(debug.attemptCount) : 1;
-        const reason = (debug.reason != null && typeof debug.reason === 'string') ? debug.reason : 'unknown';
-        let modeLabel = '';
-        try{
-          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
-          if (api){
-            const cfg = api.loadLlmConfig();
-            modeLabel = (cfg && cfg.velocityOnly === false) ? ' [Full mode]' : ' [Safe mode]';
-          }
-        }catch(_){}
-        const extractedStr = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
-        let opsTotal = 0;
-        const opsByType = {};
-        const noteIds = new Set();
-        const fieldsTouched = new Set();
-        let addedNoId = 0;
-        let parsed = false;
-        if (extractedStr){
-          try{
-            const patch = JSON.parse(extractedStr);
-            const ops = (patch && Array.isArray(patch.ops)) ? patch.ops : [];
-            opsTotal = ops.length;
-            for (let i = 0; i < ops.length; i++){
-              const op = ops[i];
-              if (!op || typeof op !== 'object') continue;
-              const opType = op.op;
-              opsByType[opType] = (opsByType[opType] || 0) + 1;
-              if (opType === 'setNote'){
-                if (op.noteId) noteIds.add(String(op.noteId));
-                if (op.velocity != null) fieldsTouched.add('velocity');
-                if (op.pitch != null) fieldsTouched.add('pitch');
-                if (op.startBeat != null || op.durationBeat != null) fieldsTouched.add('timing');
-              } else if (opType === 'moveNote'){
-                if (op.noteId) noteIds.add(String(op.noteId));
-                fieldsTouched.add('timing');
-              } else if (opType === 'deleteNote'){
-                if (op.noteId) noteIds.add(String(op.noteId));
-              } else if (opType === 'addNote'){
-                if (op.note && op.note.id) noteIds.add(String(op.note.id));
-                else addedNoId++;
-                fieldsTouched.add('pitch');
-                fieldsTouched.add('timing');
-                fieldsTouched.add('velocity');
-              }
-            }
-            parsed = true;
-          }catch(_){}
-        }
-        const opsTypesStr = Object.keys(opsByType).length ? Object.keys(opsByType).map(function(k){ return k + '=' + opsByType[k]; }).join(', ') : (opsTotal > 0 ? '?' : '0');
-        const changedNotesStr = parsed ? String(noteIds.size + addedNoId) : '(unknown)';
-        const fieldsStr = parsed ? (fieldsTouched.size ? Array.from(fieldsTouched).sort().join(', ') : '-') : '?';
-        return 'attempts=' + attempts + ' reason=' + reason + modeLabel + ' ops=' + opsTotal + ' (' + opsTypesStr + ') changedNotes=' + changedNotesStr + ' fieldsTouched=' + fieldsStr;
-      }
-
-      // PR-8C: Load and display LLM debug data from localStorage
-      function loadLlmDebugUI(){
-        if (typeof document === 'undefined' || typeof localStorage === 'undefined') return;
-        try{
-          const raw = localStorage.getItem('hum2song_studio_llm_debug_last');
-          if (!raw || raw === '') {
-            const rawEl = document.getElementById('editorLlmDebugRaw');
-            const extractedEl = document.getElementById('editorLlmDebugExtracted');
-            const errorsEl = document.getElementById('editorLlmDebugErrors');
-            if (rawEl) rawEl.value = '';
-            if (extractedEl) extractedEl.value = '';
-            if (errorsEl) errorsEl.value = '';
-            return;
-          }
-          const debug = JSON.parse(raw);
-          const rawEl = document.getElementById('editorLlmDebugRaw');
-          const extractedEl = document.getElementById('editorLlmDebugExtracted');
-          const errorsEl = document.getElementById('editorLlmDebugErrors');
-          if (rawEl) rawEl.value = (debug.rawText && typeof debug.rawText === 'string') ? debug.rawText : '';
-          if (extractedEl) extractedEl.value = (debug.extractedJson && typeof debug.extractedJson === 'string') ? debug.extractedJson : '';
-          const summaryLine = computeLlmDebugSummary(debug);
-          const errText = (debug.errors && Array.isArray(debug.errors)) ? debug.errors.join(', ') : '';
-          const attemptText = (debug.attemptCount != null) ? 'Attempt: ' + String(debug.attemptCount) : '';
-          const reasonText = (debug.reason && typeof debug.reason === 'string') ? 'Reason: ' + debug.reason : '';
-          const parts = [attemptText, reasonText, errText].filter(function(s){ return s && s.trim() !== ''; });
-          const detailLine = parts.join(' | ');
-          if (errorsEl) errorsEl.value = summaryLine + (detailLine ? '\n' + detailLine : '');
-        }catch(e){}
-      }
-
-      // PR-8C: Save LLM debug data to localStorage (truncate to 4000 chars per field)
-      function saveLlmDebug(clipId, llmDebug){
-        if (typeof localStorage === 'undefined' || !llmDebug || typeof llmDebug !== 'object') return;
-        try{
-          const rawText = (llmDebug.rawText && typeof llmDebug.rawText === 'string') ? llmDebug.rawText : '';
-          const extractedJson = (llmDebug.extractedJson && typeof llmDebug.extractedJson === 'string') ? llmDebug.extractedJson : '';
-          const errors = (llmDebug.errors && Array.isArray(llmDebug.errors)) ? llmDebug.errors : [];
-          const debug = {
-            ts: Date.now(),
-            clipId: (clipId && typeof clipId === 'string') ? clipId : '',
-            attemptCount: (llmDebug.attemptCount != null) ? Number(llmDebug.attemptCount) : 1,
-            reason: (llmDebug.reason && typeof llmDebug.reason === 'string') ? llmDebug.reason : '',
-            rawText: rawText.length > 4000 ? rawText.slice(0, 4000) : rawText,
-            extractedJson: extractedJson.length > 4000 ? extractedJson.slice(0, 4000) : extractedJson,
-            errors: errors.slice(0, 20),
-          };
-          localStorage.setItem('hum2song_studio_llm_debug_last', JSON.stringify(debug));
-          loadLlmDebugUI();
-        }catch(e){}
-      }
 
       // PR-7a-3: Populate LLM Settings from H2S_LLM_CONFIG; if missing, show warning and disable Save/Reset
       try{
@@ -1414,7 +1312,11 @@
               setEditorOptStatus('running...');
               setOptimizeControlsDisabled(true);
               Promise.resolve(app.optimizeClip(clipId)).then(function(res){
-                try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
+                if (res && res.ok && (res.ops != null && res.ops > 0)){
+                  rt.modalRefreshDraftFromClip();
+                } else {
+                  try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
+                }
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
@@ -1424,7 +1326,7 @@
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
-                if (presetId === 'llm_v0' && res && res.llmDebug){
+                if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);
                 }
                 if (res && res.ok && typeof app.playClip === 'function'){ try{ app.playClip(clipId); }catch(playErr){} }
@@ -1439,6 +1341,32 @@
         }
         btnOptimize.removeEventListener('click', H.onOptimizeClick, true);
         btnOptimize.addEventListener('click', H.onOptimizeClick, true);
+      }
+
+      // Persist-on-edit: prompt textarea — update stored userPrompt on input/blur (bound once)
+      const promptTextarea = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+      if (promptTextarea){
+        if (!H.onPromptInputOrBlur){
+          H.onPromptInputOrBlur = () => {
+            try{
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.setOptimizeOptions !== 'function') return;
+              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
+              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const value = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+              const promptVal = (value.trim() !== '') ? value.trim() : null;
+              app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+            }catch(e){}
+          };
+        }
+        promptTextarea.removeEventListener('input', H.onPromptInputOrBlur, true);
+        promptTextarea.removeEventListener('blur', H.onPromptInputOrBlur, true);
+        promptTextarea.addEventListener('input', H.onPromptInputOrBlur, true);
+        promptTextarea.addEventListener('blur', H.onPromptInputOrBlur, true);
       }
 
       // PR-4/PR-6b: Preset dropdown change — store preset + current prompt per clip
@@ -1510,15 +1438,20 @@
               const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
               const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
               const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
               setEditorOptStatus('running...');
               setOptimizeControlsDisabled(true);
               Promise.resolve(app.optimizeClip(clipId, { requestedPresetId: presetId || null, userPrompt: promptVal })).then(function(res){
-                try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
+                if (res && res.ok && (res.ops != null && res.ops > 0)){
+                  rt.modalRefreshDraftFromClip();
+                } else {
+                  try{ rt.modalUpdateEditorOptimizeUI(); rt.modalUpdateEditorRevisionUI(); }catch(e){}
+                }
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
-                if (presetId === 'llm_v0' && res && res.llmDebug){
+                if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);
                 }
               }).catch(function(err){
