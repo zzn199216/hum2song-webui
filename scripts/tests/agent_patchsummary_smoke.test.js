@@ -612,6 +612,12 @@ async function testOptimizePromptPlumbing() {
   assert(resOverride.patchSummary.requestedUserPrompt === 'one-shot override', 'PR-6a: override call requestedUserPrompt is override');
   assert(mockApp.getOptimizeOptions(cid).userPrompt === 'stored only', 'PR-6a: stored userPrompt must remain after one-shot override');
 
+  // Editor-like flow: persist userPrompt before optimize, stored and patchSummary correct, value not cleared
+  mockApp.setOptimizeOptions({ requestedPresetId: 'noop', userPrompt: 'PITCH +2' }, cid);
+  const resBuild = await ctrl.optimizeClip(cid);
+  assert(mockApp.getOptimizeOptions(cid).userPrompt === 'PITCH +2', 'prompt persists after optimize (simulates textarea not cleared)');
+  assert(resBuild && resBuild.patchSummary.requestedUserPrompt === 'PITCH +2', 'prompt sent to llm_v0 equals PITCH +2');
+
   console.log('PASS optimize prompt plumbing');
 }
 

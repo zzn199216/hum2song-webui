@@ -1,16 +1,35 @@
 # LLM Gateway Quickstart
 
-This guide helps you run the Studio **LLM v0** preset end-to-end in about 5 minutes using a local OpenAI-compatible gateway (e.g. LiteLLM Proxy). No provider API key is ever entered in the browser.
+This guide helps you run the Studio **LLM v0** preset end-to-end. You can use a direct provider (DeepSeek Cloud) or a local gateway (LiteLLM).
 
 ---
 
-## 1. What "gateway-first" means (and why)
+## Option A: DeepSeek Cloud (no local gateway)
+
+Simplest path for non-pro users: no local proxy required.
+
+1. Open **Clip Editor** → **Advanced** → **LLM Settings**
+2. **Gateway Preset:** select **DeepSeek (Cloud)**
+3. **Auth Token:** paste your DeepSeek API key  
+   *(Note: stored in browser localStorage. Avoid on shared machines.)*
+4. Pick **Model** from dropdown (e.g. `deepseek-chat` or `deepseek-reasoner`)
+5. Click **Test Connection** → then **Optimize**
+
+**Security note:** Direct provider mode stores your API key in the browser. Avoid on shared machines. For deployments, use **Option B (gateway-first)** below.
+
+---
+
+## Option B: Gateway-first (LiteLLM)
+
+Recommended for deployments: the browser never sees or stores your provider API key.
+
+### 1. What "gateway-first" means (and why)
 
 **Gateway-first** means the browser never sees or stores your provider’s API key. The frontend talks only to a **gateway/proxy** (e.g. LiteLLM) that you run locally or host. The gateway holds the provider key and forwards requests. The browser stores only: **Base URL**, **model name**, and optionally a **gateway auth token** — not the provider key. This keeps keys off the client and makes it easy to switch providers or models by reconfiguring the gateway.
 
 ---
 
-## 2. LiteLLM Proxy quickstart
+### 2. LiteLLM Proxy quickstart
 
 ### 2.1 Docker method
 
@@ -37,7 +56,7 @@ Set the provider key via env (e.g. `OPENAI_API_KEY=sk-...`) before running. Same
 
 ---
 
-## 3. Example commands to start a local gateway
+### 3. Example commands to start a local gateway
 
 **Copy-paste (Docker):** Replace `sk-your-key-here` with your real key. The key stays in the terminal/env, not in the app UI.
 
@@ -49,7 +68,7 @@ Use the URL and port from this command (e.g. `http://localhost:4000`) in the Stu
 
 ---
 
-## 4. How to fill the UI fields
+### 4. How to fill the UI fields
 
 ### 4.1 Where to find the UI
 
@@ -88,7 +107,7 @@ Do not paste the provider’s API key here; the gateway already has it via env.
 
 ---
 
-## 5. Smoke test steps
+### 5. Smoke test steps
 
 1. **Configure:** In Clip Editor → Advanced → LLM Settings, enter Base URL (e.g. `http://localhost:4000`) and Model (e.g. `gpt-4o-mini`). Add Auth Token only if your gateway requires it. Click **Save**.
 2. **Test connection:** Click **Test Connection**. You should see **Connection OK**.
@@ -99,7 +118,7 @@ Do not paste the provider’s API key here; the gateway already has it via env.
 
 ---
 
-## 6. Troubleshooting
+### 6. Troubleshooting
 
 | Symptom / Message | Cause | What to do |
 |-------------------|--------|------------|
@@ -112,7 +131,7 @@ Do not paste the provider’s API key here; the gateway already has it via env.
 
 ---
 
-## 7. Security notes
+### 7. Security notes
 
 - **Do not** put provider API keys in the browser or in localStorage. Use a gateway; only the gateway holds the provider key.
 - Store only **gateway Base URL**, **model**, and (if needed) a **gateway auth token** in the app.
@@ -120,6 +139,6 @@ Do not paste the provider’s API key here; the gateway already has it via env.
 
 ---
 
-## 8. Next steps
+### 8. Next steps
 
 For API and preset details, see [PR7b_NOTES.md](PR7b_NOTES.md).

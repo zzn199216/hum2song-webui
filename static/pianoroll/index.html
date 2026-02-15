@@ -482,6 +482,14 @@
       background: #fff;
       color: #111;
     }
+    /* Preset and Gateway Preset dropdowns — same readability pattern */
+    #editorOptimizePreset, #editorLlmGatewayPreset{
+      color: rgba(255,255,255,.90);
+    }
+    #editorOptimizePreset option, #editorLlmGatewayPreset option{
+      background: #fff;
+      color: #111;
+    }
     .help{
       color:rgba(255,255,255,.72);
       font-size:12px;
@@ -678,6 +686,13 @@
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
                   <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
                   <div class="col" style="gap:6px;">
+                    <label class="muted" style="margin:0;">Gateway Preset</label>
+                    <select id="editorLlmGatewayPreset" class="btn" style="width:100%; padding:6px; font-size:12px;">
+                      <option value="custom">Custom</option>
+                      <option value="deepseek">DeepSeek (Cloud)</option>
+                      <option value="ollama">Ollama (Local)</option>
+                    </select>
+                    <div class="muted" style="font-size:11px; margin-top:-2px; margin-bottom:2px;">DeepSeek: paste API key in Auth Token. Ollama: requires local install.</div>
                     <label class="muted" style="margin:0;">Base URL</label>
                     <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
                     <label class="muted" style="margin:0;">Model</label>
