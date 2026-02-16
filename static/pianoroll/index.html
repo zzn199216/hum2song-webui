@@ -695,18 +695,20 @@
               </div>
               <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
             </div>
-            <div class="help" style="font-size:11px; opacity:0.85; margin-bottom:2px;">Prompt (blank = default)</div>
-            <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
-            <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
-            <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
-            <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
-            <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
-            <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
             <details class="help" style="margin-top:8px;">
               <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
               <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
                 <span>Rev: <span id="editorRevId">-</span></span>
                 <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
+                <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;">Prompt (blank = default)</div>
+                <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
+                <div style="margin-top:6px;">
+                  <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
+                  <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
+                  <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
+                </div>
+                <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
+                <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
                   <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
                   <div class="col" style="gap:6px;">
