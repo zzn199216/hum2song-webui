@@ -662,6 +662,7 @@
       this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
       this.modalRequestDraw();
       this.modalBindControls();
+      this.modalUpdateEditorOptimizeUI();
       log(`Open editor: ${clip.name}`);
     },
 
@@ -915,6 +916,27 @@
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
+        const quickPresetEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
+        const quickModeEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeMode') : null;
+        const quickModelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeModel') : null;
+        if (quickPresetEl && app && typeof app.getOptimizePresetForClip === 'function'){
+          const preset = app.getOptimizePresetForClip(clipId);
+          quickPresetEl.value = (preset != null && preset !== '') ? String(preset) : 'llm_v0';
+        }
+        try{
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api){
+            const cfg = api.loadLlmConfig();
+            if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? 'Full mode' : 'Safe mode';
+            if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ('Model: ' + cfg.model) : 'Model: (unset)';
+          } else {
+            if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+            if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
+          }
+        }catch(_){
+          if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+          if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
+        }
       }catch(e){}
     },
 
@@ -1183,7 +1205,7 @@
       const setOptimizeControlsDisabled = (disabled) => {
         const doc = typeof document !== 'undefined' ? document : null;
         if (!doc) return;
-        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt'];
+        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt', 'editorQuickOptimizePreset', 'btnEditorQuickOptimize'];
         for (const id of ids) {
           const el = doc.getElementById(id);
           if (!el) continue;
@@ -1391,6 +1413,43 @@
         selPreset.addEventListener('change', H.onPresetChange);
       }
 
+      // PR-B1: Quick Optimize — sync preset to main, reuse btnEditorOptimize (no new optimize path)
+      const quickPresetSel = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
+      const btnQuickOptimize = (typeof document !== 'undefined') ? document.getElementById('btnEditorQuickOptimize') : null;
+      if (quickPresetSel){
+        if (!H.onQuickPresetChange){
+          H.onQuickPresetChange = (ev) => {
+            try{
+              const mainSel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const val = (ev.target && ev.target.value != null) ? String(ev.target.value) : '';
+              if (mainSel){ mainSel.value = val; mainSel.dispatchEvent(new Event('change', { bubbles: true })); }
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (rt && typeof rt.modalUpdateEditorOptimizeUI === 'function') rt.modalUpdateEditorOptimizeUI();
+            }catch(e){}
+          };
+        }
+        quickPresetSel.removeEventListener('change', H.onQuickPresetChange, true);
+        quickPresetSel.addEventListener('change', H.onQuickPresetChange, true);
+      }
+      if (btnQuickOptimize){
+        if (!H.onQuickOptimizeClick){
+          H.onQuickOptimizeClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const quickSel = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
+              const mainSel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const val = (quickSel && quickSel.value != null) ? String(quickSel.value) : '';
+              if (mainSel){ mainSel.value = val; mainSel.dispatchEvent(new Event('change', { bubbles: true })); }
+              const btnOpt = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimize') : null;
+              if (btnOpt) btnOpt.click();
+            }catch(e){}
+          };
+        }
+        btnQuickOptimize.removeEventListener('click', H.onQuickOptimizeClick, true);
+        btnQuickOptimize.addEventListener('click', H.onQuickOptimizeClick, true);
+      }
+
       // PR-5/PR-6b/PR-6d: Undo Optimize (Rollback) — disable during run, refresh UI, status
       const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
       if (btnUndo){
@@ -1515,6 +1574,8 @@
               const velocityOnly = (velocityOnlyEl && velocityOnlyEl.checked === true) ? true : false;
               api.saveLlmConfig({ baseUrl: baseUrl, model: model, authToken: authToken, velocityOnly: velocityOnly });
               if (statusEl) statusEl.textContent = 'Saved';
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (rt && typeof rt.modalUpdateEditorOptimizeUI === 'function') rt.modalUpdateEditorOptimizeUI();
             }catch(e){}
           };
         }
@@ -1549,6 +1610,8 @@
                 if (modelSelectEl) modelSelectEl.value = '';
                 if (statusEl) statusEl.textContent = 'Config reset';
               }
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (rt && typeof rt.modalUpdateEditorOptimizeUI === 'function') rt.modalUpdateEditorOptimizeUI();
             }catch(e){}
           };
         }

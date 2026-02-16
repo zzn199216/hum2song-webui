@@ -483,10 +483,10 @@
       color: #111;
     }
     /* Preset and Gateway Preset dropdowns — same readability pattern */
-    #editorOptimizePreset, #editorLlmGatewayPreset{
+    #editorOptimizePreset, #editorLlmGatewayPreset, #editorQuickOptimizePreset{
       color: rgba(255,255,255,.90);
     }
-    #editorOptimizePreset option, #editorLlmGatewayPreset option{
+    #editorOptimizePreset option, #editorLlmGatewayPreset option, #editorQuickOptimizePreset option{
       background: #fff;
       color: #111;
     }
@@ -671,6 +671,24 @@
               </div>
             </details>
             <div class="hr"></div>
+            <div style="margin-bottom:10px; padding:8px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.15);">
+              <div style="font-weight:700; margin-bottom:6px;">Quick Optimize</div>
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+                <select id="editorQuickOptimizePreset" class="btn" style="padding:6px 8px; font-size:12px;">
+                  <option value="">Default</option>
+                  <option value="noop">No-op</option>
+                  <option value="dynamics_accent">Dynamics Accent</option>
+                  <option value="dynamics_level">Dynamics Level</option>
+                  <option value="duration_gentle">Duration Gentle</option>
+                  <option value="llm_v0" selected>LLM v0</option>
+                </select>
+                <button id="btnEditorQuickOptimize" class="btn primary" type="button">Run Optimize</button>
+              </div>
+              <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                <span id="editorQuickOptimizeMode" class="badge">Safe mode</span>
+                <span id="editorQuickOptimizeModel" class="muted">Model: (unset)</span>
+              </div>
+            </div>
             <div class="help" style="font-size:11px; opacity:0.85; margin-bottom:2px;">Prompt (blank = default)</div>
             <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
             <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
