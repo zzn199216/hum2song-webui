@@ -1266,6 +1266,7 @@
         const r = (reason != null && typeof reason === 'string') ? reason : '';
         if (/llm_config_missing|llm_client_not_loaded/i.test(r)) return 'Please configure Base URL and Model in Advanced → LLM Settings.';
         if (/llm_no_valid_json/i.test(r)) return 'LLM response did not contain a valid JSON patch.';
+        if (/quality_velocity_only/i.test(r)) return 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
         if (/patch_rejected|ops_not_array|op\[/.test(r)) return 'Patch validation failed (LLM output not accepted).';
         if (/timeout|request timeout/i.test(r)) return 'LLM request timed out.';
         if (/401|403|Unauthorized/i.test(r)) return 'Unauthorized (check token).';
@@ -1306,7 +1307,11 @@
         if (presetId === 'llm_v0') {
           const detail = (res.detail != null && typeof res.detail === 'string') ? res.detail : '';
           const isSafeModeRejection = res.reason === 'patch_rejected' && (detail.indexOf('disallowed_op') >= 0 || detail.indexOf('disallowed_field') >= 0);
-          const msg = isSafeModeRejection ? 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.' : llmFriendlyReason(res.reason);
+          const isQualityGateRejection = res.reason === 'patch_rejected' && detail === 'quality_velocity_only';
+          let msg;
+          if (isSafeModeRejection) msg = 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.';
+          else if (isQualityGateRejection) msg = 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+          else msg = llmFriendlyReason(res.reason);
           return 'failed: ' + msg + getLlmModeLabel('llm_v0');
         }
         const ps = res.patchSummary;
@@ -1388,7 +1393,11 @@
                 }
                 const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
-                if (summaryEl) summaryEl.textContent = res && res.ok ? _formatPatchTypeSummary(ps) : '(no result yet)';
+                if (summaryEl){
+                  if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
+                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only') summaryEl.textContent = 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+                  else summaryEl.textContent = '(no result yet)';
+                }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);
@@ -1572,7 +1581,11 @@
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
                 const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
-                if (summaryEl) summaryEl.textContent = res && res.ok ? _formatPatchTypeSummary(ps) : '(no result yet)';
+                if (summaryEl){
+                  if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
+                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only') summaryEl.textContent = 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+                  else summaryEl.textContent = '(no result yet)';
+                }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);

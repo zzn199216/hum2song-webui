@@ -546,6 +546,27 @@
           }
           if (debugCapture) debugCapture.validateErrors = [];
 
+          // PR-B3b: Full-mode Quality Gate — velocity-only unacceptable when intent requires pitch/timing
+          const gateRequired = !safeMode && (intent.fixPitch || intent.tightenRhythm);
+          if (gateRequired && opsN > 0){
+            const ps = _computePatchTypeSummary(patchObj.ops);
+            if (ps.isVelocityOnly){
+              const patchSummary = Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: 'quality_velocity_only',
+                ops: opsN,
+                byOp: _opsByOp(patchObj.ops),
+                examples: [],
+              }, ps);
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: 'quality_velocity_only',
+                patchSummary,
+              };
+            }
+          }
+
           const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
           if (!applied || !applied.clip){
             return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops) });
@@ -608,6 +629,8 @@
           let fixDetail = '';
           if (res1.reason === 'llm_no_valid_json'){
             fixDetail = 'no valid JSON object found';
+          } else if (res1.reason === 'patch_rejected' && res1.detail === 'quality_velocity_only'){
+            fixDetail = 'velocity-only patch rejected; intent requires pitch or timing changes; output patch with pitch (setNote pitch) and/or timing (setNote startBeat/durationBeat, moveNote) ops';
           } else if (res1.reason === 'patch_rejected'){
             fixDetail = (res1.detail && typeof res1.detail === 'string') ? res1.detail : 'patch validation failed';
             if (fixDetail.length > 200) fixDetail = fixDetail.slice(0, 197) + '...';
