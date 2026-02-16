@@ -265,6 +265,10 @@
         executedUserPromptPreview: promptInfo.preview,
       };
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
+      const intentForSummary = (optsIn.intent && typeof optsIn.intent === 'object') ? optsIn.intent : null;
+      if (intentForSummary && (intentForSummary.fixPitch || intentForSummary.tightenRhythm || intentForSummary.reduceOutliers)) {
+        patchSummaryBase.intent = intentForSummary;
+      }
 
       function fail(reason, summaryExtras){
         return {
@@ -428,7 +432,19 @@
       }
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
-      let baseUserContent = promptInfo.prompt + clipHint;
+      // PR-B2-min: Goals section from structured intent (UI passes intent object, agent builds prompt)
+      const intent = (optsIn.intent && typeof optsIn.intent === 'object')
+        ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
+        : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+      const goalParts = [];
+      if (intent.fixPitch) goalParts.push('fix pitch (correct wrong notes)');
+      if (intent.tightenRhythm) goalParts.push('tighten rhythm (align timing)');
+      if (intent.reduceOutliers) goalParts.push('reduce outliers (smooth extreme values)');
+      const goalsPrefix = goalParts.length > 0
+        ? 'Goals: ' + goalParts.join('; ') + '.\n\n'
+        : '';
+
+      let baseUserContent = goalsPrefix + promptInfo.prompt + clipHint;
       if (!safeMode){
         baseUserContent = 'User prompt may require pitch/timing changes; do not respond with velocity-only unless explicitly requested.\n\n' + baseUserContent;
       }

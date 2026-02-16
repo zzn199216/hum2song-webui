@@ -684,6 +684,11 @@
                 </select>
                 <button id="btnEditorQuickOptimize" class="btn primary" type="button">Run Optimize</button>
               </div>
+              <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /> Fix Pitch</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /> Tighten Rhythm</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /> Reduce Outliers</label>
+              </div>
               <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
                 <span id="editorQuickOptimizeMode" class="badge">Safe mode</span>
                 <span id="editorQuickOptimizeModel" class="muted">Model: (unset)</span>

@@ -920,13 +920,18 @@
           const preset = app.getOptimizePresetForClip(clipId);
           sel.value = (preset != null && preset !== '') ? String(preset) : '';
         }
+        const opts = app && typeof app.getOptimizeOptions === 'function' ? app.getOptimizeOptions(clipId) : null;
         const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-        if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
-          if (document.activeElement !== promptEl){
-            const opts = app.getOptimizeOptions(clipId);
-            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
-          }
+        if (promptEl && document.activeElement !== promptEl){
+          promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
         }
+        const intent = (opts && opts.intent && typeof opts.intent === 'object') ? opts.intent : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+        const fixPitchEl = (typeof document !== 'undefined') ? document.getElementById('qoptFixPitch') : null;
+        const tightenRhythmEl = (typeof document !== 'undefined') ? document.getElementById('qoptTightenRhythm') : null;
+        const reduceOutliersEl = (typeof document !== 'undefined') ? document.getElementById('qoptReduceOutliers') : null;
+        if (fixPitchEl) fixPitchEl.checked = !!intent.fixPitch;
+        if (tightenRhythmEl) tightenRhythmEl.checked = !!intent.tightenRhythm;
+        if (reduceOutliersEl) reduceOutliersEl.checked = !!intent.reduceOutliers;
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
         const quickPresetEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
@@ -1223,13 +1228,32 @@
       const setOptimizeControlsDisabled = (disabled) => {
         const doc = typeof document !== 'undefined' ? document : null;
         if (!doc) return;
-        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt', 'editorQuickOptimizePreset', 'btnEditorQuickOptimize'];
+        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt', 'editorQuickOptimizePreset', 'btnEditorQuickOptimize', 'qoptFixPitch', 'qoptTightenRhythm', 'qoptReduceOutliers'];
         for (const id of ids) {
           const el = doc.getElementById(id);
           if (!el) continue;
           if (id === 'editorOptimizePrompt') el.readOnly = !!disabled;
           else el.disabled = !!disabled;
         }
+      };
+      // PR-B2-min: Read intent + preset + prompt from Quick Optimize UI for setOptimizeOptions
+      const readOptimizeOptionsFromUI = () => {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return { requestedPresetId: null, userPrompt: null, intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: false } };
+        const sel = doc.getElementById('editorOptimizePreset') || doc.getElementById('editorQuickOptimizePreset');
+        const promptEl = doc.getElementById('editorOptimizePrompt');
+        const fixPitch = doc.getElementById('qoptFixPitch');
+        const tightenRhythm = doc.getElementById('qoptTightenRhythm');
+        const reduceOutliers = doc.getElementById('qoptReduceOutliers');
+        const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+        const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+        const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+        const intent = {
+          fixPitch: !!(fixPitch && fixPitch.checked),
+          tightenRhythm: !!(tightenRhythm && tightenRhythm.checked),
+          reduceOutliers: !!(reduceOutliers && reduceOutliers.checked)
+        };
+        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent };
       };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;
@@ -1343,12 +1367,9 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.optimizeClip !== 'function') return;
-              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
-              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
-              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              if (app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId);
+              const presetId = opts.requestedPresetId;
               setEditorOptStatus('running...');
               setOptimizeControlsDisabled(true);
               Promise.resolve(app.optimizeClip(clipId)).then(function(res){
@@ -1397,12 +1418,8 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.setOptimizeOptions !== 'function') return;
-              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
-              const value = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              const promptVal = (value.trim() !== '') ? value.trim() : null;
-              app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              app.setOptimizeOptions(opts, clipId);
             }catch(e){}
           };
         }
@@ -1422,11 +1439,10 @@
               const clipId = rt.state.modal && rt.state.modal.clipId;
               if (!clipId) return;
               const app = g.H2SApp;
-              const val = (ev.target && ev.target.value) ? String(ev.target.value).trim() : null;
-              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
-              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: promptVal }, clipId);
+              if (!app || typeof app.setOptimizeOptions !== 'function') return;
+              const opts = readOptimizeOptionsFromUI();
+              opts.requestedPresetId = (ev.target && ev.target.value) ? String(ev.target.value).trim() || null : null;
+              app.setOptimizeOptions(opts, clipId);
             }catch(e){}
           };
         }
@@ -1471,6 +1487,33 @@
         btnQuickOptimize.addEventListener('click', H.onQuickOptimizeClick, true);
       }
 
+      // PR-B2-min: Intent checkboxes — persist on change (bound once)
+      const intentCheckboxIds = ['qoptFixPitch', 'qoptTightenRhythm', 'qoptReduceOutliers'];
+      for (const id of intentCheckboxIds){
+        const el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+        if (el && !H.onIntentCheckboxChange){
+          H.onIntentCheckboxChange = () => {
+            try{
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.setOptimizeOptions !== 'function') return;
+              const opts = readOptimizeOptionsFromUI();
+              app.setOptimizeOptions(opts, clipId);
+            }catch(e){}
+          };
+          break;
+        }
+      }
+      for (const id of intentCheckboxIds){
+        const el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+        if (el && H.onIntentCheckboxChange){
+          el.removeEventListener('change', H.onIntentCheckboxChange, true);
+          el.addEventListener('change', H.onIntentCheckboxChange, true);
+        }
+      }
+
       // PR-5/PR-6b/PR-6d: Undo Optimize (Rollback) — disable during run, refresh UI, status
       const btnUndo = getBtn(['btnEditorUndoOptimize', 'editorUndoOptimizeBtn']);
       if (btnUndo){
@@ -1513,15 +1556,12 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.optimizeClip !== 'function') return;
-              const sel = document.getElementById('editorOptimizePreset');
-              const promptEl = document.getElementById('editorOptimizePrompt');
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
-              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              if (app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId);
+              const presetId = opts.requestedPresetId;
               setEditorOptStatus('running...');
               setOptimizeControlsDisabled(true);
-              Promise.resolve(app.optimizeClip(clipId, { requestedPresetId: presetId || null, userPrompt: promptVal })).then(function(res){
+              Promise.resolve(app.optimizeClip(clipId, opts)).then(function(res){
                 if (res && res.ok && (res.ops != null && res.ops > 0)){
                   rt.modalRefreshDraftFromClip();
                 } else {
@@ -1564,9 +1604,9 @@
               const app = g.H2SApp;
               const promptEl = document.getElementById('editorOptimizePrompt');
               if (promptEl) promptEl.value = '';
-              const sel = document.getElementById('editorOptimizePreset');
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              opts.userPrompt = null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId);
             }catch(e){}
           };
         }

@@ -480,7 +480,18 @@ setOptimizeOptions(arg0, arg1){
     opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
   }
   const preset = opts && (opts.requestedPresetId != null ? opts.requestedPresetId : opts.presetId != null ? opts.presetId : opts.preset);
-  const normalizedOpts = opts ? { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: opts.userPrompt != null ? opts.userPrompt : null } : null;
+  const defaultIntent = { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+  const existingOpts = cid ? this.getOptimizeOptions(cid) : null;
+  const intent = (opts && opts.intent && typeof opts.intent === 'object')
+    ? { fixPitch: !!opts.intent.fixPitch, tightenRhythm: !!opts.intent.tightenRhythm, reduceOutliers: !!opts.intent.reduceOutliers }
+    : (existingOpts && existingOpts.intent && typeof existingOpts.intent === 'object')
+      ? { fixPitch: !!existingOpts.intent.fixPitch, tightenRhythm: !!existingOpts.intent.tightenRhythm, reduceOutliers: !!existingOpts.intent.reduceOutliers }
+      : defaultIntent;
+  const normalizedOpts = opts ? {
+    requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+    userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
+    intent
+  } : null;
   this._lastOptimizeOptions = normalizedOpts;
   if (cid) {
     this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
@@ -523,7 +534,14 @@ async optimizeClip(clipId, optOverride){
   let options = optOverride;
   if (options && typeof options === 'object') {
     const preset = options.requestedPresetId != null ? options.requestedPresetId : options.presetId != null ? options.presetId : options.preset;
-    options = { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: options.userPrompt != null ? options.userPrompt : null };
+    const intent = options.intent && typeof options.intent === 'object'
+      ? { fixPitch: !!options.intent.fixPitch, tightenRhythm: !!options.intent.tightenRhythm, reduceOutliers: !!options.intent.reduceOutliers }
+      : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+    options = {
+      requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+      userPrompt: options.userPrompt != null ? options.userPrompt : null,
+      intent
+    };
   }
   return await this.agentCtrl.optimizeClip(clipId, options);
 },
