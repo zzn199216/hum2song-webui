@@ -59,6 +59,19 @@
         return s.length > 6 ? s.slice(-6) : s;
       }
 
+      // PR-B3a: Format patch type summary for Quick Optimize display.
+      function _formatPatchTypeSummary(ps){
+        if (!ps || typeof ps !== 'object') return '';
+        if ((ps.ops != null && ps.ops === 0) || ps.noChanges) return '(no changes)';
+        if (ps.isVelocityOnly === true) return 'Changed: velocity only';
+        const parts = [];
+        if (ps.hasPitchChange === true) parts.push('pitch ✓');
+        if (ps.hasTimingChange === true) parts.push('timing ✓');
+        if (ps.hasStructuralChange === true) parts.push('structure ✓');
+        if (parts.length === 0) return 'Changed: velocity only';
+        return 'Changed: ' + parts.join(' ');
+      }
+
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
       // may be out of scope, causing a runtime ReferenceError and resulting in a blank
@@ -937,6 +950,11 @@
           if (quickModeEl) quickModeEl.textContent = 'Safe mode';
           if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
         }
+        const quickSummaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
+        if (quickSummaryEl){
+          const ps = (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) || null;
+          quickSummaryEl.textContent = ps ? _formatPatchTypeSummary(ps) : '(no result yet)';
+        }
       }catch(e){}
     },
 
@@ -1347,6 +1365,9 @@
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
                 }
+                const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
+                const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
+                if (summaryEl) summaryEl.textContent = res && res.ok ? _formatPatchTypeSummary(ps) : '(no result yet)';
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);
@@ -1509,6 +1530,9 @@
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
+                const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
+                const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
+                if (summaryEl) summaryEl.textContent = res && res.ok ? _formatPatchTypeSummary(ps) : '(no result yet)';
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);

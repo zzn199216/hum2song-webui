@@ -58,6 +58,26 @@
     return out;
   }
 
+  /** PR-B3a: Compute patch type summary from ops (pitch/timing/structure/velocity-only). */
+  function _computePatchTypeSummary(ops){
+    const arr = Array.isArray(ops) ? ops : [];
+    let hasPitchChange = false;
+    let hasTimingChange = false;
+    let hasStructuralChange = false;
+    for (const op of arr){
+      if (!op || typeof op !== 'object') continue;
+      const ot = String(op.op || '');
+      if (ot === 'addNote' || ot === 'deleteNote') hasStructuralChange = true;
+      if (ot === 'moveNote') hasTimingChange = true;
+      if (ot === 'setNote'){
+        if (op.pitch != null) hasPitchChange = true;
+        if (op.startBeat != null || op.durationBeat != null) hasTimingChange = true;
+      }
+    }
+    const isVelocityOnly = arr.length > 0 && !hasPitchChange && !hasTimingChange && !hasStructuralChange;
+    return { hasPitchChange, hasTimingChange, hasStructuralChange, isVelocityOnly };
+  }
+
   function buildPseudoAgentPatch(clip){
     const ops = [];
     const score = clip && clip.score;
@@ -457,7 +477,7 @@
                 ops: 0,
                 byOp: {},
                 examples: [],
-              }),
+              }, _computePatchTypeSummary([])),
             };
           }
 
@@ -534,7 +554,7 @@
               ops: opsN,
               byOp: _opsByOp(patchObj.ops),
               examples: [],
-            }),
+            }, _computePatchTypeSummary(patchObj.ops)),
           };
 
           opts.setProjectFromV2(project);
@@ -684,7 +704,7 @@
             ops:0,
             byOp:{},
             examples:[]
-          })
+          }, _computePatchTypeSummary([]))
         };
       }
 
@@ -750,7 +770,7 @@
           ops:opsN,
           byOp:_opsByOp(patch.ops),
           examples
-        })
+        }, _computePatchTypeSummary(patch.ops))
       };
 
       opts.setProjectFromV2(project);
