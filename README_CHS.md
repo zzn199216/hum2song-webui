@@ -9,6 +9,24 @@ Hum2Song 是一个“哼歌成曲”的 MVP 服务：
 - **契约 API（已冻结，推荐使用）**：`/generate`、`/tasks/{id}`、`/tasks/{id}/download?file_type=...`
 - **旧版 API（临时兼容）**：`/api/v1/...`（仅用于旧测试/旧客户端，未来可能移除）
 
+This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip editing, piano roll, LLM Optimize).
+
+### Quick Start (TL;DR)
+
+1. Create venv and install dependencies:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+2. Start the server:
+   ```powershell
+   uvicorn app:app
+   ```
+   (Optional: add `--reload` for local development.)
+3. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+4. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+
 ---
 
 ## 环境要求
@@ -31,11 +49,13 @@ pip install -r requirements.txt
 启动服务：
 
 ```powershell
-uvicorn app:app --reload
+uvicorn app:app
 ```
 
-打开 Swagger UI：
-- `http://127.0.0.1:8000/docs`
+（开发时可加 `--reload`。）
+
+- API 文档（Swagger）：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- Studio UI：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
 
 ---
 
@@ -149,7 +169,13 @@ curl -L \
 
 ## 测试
 
-运行所有测试：
+**Frontend（硬门禁）**：
+
+```powershell
+node scripts/run_frontend_all_tests.js
+```
+
+**Backend（可选）**：
 
 ```powershell
 pytest -q
