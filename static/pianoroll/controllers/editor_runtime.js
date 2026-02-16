@@ -1261,12 +1261,27 @@
         const el = doc.getElementById('editorOptStatus');
         if (el) el.textContent = text || '';
       };
+      // PR-B4b: Actionable quality gate message (model-unset hint when applicable).
+      const getQualityGateFailureMessage = (forStatus) => {
+        let modelHint = '';
+        try {
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api) {
+            const cfg = api.loadLlmConfig();
+            const m = (cfg && cfg.model != null) ? String(cfg.model).trim() : '';
+            if (!m) modelHint = 'Model is unset — open Advanced → LLM Settings to choose a model. ';
+          }
+        } catch (_) {}
+        const base = 'Quality gate failed (velocity-only). Try: (1) switch to a stronger model, (2) turn off Tighten Rhythm, or (3) add prompt: "fix pitch/timing, not just dynamics".';
+        if (forStatus) return modelHint + 'Quality gate failed. See summary for next steps.';
+        return modelHint + base;
+      };
       // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
       const llmFriendlyReason = (reason) => {
         const r = (reason != null && typeof reason === 'string') ? reason : '';
         if (/llm_config_missing|llm_client_not_loaded/i.test(r)) return 'Please configure Base URL and Model in Advanced → LLM Settings.';
         if (/llm_no_valid_json/i.test(r)) return 'LLM response did not contain a valid JSON patch.';
-        if (/quality_velocity_only/i.test(r)) return 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+        if (/quality_velocity_only/i.test(r)) return getQualityGateFailureMessage(true);
         if (/patch_rejected|ops_not_array|op\[/.test(r)) return 'Patch validation failed (LLM output not accepted).';
         if (/timeout|request timeout/i.test(r)) return 'LLM request timed out.';
         if (/401|403|Unauthorized/i.test(r)) return 'Unauthorized (check token).';
@@ -1310,7 +1325,7 @@
           const isQualityGateRejection = res.reason === 'patch_rejected' && detail === 'quality_velocity_only';
           let msg;
           if (isSafeModeRejection) msg = 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.';
-          else if (isQualityGateRejection) msg = 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+          else if (isQualityGateRejection) msg = getQualityGateFailureMessage(true);
           else msg = llmFriendlyReason(res.reason);
           return 'failed: ' + msg + getLlmModeLabel('llm_v0');
         }
@@ -1395,7 +1410,12 @@
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
                 if (summaryEl){
                   if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
-                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only') summaryEl.textContent = 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
+                    const qgMsg = getQualityGateFailureMessage(false);
+                    summaryEl.innerHTML = qgMsg + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
+                    const link = summaryEl.querySelector('.qopt-simplify');
+                    if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
+                  }
                   else summaryEl.textContent = '(no result yet)';
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
@@ -1583,7 +1603,12 @@
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
                 if (summaryEl){
                   if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
-                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only') summaryEl.textContent = 'Model failed quality gate: velocity-only. Try another model or simplify goals.';
+                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
+                    const qgMsg = getQualityGateFailureMessage(false);
+                    summaryEl.innerHTML = qgMsg + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
+                    const link = summaryEl.querySelector('.qopt-simplify');
+                    if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
+                  }
                   else summaryEl.textContent = '(no result yet)';
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
