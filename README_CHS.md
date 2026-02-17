@@ -27,6 +27,13 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 3. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 4. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
 
+**Studio（Hum2Song Studio）— 首次运行：**
+- 打开 [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) 开始使用。
+- **Quick Optimize：** 选择 Preset + Goals（Fix Pitch / Tighten Rhythm / Reduce Outliers）→ Run Optimize。
+- **Advanced** 默认折叠，内含 Prompt、Regenerate、LLM Settings 和 Debug。
+- **Quality gate：** 在 Full 模式下，若启用 Fix Pitch 或 Tighten Rhythm，velocity-only 补丁会被拒绝一次，并显示可操作的引导。
+- E2E 验证：参见 [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md)。
+
 ---
 
 ## 环境要求
