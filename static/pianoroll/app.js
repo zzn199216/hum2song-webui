@@ -569,6 +569,7 @@ rollbackClipRevision(clipId){
       lastUploadTaskId: null,
       recordingActive: false,
       lastRecordedFile: null,
+      importCancelled: false,
       modal: {
         show: false,
         clipId: null,
@@ -703,6 +704,8 @@ if (typeof localStorage !== 'undefined') {
       $('#btnStop').addEventListener('click', () => { if (this.state.recordingActive) this.stopRecording(); else this.stopProject(); });
       $('#btnRecord').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.startRecording(); });
       $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
+      const btnCancelImport = $('#btnCancelImport');
+      if (btnCancelImport) btnCancelImport.addEventListener('click', () => { this.state.importCancelled = true; });
       this._initMasterVolumeUI();
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
@@ -1356,21 +1359,49 @@ renderTimeline(){
       await this.uploadFileAndGenerate(f);
     },
 
+    /** PR-C2: Set import status (upload/generate progress). showCancel: only during active import. */
+    setImportStatus(text, showCancel){
+      if (typeof document === 'undefined') return;
+      const el = $('#studioImportStatus');
+      if (el) el.textContent = text || '';
+      const btn = $('#btnCancelImport');
+      if (btn) btn.style.display = (text && showCancel) ? 'inline-block' : 'none';
+    },
+
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording. */
     async uploadFileAndGenerate(f){
       if (!f || !(f instanceof Blob)) return;
       const file = f instanceof File ? f : new File([f], (f.name || 'recording.webm'), { type: (f.type || 'audio/webm') });
+      this.state.importCancelled = false;
+      this.setImportStatus('Uploading audio...', true);
       log(`Uploading ${file.name} ...`);
       try{
         const fd = new FormData();
         fd.append('file', file, file.name);
         const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
         const tid = res.task_id || res.id || res.taskId || res.task || null;
-        if (!tid) throw new Error('generate returned no task_id');
+        if (!tid){
+          this.setImportStatus('Failed: Server did not return task ID.', false);
+          log('generate returned no task_id');
+          alert('Upload failed: server did not return a task ID. Check backend logs.');
+          return;
+        }
         this.state.lastUploadTaskId = tid;
         log(`Generate queued: ${tid}`);
+        this.setImportStatus('Processing... (task: ' + String(tid).slice(0, 8) + '...)', true);
         await this.pollTaskUntilDone(tid);
+        if (this.state.importCancelled){
+          this.setImportStatus('Cancelled.', false);
+          log('Import cancelled by user');
+          return;
+        }
+        this.setImportStatus('Fetching result...', true);
         const score = await fetchJson(API.score(tid));
+        if (this.state.importCancelled){
+          this.setImportStatus('Cancelled.', false);
+          return;
+        }
+        this.setImportStatus('Creating clip...', true);
 
         if ((this.project.clips || []).length === 0){
           const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
@@ -1389,10 +1420,26 @@ renderTimeline(){
         this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
         persist();
         this.render();
+        this.setImportStatus('Done', false);
         log(`Clip added: ${clip.name}`);
+        setTimeout(() => this.setImportStatus('', false), 2000);
       }catch(e){
-        log(`Error: ${String(e && e.message ? e.message : e)}`);
-        alert('Generate failed. Check log.');
+        if (this.state.importCancelled){
+          this.setImportStatus('Cancelled.', false);
+          log('Import cancelled by user');
+        }else{
+          const msg = (e && e.message) ? String(e.message) : String(e);
+          const short = msg.length > 80 ? msg.slice(0, 77) + '...' : msg;
+          this.setImportStatus('Failed: ' + short, false);
+          log('Upload/generate error: ' + msg);
+          console.error('[Studio] uploadFileAndGenerate error', e);
+          let userMsg = 'Generate failed. ';
+          if (/timeout/i.test(msg)) userMsg += 'Processing timed out. Try a shorter clip.';
+          else if (/task failed/i.test(msg)) userMsg += 'Backend task failed. Check server logs.';
+          else if (/fetch|network/i.test(msg)) userMsg += 'Network error. Check connection and server.';
+          else userMsg += 'See status bar and console for details.';
+          alert(userMsg);
+        }
       }
     },
 
@@ -1443,8 +1490,10 @@ renderTimeline(){
         this.updateRecordButtonStates();
         log('Recording started.');
       }catch(e){
+        this.setImportStatus('Microphone permission denied.', false);
         log(`Microphone access denied or unavailable: ${String(e && e.message ? e.message : e)}`);
         alert('Cannot access microphone. Please allow mic permission and try again.');
+        setTimeout(() => this.setImportStatus('', false), 5000);
       }
     },
 
@@ -1463,10 +1512,10 @@ renderTimeline(){
     },
 
     async pollTaskUntilDone(taskId){
-      // backend seems to expose GET /tasks/{id} with status
       const maxWaitMs = 180000;
       const start = performance.now();
       while (true){
+        if (this.state.importCancelled) throw new Error('Cancelled by user');
         const data = await fetchJson(API.task(taskId));
         const status = String((data.status || data.state || data.task_status || data.taskStatus || '')).toLowerCase();
         if (status.includes('completed') || status.includes('done') || status === 'success'){
