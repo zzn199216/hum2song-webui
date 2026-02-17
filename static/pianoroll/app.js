@@ -570,6 +570,7 @@ rollbackClipRevision(clipId){
       recordingActive: false,
       lastRecordedFile: null,
       importCancelled: false,
+      autoOpenAfterImport: true,
       modal: {
         show: false,
         clipId: null,
@@ -704,6 +705,11 @@ if (typeof localStorage !== 'undefined') {
       $('#btnStop').addEventListener('click', () => { if (this.state.recordingActive) this.stopRecording(); else this.stopProject(); });
       $('#btnRecord').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.startRecording(); });
       $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
+      const chkAutoOpen = $('#chkAutoOpenAfterImport');
+      if (chkAutoOpen) {
+        chkAutoOpen.checked = !!this.state.autoOpenAfterImport;
+        chkAutoOpen.addEventListener('change', () => { this.state.autoOpenAfterImport = chkAutoOpen.checked; });
+      }
       const btnCancelImport = $('#btnCancelImport');
       if (btnCancelImport) btnCancelImport.addEventListener('click', () => { this.state.importCancelled = true; });
       this._initMasterVolumeUI();
@@ -1422,6 +1428,10 @@ renderTimeline(){
         this.render();
         this.setImportStatus('Done', false);
         log(`Clip added: ${clip.name}`);
+        const cidNew = clip.id;
+        if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
+          setTimeout(() => this.openClipEditor(cidNew), 0);
+        }
         setTimeout(() => this.setImportStatus('', false), 2000);
       }catch(e){
         if (this.state.importCancelled){
