@@ -567,6 +567,8 @@ rollbackClipRevision(clipId){
       transportPlaying: false,
       transportStartPerf: 0,
       lastUploadTaskId: null,
+      recordingActive: false,
+      lastRecordedFile: null,
       modal: {
         show: false,
         clipId: null,
@@ -698,7 +700,9 @@ if (typeof localStorage !== 'undefined') {
 
       // Transport buttons
       $('#btnPlayProject').addEventListener('click', (ev) => { try{ _unlockAudioFromGesture(); }catch(e){} return this.playProject(); });
-      $('#btnStop').addEventListener('click', () => this.stopProject());
+      $('#btnStop').addEventListener('click', () => { if (this.state.recordingActive) this.stopRecording(); else this.stopProject(); });
+      $('#btnRecord').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.startRecording(); });
+      $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
       this._initMasterVolumeUI();
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
@@ -1138,6 +1142,7 @@ ensureTrackButtons(){
       this.renderClipList();
       this.renderTimeline();
       this.renderSelection();
+      try{ this.updateRecordButtonStates(); }catch(e){}
     },
 
     renderClipList(){
@@ -1348,23 +1353,25 @@ renderTimeline(){
     async pickWavAndGenerate(){
       const f = await this.pickFile('.wav,.mp3,.m4a,.flac,.ogg');
       if (!f) return;
+      await this.uploadFileAndGenerate(f);
+    },
 
-      // Auto-generate on selection
-      log(`Uploading ${f.name} ...`);
+    /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording. */
+    async uploadFileAndGenerate(f){
+      if (!f || !(f instanceof Blob)) return;
+      const file = f instanceof File ? f : new File([f], (f.name || 'recording.webm'), { type: (f.type || 'audio/webm') });
+      log(`Uploading ${file.name} ...`);
       try{
         const fd = new FormData();
-        fd.append('file', f, f.name);
+        fd.append('file', file, file.name);
         const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
         const tid = res.task_id || res.id || res.taskId || res.task || null;
         if (!tid) throw new Error('generate returned no task_id');
         this.state.lastUploadTaskId = tid;
         log(`Generate queued: ${tid}`);
         await this.pollTaskUntilDone(tid);
-        // Load score and add to library
         const score = await fetchJson(API.score(tid));
 
-        // BPM init rule: on the very first clip import, initialize project BPM
-        // from score.tempo_bpm (or score.bpm) if it looks valid.
         if ((this.project.clips || []).length === 0){
           const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
           if (typeof srcBpm === 'number' && isFinite(srcBpm) && srcBpm >= 30 && srcBpm <= 300){
@@ -1374,13 +1381,11 @@ renderTimeline(){
           }
         }
 
-        const clip = H2SProject.createClipFromScore(score, { name: f.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
-        // Trace source tempo (for v2 migration).
+        const clip = H2SProject.createClipFromScore(score, { name: file.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
         if (!clip.meta) clip.meta = {};
         if (typeof score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = score.tempo_bpm;
         else if (typeof score.bpm === 'number') clip.meta.sourceTempoBpm = score.bpm;
         this.project.clips.unshift(clip);
-        // Also add instance to timeline at playhead
         this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
         persist();
         this.render();
@@ -1389,6 +1394,72 @@ renderTimeline(){
         log(`Error: ${String(e && e.message ? e.message : e)}`);
         alert('Generate failed. Check log.');
       }
+    },
+
+    /** PR-C1: Recording state machine. */
+    updateRecordButtonStates(){
+      if (typeof document === 'undefined') return;
+      const rec = $('#btnRecord');
+      const stp = $('#btnStop');
+      const useLast = $('#btnUseLast');
+      if (rec) rec.disabled = !!this.state.recordingActive;
+      if (stp) stp.disabled = !this.state.recordingActive && !this.state.transportPlaying;
+      if (useLast) {
+        useLast.disabled = !this.state.lastRecordedFile;
+        useLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
+      }
+    },
+
+    async startRecording(){
+      if (this.state.recordingActive) return;
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function'){
+        log('Microphone not available in this environment.');
+        return;
+      }
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        const recorder = new MediaRecorder(stream);
+        const chunks = [];
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunks, { type: mime });
+          const ext = mime.indexOf('webm') >= 0 ? 'webm' : 'ogg';
+          this.state.lastRecordedFile = new File([blob], `recording.${ext}`, { type: blob.type || 'audio/webm' });
+          this.state.recordingActive = false;
+          this.updateRecordButtonStates();
+          log('Recording stopped.');
+        };
+        recorder.onerror = (e) => {
+          this.state.recordingActive = false;
+          this.updateRecordButtonStates();
+          log(`Recording error: ${e.error || 'unknown'}`);
+        };
+        this._mediaRecorder = recorder;
+        this._recordedChunks = chunks;
+        recorder.start(200);
+        this.state.recordingActive = true;
+        this.updateRecordButtonStates();
+        log('Recording started.');
+      }catch(e){
+        log(`Microphone access denied or unavailable: ${String(e && e.message ? e.message : e)}`);
+        alert('Cannot access microphone. Please allow mic permission and try again.');
+      }
+    },
+
+    stopRecording(){
+      if (!this.state.recordingActive || !this._mediaRecorder) return;
+      try{
+        if (this._mediaRecorder.state !== 'inactive') this._mediaRecorder.stop();
+      }catch(e){ log(`Stop recording: ${e}`); }
+      this._mediaRecorder = null;
+      this._recordedChunks = null;
+    },
+
+    useLastRecording(){
+      if (!this.state.lastRecordedFile) return;
+      this.uploadFileAndGenerate(this.state.lastRecordedFile);
     },
 
     async pollTaskUntilDone(taskId){
