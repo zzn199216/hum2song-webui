@@ -32,7 +32,7 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 - **Quick Optimize：** 选择 Preset + Goals（Fix Pitch / Tighten Rhythm / Reduce Outliers）→ Run Optimize。
 - **Advanced** 默认折叠，内含 Prompt、Regenerate、LLM Settings 和 Debug。
 - **Quality gate：** 在 Full 模式下，若启用 Fix Pitch 或 Tighten Rhythm，velocity-only 补丁会被拒绝一次，并显示可操作的引导。
-- E2E 验证：参见 [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md)。
+- E2E 验证：参见 [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md)。Phase C 包含录音/导入 → 自动打开编辑器 → Quick Optimize。
 
 ---
 

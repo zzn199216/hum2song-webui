@@ -32,7 +32,7 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 - **Quick Optimize:** Choose Preset + Goals (Fix Pitch / Tighten Rhythm / Reduce Outliers) → Run Optimize.
 - **Advanced** is collapsed by default and contains Prompt, Regenerate, LLM Settings, and Debug.
 - **Quality gate:** In Full mode, if Fix Pitch or Tighten Rhythm is enabled, velocity-only patches are rejected once and you'll see actionable guidance.
-- E2E validation: see [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md).
+- E2E validation: see [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md). Phase C covers Recording/Import → auto-open editor → Quick Optimize.
 
 ---
 

@@ -48,6 +48,35 @@ All tests must pass before merge.
 
 ---
 
+## Phase C — Input MVP (Recording / Upload)
+
+Full flow: Record → Generate clip → Auto-open editor → Quick Optimize.
+
+1. **Open Studio UI**  
+   Navigate to [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+
+2. **Record and generate a clip**  
+   - Click **Record**, hum/sing for ~3 seconds, click **Stop**  
+   - Click **Use last recording**  
+   - Observe status progression: Uploading → Processing (task...) → Fetching → Creating clip → Done
+
+3. **Cancel during import**  
+   - If import is in progress, **Cancel** stops polling (client-side only; backend task may continue)
+
+4. **Mic permission denied**  
+   - If recording fails due to mic access, the UI shows a message; grant permission in the browser and retry
+
+5. **Auto-open editor**  
+   - Checkbox "Auto-open editor after import" (default on) opens the Clip Editor automatically when the clip is created  
+   - Confirm the new clip is visible/selected and the editor opens  
+   - Quick Optimize is immediately available in the editor
+
+6. **Troubleshooting**  
+   - **Model unset:** Advanced → LLM Settings → set Base URL and Model → Save  
+   - **Quality gate fails:** Follow on-screen guidance or turn off Tighten Rhythm
+
+---
+
 ## 3. Common issues
 
 | Issue | Cause | Workaround |
