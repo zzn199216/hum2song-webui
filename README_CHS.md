@@ -29,9 +29,11 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 **Studio（Hum2Song Studio）— 首次运行：**
 - 打开 [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) 开始使用。
+- **快捷键：** R = 录音切换，P = 播放/暂停（按钮），S = 停止并重置播放头（S 仅在播放时显示；不停止录音）。
 - **Quick Optimize：** 选择 Preset + Goals（Fix Pitch / Tighten Rhythm / Reduce Outliers）→ Run Optimize。
 - **Advanced** 默认折叠，内含 Prompt、Regenerate、LLM Settings 和 Debug。
 - **Quality gate：** 在 Full 模式下，若启用 Fix Pitch 或 Tighten Rhythm，velocity-only 补丁会被拒绝一次，并显示可操作的引导。
+- **Tone.js** 默认从本地加载（`/static/pianoroll/vendor/tone/Tone.js`）；仅当 `window.H2S_ALLOW_CDN_TONE === true` 时才尝试 CDN 回退。
 - E2E 验证：参见 [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md)。Phase C 包含录音/导入 → 自动打开编辑器 → Quick Optimize。
 
 ---

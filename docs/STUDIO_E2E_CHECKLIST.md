@@ -14,6 +14,18 @@ All tests must pass before merge.
 
 ---
 
+## Controls
+
+| Key / Button | Action | Note |
+|--------------|--------|------|
+| **R** | Record toggle | Start or stop recording |
+| **P** | Play / Pause | Button only (no keybinding) |
+| **S** | Stop + Reset to start | Visible only while playing; resets playhead to 0. Does **not** stop recording |
+
+Recording is controlled only by R or the Record button. S stops playback and resets the playhead; use R to stop recording.
+
+---
+
 ## 2. Manual E2E (deterministic)
 
 1. **Start server**
@@ -56,24 +68,30 @@ Full flow: Record → Generate clip → Auto-open editor → Quick Optimize.
    Navigate to [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
 
 2. **Record and generate a clip**  
-   - Click **Record**, hum/sing for ~3 seconds, click **Stop**  
+   - Click **Record**, hum/sing for ~3 seconds, click **Stop** (same button toggles)  
+   - Timer counts up and waveform animates during recording  
    - Click **Use last recording**  
    - Observe status progression: Uploading → Processing (task...) → Fetching → Creating clip → Done
 
-3. **Cancel during import**  
+3. **S button**  
+   - Appears only while playback is active (next to P). Stops playback and resets playhead to start (0).
+
+4. **Cancel during import**  
    - If import is in progress, **Cancel** stops polling (client-side only; backend task may continue)
 
-4. **Mic permission denied**  
+5. **Mic permission denied**  
    - If recording fails due to mic access, the UI shows a message; grant permission in the browser and retry
 
-5. **Auto-open editor**  
+6. **Auto-open editor**  
    - Checkbox "Auto-open editor after import" (default on) opens the Clip Editor automatically when the clip is created  
    - Confirm the new clip is visible/selected and the editor opens  
    - Quick Optimize is immediately available in the editor
 
-6. **Troubleshooting**  
+7. **Troubleshooting**  
    - **Model unset:** Advanced → LLM Settings → set Base URL and Model → Save  
-   - **Quality gate fails:** Follow on-screen guidance or turn off Tighten Rhythm
+   - **Quality gate fails:** Follow on-screen guidance or turn off Tighten Rhythm  
+   - **Tone.js CDN blocked:** Studio loads Tone.js locally from `/static/pianoroll/vendor/tone/Tone.js` by default. CDN fallback exists only if `window.H2S_ALLOW_CDN_TONE === true` (set in console before first playback).  
+   - **Waveform not showing during recording:** Refresh page and allow microphone permission when prompted.
 
 ---
 
@@ -84,6 +102,7 @@ Full flow: Record → Generate clip → Auto-open editor → Quick Optimize.
 | **Model unset** | Base URL or Model not configured | Advanced → LLM Settings → set Base URL and Model → Save |
 | **Quality gate velocity-only failure** | Fix Pitch / Tighten Rhythm enabled but model returned only velocity changes | Use a stronger model, turn off Tighten Rhythm (or Fix Pitch), or add prompt: "fix pitch/timing, not just dynamics" |
 | **Safe vs Full mode** | Safe mode allows only velocity changes; Full mode allows pitch/timing/structural edits | Advanced → LLM Settings → uncheck "Velocity-only (Safe mode)" for Full mode |
+| **Tone.js CDN blocked** | Studio loads Tone locally by default | No action needed; CDN fallback only if `window.H2S_ALLOW_CDN_TONE === true` |
 
 ---
 
