@@ -377,7 +377,7 @@
 
         // Ensure Tone.js is available in the browser.
         // - In Node tests there is no `document`, so this must be guarded.
-        // - In the browser, local vendor may be missing; we attempt a CDN fallback.
+        // - Default: try local vendor only. CDN only if window.H2S_ALLOW_CDN_TONE === true.
         async ensureTone(){
           const r = (typeof window !== 'undefined') ? window : global;
           if (r && r.Tone) return true;
@@ -389,7 +389,10 @@
             if (r.Tone) return true;
           }
 
-          const SRC = 'https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js';
+          const SRC_LOCAL = '/static/pianoroll/vendor/tone/Tone.js';
+          const SRC_CDN = 'https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js';
+          const sources = [SRC_LOCAL];
+          if (r && r.H2S_ALLOW_CDN_TONE === true) sources.push(SRC_CDN);
 
           return await new Promise((resolve) => {
             try {
@@ -404,13 +407,21 @@
                 return;
               }
 
-              const s = document.createElement('script');
-              s.src = SRC;
-              s.async = true;
-              s.onload = () => resolve(!!r.Tone);
-              s.onerror = () => resolve(false);
-              document.head.appendChild(s);
-              setTimeout(() => resolve(!!r.Tone), 3000);
+              let idx = 0;
+              let toId = 0;
+              const tryNext = () => {
+                if (r.Tone) return resolve(true);
+                if (idx >= sources.length) return resolve(false);
+                if (toId) clearTimeout(toId);
+                const s = document.createElement('script');
+                s.src = sources[idx++];
+                s.async = true;
+                s.onload = () => resolve(!!r.Tone);
+                s.onerror = () => tryNext();
+                document.head.appendChild(s);
+                toId = setTimeout(() => resolve(!!r.Tone), 3000);
+              };
+              tryNext();
             } catch(e){
               resolve(false);
             }

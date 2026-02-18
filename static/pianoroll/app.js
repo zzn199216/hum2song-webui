@@ -702,7 +702,7 @@ if (typeof localStorage !== 'undefined') {
 
       // Transport buttons
       $('#btnPlayProject').addEventListener('click', (ev) => { try{ _unlockAudioFromGesture(); }catch(e){} return this.playProject(); });
-      $('#btnStop').addEventListener('click', () => { this.stopProject(); });
+      $('#btnStop').addEventListener('click', () => { this.stopProjectReset(); });
       $('#btnRecord').addEventListener('click', () => {
         try{ _unlockAudioFromGesture(); }catch(e){}
         if (this.state.recordingActive) this.stopRecording();
@@ -750,7 +750,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
         if (inInput) return;
         if (!this.state.modal.show){
           if (ev.key === 'r' || ev.key === 'R'){ try{ _unlockAudioFromGesture(); }catch(e){} if (this.state.recordingActive) this.stopRecording(); else this.startRecording(); ev.preventDefault(); }
-          if (ev.key === 's' || ev.key === 'S'){ if (this.state.recordingActive) this.stopRecording(); else this.stopProject(); ev.preventDefault(); }
+          if (ev.key === 's' || ev.key === 'S'){ if (!this.state.recordingActive) this.stopProjectReset(); ev.preventDefault(); }
           return;
         }
         if (ev.key === 'Escape'){ this.closeModal(false); ev.preventDefault(); }
@@ -1461,11 +1461,21 @@ renderTimeline(){
       }
     },
 
+    /** PR-C5.3b: Reliable isPlaying for S button visibility. */
+    _isPlaying(){
+      if (this.audioCtrl && typeof this.audioCtrl.playing === 'boolean') return this.audioCtrl.playing;
+      if (this.state && this.state.transportPlaying) return true;
+      try{
+        if (typeof window !== 'undefined' && window.Tone && window.Tone.Transport) return String(window.Tone.Transport.state) === 'started';
+      }catch(e){}
+      return false;
+    },
+
     /** PR-C1/PR-C5: Recording state machine + Recording panel UI. */
     updateRecordButtonStates(){
       if (typeof document === 'undefined') return;
       const rec = $('#btnRecord');
-      const stp = $('#btnStop');
+      const stp = document.getElementById('btnStop');
       const useLast = $('#btnUseLast');
       const timerEl = $('#studioRecordTimer');
       const waveEl = $('#studioRecordWaveform');
@@ -1476,7 +1486,12 @@ renderTimeline(){
         rec.title = active ? 'Stop recording' : 'Record mic (R)';
         rec.disabled = false;
       }
-      if (stp) stp.disabled = !this.state.transportPlaying;
+      if (stp) {
+        const playing = this._isPlaying();
+        stp.style.visibility = playing ? 'visible' : 'hidden';
+        stp.style.pointerEvents = playing ? '' : 'none';
+        stp.title = 'Stop + Reset (S)';
+      }
       if (useLast) {
         useLast.disabled = !this.state.lastRecordedFile;
         useLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
@@ -1798,13 +1813,16 @@ renderTimeline(){
         alert('Audio engine not ready (AudioController missing).');
         return false;
       }
-      return await this.audioCtrl.playProject();
+      const result = await this.audioCtrl.playProject();
+      this.updateRecordButtonStates();
+      return result;
     },
 
     stopProject(){
       if (this.audioCtrl && this.audioCtrl.stop){
         // Delegate to AudioController
         this.audioCtrl.stop();
+        this.updateRecordButtonStates();
         return;
       }
       if (window.Tone){
@@ -1812,6 +1830,23 @@ renderTimeline(){
       }
       this.state.transportPlaying = false;
       log('Project stop.');
+      persist();
+      this.render();
+    },
+
+    /** PR-C5.3: Stop playback and reset playhead to start. S key / S button. */
+    stopProjectReset(){
+      if (this.audioCtrl && this.audioCtrl.stop){
+        this.audioCtrl.stop(true);
+        this.updateRecordButtonStates();
+        return;
+      }
+      if (window.Tone){
+        try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(e){}
+      }
+      this.state.transportPlaying = false;
+      if (this.project && this.project.ui) this.project.ui.playheadSec = 0;
+      log('Project stop (reset).');
       persist();
       this.render();
     },

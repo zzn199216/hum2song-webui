@@ -520,8 +520,8 @@
       <span id="studioRecordTimer" class="smallmuted" style="display:none; min-width:42px; font-variant-numeric:tabular-nums;">00:00</span>
       <canvas id="studioRecordWaveform" width="160" height="28" style="display:none; vertical-align:middle; background:rgba(0,0,0,.25); border-radius:6px;" title="Recording waveform"></canvas>
       <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
-      <button id="btnStop" class="btn icon" title="Stop playback (S)">S</button>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
+      <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
       <button id="btnUpload" class="btn">Upload WAV</button>
     </div>
     <div class="spacer"></div>
@@ -783,8 +783,8 @@
     </div>
   </div>
 
-  <!-- Tone.js (UMD) -->
-  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+  <!-- Tone.js (UMD) - local vendor -->
+  <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
   <script src="/static/pianoroll/project.js"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
