@@ -515,9 +515,12 @@
       <span style="opacity:.8;">Studio</span>
       <span class="badge">MVP</span>
     </div>
-    <div class="row">
-      <button id="btnRecord" class="btn icon" title="Record mic">R</button>
-      <button id="btnStop" class="btn icon" title="Stop (recording or playback)">S</button>
+    <div class="row" style="align-items:center; gap:8px;">
+      <button id="btnRecord" class="btn" title="Record mic (R)">&#128308; Record</button>
+      <span id="studioRecordTimer" class="smallmuted" style="display:none; min-width:42px; font-variant-numeric:tabular-nums;">00:00</span>
+      <canvas id="studioRecordWaveform" width="160" height="28" style="display:none; vertical-align:middle; background:rgba(0,0,0,.25); border-radius:6px;" title="Recording waveform"></canvas>
+      <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
+      <button id="btnStop" class="btn icon" title="Stop playback (S)">S</button>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
       <button id="btnUpload" class="btn">Upload WAV</button>
     </div>

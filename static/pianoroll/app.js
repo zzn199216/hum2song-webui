@@ -702,8 +702,12 @@ if (typeof localStorage !== 'undefined') {
 
       // Transport buttons
       $('#btnPlayProject').addEventListener('click', (ev) => { try{ _unlockAudioFromGesture(); }catch(e){} return this.playProject(); });
-      $('#btnStop').addEventListener('click', () => { if (this.state.recordingActive) this.stopRecording(); else this.stopProject(); });
-      $('#btnRecord').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.startRecording(); });
+      $('#btnStop').addEventListener('click', () => { this.stopProject(); });
+      $('#btnRecord').addEventListener('click', () => {
+        try{ _unlockAudioFromGesture(); }catch(e){}
+        if (this.state.recordingActive) this.stopRecording();
+        else this.startRecording();
+      });
       $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
       const chkAutoOpen = $('#chkAutoOpenAfterImport');
       if (chkAutoOpen) {
@@ -741,10 +745,14 @@ $('#rngPitchCenter').addEventListener('input', () => {
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 
       window.addEventListener('keydown', (ev) => {
-        if (!this.state.modal.show) return;
         const path = (ev.composedPath && ev.composedPath()) || (ev.target ? [ev.target] : []);
         const inInput = path.some((el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
         if (inInput) return;
+        if (!this.state.modal.show){
+          if (ev.key === 'r' || ev.key === 'R'){ try{ _unlockAudioFromGesture(); }catch(e){} if (this.state.recordingActive) this.stopRecording(); else this.startRecording(); ev.preventDefault(); }
+          if (ev.key === 's' || ev.key === 'S'){ if (this.state.recordingActive) this.stopRecording(); else this.stopProject(); ev.preventDefault(); }
+          return;
+        }
         if (ev.key === 'Escape'){ this.closeModal(false); ev.preventDefault(); }
         if (ev.key === 'Delete' || ev.key === 'Backspace'){ this.modalDeleteSelectedNote(); ev.preventDefault(); }
         if (ev.key === ' '){ this.modalTogglePlay(); ev.preventDefault(); }
@@ -1453,18 +1461,28 @@ renderTimeline(){
       }
     },
 
-    /** PR-C1: Recording state machine. */
+    /** PR-C1/PR-C5: Recording state machine + Recording panel UI. */
     updateRecordButtonStates(){
       if (typeof document === 'undefined') return;
       const rec = $('#btnRecord');
       const stp = $('#btnStop');
       const useLast = $('#btnUseLast');
-      if (rec) rec.disabled = !!this.state.recordingActive;
-      if (stp) stp.disabled = !this.state.recordingActive && !this.state.transportPlaying;
+      const timerEl = $('#studioRecordTimer');
+      const waveEl = $('#studioRecordWaveform');
+      const statusEl = $('#studioRecordStatus');
+      const active = !!this.state.recordingActive;
+      if (rec) {
+        rec.textContent = active ? '\u23F9 Stop' : '\u{1F534} Record';
+        rec.title = active ? 'Stop recording' : 'Record mic (R)';
+        rec.disabled = false;
+      }
+      if (stp) stp.disabled = !this.state.transportPlaying;
       if (useLast) {
         useLast.disabled = !this.state.lastRecordedFile;
         useLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
       }
+      if (timerEl) timerEl.style.display = active ? '' : 'none';
+      if (waveEl) waveEl.style.display = active ? '' : 'none';
     },
 
     async startRecording(){
@@ -1473,6 +1491,9 @@ renderTimeline(){
         log('Microphone not available in this environment.');
         return;
       }
+      const statusEl = typeof document !== 'undefined' ? $('#studioRecordStatus') : null;
+      const timerEl = typeof document !== 'undefined' ? $('#studioRecordTimer') : null;
+      const waveEl = typeof document !== 'undefined' ? $('#studioRecordWaveform') : null;
       try{
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
@@ -1485,11 +1506,19 @@ renderTimeline(){
           const ext = mime.indexOf('webm') >= 0 ? 'webm' : 'ogg';
           this.state.lastRecordedFile = new File([blob], `recording.${ext}`, { type: blob.type || 'audio/webm' });
           this.state.recordingActive = false;
+          this._stopRecordingUI();
+          const durSec = this._recordingStartMs ? (Date.now() - this._recordingStartMs) / 1000 : 0;
+          const mm = Math.floor(durSec / 60);
+          const ss = Math.floor(durSec % 60);
+          const durStr = `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+          if (statusEl) { statusEl.dataset.recordingStatus = '1'; statusEl.textContent = `Recording stopped (${durStr})`; }
+          setTimeout(() => { if (statusEl) { statusEl.textContent = ''; delete statusEl.dataset.recordingStatus; } }, 2000);
           this.updateRecordButtonStates();
           log('Recording stopped.');
         };
         recorder.onerror = (e) => {
           this.state.recordingActive = false;
+          this._stopRecordingUI();
           this.updateRecordButtonStates();
           log(`Recording error: ${e.error || 'unknown'}`);
         };
@@ -1497,13 +1526,119 @@ renderTimeline(){
         this._recordedChunks = chunks;
         recorder.start(200);
         this.state.recordingActive = true;
+        this._recordingStartMs = Date.now();
+        this._startRecordingUI(stream, waveEl, timerEl);
         this.updateRecordButtonStates();
         log('Recording started.');
       }catch(e){
+        this.state.recordingActive = false;
+        if (statusEl) statusEl.textContent = 'Microphone permission denied.';
+        this.updateRecordButtonStates();
         this.setImportStatus('Microphone permission denied.', false);
         log(`Microphone access denied or unavailable: ${String(e && e.message ? e.message : e)}`);
         alert('Cannot access microphone. Please allow mic permission and try again.');
-        setTimeout(() => this.setImportStatus('', false), 5000);
+        setTimeout(() => { this.setImportStatus('', false); if (statusEl) statusEl.textContent = ''; }, 5000);
+      }
+    },
+
+    _startRecordingUI(stream, waveEl, timerEl){
+      if (typeof document === 'undefined') return;
+      const self = this;
+      const statusEl = $('#studioRecordStatus');
+      this._recordingTimerInterval = setInterval(() => {
+        if (!self.state.recordingActive || !timerEl) return;
+        const elapsed = (Date.now() - (self._recordingStartMs || 0)) / 1000;
+        const mm = Math.floor(elapsed / 60);
+        const ss = Math.floor(elapsed % 60);
+        timerEl.textContent = `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+      }, 200);
+      if (waveEl && stream){
+        const CtxClass = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || (typeof AudioContext !== 'undefined' ? AudioContext : null);
+        if (!CtxClass){
+          if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+          return;
+        }
+        (async () => {
+          try{
+            const audioCtx = new CtxClass();
+            await audioCtx.resume().catch(() => {});
+            this._recAudioCtx = audioCtx;
+            const src = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            src.connect(analyser);
+            const z = audioCtx.createGain();
+            z.gain.value = 0;
+            analyser.connect(z);
+            z.connect(audioCtx.destination);
+            this._recAnalyser = analyser;
+            this._recZeroGain = z;
+            this._recStreamSrc = src;
+            const data = new Uint8Array(analyser.fftSize);
+            const canvas = waveEl;
+            const w = canvas.width;
+            const h = canvas.height;
+            const sliceWidth = w / data.length;
+            const draw = () => {
+              try{
+                if (!self.state.recordingActive || !analyser) return;
+                const ctx2d = canvas.getContext('2d');
+                if (!ctx2d){
+                  if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+                  return;
+                }
+                analyser.getByteTimeDomainData(data);
+                ctx2d.clearRect(0, 0, w, h);
+                ctx2d.strokeStyle = 'rgba(239,68,68,.7)';
+                ctx2d.lineWidth = 2;
+                ctx2d.beginPath();
+                let x = 0;
+                for (let i = 0; i < data.length; i++){
+                  const v = data[i] / 128.0;
+                  const y = v * (h / 2);
+                  if (i === 0) ctx2d.moveTo(x, y);
+                  else ctx2d.lineTo(x, y);
+                  x += sliceWidth;
+                }
+                ctx2d.stroke();
+                ctx2d.strokeStyle = 'rgba(255,255,255,.15)';
+                ctx2d.lineWidth = 1;
+                ctx2d.beginPath();
+                ctx2d.moveTo(0, h / 2);
+                ctx2d.lineTo(w, h / 2);
+                ctx2d.stroke();
+              }catch(err){
+                if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+                log('Waveform draw error: ' + err);
+                return;
+              }
+              self._recordingWaveformRaf = requestAnimationFrame(draw);
+            };
+            draw();
+          }catch(err){
+            log('Waveform init failed: ' + err);
+            if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+          }
+        })();
+      }
+    },
+
+    _stopRecordingUI(){
+      if (typeof document === 'undefined') return;
+      if (this._recordingTimerInterval){ clearInterval(this._recordingTimerInterval); this._recordingTimerInterval = null; }
+      if (this._recordingWaveformRaf){ cancelAnimationFrame(this._recordingWaveformRaf); this._recordingWaveformRaf = null; }
+      if (this._recStreamSrc){ try{ this._recStreamSrc.disconnect(); }catch(e){} this._recStreamSrc = null; }
+      if (this._recAnalyser){ try{ this._recAnalyser.disconnect(); }catch(e){} this._recAnalyser = null; }
+      if (this._recZeroGain){ try{ this._recZeroGain.disconnect(); }catch(e){} this._recZeroGain = null; }
+      if (this._recAudioCtx){ this._recAudioCtx.close().catch(() => {}); this._recAudioCtx = null; }
+      const timerEl = $('#studioRecordTimer');
+      const waveEl = $('#studioRecordWaveform');
+      if (timerEl){ timerEl.textContent = '00:00'; timerEl.style.display = 'none'; }
+      if (waveEl){
+        waveEl.style.display = 'none';
+        const g = waveEl.getContext('2d');
+        if (g) g.clearRect(0, 0, waveEl.width, waveEl.height);
       }
     },
 
@@ -1512,6 +1647,7 @@ renderTimeline(){
       try{
         if (this._mediaRecorder.state !== 'inactive') this._mediaRecorder.stop();
       }catch(e){ log(`Stop recording: ${e}`); }
+      this._stopRecordingUI();
       this._mediaRecorder = null;
       this._recordedChunks = null;
     },
