@@ -150,8 +150,9 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
         `</div>`
       );
     }
-// Optimize feedback (shown after clicking Optimize, even when no-op)
-    let optStatusHtml = '';
+// Optimize feedback: short line for primary, full block for advanced
+    let lastOptimizeShort = '';
+    let optStatusFullHtml = '';
     try{
       const agent = clip && clip.meta && clip.meta.agent;
       if (agent){
@@ -174,6 +175,9 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
           }
 
           const when = _fmtTs(agent.appliedAt);
+
+          // Short line for primary
+          lastOptimizeShort = `Last: ${escapeHtml(msg)}`;
 
           // PR-3: Display executedPreset, ops, reason from patchSummary (compute BEFORE using in template)
           let presetBadge = '';
@@ -213,7 +217,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
             }
           }catch(_){ /* ignore */ }
           
-          optStatusHtml =
+          optStatusFullHtml =
             `<div class="clip-opt-status" data-role="optStatus" data-id="${id}" ` +
             `style="margin-top:6px; font-size:12px; opacity:0.75;">` +
             `Optimize: ${escapeHtml(msg)}${badgeText}` +
@@ -224,14 +228,27 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
       }
     }catch(_){ /* ignore */ }
 
+    const lastLineHtml = lastOptimizeShort ? `<div class="clip-last-opt" style="font-size:11px; opacity:0.75; margin-top:2px;">${lastOptimizeShort}</div>` : '';
 
+    const advancedHtml =
+      `<details class="clipAdvanced" style="margin-top:6px; font-size:12px;">` +
+        `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Details</summary>` +
+        `<div class="clip-advanced-content" style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">` +
+          revLine +
+          revHtml +
+          optStatusFullHtml +
+          `<div style="margin-top:8px;">` +
+            `<button class="btn" data-act="remove" data-id="${id}" style="padding:4px 8px;">Remove</button>` +
+          `</div>` +
+        `</div>` +
+      `</details>`;
 
     return (
-      `<div class="clip-card" data-clip-id="${id}">` +
+      `<div class="clip-card clipCard" data-clip-id="${id}">` +
         `<div class="clip-title">${name}</div>` +
         `<div class="clip-sub">${notes} notes · ${fmtSec(spanSec)}</div>` +
-        revLine +
-        `<div class="clip-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">` +
+        lastLineHtml +
+        `<div class="clip-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center;">` +
           `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
           `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
           `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
@@ -242,10 +259,8 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
             `<option value="duration_gentle"${presetVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
           `</select>` +
           `<button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
-          `<button class="btn" data-act="remove" data-id="${id}">Remove</button>` +
         `</div>` +
-        optStatusHtml +
-        revHtml +
+        advancedHtml +
       `</div>`
     );
   }
