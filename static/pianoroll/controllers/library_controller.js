@@ -180,22 +180,12 @@
       }
 
       // T3-4: Optimize (agent runner v0)
+      // PR-D2d: Preset moved to Inspector; Optimize uses stored per-clip options via getOptimizeOptions.
       if (act === 'optimize'){
         // Important: bind this handler in capture phase so we can reliably intercept
         // optimize clicks even if a fallback listener is added later.
         // This also prevents double-handling (e.g. App fallback + controller).
         try{ e.preventDefault(); e.stopPropagation(); }catch(_){ /* ignore */ }
-        
-        // PR-3: Read preset from card (robust: .clip-card then single [data-act="optimizePreset"])
-        const cardEl = (e.target && e.target.closest) ? e.target.closest('.clip-card') : null;
-        const presetSel = cardEl ? cardEl.querySelector('[data-act="optimizePreset"]') : null;
-        const presetId = (presetSel && presetSel.value) ? String(presetSel.value).trim() : null;
-        if (app && typeof app.setOptimizeOptions === 'function'){
-          app.setOptimizeOptions({
-            requestedPresetId: presetId || null,
-            userPrompt: null,
-          }, clipId);
-        }
         
         const fn = (app && typeof app.optimizeClip === 'function') ? app.optimizeClip : null;
         if (!fn){
@@ -229,19 +219,7 @@
     function _handleChange(e){
       const el = e.target;
       if (!el || !el.getAttribute) return;
-      const act = el.getAttribute('data-act');
-
-      // PR-3: Preset dropdown change — store per-clip so dropdown persists and Optimize uses it
-      if (act === 'optimizePreset'){
-        const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
-        const presetId = (el.value && String(el.value).trim()) || null;
-        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
-        if (clipId && app && typeof app.setOptimizeOptions === 'function'){
-          app.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, clipId);
-        }
-        return;
-      }
-
+      // PR-D2d: optimizePreset moved to Inspector (inspOptimizePreset)
       // PR-D2a: revSelect moved to Inspector (inspRevSelect)
     }
 

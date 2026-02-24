@@ -80,6 +80,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     const id = escapeHtml(clip.id || '');
     const isSelected = selectedClipId && String(clip.id || '') === String(selectedClipId);
     const presetVal = (selectedPreset != null && selectedPreset !== '') ? String(selectedPreset) : '';
+    const presetLabel = presetVal === 'dynamics_accent' ? 'Dynamics Accent' : presetVal === 'dynamics_level' ? 'Dynamics Level' : presetVal === 'duration_gentle' ? 'Duration Gentle' : 'Default';
     const name = escapeHtml(clip.name || 'Untitled');
     const notes = Number(stats.count ?? stats.notes ?? 0) || 0;
     const spanSec = Number(stats.spanSec ?? 0) || 0;
@@ -202,12 +203,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
           `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
           `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
           `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
-          `<select data-act="optimizePreset" data-id="${id}" style="padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit;">` +
-            `<option value=""${presetVal === '' ? ' selected' : ''}>Default</option>` +
-            `<option value="dynamics_accent"${presetVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
-            `<option value="dynamics_level"${presetVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
-            `<option value="duration_gentle"${presetVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
-          `</select>` +
+          (presetVal ? `<span class="clip-preset-label" style="font-size:11px; opacity:0.7;">Preset: ${escapeHtml(presetLabel)}</span>` : '') +
           `<button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
         `</div>` +
         advancedHtml +

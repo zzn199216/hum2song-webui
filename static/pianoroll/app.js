@@ -1273,10 +1273,27 @@ renderTimeline(){
       } else {
         resultsHtml = 'No patch summary yet.';
       }
+      const storedPreset = this.getOptimizePresetForClip ? this.getOptimizePresetForClip(clipId) : null;
+      const presetSelVal = (storedPreset != null && storedPreset !== '') ? String(storedPreset) : '';
+      const optimizeSettingsHtml = (
+        `<details class="clipOptimizeSettings" style="margin-top:6px;">` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Optimize Settings</summary>` +
+          `<div style="margin-top:6px;">` +
+            `<label style="font-size:12px; opacity:0.8;">Preset</label>` +
+            `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
+              `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
+              `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
+              `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
+              `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
+            `</select>` +
+          `</div>` +
+        `</details>`
+      );
       box.className = '';
       box.innerHTML = (
         syncHtml +
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
+        optimizeSettingsHtml +
         `<details class="selectedClipResults" style="margin-top:6px;">` +
           `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Results</summary>` +
           `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
@@ -1332,11 +1349,21 @@ renderTimeline(){
         };
         box.__h2sChangeHandler = function(ev){
           const el = ev.target;
-          if (!el || el.getAttribute('data-act') !== 'inspRevSelect') return;
+          if (!el || !el.getAttribute) return;
+          const act = el.getAttribute('data-act');
           const cid = el.getAttribute('data-id');
+          const self = box.__h2sApp;
+          if (act === 'inspOptimizePreset'){
+            const presetId = (el.value && String(el.value).trim()) || null;
+            if (cid && self && typeof self.setOptimizeOptions === 'function'){
+              self.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, cid);
+            }
+            self.render();
+            return;
+          }
+          if (act !== 'inspRevSelect') return;
           if (!cid || !P || !P.setClipActiveRevision) return;
           const revId = el.value;
-          const self = box.__h2sApp;
           const p2 = self.getProjectV2();
           const target = p2 || self.project;
           const res = P.setClipActiveRevision(target, cid, revId);
