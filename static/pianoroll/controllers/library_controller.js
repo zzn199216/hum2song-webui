@@ -126,12 +126,13 @@
       }
       const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
       const getPresetForClip = (app && typeof app.getOptimizePresetForClip === 'function') ? app.getOptimizePresetForClip.bind(app) : null;
+      const selectedClipId = (app && app.state && app.state.selectedClipId) ? app.state.selectedClipId : null;
       let html = '';
       for (const clip of clips){
         const stats = _clipStats(project, clip);
         const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
         const selectedPreset = getPresetForClip ? getPresetForClip(clip.id) : null;
-        html += view.clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset);
+        html += view.clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset, selectedClipId);
       }
       rootEl.innerHTML = html;
     }

@@ -1247,6 +1247,13 @@ renderTimeline(){
       const view = (typeof window !== 'undefined' && window.H2SLibraryView && window.H2SLibraryView.historyControlsHTML) ? window.H2SLibraryView : null;
       let historyHtml = '';
       if (view) historyHtml = view.historyControlsHTML(clipId, revInfo, escapeHtml);
+      // PR-D2c: Sync button when Clip Details (library) vs Timeline Selection differ
+      let syncHtml = '';
+      const timelineInst = this.state.selectedInstanceId && (this.project.instances || []).find(x => x.id === this.state.selectedInstanceId);
+      const timelineClipId = timelineInst ? timelineInst.clipId : null;
+      if (clipId && timelineClipId && clipId !== timelineClipId){
+        syncHtml = `<div style="margin-bottom:6px;"><a href="#" data-act="inspSyncClip" data-id="${escapeHtml(timelineClipId)}" style="font-size:12px; opacity:0.9;">Sync to timeline clip</a></div>`;
+      }
       const ps = (clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) ||
         (clip.meta && clip.meta.patchSummary) ||
         (clip.meta && clip.meta.agent && clip.meta.agent.lastResult && clip.meta.agent.lastResult.patchSummary) ||
@@ -1268,6 +1275,7 @@ renderTimeline(){
       }
       box.className = '';
       box.innerHTML = (
+        syncHtml +
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
         `<details class="selectedClipResults" style="margin-top:6px;">` +
           `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Results</summary>` +
@@ -1313,6 +1321,13 @@ renderTimeline(){
             const res = P.setClipActiveRevision(target, cid, revId);
             if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
             self.render();
+            return;
+          }
+          if (act === 'inspSyncClip'){
+            ev.preventDefault();
+            if (cid) self.state.selectedClipId = cid;
+            self.render();
+            return;
           }
         };
         box.__h2sChangeHandler = function(ev){

@@ -71,13 +71,14 @@
     }
   }
 
-function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset){
+function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset, selectedClipId){
     clip = clip || {};
     stats = stats || {};
     fmtSec = (typeof fmtSec === 'function') ? fmtSec : _defaultFmtSec;
     escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
 
     const id = escapeHtml(clip.id || '');
+    const isSelected = selectedClipId && String(clip.id || '') === String(selectedClipId);
     const presetVal = (selectedPreset != null && selectedPreset !== '') ? String(selectedPreset) : '';
     const name = escapeHtml(clip.name || 'Untitled');
     const notes = Number(stats.count ?? stats.notes ?? 0) || 0;
@@ -193,7 +194,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
       `</details>`;
 
     return (
-      `<div class="clip-card clipCard" data-clip-id="${id}">` +
+      `<div class="clip-card clipCard${isSelected ? ' clipSelected' : ''}" data-clip-id="${id}">` +
         `<div class="clip-title">${name}</div>` +
         `<div class="clip-sub">${notes} notes · ${fmtSec(spanSec)}</div>` +
         lastLineHtml +

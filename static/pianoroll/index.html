@@ -142,6 +142,7 @@
       cursor:grab;
     }
     .clipCard:hover{ border-color: rgba(59,130,246,.45); }
+    .clipCard.clipSelected{ border-color: rgba(80,140,255,0.8); background: rgba(80,140,255,0.08); }
     .clipAdvanced summary{ font-size:11px; }
     .clipTitle{ font-weight:800; font-size:13px; }
     .clipMeta{ display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
@@ -600,14 +601,16 @@
         <div class="hr"></div>
 
         <div class="insSection">
-          <h4>Selected Clip</h4>
+          <h4>Clip Details</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected from Clip Library (shows History & Results).</div>
           <div id="selectedClipBox" class="muted">Click a clip in the library to view History.</div>
         </div>
 
         <div class="hr"></div>
 
         <div class="insSection">
-          <h4>Selection</h4>
+          <h4>Timeline Selection</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected instance on timeline (start/transpose/edit).</div>
           <div id="selectionBox" class="muted">Select a clip instance on timeline.</div>
         </div>
 
