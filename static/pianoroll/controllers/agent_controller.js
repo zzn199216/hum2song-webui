@@ -14,6 +14,55 @@
   const DEFAULT_OPT_SOURCE = 'safe_stub_v0';
   const SAFE_STUB_PRESET = 'alt_110_80';
 
+  /** PR-E1: TemplateSpec v1 registry — static data only; no DOM, no localStorage. */
+  const LLM_TEMPLATES_V1 = {
+    fix_pitch_v1: {
+      id: 'fix_pitch_v1',
+      label: 'Fix Pitch',
+      promptVersion: 'tmpl_v1.fix_pitch',
+      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+      seed: 'Correct wrong notes; fix pitch errors.',
+      directives: {},
+    },
+    tighten_rhythm_v1: {
+      id: 'tighten_rhythm_v1',
+      label: 'Tighten Rhythm',
+      promptVersion: 'tmpl_v1.tighten_rhythm',
+      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
+      seed: 'Align timing; tighten rhythm.',
+      directives: {},
+    },
+    clean_outliers_v1: {
+      id: 'clean_outliers_v1',
+      label: 'Clean Outliers',
+      promptVersion: 'tmpl_v1.clean_outliers',
+      intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+      seed: 'Smooth extreme values; reduce outliers.',
+      directives: {},
+    },
+    bluesy_v1: {
+      id: 'bluesy_v1',
+      label: 'Bluesy',
+      promptVersion: 'tmpl_v1.bluesy',
+      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
+      seed: 'Add subtle blues inflection to timing and dynamics.',
+      directives: {},
+    },
+  };
+
+  /** PR-E1: Resolve promptMeta from optsIn for patchSummary trace. */
+  function resolvePromptMeta(optsIn){
+    const templateId = (optsIn && optsIn.templateId != null && String(optsIn.templateId).trim()) ? String(optsIn.templateId).trim() : null;
+    const tmpl = templateId && LLM_TEMPLATES_V1[templateId] ? LLM_TEMPLATES_V1[templateId] : null;
+    const promptVersion = tmpl ? tmpl.promptVersion : 'manual_v0';
+    const intent = (optsIn && optsIn.intent && typeof optsIn.intent === 'object') ? optsIn.intent : null;
+    return {
+      templateId: tmpl ? tmpl.id : null,
+      promptVersion,
+      intent,
+    };
+  }
+
   /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
   const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
 
@@ -269,6 +318,7 @@
       if (intentForSummary && (intentForSummary.fixPitch || intentForSummary.tightenRhythm || intentForSummary.reduceOutliers)) {
         patchSummaryBase.intent = intentForSummary;
       }
+      patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
       function fail(reason, summaryExtras){
         return {
@@ -731,6 +781,7 @@
       };
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
       if (requestedPresetId && !SAFE_PRESET_ALLOWLIST[requestedPresetId]) patchSummaryBase.reason = 'unknown_preset_fallback';
+      patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
       if (opsN === 0){
         return {
