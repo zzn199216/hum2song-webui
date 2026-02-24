@@ -168,27 +168,12 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
           ].filter(Boolean);
           const badgeText = badgeParts.length > 0 ? ` | ${badgeParts.join(' | ')}` : '';
 
-          let detailHtml = '';
-          try{
-            if (agent.patchSummary && typeof agent.patchSummary === 'object'){
-              const js = _safeJson(agent.patchSummary, 2200);
-              detailHtml =
-                `<details class="clip-opt-detail" style="margin-top:6px; font-size:12px; opacity:0.85;">` +
-                  `<summary style="cursor:pointer; user-select:none;">Patch summary</summary>` +
-                  `<pre style="white-space:pre-wrap; margin:6px 0 0 0; padding:6px; border-radius:8px; background:rgba(255,255,255,0.04); max-width:420px; overflow:auto;">` +
-                    `${escapeHtml(js)}` +
-                  `</pre>` +
-                `</details>`;
-            }
-          }catch(_){ /* ignore */ }
-          
           optStatusFullHtml =
             `<div class="clip-opt-status" data-role="optStatus" data-id="${id}" ` +
             `style="margin-top:6px; font-size:12px; opacity:0.75;">` +
             `Optimize: ${escapeHtml(msg)}${badgeText}` +
             (when ? ` · ${escapeHtml(when)}` : ``) +
-            `</div>` +
-            detailHtml;
+            `</div>`;
         }
       }
     }catch(_){ /* ignore */ }

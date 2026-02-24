@@ -1247,9 +1247,32 @@ renderTimeline(){
       const view = (typeof window !== 'undefined' && window.H2SLibraryView && window.H2SLibraryView.historyControlsHTML) ? window.H2SLibraryView : null;
       let historyHtml = '';
       if (view) historyHtml = view.historyControlsHTML(clipId, revInfo, escapeHtml);
+      const ps = (clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) ||
+        (clip.meta && clip.meta.patchSummary) ||
+        (clip.meta && clip.meta.agent && clip.meta.agent.lastResult && clip.meta.agent.lastResult.patchSummary) ||
+        null;
+      let resultsHtml = '';
+      if (ps && typeof ps === 'object'){
+        const parts = [];
+        if (typeof ps.ops === 'number') parts.push(`ops: ${ps.ops}`);
+        if (ps.isVelocityOnly === true) parts.push('velocity only');
+        else {
+          if (ps.hasPitchChange === true) parts.push('pitch ✓');
+          if (ps.hasTimingChange === true) parts.push('timing ✓');
+          if (ps.hasStructuralChange === true) parts.push('structure ✓');
+        }
+        if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
+        resultsHtml = parts.length > 0 ? parts.join(' · ') : 'No key fields.';
+      } else {
+        resultsHtml = 'No patch summary yet.';
+      }
       box.className = '';
       box.innerHTML = (
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
+        `<details class="selectedClipResults" style="margin-top:6px;">` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Results</summary>` +
+          `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
+        `</details>` +
         (historyHtml ? (
           `<details class="clipAdvanced" style="margin-top:6px;">` +
             `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
