@@ -114,42 +114,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
       : '';
 
 
-    let revHtml = '';
-    if (revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 1){
-      const active = String(revInfo.activeRevisionId || headRevId || '');
-      const items = revInfo.items || [];
-      const activeItem = items.find(it => String(it.revisionId || '') === active) || items.find(it => it.isActive) || items[0] || null;
-      const hasParent = !!(activeItem && activeItem.parentRevisionId);
-
-      const opts = items.map(it => {
-        const ridRaw = String(it.revisionId || '');
-        const rid = escapeHtml(ridRaw);
-        let label = it.label;
-        if (!label){
-          const shortRid = _shortRev(ridRaw);
-          const shortPar = _shortRev(it.parentRevisionId || '');
-          label = it.parentRevisionId ? (`Rev ${shortRid}${shortPar ? ` ← ${shortPar}` : ''}`) : (`Original ${shortRid}`);
-        }
-        label = escapeHtml(label);
-        const sel = (ridRaw === active) ? ' selected' : '';
-        return `<option value="${rid}"${sel}>${label}</option>`;
-      }).join('');
-
-      const selectDisabled = (items.length <= 1) ? ' disabled' : '';
-      const rollbackDisabled = hasParent ? '' : ' disabled';
-      const useDisabled = (items.length <= 1) ? ' disabled' : '';
-      const abDisabled = hasParent ? '' : ' disabled';
-
-      revHtml = (
-        `<div class="clip-revisions" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">` +
-          `<span style="font-size:12px; opacity:0.7;">Version</span>` +
-          `<select data-act="revSelect" data-id="${id}" style="padding:4px 6px; max-width:260px;"${selectDisabled}>${opts}</select>` +
-          `<button class="btn" data-act="revActivate" data-id="${id}" style="padding:4px 8px;"${useDisabled}>Use</button>` +
-          `<button class="btn" data-act="rollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>Rollback</button>` +
-          `<button class="btn" data-act="abToggle" data-id="${id}" style="padding:4px 8px;"${abDisabled}>A/B</button>` +
-        `</div>`
-      );
-    }
+    // PR-D2a: History (versions/Use/Rollback/A-B) moved to Inspector; not rendered per-card.
 // Optimize feedback: short line for primary, full block for advanced
     let lastOptimizeShort = '';
     let optStatusFullHtml = '';
@@ -235,7 +200,6 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
         `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Details</summary>` +
         `<div class="clip-advanced-content" style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">` +
           revLine +
-          revHtml +
           optStatusFullHtml +
           `<div style="margin-top:8px;">` +
             `<button class="btn" data-act="remove" data-id="${id}" style="padding:4px 8px;">Remove</button>` +
@@ -265,8 +229,55 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     );
   }
 
+  /** PR-D2a: History controls HTML for Inspector (versions + Use/Rollback/A-B). */
+  function historyControlsHTML(clipId, revInfo, escapeHtml){
+    escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
+    const id = escapeHtml(clipId || '');
+    const clip = {};
+    const headRevId = '';
+    const headParentId = '';
+    let revHtml = '';
+    if (revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 1){
+      const active = String(revInfo.activeRevisionId || '');
+      const items = revInfo.items || [];
+      const activeItem = items.find(it => String(it.revisionId || '') === active) || items.find(it => it && it.isActive) || items[0] || null;
+      const hasParent = !!(activeItem && activeItem.parentRevisionId);
+
+      const opts = items.map(it => {
+        const ridRaw = String(it.revisionId || '');
+        const rid = escapeHtml(ridRaw);
+        let label = it.label;
+        if (!label){
+          const shortRid = _shortRev(ridRaw);
+          const shortPar = _shortRev(it.parentRevisionId || '');
+          label = it.parentRevisionId ? (`Rev ${shortRid}${shortPar ? ` ← ${shortPar}` : ''}`) : (`Original ${shortRid}`);
+        }
+        label = escapeHtml(label);
+        const sel = (ridRaw === active) ? ' selected' : '';
+        return `<option value="${rid}"${sel}>${label}</option>`;
+      }).join('');
+
+      const selectDisabled = (items.length <= 1) ? ' disabled' : '';
+      const rollbackDisabled = hasParent ? '' : ' disabled';
+      const useDisabled = (items.length <= 1) ? ' disabled' : '';
+      const abDisabled = hasParent ? '' : ' disabled';
+
+      revHtml = (
+        `<div class="clip-revisions" style="margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">` +
+          `<span style="font-size:12px; opacity:0.7;">Version</span>` +
+          `<select data-act="inspRevSelect" data-id="${id}" style="padding:4px 6px; max-width:220px;"${selectDisabled}>${opts}</select>` +
+          `<button class="btn" data-act="inspRevActivate" data-id="${id}" style="padding:4px 8px;"${useDisabled}>Use</button>` +
+          `<button class="btn" data-act="inspRollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>Rollback</button>` +
+          `<button class="btn" data-act="inspAbToggle" data-id="${id}" style="padding:4px 8px;"${abDisabled}>A/B</button>` +
+        `</div>`
+      );
+    }
+    return revHtml;
+  }
+
   return {
     emptyMessage,
     clipCardInnerHTML,
+    historyControlsHTML,
   };
 });

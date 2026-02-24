@@ -138,7 +138,14 @@
 
     function _handleClick(e){
       const btn = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
-      if (!btn) return;
+      if (!btn){
+        const card = e.target && e.target.closest ? e.target.closest('.clip-card, .clipCard') : null;
+        if (card){
+          const clipId = card.getAttribute('data-clip-id');
+          if (clipId && typeof opts.onSelectClip === 'function') opts.onSelectClip(clipId);
+        }
+        return;
+      }
       const act = btn.getAttribute('data-act');
       const clipId = btn.getAttribute('data-id') || btn.getAttribute('data-clip-id');
       if (!act || !clipId) return;
@@ -213,61 +220,7 @@
         return;
       }
 
-      // T3-1/T3-4: rollback current revision to parent (v2-only)
-      if (act === 'rollbackRev'){
-        if (!projectV2 || !(P && typeof P.rollbackClipRevision === 'function')){
-          console.warn('[LibraryController] rollbackClipRevision not available (need v2 project)');
-          return;
-        }
-        const res = P.rollbackClipRevision(projectV2, clipId);
-        if (res && res.ok){
-          if (app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-          _notifyChanged('clipRevision');
-          render();
-        }else{
-          console.warn('[LibraryController] rollbackClipRevision failed', res);
-        }
-        return;
-      }
-
-      // T3-1/T3-4: toggle A/B between current and parent revision
-      if (act === 'abToggle'){
-        if (!projectV2 || !(P && typeof P.toggleClipAB === 'function')){
-          console.warn('[LibraryController] toggleClipAB not available (need v2 project)');
-          return;
-        }
-        const res = P.toggleClipAB(projectV2, clipId);
-        if (res && res.ok){
-          if (app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-          _notifyChanged('clipRevision');
-          render();
-        }else{
-          console.warn('[LibraryController] toggleClipAB failed', res);
-        }
-        return;
-      }
-
-      // T3-1: activate selected revision
-      if (act === 'revActivate'){
-        const escId = (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') ? CSS.escape(clipId) : clipId;
-        const sel = rootEl.querySelector(`select[data-act="revSelect"][data-id="${escId}"]`)
-                  || rootEl.querySelector(`select[data-act="revSelect"][data-id="${clipId}"]`);
-        const revId = sel ? sel.value : null;
-        if (!revId) return;
-        const targetProject = projectV2 || getProject();
-        if (P && typeof P.setClipActiveRevision === 'function'){
-          const res = P.setClipActiveRevision(targetProject, clipId, revId);
-          if (res && res.ok){
-            if (projectV2 && app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-            _notifyChanged('clipRevision');
-            render();
-          }else{
-            console.warn('[LibraryController] setClipActiveRevision failed', res);
-          }
-        }
-        return;
-      }
-
+      // PR-D2a: rollbackRev, abToggle, revActivate moved to Inspector
     }
 
     function _handleChange(e){
@@ -286,31 +239,7 @@
         return;
       }
 
-      // On revision select change, immediately activate the chosen revision (v2-only when available).
-      if (act === 'revSelect'){
-        const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
-        const revId = el.value;
-        if (!clipId || !revId) return;
-
-        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
-        const projectV2 = getProjectV2();
-        const targetProject = projectV2 || getProject();
-
-        if (!(P && typeof P.setClipActiveRevision === 'function')){
-          console.warn('[LibraryController] setClipActiveRevision not available');
-          return;
-        }
-
-        const res = P.setClipActiveRevision(targetProject, clipId, revId);
-        if (res && res.ok){
-          if (projectV2 && app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-          _notifyChanged('clipRevision');
-          render();
-        }else{
-          console.warn('[LibraryController] setClipActiveRevision failed', res);
-        }
-        return;
-      }
+      // PR-D2a: revSelect moved to Inspector (inspRevSelect)
     }
 
     if (rootEl){

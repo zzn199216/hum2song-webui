@@ -559,6 +559,7 @@ rollbackClipRevision(clipId){
 
     state: {
       selectedInstanceId: null,
+      selectedClipId: null,
       activeTrackIndex: 0,
       activeTrackId: null,
       draggingInstance: null,
@@ -777,6 +778,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onEdit: (clipId) => this.openClipEditor(clipId),
             onRemove: (clipId) => this.deleteClip(clipId),
             onOptimize: (clipId) => this.optimizeClip(clipId),
+            onSelectClip: (clipId) => { this.state.selectedClipId = clipId; this.render(); },
           });
         }
       }catch(e){
@@ -1159,6 +1161,7 @@ ensureTrackButtons(){
       this.renderClipList();
       this.renderTimeline();
       this.renderSelection();
+      this.renderSelectedClip();
       try{ this.updateRecordButtonStates(); }catch(e){}
     },
 
@@ -1220,6 +1223,92 @@ renderTimeline(){
   const tracks = $('#tracks');
   tracks.innerHTML = '<div class="muted" style="padding:12px;">Timeline controller not loaded.</div>';
 },
+
+    renderSelectedClip(){
+      const box = $('#selectedClipBox');
+      if (!box) return;
+      const clipId = this.state.selectedClipId;
+      if (!clipId){
+        box.className = 'muted';
+        box.textContent = 'Click a clip in the library to view History.';
+        return;
+      }
+      const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+      const p2 = this.getProjectV2();
+      let clip = p2 && p2.clips ? p2.clips[clipId] : null;
+      if (!clip) clip = (this.project.clips || []).find(c => c && c.id === clipId);
+      if (!clip){
+        this.state.selectedClipId = null;
+        box.className = 'muted';
+        box.textContent = 'Click a clip in the library to view History.';
+        return;
+      }
+      const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
+      const view = (typeof window !== 'undefined' && window.H2SLibraryView && window.H2SLibraryView.historyControlsHTML) ? window.H2SLibraryView : null;
+      let historyHtml = '';
+      if (view) historyHtml = view.historyControlsHTML(clipId, revInfo, escapeHtml);
+      box.className = '';
+      box.innerHTML = (
+        `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
+        (historyHtml ? (
+          `<details class="clipAdvanced" style="margin-top:6px;">` +
+            `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
+            `<div style="margin-top:6px;">${historyHtml}</div>` +
+          `</details>`
+        ) : '<div class="muted" style="font-size:12px; margin-top:4px;">No revision history.</div>')
+      );
+      box.__h2sApp = this;
+      if (!box.__h2sSelectedClipBound){
+        const self = this;
+        box.__h2sSelectedClipBound = true;
+        box.__h2sClickHandler = function(ev){
+          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+          if (!btn) return;
+          const act = btn.getAttribute('data-act');
+          const cid = btn.getAttribute('data-id');
+          if (!cid) return;
+          const p2 = self.getProjectV2();
+          if (!P) return;
+          if (act === 'inspRollbackRev' && P.rollbackClipRevision){
+            const res = P.rollbackClipRevision(p2, cid);
+            if (res && res.ok && self.setProjectFromV2) self.setProjectFromV2(p2);
+            self.render();
+            return;
+          }
+          if (act === 'inspAbToggle' && P.toggleClipAB){
+            const res = P.toggleClipAB(p2, cid);
+            if (res && res.ok && self.setProjectFromV2) self.setProjectFromV2(p2);
+            self.render();
+            return;
+          }
+          if (act === 'inspRevActivate'){
+            const sels = box.querySelectorAll('select[data-act="inspRevSelect"]');
+            const sel = Array.from(sels || []).find(s => (s.getAttribute('data-id') || '') === cid) || null;
+            const revId = sel ? sel.value : null;
+            if (!revId || !P.setClipActiveRevision) return;
+            const target = p2 || self.project;
+            const res = P.setClipActiveRevision(target, cid, revId);
+            if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+            self.render();
+          }
+        };
+        box.__h2sChangeHandler = function(ev){
+          const el = ev.target;
+          if (!el || el.getAttribute('data-act') !== 'inspRevSelect') return;
+          const cid = el.getAttribute('data-id');
+          if (!cid || !P || !P.setClipActiveRevision) return;
+          const revId = el.value;
+          const self = box.__h2sApp;
+          const p2 = self.getProjectV2();
+          const target = p2 || self.project;
+          const res = P.setClipActiveRevision(target, cid, revId);
+          if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+          self.render();
+        };
+        box.addEventListener('click', box.__h2sClickHandler, true);
+        box.addEventListener('change', box.__h2sChangeHandler);
+      }
+    },
 
     renderSelection(){
       if (this.selectionCtrl && this.selectionCtrl.render){
@@ -1310,6 +1399,7 @@ renderTimeline(){
         const ok = (this.project.instances || []).some(x => x.id === this.state.selectedInstanceId);
         if (!ok) this.state.selectedInstanceId = null;
       }
+      if (this.state.selectedClipId === clipId) this.state.selectedClipId = null;
 
       persist();
       log('Removed clip.');
