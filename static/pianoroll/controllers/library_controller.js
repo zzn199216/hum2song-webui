@@ -139,7 +139,9 @@
     function _handleClick(e){
       const btn = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
       if (!btn){
-        const card = e.target && e.target.closest ? e.target.closest('.clip-card, .clipCard') : null;
+        const t = e.target;
+        if (t && t.closest && t.closest('details, summary, button, select, input, textarea, a')) return;
+        const card = t && t.closest ? t.closest('.clip-card, .clipCard') : null;
         if (card){
           const clipId = card.getAttribute('data-clip-id');
           if (clipId && typeof opts.onSelectClip === 'function') opts.onSelectClip(clipId);
@@ -250,14 +252,22 @@
         if (prev){
           // removeEventListener must match the same capture flag used in addEventListener.
           rootEl.removeEventListener('click', prev.click, true);
+          rootEl.removeEventListener('click', prev.summaryClick);
           rootEl.removeEventListener('change', prev.change);
         }
       }catch(_){ /* ignore */ }
+      function _handleSummaryClick(e){
+        const t = e.target;
+        if (t && t.closest && t.closest('.clipAdvanced summary, summary')){
+          e.stopPropagation();
+        }
+      }
       try{
-        rootEl.__h2sLibraryHandlers = { click: _handleClick, change: _handleChange };
+        rootEl.__h2sLibraryHandlers = { click: _handleClick, summaryClick: _handleSummaryClick, change: _handleChange };
       }catch(_){ /* ignore */ }
       // Use capture so Optimize can be handled even if a fallback listener is attached later.
       rootEl.addEventListener('click', _handleClick, true);
+      rootEl.addEventListener('click', _handleSummaryClick, false);
       rootEl.addEventListener('change', _handleChange);
     }
 
