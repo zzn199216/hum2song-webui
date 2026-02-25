@@ -66,6 +66,34 @@
   /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
   const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
 
+  /** PR-E3: Build structured Directives block from template + intent for llm_v0 prompt. */
+  function buildDirectivesBlock(template, intent){
+    const fixPitch = intent && !!intent.fixPitch;
+    const tightenRhythm = intent && !!intent.tightenRhythm;
+    const reduceOutliers = intent && !!intent.reduceOutliers;
+    const goalParts = [];
+    if (fixPitch) goalParts.push('pitch correction');
+    if (tightenRhythm) goalParts.push('rhythm alignment');
+    if (reduceOutliers) goalParts.push('cleanup outliers');
+    if (goalParts.length === 0 && template) goalParts.push((template.label || 'improve').toLowerCase());
+    const goalsLine = goalParts.length > 0 ? goalParts.join(', ') : 'dynamics only';
+    let lines = [
+      'DIRECTIVES:',
+      '- Goals: ' + goalsLine,
+      '- Priority: pitch_correction > rhythm_alignment > cleanup_outliers > dynamics',
+      '- Constraints:',
+      '  * keep melody contour; prefer small edits; do not rewrite into a new melody',
+      '  * avoid large pitch jumps; keep note count similar unless cleanup requires deletes',
+      '  * do not output velocity-only when pitch/rhythm goals are enabled',
+      '- Required ops:',
+    ];
+    if (fixPitch) lines.push('  * include at least one setNote with pitch change');
+    if (tightenRhythm) lines.push('  * include at least one moveNote or setNote with startBeat/durationBeat change');
+    if (reduceOutliers) lines.push('  * allow deleteNote for glitches');
+    if (!fixPitch && !tightenRhythm && !reduceOutliers) lines.push('  * (dynamics-only allowed)');
+    return lines.join('\n');
+  }
+
   /** PR-6a: resolve executed prompt and source for patchSummary trace. */
   function resolveOptimizeUserPrompt(opts){
     const raw = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? String(opts.userPrompt).trim() : '';
@@ -301,6 +329,12 @@
   function create(opts){
     /** PR-7b-2: Run optimize with llm_v0 preset (async). Returns Promise<result>. */
     function _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId){
+      const templateId = (optsIn.templateId != null && String(optsIn.templateId).trim()) ? String(optsIn.templateId).trim() : null;
+      const template = templateId && LLM_TEMPLATES_V1[templateId] ? LLM_TEMPLATES_V1[templateId] : null;
+      const userPromptEmpty = !(optsIn.userPrompt != null && String(optsIn.userPrompt).trim());
+      const effectivePromptInfo = (template && userPromptEmpty)
+        ? { prompt: template.seed || '', source: 'template', preview: (template.seed && template.seed.length > 40) ? template.seed.slice(0, 37) + '...' : (template.seed || '') }
+        : promptInfo;
       const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
       const patchSummaryBase = {
         requestedSource: requestedPresetId,
@@ -310,8 +344,8 @@
         source: 'llm_v0',
         preset: 'llm_v0',
         requestedUserPrompt: requestedUserPrompt,
-        executedUserPromptSource: promptInfo.source,
-        executedUserPromptPreview: promptInfo.preview,
+        executedUserPromptSource: effectivePromptInfo.source,
+        executedUserPromptPreview: effectivePromptInfo.preview,
       };
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
       const intentForSummary = (optsIn.intent && typeof optsIn.intent === 'object') ? optsIn.intent : null;
@@ -482,19 +516,18 @@
       }
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
-      // PR-B2-min: Goals section from structured intent (UI passes intent object, agent builds prompt)
+      // PR-B2-min / PR-E3: Goals and Directives from intent + template
       const intent = (optsIn.intent && typeof optsIn.intent === 'object')
         ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
         : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
-      const goalParts = [];
-      if (intent.fixPitch) goalParts.push('fix pitch (correct wrong notes)');
-      if (intent.tightenRhythm) goalParts.push('tighten rhythm (align timing)');
-      if (intent.reduceOutliers) goalParts.push('reduce outliers (smooth extreme values)');
-      const goalsPrefix = goalParts.length > 0
-        ? 'Goals: ' + goalParts.join('; ') + '.\n\n'
+      const hasGoals = intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers || !!template;
+      const directivesBlock = hasGoals ? buildDirectivesBlock(template, intent) : '';
+      const goalsPrefix = !directivesBlock && (intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers)
+        ? ('Goals: ' + [intent.fixPitch ? 'fix pitch (correct wrong notes)' : null, intent.tightenRhythm ? 'tighten rhythm (align timing)' : null, intent.reduceOutliers ? 'reduce outliers (smooth extreme values)' : null].filter(Boolean).join('; ') + '.\n\n')
         : '';
+      const promptBody = (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
 
-      let baseUserContent = goalsPrefix + promptInfo.prompt + clipHint;
+      let baseUserContent = promptBody + clipHint;
       if (!safeMode){
         baseUserContent = 'User prompt may require pitch/timing changes; do not respond with velocity-only unless explicitly requested.\n\n' + baseUserContent;
       }
@@ -680,7 +713,10 @@
           if (res1.reason === 'llm_no_valid_json'){
             fixDetail = 'no valid JSON object found';
           } else if (res1.reason === 'patch_rejected' && res1.detail === 'quality_velocity_only'){
-            fixDetail = 'velocity-only patch rejected; intent requires pitch or timing changes; output patch with pitch (setNote pitch) and/or timing (setNote startBeat/durationBeat, moveNote) ops';
+            const hintParts = ['velocity-only patch rejected'];
+            if (intent.fixPitch) hintParts.push('output setNote with pitch change');
+            if (intent.tightenRhythm) hintParts.push('output moveNote or setNote startBeat/durationBeat');
+            fixDetail = hintParts.length > 1 ? hintParts.join('; ') + ' — do not output velocity-only' : 'intent requires pitch or timing changes; output setNote with pitch and/or moveNote/setNote startBeat/durationBeat';
           } else if (res1.reason === 'patch_rejected'){
             fixDetail = (res1.detail && typeof res1.detail === 'string') ? res1.detail : 'patch validation failed';
             if (fixDetail.length > 200) fixDetail = fixDetail.slice(0, 197) + '...';
