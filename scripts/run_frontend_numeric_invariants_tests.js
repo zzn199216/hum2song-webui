@@ -239,6 +239,45 @@ function testFlattenExpansion(){
   }
 }
 
+function testFlattenRespectsMute(){
+  console.log('[numeric] Test C2: flatten skips muted tracks (PR-F1.1)');
+  const P = loadH2SProject();
+
+  // Two tracks, two clips, one instance per track. Mute track 2.
+  const score1 = { version: 2, tempo_bpm: 120, time_signature: '4/4', tracks: [{ id: 's0', name: 'ch0', notes: [{ id: 'n1', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 0.5 }] }] };
+  const score2 = { version: 2, tempo_bpm: 120, time_signature: '4/4', tracks: [{ id: 's0', name: 'ch0', notes: [{ id: 'n2', pitch: 64, velocity: 90, startBeat: 0, durationBeat: 0.25 }] }] };
+  const clip1 = P.createClipFromScoreBeat(score1, { id: 'c1', name: 'C1' });
+  const clip2 = P.createClipFromScoreBeat(score2, { id: 'c2', name: 'C2' });
+
+  const p2 = {
+    version: 2,
+    timebase: 'beat',
+    bpm: 120,
+    tracks: [
+      { id: 'tr1', name: 'Track 1', instrument: 'default', gainDb: 0, muted: false },
+      { id: 'tr2', name: 'Track 2', instrument: 'default', gainDb: 0, muted: true },
+    ],
+    clips: { [clip1.id]: clip1, [clip2.id]: clip2 },
+    clipOrder: [clip1.id, clip2.id],
+    instances: [
+      { id: 'i1', clipId: clip1.id, trackId: 'tr1', startBeat: 0, transpose: 0 },
+      { id: 'i2', clipId: clip2.id, trackId: 'tr2', startBeat: 0, transpose: 0 },
+    ],
+    ui: { pxPerBeat: 120, playheadBeat: 0 },
+  };
+  if (P.normalizeProjectRevisionChains) P.normalizeProjectRevisionChains(p2);
+
+  const flat = P.flatten(p2);
+
+  // Muted track tr2 must not appear in output.
+  const trackIds = (flat.tracks || []).map(t => t.trackId || t.id);
+  assertOk(!trackIds.includes('tr2'), 'muted track tr2 must not be in flatten output');
+  assertOk(trackIds.includes('tr1'), 'unmuted track tr1 must be in flatten output');
+  // tr1 should have 1 note (from clip1)
+  const tr1Data = (flat.tracks || []).find(t => (t.trackId || t.id) === 'tr1');
+  assertOk(tr1Data && tr1Data.notes && tr1Data.notes.length === 1, 'tr1 must have 1 note');
+}
+
 function mkClipWithNotes(P, count){
   // Build a single-track beat score.
   const notes = [];
@@ -345,6 +384,7 @@ function main(){
   testProjectMigration();
   testLegacyV2SchemaGuard();
   testFlattenExpansion();
+  testFlattenRespectsMute();
   testAgentPatchRoundtrip();
   testSemanticSanityGate();
 
