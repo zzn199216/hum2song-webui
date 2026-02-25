@@ -87,7 +87,7 @@
       // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
       const TEMPLATES_V1_UI = {
         fix_pitch_v1: { label: 'Fix Pitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
-        tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align timing; tighten rhythm.' },
+        tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
         clean_outliers_v1: { label: 'Clean Outliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
         bluesy_v1: { label: 'Bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
       };

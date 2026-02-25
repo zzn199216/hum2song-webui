@@ -27,9 +27,9 @@
     tighten_rhythm_v1: {
       id: 'tighten_rhythm_v1',
       label: 'Tighten Rhythm',
-      promptVersion: 'tmpl_v1.tighten_rhythm',
+      promptVersion: 'tmpl_v1.tighten_rhythm.r1',
       intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
-      seed: 'Align timing; tighten rhythm.',
+      seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.',
       directives: {},
     },
     clean_outliers_v1: {
@@ -87,6 +87,14 @@
       lines.push('  * focus on clearly wrong notes; do not change most notes (edit budget: minimal)');
       lines.push('  * prefer ±1–2 semitone corrections; avoid large pitch jumps');
       lines.push('  * preserve contour and phrase rhythm; keep note count similar unless reduceOutliers requires deletes');
+      lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
+    } else if (tightenRhythm && template && template.id === 'tighten_rhythm_v1'){
+      lines.push('  * keep pitches the same; do not change pitch unless absolutely necessary; ideally no pitch changes');
+      lines.push('  * prefer small moves; avoid large startBeat shifts; nudge toward nearby grid');
+      lines.push('  * avoid creating very tiny or extremely long durations unintentionally');
+      lines.push('  * preserve phrase rhythm/feel; do not introduce jitter');
+      if (reduceOutliers) lines.push('  * allow deleteNote for obvious micro-glitches only');
+      else lines.push('  * avoid deleteNote and addNote; use moveNote and setNote startBeat/durationBeat only');
       lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
     } else {
       lines.push('  * keep melody contour; prefer small edits; do not rewrite into a new melody');
