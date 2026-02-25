@@ -19,9 +19,9 @@
     fix_pitch_v1: {
       id: 'fix_pitch_v1',
       label: 'Fix Pitch',
-      promptVersion: 'tmpl_v1.fix_pitch',
+      promptVersion: 'tmpl_v1.fix_pitch.r1',
       intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
-      seed: 'Correct wrong notes; fix pitch errors.',
+      seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.',
       directives: {},
     },
     tighten_rhythm_v1: {
@@ -82,11 +82,18 @@
       '- Goals: ' + goalsLine,
       '- Priority: pitch_correction > rhythm_alignment > cleanup_outliers > dynamics',
       '- Constraints:',
-      '  * keep melody contour; prefer small edits; do not rewrite into a new melody',
-      '  * avoid large pitch jumps; keep note count similar unless cleanup requires deletes',
-      '  * do not output velocity-only when pitch/rhythm goals are enabled',
-      '- Required ops:',
     ];
+    if (fixPitch && template && template.id === 'fix_pitch_v1'){
+      lines.push('  * focus on clearly wrong notes; do not change most notes (edit budget: minimal)');
+      lines.push('  * prefer ±1–2 semitone corrections; avoid large pitch jumps');
+      lines.push('  * preserve contour and phrase rhythm; keep note count similar unless reduceOutliers requires deletes');
+      lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
+    } else {
+      lines.push('  * keep melody contour; prefer small edits; do not rewrite into a new melody');
+      lines.push('  * avoid large pitch jumps; keep note count similar unless cleanup requires deletes');
+      lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
+    }
+    lines.push('- Required ops:');
     if (fixPitch) lines.push('  * include at least one setNote with pitch change');
     if (tightenRhythm) lines.push('  * include at least one moveNote or setNote with startBeat/durationBeat change');
     if (reduceOutliers) lines.push('  * allow deleteNote for glitches');
