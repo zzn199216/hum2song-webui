@@ -19,11 +19,12 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
    .\venv\Scripts\activate
    pip install -r requirements.txt
    ```
-2. Start the server:
+2. Start the server (from project root; required for correct app import):
    ```powershell
    uvicorn app:app
    ```
    (Optional: add `--reload` for local development.)
+   - **Export MIDI 404?** Run `python scripts/check_export_routes.py` to verify routes; restart uvicorn to pick up changes.
 3. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 4. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
 
