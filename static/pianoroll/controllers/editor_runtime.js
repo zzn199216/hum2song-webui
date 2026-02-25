@@ -1292,7 +1292,13 @@
         };
         const g = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
         const rt = (g && g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
-        const templateId = (rt && rt._selectedTemplateId != null && String(rt._selectedTemplateId).trim()) ? String(rt._selectedTemplateId).trim() : null;
+        const app = (g && g.H2SApp) ? g.H2SApp : null;
+        const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+        let templateId = (rt && rt._selectedTemplateId != null && String(rt._selectedTemplateId).trim()) ? String(rt._selectedTemplateId).trim() : null;
+        if (!templateId && clipId && app && typeof app.getOptimizeOptions === 'function') {
+          const stored = app.getOptimizeOptions(clipId);
+          templateId = (stored && stored.templateId != null && String(stored.templateId).trim()) ? String(stored.templateId).trim() : null;
+        }
         return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null };
       };
       const setEditorOptStatus = (text) => {
@@ -1547,7 +1553,11 @@
               const quickSel = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
               const mainSel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
               const val = (quickSel && quickSel.value != null) ? String(quickSel.value) : '';
-              if (mainSel){ mainSel.value = val; mainSel.dispatchEvent(new Event('change', { bubbles: true })); }
+              if (mainSel){ mainSel.value = val; }
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              const app = g.H2SApp;
+              const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+              if (clipId && app && app.setOptimizeOptions) app.setOptimizeOptions(readOptimizeOptionsFromUI(), clipId);
               const btnOpt = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimize') : null;
               if (btnOpt) btnOpt.click();
             }catch(e){}
@@ -1576,6 +1586,7 @@
             ev.stopPropagation();
             const quickPresetEl = document.getElementById('editorQuickOptimizePreset');
             const mainPresetEl = document.getElementById('editorOptimizePreset');
+            if (rt) rt._selectedTemplateId = templateId;
             if (quickPresetEl) quickPresetEl.value = 'llm_v0';
             if (mainPresetEl) mainPresetEl.value = 'llm_v0';
             const fixPitchEl = document.getElementById('qoptFixPitch');
@@ -1586,8 +1597,8 @@
             if (reduceOutliersEl) reduceOutliersEl.checked = !!tmpl.intent.reduceOutliers;
             const promptEl = document.getElementById('editorOptimizePrompt');
             if (promptEl) promptEl.value = tmpl.seed || '';
-            if (rt) rt._selectedTemplateId = templateId;
             const opts = readOptimizeOptionsFromUI();
+            opts.templateId = templateId;
             app.setOptimizeOptions(opts, clipId);
             const labelEl = document.getElementById('editorQuickOptimizeTemplateLabel');
             if (labelEl) labelEl.textContent = 'Template: ' + tmpl.label;

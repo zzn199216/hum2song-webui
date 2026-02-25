@@ -38,3 +38,41 @@ This metadata is recorded for:
 - patch_rejected (quality gate) failures
 
 Used for reproducibility and traceability; does not affect prompt construction in PR-E1.
+
+---
+
+## Template Tuning Guide (PR-E6a)
+
+Guide for prompt/template iteration: reproducible, engineering-driven.
+
+### 1. Success criteria (by patchSummary flags)
+
+| Template | Success criteria |
+|----------|------------------|
+| **Fix Pitch** | `hasPitchChange` true; preserve melody contour; avoid full rewrite; avoid large pitch jumps |
+| **Tighten Rhythm** | `hasTimingChange` true; avoid chaotic moves; keep groove consistent |
+| **Clean Outliers** | `hasStructuralChange` allowed; avoid over-deleting; keep main melodic line |
+| **Bluesy** | `hasPitchChange` true (micro-tones/bends); tasteful; preserve contour |
+
+### 2. Common failures and how to tune
+
+| Failure mode | Tuning lever |
+|--------------|--------------|
+| **Gate fail (velocity-only)** | Strengthen required-ops wording in DIRECTIVES; explicit "include setNote with pitch" or "include moveNote" |
+| **Over-edit / rewrite** | Add "small edits", edit budget, contour constraint; "prefer minimal ops" |
+| **Too many deletes** | Cap delete ratio; prefer soften/velocity before delete; "avoid deleteNote unless glitch" |
+| **Rhythm becomes messy** | Constrain move magnitude; duration stability; "avoid large deltaBeat" |
+
+### 3. Versioning rules
+
+- **Bump `promptVersion`** on any behavioral change: `tmpl_v1.fix_pitch.r1`, `tmpl_v1.fix_pitch.r2`, etc.
+- **Keep `templateId` stable**; only `promptVersion` changes.
+- Enables A/B comparison and rollback without UI changes.
+
+### 4. Suggested standard test clips
+
+| Clip type | Purpose |
+|-----------|---------|
+| (1) Mostly in-tune | Low-change baseline; should yield ops≈0 or minimal |
+| (2) Pitchy / out-of-key | Fix Pitch target; expect hasPitchChange true |
+| (3) Rhythm jitter / noisy outliers | Tighten Rhythm + Clean Outliers; expect hasTimingChange and limited structuralChange |
