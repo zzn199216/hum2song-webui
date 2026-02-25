@@ -487,10 +487,15 @@ setOptimizeOptions(arg0, arg1){
     : (existingOpts && existingOpts.intent && typeof existingOpts.intent === 'object')
       ? { fixPitch: !!existingOpts.intent.fixPitch, tightenRhythm: !!existingOpts.intent.tightenRhythm, reduceOutliers: !!existingOpts.intent.reduceOutliers }
       : defaultIntent;
+  const rawTemplateId = opts && opts.templateId;
+  const templateId = rawTemplateId !== undefined
+    ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
+    : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
   const normalizedOpts = opts ? {
     requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
     userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
-    intent
+    intent,
+    templateId: templateId || null
   } : null;
   this._lastOptimizeOptions = normalizedOpts;
   if (cid) {

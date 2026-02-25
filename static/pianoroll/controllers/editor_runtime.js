@@ -72,6 +72,14 @@
         return 'Changed: ' + parts.join(' ');
       }
 
+      // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
+      const TEMPLATES_V1_UI = {
+        fix_pitch_v1: { label: 'Fix Pitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct wrong notes; fix pitch errors.' },
+        tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align timing; tighten rhythm.' },
+        clean_outliers_v1: { label: 'Clean Outliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
+        bluesy_v1: { label: 'Bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
+      };
+
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
       // may be out of scope, causing a runtime ReferenceError and resulting in a blank
@@ -943,6 +951,12 @@
         if (fixPitchEl) fixPitchEl.checked = !!intent.fixPitch;
         if (tightenRhythmEl) tightenRhythmEl.checked = !!intent.tightenRhythm;
         if (reduceOutliersEl) reduceOutliersEl.checked = !!intent.reduceOutliers;
+        this._selectedTemplateId = (opts && opts.templateId != null && String(opts.templateId).trim()) ? String(opts.templateId).trim() : null;
+        const templateLabelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeTemplateLabel') : null;
+        if (templateLabelEl) {
+          const tmpl = this._selectedTemplateId && TEMPLATES_V1_UI[this._selectedTemplateId] ? TEMPLATES_V1_UI[this._selectedTemplateId] : null;
+          templateLabelEl.textContent = tmpl ? ('Template: ' + tmpl.label) : 'Template: Custom';
+        }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
         const quickPresetEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
@@ -1264,7 +1278,10 @@
           tightenRhythm: !!(tightenRhythm && tightenRhythm.checked),
           reduceOutliers: !!(reduceOutliers && reduceOutliers.checked)
         };
-        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent };
+        const g = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
+        const rt = (g && g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+        const templateId = (rt && rt._selectedTemplateId != null && String(rt._selectedTemplateId).trim()) ? String(rt._selectedTemplateId).trim() : null;
+        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null };
       };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;
@@ -1525,6 +1542,48 @@
         }
         btnQuickOptimize.removeEventListener('click', H.onQuickOptimizeClick, true);
         btnQuickOptimize.addEventListener('click', H.onQuickOptimizeClick, true);
+      }
+
+      // PR-E2: Template buttons — set templateId, intent, prompt, preset llm_v0; persist; no auto-run
+      const templatesContainer = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeTemplates') : null;
+      if (templatesContainer && !H.onTemplateButtonClick){
+        H.onTemplateButtonClick = (ev) => {
+          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-template-id]') : null;
+          if (!btn) return;
+          const templateId = btn.getAttribute('data-template-id');
+          if (!templateId || !TEMPLATES_V1_UI[templateId]) return;
+          const tmpl = TEMPLATES_V1_UI[templateId];
+          const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+          const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+          if (!clipId) return;
+          const app = g.H2SApp;
+          if (!app || typeof app.setOptimizeOptions !== 'function') return;
+          try {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const quickPresetEl = document.getElementById('editorQuickOptimizePreset');
+            const mainPresetEl = document.getElementById('editorOptimizePreset');
+            if (quickPresetEl) quickPresetEl.value = 'llm_v0';
+            if (mainPresetEl) mainPresetEl.value = 'llm_v0';
+            const fixPitchEl = document.getElementById('qoptFixPitch');
+            const tightenRhythmEl = document.getElementById('qoptTightenRhythm');
+            const reduceOutliersEl = document.getElementById('qoptReduceOutliers');
+            if (fixPitchEl) fixPitchEl.checked = !!tmpl.intent.fixPitch;
+            if (tightenRhythmEl) tightenRhythmEl.checked = !!tmpl.intent.tightenRhythm;
+            if (reduceOutliersEl) reduceOutliersEl.checked = !!tmpl.intent.reduceOutliers;
+            const promptEl = document.getElementById('editorOptimizePrompt');
+            if (promptEl) promptEl.value = tmpl.seed || '';
+            if (rt) rt._selectedTemplateId = templateId;
+            const opts = readOptimizeOptionsFromUI();
+            app.setOptimizeOptions(opts, clipId);
+            const labelEl = document.getElementById('editorQuickOptimizeTemplateLabel');
+            if (labelEl) labelEl.textContent = 'Template: ' + tmpl.label;
+          } catch (e) {}
+        };
+      }
+      if (templatesContainer && H.onTemplateButtonClick){
+        templatesContainer.removeEventListener('click', H.onTemplateButtonClick, true);
+        templatesContainer.addEventListener('click', H.onTemplateButtonClick, true);
       }
 
       // PR-B2-min: Intent checkboxes — persist on change (bound once)

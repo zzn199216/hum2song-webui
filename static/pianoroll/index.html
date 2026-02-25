@@ -704,6 +704,15 @@
                 </select>
                 <button id="btnEditorQuickOptimize" class="btn primary" type="button">Run Optimize</button>
               </div>
+              <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
+                <span id="editorQuickOptimizeTemplateLabel" class="muted">Template: Custom</span>
+                <div id="editorQuickOptimizeTemplates" style="display:flex; gap:4px; flex-wrap:wrap;">
+                  <button type="button" class="btn mini" data-template-id="fix_pitch_v1">Fix Pitch</button>
+                  <button type="button" class="btn mini" data-template-id="tighten_rhythm_v1">Tighten Rhythm</button>
+                  <button type="button" class="btn mini" data-template-id="clean_outliers_v1">Clean Outliers</button>
+                  <button type="button" class="btn mini" data-template-id="bluesy_v1">Bluesy</button>
+                </div>
+              </div>
               <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
                 <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /> Fix Pitch</label>
                 <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /> Tighten Rhythm</label>
