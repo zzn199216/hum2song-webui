@@ -1274,6 +1274,11 @@ renderTimeline(){
           if (ps.hasStructuralChange === true) parts.push('structure ✓');
         }
         if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
+        if (ps.promptMeta && typeof ps.promptMeta === 'object') {
+          const id = (ps.promptMeta.templateId != null && String(ps.promptMeta.templateId).trim()) ? String(ps.promptMeta.templateId) : 'Custom';
+          const ver = (ps.promptMeta.promptVersion != null && String(ps.promptMeta.promptVersion).trim()) ? String(ps.promptMeta.promptVersion) : 'manual_v0';
+          parts.push(`Template: ${escapeHtml(id)} (${escapeHtml(ver)})`);
+        }
         resultsHtml = parts.length > 0 ? parts.join(' · ') : 'No key fields.';
       } else {
         resultsHtml = 'No patch summary yet.';

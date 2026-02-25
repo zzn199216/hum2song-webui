@@ -60,16 +60,28 @@
       }
 
       // PR-B3a: Format patch type summary for Quick Optimize display.
+      // PR-E5b: Append templateId + promptVersion from promptMeta when present.
+      function _formatPromptMetaSuffix(ps){
+        if (!ps || !ps.promptMeta || typeof ps.promptMeta !== 'object') return '';
+        const pm = ps.promptMeta;
+        const id = (pm.templateId != null && String(pm.templateId).trim()) ? String(pm.templateId) : 'Custom';
+        const ver = (pm.promptVersion != null && String(pm.promptVersion).trim()) ? String(pm.promptVersion) : 'manual_v0';
+        return 'Template: ' + id + ' (' + ver + ')';
+      }
       function _formatPatchTypeSummary(ps){
         if (!ps || typeof ps !== 'object') return '';
-        if ((ps.ops != null && ps.ops === 0) || ps.noChanges) return '(no changes)';
-        if (ps.isVelocityOnly === true) return 'Changed: velocity only';
-        const parts = [];
-        if (ps.hasPitchChange === true) parts.push('pitch ✓');
-        if (ps.hasTimingChange === true) parts.push('timing ✓');
-        if (ps.hasStructuralChange === true) parts.push('structure ✓');
-        if (parts.length === 0) return 'Changed: velocity only';
-        return 'Changed: ' + parts.join(' ');
+        let base = '';
+        if ((ps.ops != null && ps.ops === 0) || ps.noChanges) base = '(no changes)';
+        else if (ps.isVelocityOnly === true) base = 'Changed: velocity only';
+        else {
+          const parts = [];
+          if (ps.hasPitchChange === true) parts.push('pitch ✓');
+          if (ps.hasTimingChange === true) parts.push('timing ✓');
+          if (ps.hasStructuralChange === true) parts.push('structure ✓');
+          base = parts.length === 0 ? 'Changed: velocity only' : 'Changed: ' + parts.join(' ');
+        }
+        const suffix = _formatPromptMetaSuffix(ps);
+        return suffix ? base + ' | ' + suffix : base;
       }
 
       // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
@@ -1440,11 +1452,12 @@
                   if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
                   else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
                     const qgMsg = getQualityGateFailureMessage(false);
-                    summaryEl.innerHTML = qgMsg + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
+                    const tmplSuffix = ps && _formatPromptMetaSuffix(ps) ? (' <span style="font-size:10px; opacity:0.85;">| ' + _formatPromptMetaSuffix(ps) + '</span>') : '';
+                    summaryEl.innerHTML = qgMsg + tmplSuffix + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
                     const link = summaryEl.querySelector('.qopt-simplify');
                     if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
                   }
-                  else summaryEl.textContent = '(no result yet)';
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
@@ -1675,11 +1688,12 @@
                   if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
                   else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
                     const qgMsg = getQualityGateFailureMessage(false);
-                    summaryEl.innerHTML = qgMsg + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
+                    const tmplSuffix = ps && _formatPromptMetaSuffix(ps) ? (' <span style="font-size:10px; opacity:0.85;">| ' + _formatPromptMetaSuffix(ps) + '</span>') : '';
+                    summaryEl.innerHTML = qgMsg + tmplSuffix + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
                     const link = summaryEl.querySelector('.qopt-simplify');
                     if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
                   }
-                  else summaryEl.textContent = '(no result yet)';
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
