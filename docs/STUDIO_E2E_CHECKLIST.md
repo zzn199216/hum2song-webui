@@ -95,6 +95,17 @@ Full flow: Record → Generate clip → Auto-open editor → Quick Optimize.
 
 ---
 
+## MVP Demo Path (~2 min)
+
+For a quick reproducible demo, see **[docs/DEMO_SCRIPT_MVP_V1.md](DEMO_SCRIPT_MVP_V1.md)**:
+
+- Record → Use last recording → Editor auto-opens
+- Quick Optimize templates (Fix Pitch, Tighten Rhythm)
+- Export MIDI with mute
+- Optional: History rollback
+
+---
+
 ## 3. Common issues
 
 | Issue | Cause | Workaround |
