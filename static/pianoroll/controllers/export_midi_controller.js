@@ -51,12 +51,21 @@
       alert('Export MIDI: H2SProject.flatten not available (project.js not loaded?)');
       return;
     }
-    var any = loadProjectAny();
-    if (!any){
-      alert('No project found. Save or create a project first.');
-      return;
+    // PR-F1.3: Prefer in-memory project from running app; fallback to localStorage.
+    var APP = window.H2SApp || window.APP || window.app;
+    var p2 = (APP && typeof APP.getProjectV2 === 'function') ? APP.getProjectV2() : null;
+    if (!p2 && APP && typeof APP.getProject === 'function'){
+      var p = APP.getProject();
+      if (p) p2 = ensureProjectV2(p);
     }
-    var p2 = ensureProjectV2(any);
+    if (!p2){
+      var any = loadProjectAny();
+      if (!any){
+        alert('No project found. Save or create a project first.');
+        return;
+      }
+      p2 = ensureProjectV2(any);
+    }
     if (!p2){
       alert('Export MIDI: could not migrate project to v2 (beats).');
       return;
