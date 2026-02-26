@@ -85,6 +85,15 @@
       });
 
       if (!r.ok){
+        setStatus('');
+        if (r.status === 404){
+          alert(
+            'Export MIDI failed (404). Backend route /export/midi not found.\n\n' +
+            'Restart uvicorn and verify http://127.0.0.1:8000/openapi.json includes /export/midi.\n\n' +
+            'Make sure you are running the updated backend from the correct repo root.'
+          );
+          return;
+        }
         var errText = '';
         try {
           var errJson = await r.json();
@@ -92,7 +101,6 @@
         } catch(_e){
           errText = r.statusText || 'Request failed';
         }
-        setStatus('');
         alert('Export MIDI failed: ' + errText);
         return;
       }
