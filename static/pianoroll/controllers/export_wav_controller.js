@@ -32,10 +32,13 @@
     return null;
   }
 
-  function setStatus(text){
+  var exportWavCancelled = false;
+  var exportWavActive = false;
+
+  function setStatus(text, showCancel){
     var app = window.H2SApp;
     if (app && typeof app.setImportStatus === 'function'){
-      app.setImportStatus(text, false);
+      app.setImportStatus(text || '', !!showCancel);
     }
   }
 
@@ -152,9 +155,13 @@
     var totalSec = Math.max(0.5, endSec + TAIL_SEC);
 
     if (btn){ btn.disabled = true; }
-    setStatus('Rendering WAV...');
+    exportWavCancelled = false;
+    exportWavActive = true;
+    setStatus('Preparing audio render...', true);
 
     try {
+      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
+      setStatus('Rendering audio...', true);
       var metaByTrackId = {};
       for (var i = 0; i < (p2.tracks || []).length; i++){
         var t = p2.tracks[i];
@@ -201,6 +208,9 @@
         transport.start(0);
       }, totalSec);
 
+      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
+      setStatus('Encoding WAV...', true);
+
       var buf = (result && result.buffer) ? result.buffer : result;
       var blob = audioBufferToWav(buf);
       if (!blob){
@@ -208,6 +218,10 @@
         alert('Export WAV: failed to encode audio buffer.');
         return;
       }
+      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
+      setStatus('Downloading...', false);
+      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
+
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
@@ -219,10 +233,21 @@
       setStatus('WAV exported.');
       setTimeout(function(){ setStatus(''); }, 2000);
     } catch(e){
-      setStatus('');
-      alert('Export WAV failed: ' + (e && e.message ? e.message : String(e)));
+      if (!exportWavCancelled){
+        setStatus('');
+        alert('Export WAV failed: ' + (e && e.message ? e.message : String(e)));
+      }
     } finally {
+      exportWavActive = false;
+      setStatus('', false);
       if (btn){ btn.disabled = false; }
+    }
+  }
+
+  function onCancelClick(){
+    if (exportWavActive){
+      exportWavCancelled = true;
+      setStatus('Cancelled.', false);
     }
   }
 
@@ -240,12 +265,21 @@
     return true;
   }
 
+  function bindCancelOnce(){
+    var cancelBtn = document.getElementById('btnCancelImport');
+    if (!cancelBtn || cancelBtn.__h2sExportWavCancelBound) return;
+    cancelBtn.addEventListener('click', onCancelClick);
+    cancelBtn.__h2sExportWavCancelBound = true;
+  }
+
   function start(){
     ensureButton();
+    bindCancelOnce();
     var tries = 0;
     var t = setInterval(function(){
       tries++;
       if (ensureButton() || tries >= 80){ clearInterval(t); }
+      if (tries < 20) bindCancelOnce();
     }, 250);
     var parent = document.getElementById('btnExportProject') && document.getElementById('btnExportProject').parentNode;
     if (parent && window.MutationObserver){
