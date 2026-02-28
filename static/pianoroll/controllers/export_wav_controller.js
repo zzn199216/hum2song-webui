@@ -196,13 +196,12 @@
             var vel = (n.velocity == null) ? 0.8 : Number(n.velocity);
             if (vel > 1.01) vel = clamp(Math.round(vel), 1, 127) / 127;
             else vel = clamp(vel, 0.01, 1);
-            var pitch = n.pitch;
-            var when = time;
-            (function(pt, d, v, at){
+            var synthForNote = syn;
+            (function(s, pt, d, v, at){
               transport.schedule(function(t){
-                try{ syn.triggerAttackRelease(Tone.Frequency(pt, 'midi'), d, t, v); }catch(e){}
+                try{ s.triggerAttackRelease(Tone.Frequency(pt, 'midi'), d, t, v); }catch(e){}
               }, at);
-            })(pitch, dur, vel, when);
+            })(synthForNote, n.pitch, dur, vel, time);
           }
         }
         transport.start(0);

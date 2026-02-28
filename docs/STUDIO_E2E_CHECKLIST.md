@@ -102,7 +102,16 @@ For a quick reproducible demo, see **[docs/DEMO_SCRIPT_MVP_V1.md](DEMO_SCRIPT_MV
 - Record → Use last recording → Editor auto-opens
 - Quick Optimize templates (Fix Pitch, Tighten Rhythm)
 - Export MIDI with mute
+- Export WAV (instrument presets, cancel during render)
 - Optional: History rollback
+
+---
+
+## Export WAV
+
+- **Duration:** Rendered length = last note end + tail (~1.5 s); verify file duration is reasonable.
+- **Mute respected:** Mute a track (M) → Export WAV → muted track is silent in the file.
+- **Cancel export:** Start export on a longer project → click Cancel during *Rendering audio...* → no file download, status shows *Cancelled.*
 
 ---
 

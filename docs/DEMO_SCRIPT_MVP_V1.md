@@ -45,7 +45,16 @@ Reproducible demo path for MVP v1. Step-by-step, single page.
 
 ---
 
-## Step 4 (optional): History rollback
+## Step 4: Export WAV
+
+1. Click **Export WAV** (`btnExportWav`) in Inspector → Actions.
+2. WAV preserves Tone.js instrument presets (default, pad, lead, bass, pluck, drum). Assign different instruments per track to hear distinct timbres.
+3. During rendering, status shows: *Preparing audio render...* → *Rendering audio...* → *Encoding WAV...* → *Downloading...*
+4. **Cancel** works during rendering (soft cancel): click Cancel in the status bar to abort; no file is downloaded, status shows *Cancelled.*
+
+---
+
+## Step 5 (optional): History rollback
 
 1. In Inspector → **Clip Details**, select a clip that has revision history.
 2. Use **History** controls: **Rollback**, **Use**, or **A–B** to navigate revision chain.
