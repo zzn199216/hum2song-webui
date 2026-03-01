@@ -140,9 +140,12 @@ function _disposeTrackSynths(){
   _trackSynths = [];
 }
 
-function _makeSynthByInstrument(name){
-  // Keep it simple: "clearly different" timbres, not high quality.
-  switch(String(name||'default')){
+function _makeSynthByInstrument(instr){
+  const desc = (G.H2SProject && typeof G.H2SProject.normalizeInstrument === 'function')
+    ? G.H2SProject.normalizeInstrument(instr)
+    : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+  const presetId = (desc.kind === 'tone_synth' && desc.presetId) ? desc.presetId : 'default';
+  switch (String(presetId)){
     case 'bass': return new G.Tone.MonoSynth();
     case 'lead': return new G.Tone.Synth();
     case 'pad': return new G.Tone.FMSynth();

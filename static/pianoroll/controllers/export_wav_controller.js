@@ -48,8 +48,12 @@
     return Math.max(lo, Math.min(hi, v));
   }
 
-  function makeSynthByInstrument(Tone, name){
-    switch (String(name || 'default')){
+  function makeSynthByInstrument(Tone, instr){
+    var desc = (window.H2SProject && typeof window.H2SProject.normalizeInstrument === 'function')
+      ? window.H2SProject.normalizeInstrument(instr)
+      : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+    var presetId = (desc.kind === 'tone_synth' && desc.presetId) ? desc.presetId : 'default';
+    switch (String(presetId)){
       case 'bass': return new Tone.MonoSynth();
       case 'lead': return new Tone.Synth();
       case 'pad': return new Tone.FMSynth();

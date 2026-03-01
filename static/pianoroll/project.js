@@ -73,6 +73,21 @@
     DEFAULT_INSTRUMENT: 'default',
   };
 
+  /**
+   * PR-INS1: Normalize instrument to descriptor shape.
+   * Accepts legacy string (e.g. 'pad') or structured descriptor.
+   * Returns { kind: 'tone_synth', presetId: string, params: {} }
+   */
+  function normalizeInstrument(instr){
+    if (typeof instr === 'string' && instr.trim()){
+      return { kind: 'tone_synth', presetId: instr.trim(), params: {} };
+    }
+    if (instr && typeof instr === 'object' && instr.kind === 'tone_synth' && typeof instr.presetId === 'string'){
+      return { kind: 'tone_synth', presetId: instr.presetId, params: instr.params || {} };
+    }
+    return { kind: 'tone_synth', presetId: SCHEMA_V2.DEFAULT_INSTRUMENT, params: {} };
+  }
+
   function defaultTrackV2(){
     return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT, gainDb: 0, muted: false };
   }
@@ -1482,5 +1497,8 @@ function toggleClipAB(projectV2, clipId){
     // load / schema versioning (T3-0b)
     loadProjectDoc,
     loadProjectDocV2,
+
+    // instrument descriptor (PR-INS1)
+    normalizeInstrument,
   };
 })();
