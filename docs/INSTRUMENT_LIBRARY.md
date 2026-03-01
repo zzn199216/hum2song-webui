@@ -18,16 +18,20 @@ Place sample files under:
 /static/pianoroll/vendor/tonejs-instruments/samples/<instrument>/
 ```
 
-For the bundled Piano pack:
+Each pack expects a minimal set of samples (A1.mp3 … A6.mp3) for repitching. Example layout:
 
 ```
-static/pianoroll/vendor/tonejs-instruments/samples/piano/
-├── A1.mp3
-├── A2.mp3
-├── A3.mp3
-├── A4.mp3
-├── A5.mp3
-├── A6.mp3
+static/pianoroll/vendor/tonejs-instruments/samples/
+├── piano/
+│   ├── A1.mp3  … A6.mp3
+├── strings/
+│   ├── A1.mp3  … A6.mp3
+├── bass/
+│   ├── A1.mp3  … A6.mp3
+├── guitar-acoustic/
+│   ├── A1.mp3  … A6.mp3
+└── guitar-electric/
+    ├── A1.mp3  … A6.mp3
 ```
 
 Samples are resolved relative to the site root. Example: with server at `http://127.0.0.1:8000`, the piano `A1` sample is fetched from:
@@ -38,17 +42,17 @@ http://127.0.0.1:8000/static/pianoroll/vendor/tonejs-instruments/samples/piano/A
 
 ---
 
-## How the app references baseUrl
+## Supported sampler packs (PR-INS2d)
 
-The app uses a pack registry that defines `baseUrlDefault` per instrument. For the Piano pack:
+| packId | Dropdown label | instrumentSubdir |
+|--------|----------------|------------------|
+| `tonejs:piano` | Sampler: Piano | `piano/` |
+| `tonejs:strings` | Sampler: Strings | `strings/` |
+| `tonejs:bass` | Sampler: Bass | `bass/` |
+| `tonejs:guitar-acoustic` | Sampler: Guitar Acoustic | `guitar-acoustic/` |
+| `tonejs:guitar-electric` | Sampler: Guitar Electric | `guitar-electric/` |
 
-| Field       | Value                                                                 |
-|------------|-----------------------------------------------------------------------|
-| packId     | `tonejs:piano`                                                        |
-| baseUrlDefault | `/static/pianoroll/vendor/tonejs-instruments/samples/piano/`      |
-| urls       | `{ A1: 'A1.mp3', A2: 'A2.mp3', ... }`                                 |
-
-`Tone.Sampler` uses `baseUrl` + each `url` key to fetch samples. Repitching is automatic: a few sample notes cover the full MIDI range.
+Each pack uses `baseUrlDefault` (or user baseUrl + subdir) and a minimal `urls` set (A1…A6, .mp3). `Tone.Sampler` repitches these samples across the MIDI range.
 
 ---
 
@@ -81,8 +85,8 @@ You can set a custom root path so samples are loaded from anywhere (local folder
 
 **Fixes:**
 
-- Ensure the `samples/piano/` directory exists under `static/pianoroll/vendor/tonejs-instruments/`.
-- Ensure the required `.mp3` files (A1, A2, A3, A4, A5, A6) are present.
+- Ensure the instrument folder exists (e.g. `samples/piano/`, `samples/strings/`) under `static/pianoroll/vendor/tonejs-instruments/`.
+- Ensure the required `.mp3` files (A1–A6) are present for that pack.
 - Check the browser Network tab for 404 responses to sample URLs.
 - Verify the dev server is serving files from the `static/` directory.
 

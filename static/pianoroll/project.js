@@ -98,12 +98,36 @@
     return { kind: 'tone_synth', presetId: SCHEMA_V2.DEFAULT_INSTRUMENT, params: {} };
   }
 
-  /** PR-INS2a: Sampler pack registry. baseUrlDefault relative to site root. instrumentSubdir for user baseUrl join. */
+  /** PR-INS2a/INS2d: Sampler pack registry. baseUrlDefault relative to site root. instrumentSubdir for user baseUrl join. */
   const SAMPLER_PACKS = {
     'tonejs:piano': {
       label: 'Piano (tonejs-instruments)',
       baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/piano/',
       instrumentSubdir: 'piano/',
+      urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
+    },
+    'tonejs:strings': {
+      label: 'Strings (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/strings/',
+      instrumentSubdir: 'strings/',
+      urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
+    },
+    'tonejs:bass': {
+      label: 'Bass (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/bass/',
+      instrumentSubdir: 'bass/',
+      urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
+    },
+    'tonejs:guitar-acoustic': {
+      label: 'Guitar Acoustic (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/guitar-acoustic/',
+      instrumentSubdir: 'guitar-acoustic/',
+      urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
+    },
+    'tonejs:guitar-electric': {
+      label: 'Guitar Electric (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/guitar-electric/',
+      instrumentSubdir: 'guitar-electric/',
       urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
     },
   };

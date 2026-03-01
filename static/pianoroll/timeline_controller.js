@@ -513,6 +513,10 @@
             { v: 'pluck', l: 'pluck' },
             { v: 'drum', l: 'drum' },
             { v: 'sampler:tonejs:piano', l: 'Sampler: Piano' },
+            { v: 'sampler:tonejs:strings', l: 'Sampler: Strings' },
+            { v: 'sampler:tonejs:bass', l: 'Sampler: Bass' },
+            { v: 'sampler:tonejs:guitar-acoustic', l: 'Sampler: Guitar Acoustic' },
+            { v: 'sampler:tonejs:guitar-electric', l: 'Sampler: Guitar Electric' },
           ].map(x=>`<option value="${x.v}">${x.l}</option>`).join('');
           sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
           sel.title = 'Instrument';
