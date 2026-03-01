@@ -506,8 +506,14 @@
           const sel = document.createElement('select');
           sel.className = 'trackInstrumentSelect';
           sel.innerHTML = [
-            'default','bass','lead','pad','pluck','drum'
-          ].map(x=>`<option value="${x}">${x}</option>`).join('');
+            { v: 'default', l: 'default' },
+            { v: 'bass', l: 'bass' },
+            { v: 'lead', l: 'lead' },
+            { v: 'pad', l: 'pad' },
+            { v: 'pluck', l: 'pluck' },
+            { v: 'drum', l: 'drum' },
+            { v: 'sampler:tonejs:piano', l: 'Sampler: Piano' },
+          ].map(x=>`<option value="${x.v}">${x.l}</option>`).join('');
           sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
           sel.title = 'Instrument';
           sel.style.width = '100%';

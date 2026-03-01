@@ -140,20 +140,71 @@ function _disposeTrackSynths(){
   _trackSynths = [];
 }
 
-function _makeSynthByInstrument(instr){
-  const desc = (G.H2SProject && typeof G.H2SProject.normalizeInstrument === 'function')
-    ? G.H2SProject.normalizeInstrument(instr)
-    : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
-  const presetId = (desc.kind === 'tone_synth' && desc.presetId) ? desc.presetId : 'default';
-  switch (String(presetId)){
-    case 'bass': return new G.Tone.MonoSynth();
-    case 'lead': return new G.Tone.Synth();
-    case 'pad': return new G.Tone.FMSynth();
-    case 'pluck': return new G.Tone.PluckSynth();
-    case 'drum': return new G.Tone.MembraneSynth();
-    default: return new G.Tone.PolySynth(G.Tone.Synth);
+  function _makeSynthByInstrument(instr){
+    const desc = (G.H2SProject && typeof G.H2SProject.normalizeInstrument === 'function')
+      ? G.H2SProject.normalizeInstrument(instr)
+      : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+    const presetId = (desc.kind === 'tone_synth' && desc.presetId) ? desc.presetId : 'default';
+    switch (String(presetId)){
+      case 'bass': return new G.Tone.MonoSynth();
+      case 'lead': return new G.Tone.Synth();
+      case 'pad': return new G.Tone.FMSynth();
+      case 'pluck': return new G.Tone.PluckSynth();
+      case 'drum': return new G.Tone.MembraneSynth();
+      default: return new G.Tone.PolySynth(G.Tone.Synth);
+    }
   }
-}
+
+  const SAMPLER_LOAD_TIMEOUT_MS = 4000;
+
+  /** PR-INS2a: Async instrument creation; for sampler awaits load or falls back on timeout. */
+  async function _makeSynthByInstrumentAsync(instr){
+    const desc = (G.H2SProject && typeof G.H2SProject.normalizeInstrument === 'function')
+      ? G.H2SProject.normalizeInstrument(instr)
+      : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+
+    if (desc.kind !== 'sampler' || !desc.packId){
+      return _makeSynthByInstrument(instr);
+    }
+
+    const packs = (G.H2SProject && G.H2SProject.SAMPLER_PACKS) ? G.H2SProject.SAMPLER_PACKS : {};
+    const pack = packs[desc.packId];
+    if (!pack || !pack.urls || !pack.baseUrlDefault){
+      onLog('Sampler pack missing. See docs to install samples. Using default synth.');
+      return _makeSynthByInstrument('default');
+    }
+
+    return new Promise(function(resolve){
+      let settled = false;
+      const settle = function(synth){
+        if (settled) return;
+        settled = true;
+        resolve(synth);
+      };
+      const timeout = setTimeout(function(){
+        settle(_makeSynthByInstrument('default'));
+        onLog('Sampler pack missing. See docs to install samples. Using default synth.');
+        try{ if (sampler && sampler.dispose) sampler.dispose(); }catch(e){}
+      }, SAMPLER_LOAD_TIMEOUT_MS);
+
+      var sampler;
+      try{
+        sampler = new G.Tone.Sampler({
+          urls: pack.urls,
+          baseUrl: pack.baseUrlDefault,
+          onload: function(){
+            clearTimeout(timeout);
+            if (!settled) settle(sampler);
+          },
+        });
+      }catch(e){
+        clearTimeout(timeout);
+        onLog('Sampler pack missing. See docs to install samples. Using default synth.');
+        settle(_makeSynthByInstrument('default'));
+        return;
+      }
+    });
+  }
 
 
     function _cancelTimers(){
@@ -245,22 +296,29 @@ if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   }catch(e){}
 
   const synthByTrackId = new Map();
-  const getSynth = (trackId) => {
+  const getSynth = async (trackId) => {
     if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
     const meta = metaByTrackId.get(trackId) || {instrument:'default', muted:false, gainDb:0};
     if (meta.muted) return null;
     const inst = meta.instrument || 'default';
-    const s = _makeSynthByInstrument(inst).toDestination();
-    try{ if (s && s.volume && Number.isFinite(meta.gainDb)) s.volume.value = meta.gainDb; }catch(e){};
-    _trackSynths.push(s);
-    synthByTrackId.set(trackId, s);
-    return s;
+    const s = await _makeSynthByInstrumentAsync(inst);
+    if (!s) return null;
+    const dest = (s.toDestination && s.toDestination.call) ? s.toDestination() : s;
+    try{ if (dest && dest.volume && Number.isFinite(meta.gainDb)) dest.volume.value = meta.gainDb; }catch(e){};
+    _trackSynths.push(dest);
+    synthByTrackId.set(trackId, dest);
+    return dest;
   };
+
+  const trackIdsNeeded = [...new Set((flat2.tracks || []).map(tr => tr && (tr.trackId || tr.id)).filter(Boolean))];
+  for (const tid of trackIdsNeeded){
+    await getSynth(tid);
+  }
 
   for (const tr of (flat2.tracks || [])){
     const tid = tr && (tr.trackId || tr.id);
     if (!tid) continue;
-    const s = getSynth(tid);
+    const s = synthByTrackId.get(tid);
     if (!s) continue;
     for (const n of (tr.notes || [])){
       const absStart = Number(n.startSec || 0);

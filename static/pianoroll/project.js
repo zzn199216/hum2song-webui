@@ -74,19 +74,38 @@
   };
 
   /**
-   * PR-INS1: Normalize instrument to descriptor shape.
-   * Accepts legacy string (e.g. 'pad') or structured descriptor.
-   * Returns { kind: 'tone_synth', presetId: string, params: {} }
+   * PR-INS1/INS2a: Normalize instrument to descriptor shape.
+   * Accepts legacy string (e.g. 'pad', 'sampler:tonejs:piano') or structured descriptor.
+   * Returns { kind: 'tone_synth'|'sampler', presetId?: string, packId?: string, params: {} }
    */
   function normalizeInstrument(instr){
     if (typeof instr === 'string' && instr.trim()){
-      return { kind: 'tone_synth', presetId: instr.trim(), params: {} };
+      const s = instr.trim();
+      if (s.indexOf('sampler:') === 0){
+        const packId = s.slice(8).trim() || 'tonejs:piano';
+        return { kind: 'sampler', packId: packId, params: {} };
+      }
+      return { kind: 'tone_synth', presetId: s, params: {} };
     }
-    if (instr && typeof instr === 'object' && instr.kind === 'tone_synth' && typeof instr.presetId === 'string'){
-      return { kind: 'tone_synth', presetId: instr.presetId, params: instr.params || {} };
+    if (instr && typeof instr === 'object'){
+      if (instr.kind === 'sampler' && typeof instr.packId === 'string'){
+        return { kind: 'sampler', packId: instr.packId, params: instr.params || {} };
+      }
+      if (instr.kind === 'tone_synth' && typeof instr.presetId === 'string'){
+        return { kind: 'tone_synth', presetId: instr.presetId, params: instr.params || {} };
+      }
     }
     return { kind: 'tone_synth', presetId: SCHEMA_V2.DEFAULT_INSTRUMENT, params: {} };
   }
+
+  /** PR-INS2a: Sampler pack registry. baseUrlDefault relative to site root. */
+  const SAMPLER_PACKS = {
+    'tonejs:piano': {
+      label: 'Piano (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/piano/',
+      urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
+    },
+  };
 
   function defaultTrackV2(){
     return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT, gainDb: 0, muted: false };
@@ -1498,7 +1517,8 @@ function toggleClipAB(projectV2, clipId){
     loadProjectDoc,
     loadProjectDocV2,
 
-    // instrument descriptor (PR-INS1)
+    // instrument descriptor (PR-INS1, INS2a)
     normalizeInstrument,
+    SAMPLER_PACKS,
   };
 })();

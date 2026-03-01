@@ -48,7 +48,7 @@
     return Math.max(lo, Math.min(hi, v));
   }
 
-  function makeSynthByInstrument(Tone, instr){
+  function makeSynthByInstrumentSync(Tone, instr){
     var desc = (window.H2SProject && typeof window.H2SProject.normalizeInstrument === 'function')
       ? window.H2SProject.normalizeInstrument(instr)
       : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
@@ -61,6 +61,60 @@
       case 'drum': return new Tone.MembraneSynth();
       default: return new Tone.PolySynth(Tone.Synth);
     }
+  }
+
+  var SAMPLER_LOAD_TIMEOUT_MS = 4000;
+
+  function makeSynthByInstrument(Tone, instr){
+    return makeSynthByInstrumentSync(Tone, instr);
+  }
+
+  function makeSynthByInstrumentAsync(Tone, instr, setStatusFn){
+    var desc = (window.H2SProject && typeof window.H2SProject.normalizeInstrument === 'function')
+      ? window.H2SProject.normalizeInstrument(instr)
+      : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+
+    if (desc.kind !== 'sampler' || !desc.packId){
+      return Promise.resolve(makeSynthByInstrumentSync(Tone, instr));
+    }
+
+    var packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) ? window.H2SProject.SAMPLER_PACKS : {};
+    var pack = packs[desc.packId];
+    if (!pack || !pack.urls || !pack.baseUrlDefault){
+      if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+      return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
+    }
+
+    return new Promise(function(resolve){
+      var settled = false;
+      function settle(synth){
+        if (settled) return;
+        settled = true;
+        resolve(synth);
+      }
+      var timeout = setTimeout(function(){
+        if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+        settle(makeSynthByInstrumentSync(Tone, 'default'));
+        try{ if (sampler && sampler.dispose) sampler.dispose(); }catch(e){}
+      }, SAMPLER_LOAD_TIMEOUT_MS);
+
+      var sampler;
+      try{
+        sampler = new Tone.Sampler({
+          urls: pack.urls,
+          baseUrl: pack.baseUrlDefault,
+          onload: function(){
+            clearTimeout(timeout);
+            if (!settled) settle(sampler);
+          },
+        });
+      }catch(e){
+        clearTimeout(timeout);
+        if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+        settle(makeSynthByInstrumentSync(Tone, 'default'));
+        return;
+      }
+    });
   }
 
   function audioBufferToWav(ab){
@@ -174,23 +228,33 @@
         if (tid) metaByTrackId[tid] = { instrument: t.instrument || 'default', muted: !!t.muted, gainDb: Number.isFinite(Number(t.gainDb)) ? Number(t.gainDb) : 0 };
       }
 
-      var result = await Tone.Offline(function(ctx){
+      var result = await Tone.Offline(async function(ctx){
         var transport = ctx.transport;
         var synthByTid = {};
-        function getSynth(trackId){
+        async function getSynth(trackId){
           if (synthByTid[trackId]) return synthByTid[trackId];
           var meta = metaByTrackId[trackId] || { instrument: 'default', muted: false, gainDb: 0 };
           if (meta.muted) return null;
-          var s = makeSynthByInstrument(Tone, meta.instrument).toDestination();
-          try{ if (s.volume && isFinite(meta.gainDb)) s.volume.value = meta.gainDb; }catch(e){}
-          synthByTid[trackId] = s;
-          return s;
+          var s = await makeSynthByInstrumentAsync(Tone, meta.instrument, setStatus);
+          var dest = (s && s.toDestination) ? s.toDestination() : s;
+          try{ if (dest && dest.volume && isFinite(meta.gainDb)) dest.volume.value = meta.gainDb; }catch(e){}
+          synthByTid[trackId] = dest;
+          return dest;
+        }
+        var trackIdsNeeded = [];
+        for (var ti = 0; ti < (flat.tracks || []).length; ti++){
+          var tr0 = flat.tracks[ti];
+          var tid0 = tr0 && (tr0.trackId || tr0.id);
+          if (tid0 && trackIdsNeeded.indexOf(tid0) < 0) trackIdsNeeded.push(tid0);
+        }
+        for (var ii = 0; ii < trackIdsNeeded.length; ii++){
+          await getSynth(trackIdsNeeded[ii]);
         }
         for (var ti = 0; ti < (flat.tracks || []).length; ti++){
           var tr = flat.tracks[ti];
           var tid = tr && (tr.trackId || tr.id);
           if (!tid) continue;
-          var syn = getSynth(tid);
+          var syn = synthByTid[tid];
           if (!syn) continue;
           var notes = tr.notes || [];
           for (var ni = 0; ni < notes.length; ni++){

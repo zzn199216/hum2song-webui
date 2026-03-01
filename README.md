@@ -35,6 +35,7 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 - **Advanced** is collapsed by default and contains Prompt, Regenerate, LLM Settings, and Debug.
 - **Quality gate:** In Full mode, if Fix Pitch or Tighten Rhythm is enabled, velocity-only patches are rejected once and you'll see actionable guidance.
 - **Tone.js** loads locally by default (`/static/pianoroll/vendor/tone/Tone.js`); CDN fallback only if `window.H2S_ALLOW_CDN_TONE === true`.
+- **Sampler instruments (e.g. Piano):** Optional; see [docs/INSTRUMENT_LIBRARY.md](docs/INSTRUMENT_LIBRARY.md) for sample asset setup.
 - E2E validation: see [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md). Phase C covers Recording/Import → auto-open editor → Quick Optimize.
 
 ---
