@@ -638,6 +638,17 @@
               <button id="btnTestSampler" class="btn mini">Test Load</button>
             </div>
             <div id="samplerBaseUrlStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
+
+            <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
+              <label style="font-size:11px; color:var(--muted);">Upload local samples (PR-INS2e)</label>
+              <select id="selSamplerPack" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;"></select>
+              <input type="file" id="inpSamplerUpload" multiple accept="audio/*" style="display:none;" />
+              <div style="display:flex; gap:6px; margin-top:6px;">
+                <button id="btnSamplerUpload" class="btn mini">Upload samples</button>
+                <button id="btnClearSamplerPack" class="btn mini danger">Clear local samples</button>
+              </div>
+              <div id="samplerUploadStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
+            </div>
           </div>
         </details>
       </div>
@@ -824,6 +835,7 @@
   <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
   <script src="/static/pianoroll/project.js"></script>
+  <script src="/static/pianoroll/controllers/instrument_library_store.js"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
   <script src="/static/pianoroll/controllers/agent_controller.js"></script>
   <script src="/static/pianoroll/ui/timeline_view.js"></script>

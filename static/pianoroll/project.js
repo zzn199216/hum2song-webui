@@ -163,6 +163,37 @@
     return base + '/' + subdir.replace(/^\//, '');
   }
 
+  /** PR-INS2e: Resolve sampler urls with local store override. Returns { urls: object, objectUrls: string[] }.
+   *  Fallback chain: local IndexedDB -> baseUrl -> default baseUrl. objectUrls should be revoked when done. */
+  function resolveSamplerUrlsForPack(pack, packId){
+    var result = { urls: {}, objectUrls: [] };
+    if (!pack || !pack.urls || !packId) return result;
+    var baseUrl = getResolvedSamplerBaseUrl(pack) || pack.baseUrlDefault || '';
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    var keys = Object.keys(pack.urls);
+
+    return Promise.all(keys.map(function(k){
+      if (!store || !store.getSample) return Promise.resolve(null);
+      return store.getSample(packId, k).then(function(blob){
+        if (blob && blob instanceof Blob){
+          var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+          if (url){ result.objectUrls.push(url); return { k: k, url: url }; }
+        }
+        return null;
+      });
+    })).then(function(localResults){
+      for (var i = 0; i < keys.length; i++){
+        var k = keys[i];
+        var loc = localResults[i];
+        if (loc && loc.url) result.urls[k] = loc.url;
+        else if (baseUrl && pack.urls[k]) result.urls[k] = baseUrl.replace(/\/+$/, '') + '/' + pack.urls[k];
+        else result.urls[k] = pack.urls[k];
+      }
+      if (store && store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
+      return result;
+    });
+  }
+
   function defaultTrackV2(){
     return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT, gainDb: 0, muted: false };
   }
@@ -1579,5 +1610,6 @@ function toggleClipAB(projectV2, clipId){
     getSamplerBaseUrl,
     setSamplerBaseUrl,
     getResolvedSamplerBaseUrl,
+    resolveSamplerUrlsForPack,
   };
 })();

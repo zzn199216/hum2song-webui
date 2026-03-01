@@ -1979,9 +1979,15 @@ renderTimeline(){
         const btnSave = document.getElementById('btnSaveSamplerBaseUrl');
         const btnTest = document.getElementById('btnTestSampler');
         const status = document.getElementById('samplerBaseUrlStatus');
+        const selPack = document.getElementById('selSamplerPack');
+        const inpUpload = document.getElementById('inpSamplerUpload');
+        const btnUpload = document.getElementById('btnSamplerUpload');
+        const btnClear = document.getElementById('btnClearSamplerPack');
+        const uploadStatus = document.getElementById('samplerUploadStatus');
         if (!inp || !btnSave) return;
 
         const setStatus = (msg) => { if (status) status.textContent = msg || ''; };
+        const setUploadStatus = (msg) => { if (uploadStatus) uploadStatus.textContent = msg || ''; };
         const renderInput = () => {
           const v = (window.H2SProject.getSamplerBaseUrl && window.H2SProject.getSamplerBaseUrl()) || '';
           inp.value = v;
@@ -2012,6 +2018,66 @@ renderTimeline(){
               .catch(() => { setStatus('Test failed: network error.'); });
           });
         }
+
+        if (selPack && window.H2SProject.SAMPLER_PACKS){
+          const packs = window.H2SProject.SAMPLER_PACKS;
+          selPack.innerHTML = Object.keys(packs).map(k => `<option value="${k}">${packs[k].label || k}</option>`).join('');
+        }
+
+        function refreshUploadStatus(){
+          if (!uploadStatus || !selPack || !window.H2SInstrumentLibraryStore) return;
+          const packId = selPack.value;
+          if (!packId){
+            setUploadStatus('');
+            return;
+          }
+          window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
+            const valid = (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).slice();
+            const have = keys || [];
+            const missing = valid.filter(k => have.indexOf(k) < 0);
+            if (have.length === 0) setUploadStatus('No local samples. Use baseUrl or upload A1..A6 (mp3/wav).');
+            else setUploadStatus('Local: ' + have.sort().join(', ') + (missing.length ? ' | Missing: ' + missing.join(', ') : ' (complete)'));
+          });
+        }
+
+        if (selPack) selPack.addEventListener('change', refreshUploadStatus);
+
+        if (btnUpload && inpUpload){
+          btnUpload.addEventListener('click', () => { inpUpload.click(); });
+          inpUpload.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = '';
+            if (!files.length || !selPack || !window.H2SInstrumentLibraryStore) return;
+            const packId = selPack.value;
+            if (!packId){ setUploadStatus('Select a pack first.'); return; }
+            const store = window.H2SInstrumentLibraryStore;
+            const toUpload = [];
+            let skipped = 0;
+            for (let i = 0; i < files.length; i++){
+              const key = store.parseNoteKeyFromFilename(files[i].name);
+              if (key) toUpload.push({ file: files[i], key });
+              else skipped++;
+            }
+            if (!toUpload.length){ setUploadStatus(skipped ? skipped + ' file(s) skipped (use A1..A6.mp3).' : 'No valid files.'); return; }
+            setUploadStatus('Uploading ' + toUpload.length + ' file(s)...');
+            Promise.all(toUpload.map(x => store.putSample(packId, x.key, x.file, x.file.name))).then(() => {
+              refreshUploadStatus();
+              setUploadStatus('Uploaded ' + toUpload.length + '. ' + (skipped ? skipped + ' skipped.' : ''));
+            }).catch(() => { setUploadStatus('Upload failed.'); });
+          });
+        }
+
+        if (btnClear && selPack){
+          btnClear.addEventListener('click', () => {
+            const packId = selPack.value;
+            if (!packId){ setUploadStatus('Select a pack first.'); return; }
+            if (!window.H2SInstrumentLibraryStore) return;
+            setUploadStatus('Clearing...');
+            window.H2SInstrumentLibraryStore.clearPack(packId).then(() => { setUploadStatus('Cleared.'); refreshUploadStatus(); });
+          });
+        }
+
+        refreshUploadStatus();
       }catch(e){}
     },
 	async playProject(){

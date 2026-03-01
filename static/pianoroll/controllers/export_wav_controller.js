@@ -80,42 +80,50 @@
 
     var packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) ? window.H2SProject.SAMPLER_PACKS : {};
     var pack = packs[desc.packId];
-    var getResolved = (window.H2SProject && window.H2SProject.getResolvedSamplerBaseUrl) ? window.H2SProject.getResolvedSamplerBaseUrl : null;
-    var baseUrl = getResolved && pack ? getResolved(pack) : (pack && pack.baseUrlDefault);
-    if (!pack || !pack.urls || !baseUrl){
+    var resolveUrls = (window.H2SProject && window.H2SProject.resolveSamplerUrlsForPack) ? window.H2SProject.resolveSamplerUrlsForPack : null;
+    if (!pack || !pack.urls || !resolveUrls){
       if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
       return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
     }
 
-    return new Promise(function(resolve){
-      var settled = false;
-      function settle(synth){
-        if (settled) return;
-        settled = true;
-        resolve(synth);
-      }
-      var timeout = setTimeout(function(){
+    return resolveUrls(pack, desc.packId).then(function(resolved){
+      var urls = resolved.urls;
+      if (!urls || Object.keys(urls).length === 0){
         if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
-        settle(makeSynthByInstrumentSync(Tone, 'default'));
-        try{ if (sampler && sampler.dispose) sampler.dispose(); }catch(e){}
-      }, SAMPLER_LOAD_TIMEOUT_MS);
+        return makeSynthByInstrumentSync(Tone, 'default');
+      }
+      return new Promise(function(resolve){
+        var settled = false;
+        function settle(synth){
+          if (settled) return;
+          settled = true;
+          resolve(synth);
+        }
+        var timeout = setTimeout(function(){
+          if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+          settle(makeSynthByInstrumentSync(Tone, 'default'));
+          try{ if (sampler && sampler.dispose) sampler.dispose(); }catch(e){}
+        }, SAMPLER_LOAD_TIMEOUT_MS);
 
-      var sampler;
-      try{
-        sampler = new Tone.Sampler({
-          urls: pack.urls,
-          baseUrl: baseUrl,
-          onload: function(){
-            clearTimeout(timeout);
-            if (!settled) settle(sampler);
-          },
-        });
-      }catch(e){
-        clearTimeout(timeout);
-        if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
-        settle(makeSynthByInstrumentSync(Tone, 'default'));
-        return;
-      }
+        var sampler;
+        try{
+          sampler = new Tone.Sampler({
+            urls: urls,
+            onload: function(){
+              clearTimeout(timeout);
+              if (!settled) settle(sampler);
+            },
+          });
+        }catch(e){
+          clearTimeout(timeout);
+          if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+          settle(makeSynthByInstrumentSync(Tone, 'default'));
+          return;
+        }
+      });
+    }).catch(function(){
+      if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+      return makeSynthByInstrumentSync(Tone, 'default');
     });
   }
 

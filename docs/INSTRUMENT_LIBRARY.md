@@ -69,6 +69,20 @@ You can set a custom root path so samples are loaded from anywhere (local folder
 
 ---
 
+## Upload local samples (PR-INS2e)
+
+You can upload sample files (A1..A6) directly in the UI. They are stored in IndexedDB and override baseUrl for playback and Export WAV.
+
+1. Open **Inspector** → expand **Instrument Library**.
+2. Select a pack from the "Upload local samples" dropdown (e.g. Piano).
+3. Click **Upload samples** and choose files named `A1.mp3`, `A2.wav`, etc. (case-insensitive; only A1–A6 accepted).
+4. Status shows recognized keys and any missing keys.
+5. Use **Clear local samples** to remove uploaded samples for the selected pack and revert to baseUrl/default.
+
+**Fallback chain:** local IndexedDB → user baseUrl → default baseUrl → default synth.
+
+---
+
 ## Troubleshooting
 
 **Symptom:** You select "Sampler: Piano" but hear the default synth instead.
@@ -77,7 +91,7 @@ You can set a custom root path so samples are loaded from anywhere (local folder
 
 **Behavior:**
 
-1. The app tries to fetch samples from the configured `baseUrl`.
+1. The app first checks IndexedDB for uploaded samples; then baseUrl (or default path).
 2. If fetch fails or takes too long:
    - A message appears: *"Sampler pack missing. See docs to install samples. Using default synth."*
    - Playback and Export WAV fall back to the default synth.

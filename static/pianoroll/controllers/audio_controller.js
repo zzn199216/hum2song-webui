@@ -157,7 +157,7 @@ function _disposeTrackSynths(){
 
   const SAMPLER_LOAD_TIMEOUT_MS = 4000;
 
-  /** PR-INS2a: Async instrument creation; for sampler awaits load or falls back on timeout. */
+  /** PR-INS2a/INS2e: Async instrument creation; for sampler resolves urls (local->baseUrl->default), awaits load or falls back on timeout. */
   async function _makeSynthByInstrumentAsync(instr){
     const desc = (G.H2SProject && typeof G.H2SProject.normalizeInstrument === 'function')
       ? G.H2SProject.normalizeInstrument(instr)
@@ -169,9 +169,16 @@ function _disposeTrackSynths(){
 
     const packs = (G.H2SProject && G.H2SProject.SAMPLER_PACKS) ? G.H2SProject.SAMPLER_PACKS : {};
     const pack = packs[desc.packId];
-    const getResolved = (G.H2SProject && G.H2SProject.getResolvedSamplerBaseUrl) ? G.H2SProject.getResolvedSamplerBaseUrl : null;
-    const baseUrl = getResolved && pack ? getResolved(pack) : (pack && pack.baseUrlDefault);
-    if (!pack || !pack.urls || !baseUrl){
+    const resolveUrls = (G.H2SProject && G.H2SProject.resolveSamplerUrlsForPack) ? G.H2SProject.resolveSamplerUrlsForPack : null;
+    if (!pack || !pack.urls || !resolveUrls){
+      onLog('Sampler pack missing. See docs to install samples. Using default synth.');
+      return _makeSynthByInstrument('default');
+    }
+
+    let resolved;
+    try{ resolved = await resolveUrls(pack, desc.packId); }catch(e){ resolved = { urls: {}, objectUrls: [] }; }
+    const urls = resolved.urls;
+    if (!urls || Object.keys(urls).length === 0){
       onLog('Sampler pack missing. See docs to install samples. Using default synth.');
       return _makeSynthByInstrument('default');
     }
@@ -192,8 +199,7 @@ function _disposeTrackSynths(){
       var sampler;
       try{
         sampler = new G.Tone.Sampler({
-          urls: pack.urls,
-          baseUrl: baseUrl,
+          urls: urls,
           onload: function(){
             clearTimeout(timeout);
             if (!settled) settle(sampler);
