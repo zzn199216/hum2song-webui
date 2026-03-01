@@ -725,6 +725,9 @@ if (typeof localStorage !== 'undefined') {
       this._initMasterVolumeUI();
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
+      // PR-INS2c: Instrument Library (sampler baseUrl)
+      this._initInstrumentLibraryUI();
+
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
       $('#btnModalCancel').addEventListener('click', () => this.closeModal(false));
@@ -1967,6 +1970,48 @@ renderTimeline(){
         wrap.appendChild(input);
         wrap.appendChild(val);
         row.appendChild(wrap);
+      }catch(e){}
+    },
+    _initInstrumentLibraryUI(){
+      try{
+        if (typeof document === 'undefined' || !window.H2SProject) return;
+        const inp = document.getElementById('inpSamplerBaseUrl');
+        const btnSave = document.getElementById('btnSaveSamplerBaseUrl');
+        const btnTest = document.getElementById('btnTestSampler');
+        const status = document.getElementById('samplerBaseUrlStatus');
+        if (!inp || !btnSave) return;
+
+        const setStatus = (msg) => { if (status) status.textContent = msg || ''; };
+        const renderInput = () => {
+          const v = (window.H2SProject.getSamplerBaseUrl && window.H2SProject.getSamplerBaseUrl()) || '';
+          inp.value = v;
+        };
+        renderInput();
+
+        if (btnSave.__h2sInstrumentLibBound) return;
+        btnSave.__h2sInstrumentLibBound = true;
+
+        btnSave.addEventListener('click', () => {
+          const v = inp.value.trim();
+          if (window.H2SProject.setSamplerBaseUrl) window.H2SProject.setSamplerBaseUrl(v);
+          setStatus(v ? 'Saved. Base URL: ' + v : 'Cleared. Using default path.');
+        });
+        if (btnTest){
+          btnTest.addEventListener('click', () => {
+            setStatus('Testing...');
+            const P = window.H2SProject;
+            const pack = (P && P.SAMPLER_PACKS && P.SAMPLER_PACKS['tonejs:piano']) || null;
+            const baseUrl = (P && P.getResolvedSamplerBaseUrl && pack) ? P.getResolvedSamplerBaseUrl(pack) : null;
+            const testUrl = baseUrl ? (baseUrl.replace(/\/+$/, '') + '/A1.mp3') : null;
+            if (!testUrl){
+              setStatus('No base URL configured.');
+              return;
+            }
+            fetch(testUrl, { method: 'HEAD' })
+              .then(r => { setStatus(r.ok ? 'Test OK: samples reachable.' : 'Test failed: ' + r.status); })
+              .catch(() => { setStatus('Test failed: network error.'); });
+          });
+        }
       }catch(e){}
     },
 	async playProject(){

@@ -98,14 +98,46 @@
     return { kind: 'tone_synth', presetId: SCHEMA_V2.DEFAULT_INSTRUMENT, params: {} };
   }
 
-  /** PR-INS2a: Sampler pack registry. baseUrlDefault relative to site root. */
+  /** PR-INS2a: Sampler pack registry. baseUrlDefault relative to site root. instrumentSubdir for user baseUrl join. */
   const SAMPLER_PACKS = {
     'tonejs:piano': {
       label: 'Piano (tonejs-instruments)',
       baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/piano/',
+      instrumentSubdir: 'piano/',
       urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
     },
   };
+
+  const LS_SAMPLER_BASEURL = 'hum2song_studio_sampler_baseurl';
+
+  /** PR-INS2c: Get user-configured sampler baseUrl from localStorage. Returns null if not set. */
+  function getSamplerBaseUrl(){
+    try{
+      if (typeof localStorage === 'undefined') return null;
+      var v = localStorage.getItem(LS_SAMPLER_BASEURL);
+      return (v && typeof v === 'string' && v.trim()) ? v.trim() : null;
+    }catch(e){ return null; }
+  }
+
+  /** PR-INS2c: Set user-configured sampler baseUrl. Empty string removes the key. */
+  function setSamplerBaseUrl(url){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      var s = (url != null && typeof url === 'string') ? url.trim() : '';
+      if (s) localStorage.setItem(LS_SAMPLER_BASEURL, s);
+      else localStorage.removeItem(LS_SAMPLER_BASEURL);
+    }catch(e){}
+  }
+
+  /** PR-INS2c: Resolve baseUrl for a pack. Uses user baseUrl + instrumentSubdir if set, else baseUrlDefault. */
+  function getResolvedSamplerBaseUrl(pack){
+    if (!pack) return null;
+    var user = getSamplerBaseUrl();
+    if (!user) return pack.baseUrlDefault || null;
+    var subdir = pack.instrumentSubdir || 'piano/';
+    var base = user.replace(/\/+$/, '');
+    return base + '/' + subdir.replace(/^\//, '');
+  }
 
   function defaultTrackV2(){
     return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT, gainDb: 0, muted: false };
@@ -1517,8 +1549,11 @@ function toggleClipAB(projectV2, clipId){
     loadProjectDoc,
     loadProjectDocV2,
 
-    // instrument descriptor (PR-INS1, INS2a)
+    // instrument descriptor (PR-INS1, INS2a, INS2c)
     normalizeInstrument,
     SAMPLER_PACKS,
+    getSamplerBaseUrl,
+    setSamplerBaseUrl,
+    getResolvedSamplerBaseUrl,
   };
 })();

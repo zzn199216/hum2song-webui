@@ -169,7 +169,9 @@ function _disposeTrackSynths(){
 
     const packs = (G.H2SProject && G.H2SProject.SAMPLER_PACKS) ? G.H2SProject.SAMPLER_PACKS : {};
     const pack = packs[desc.packId];
-    if (!pack || !pack.urls || !pack.baseUrlDefault){
+    const getResolved = (G.H2SProject && G.H2SProject.getResolvedSamplerBaseUrl) ? G.H2SProject.getResolvedSamplerBaseUrl : null;
+    const baseUrl = getResolved && pack ? getResolved(pack) : (pack && pack.baseUrlDefault);
+    if (!pack || !pack.urls || !baseUrl){
       onLog('Sampler pack missing. See docs to install samples. Using default synth.');
       return _makeSynthByInstrument('default');
     }
@@ -191,7 +193,7 @@ function _disposeTrackSynths(){
       try{
         sampler = new G.Tone.Sampler({
           urls: pack.urls,
-          baseUrl: pack.baseUrlDefault,
+          baseUrl: baseUrl,
           onload: function(){
             clearTimeout(timeout);
             if (!settled) settle(sampler);

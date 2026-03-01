@@ -80,7 +80,9 @@
 
     var packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) ? window.H2SProject.SAMPLER_PACKS : {};
     var pack = packs[desc.packId];
-    if (!pack || !pack.urls || !pack.baseUrlDefault){
+    var getResolved = (window.H2SProject && window.H2SProject.getResolvedSamplerBaseUrl) ? window.H2SProject.getResolvedSamplerBaseUrl : null;
+    var baseUrl = getResolved && pack ? getResolved(pack) : (pack && pack.baseUrlDefault);
+    if (!pack || !pack.urls || !baseUrl){
       if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
       return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
     }
@@ -102,7 +104,7 @@
       try{
         sampler = new Tone.Sampler({
           urls: pack.urls,
-          baseUrl: pack.baseUrlDefault,
+          baseUrl: baseUrl,
           onload: function(){
             clearTimeout(timeout);
             if (!settled) settle(sampler);

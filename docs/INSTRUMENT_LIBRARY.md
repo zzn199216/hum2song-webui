@@ -52,6 +52,19 @@ The app uses a pack registry that defines `baseUrlDefault` per instrument. For t
 
 ---
 
+## Configurable baseUrl (PR-INS2c)
+
+You can set a custom root path so samples are loaded from anywhere (local folder, CDN, etc.):
+
+1. Open **Inspector** → expand **Instrument Library**.
+2. Enter the base URL (e.g. `https://cdn.example.com/samples` or `/my-samples`) in **Sampler baseUrl**.
+3. Click **Save**. The app appends the instrument subdirectory (e.g. `piano/`) to your URL.
+4. Use **Test Load** to verify the piano pack is reachable.
+
+**Storage:** One `localStorage` key: `hum2song_studio_sampler_baseurl`. Leave the field blank and Save to clear (revert to default path).
+
+---
+
 ## Troubleshooting
 
 **Symptom:** You select "Sampler: Piano" but hear the default synth instead.

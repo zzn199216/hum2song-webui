@@ -625,6 +625,21 @@
             <button id="btnImportProject" class="btn">Import Project JSON</button>
           </div>
         </div>
+
+        <div class="hr"></div>
+
+        <details id="instrumentLibraryBox" class="insSection">
+          <summary style="cursor:pointer; font-weight:700;">Instrument Library</summary>
+          <div style="margin-top:8px;">
+            <label style="font-size:11px; color:var(--muted);">Sampler baseUrl</label>
+            <input id="inpSamplerBaseUrl" type="text" placeholder="(default)" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;" />
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button id="btnSaveSamplerBaseUrl" class="btn mini">Save</button>
+              <button id="btnTestSampler" class="btn mini">Test Load</button>
+            </div>
+            <div id="samplerBaseUrlStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
+          </div>
+        </details>
       </div>
     </div>
   </div>
