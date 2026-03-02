@@ -14,8 +14,100 @@
   const DEFAULT_OPT_SOURCE = 'safe_stub_v0';
   const SAFE_STUB_PRESET = 'alt_110_80';
 
+  /** PR-E1: TemplateSpec v1 registry — static data only; no DOM, no localStorage. */
+  const LLM_TEMPLATES_V1 = {
+    fix_pitch_v1: {
+      id: 'fix_pitch_v1',
+      label: 'Fix Pitch',
+      promptVersion: 'tmpl_v1.fix_pitch.r1',
+      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+      seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.',
+      directives: {},
+    },
+    tighten_rhythm_v1: {
+      id: 'tighten_rhythm_v1',
+      label: 'Tighten Rhythm',
+      promptVersion: 'tmpl_v1.tighten_rhythm.r1',
+      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
+      seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.',
+      directives: {},
+    },
+    clean_outliers_v1: {
+      id: 'clean_outliers_v1',
+      label: 'Clean Outliers',
+      promptVersion: 'tmpl_v1.clean_outliers',
+      intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+      seed: 'Smooth extreme values; reduce outliers.',
+      directives: {},
+    },
+    bluesy_v1: {
+      id: 'bluesy_v1',
+      label: 'Bluesy',
+      promptVersion: 'tmpl_v1.bluesy',
+      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
+      seed: 'Add subtle blues inflection to timing and dynamics.',
+      directives: {},
+    },
+  };
+
+  /** PR-E1: Resolve promptMeta from optsIn for patchSummary trace. */
+  function resolvePromptMeta(optsIn){
+    const templateId = (optsIn && optsIn.templateId != null && String(optsIn.templateId).trim()) ? String(optsIn.templateId).trim() : null;
+    const tmpl = templateId && LLM_TEMPLATES_V1[templateId] ? LLM_TEMPLATES_V1[templateId] : null;
+    const promptVersion = tmpl ? tmpl.promptVersion : 'manual_v0';
+    const intent = (optsIn && optsIn.intent && typeof optsIn.intent === 'object') ? optsIn.intent : null;
+    return {
+      templateId: tmpl ? tmpl.id : null,
+      promptVersion,
+      intent,
+    };
+  }
+
   /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
   const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
+
+  /** PR-E3: Build structured Directives block from template + intent for llm_v0 prompt. */
+  function buildDirectivesBlock(template, intent){
+    const fixPitch = intent && !!intent.fixPitch;
+    const tightenRhythm = intent && !!intent.tightenRhythm;
+    const reduceOutliers = intent && !!intent.reduceOutliers;
+    const goalParts = [];
+    if (fixPitch) goalParts.push('pitch correction');
+    if (tightenRhythm) goalParts.push('rhythm alignment');
+    if (reduceOutliers) goalParts.push('cleanup outliers');
+    if (goalParts.length === 0 && template) goalParts.push((template.label || 'improve').toLowerCase());
+    const goalsLine = goalParts.length > 0 ? goalParts.join(', ') : 'dynamics only';
+    let lines = [
+      'DIRECTIVES:',
+      '- Goals: ' + goalsLine,
+      '- Priority: pitch_correction > rhythm_alignment > cleanup_outliers > dynamics',
+      '- Constraints:',
+    ];
+    if (fixPitch && template && template.id === 'fix_pitch_v1'){
+      lines.push('  * focus on clearly wrong notes; do not change most notes (edit budget: minimal)');
+      lines.push('  * prefer ±1–2 semitone corrections; avoid large pitch jumps');
+      lines.push('  * preserve contour and phrase rhythm; keep note count similar unless reduceOutliers requires deletes');
+      lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
+    } else if (tightenRhythm && template && template.id === 'tighten_rhythm_v1'){
+      lines.push('  * keep pitches the same; do not change pitch unless absolutely necessary; ideally no pitch changes');
+      lines.push('  * prefer small moves; avoid large startBeat shifts; nudge toward nearby grid');
+      lines.push('  * avoid creating very tiny or extremely long durations unintentionally');
+      lines.push('  * preserve phrase rhythm/feel; do not introduce jitter');
+      if (reduceOutliers) lines.push('  * allow deleteNote for obvious micro-glitches only');
+      else lines.push('  * avoid deleteNote and addNote; use moveNote and setNote startBeat/durationBeat only');
+      lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
+    } else {
+      lines.push('  * keep melody contour; prefer small edits; do not rewrite into a new melody');
+      lines.push('  * avoid large pitch jumps; keep note count similar unless cleanup requires deletes');
+      lines.push('  * do not output velocity-only when pitch/rhythm goals are enabled');
+    }
+    lines.push('- Required ops:');
+    if (fixPitch) lines.push('  * include at least one setNote with pitch change');
+    if (tightenRhythm) lines.push('  * include at least one moveNote or setNote with startBeat/durationBeat change');
+    if (reduceOutliers) lines.push('  * allow deleteNote for glitches');
+    if (!fixPitch && !tightenRhythm && !reduceOutliers) lines.push('  * (dynamics-only allowed)');
+    return lines.join('\n');
+  }
 
   /** PR-6a: resolve executed prompt and source for patchSummary trace. */
   function resolveOptimizeUserPrompt(opts){
@@ -56,6 +148,26 @@
       out[k] = (out[k] || 0) + 1;
     }
     return out;
+  }
+
+  /** PR-B3a: Compute patch type summary from ops (pitch/timing/structure/velocity-only). */
+  function _computePatchTypeSummary(ops){
+    const arr = Array.isArray(ops) ? ops : [];
+    let hasPitchChange = false;
+    let hasTimingChange = false;
+    let hasStructuralChange = false;
+    for (const op of arr){
+      if (!op || typeof op !== 'object') continue;
+      const ot = String(op.op || '');
+      if (ot === 'addNote' || ot === 'deleteNote') hasStructuralChange = true;
+      if (ot === 'moveNote') hasTimingChange = true;
+      if (ot === 'setNote'){
+        if (op.pitch != null) hasPitchChange = true;
+        if (op.startBeat != null || op.durationBeat != null) hasTimingChange = true;
+      }
+    }
+    const isVelocityOnly = arr.length > 0 && !hasPitchChange && !hasTimingChange && !hasStructuralChange;
+    return { hasPitchChange, hasTimingChange, hasStructuralChange, isVelocityOnly };
   }
 
   function buildPseudoAgentPatch(clip){
@@ -232,6 +344,12 @@
   function create(opts){
     /** PR-7b-2: Run optimize with llm_v0 preset (async). Returns Promise<result>. */
     function _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId){
+      const templateId = (optsIn.templateId != null && String(optsIn.templateId).trim()) ? String(optsIn.templateId).trim() : null;
+      const template = templateId && LLM_TEMPLATES_V1[templateId] ? LLM_TEMPLATES_V1[templateId] : null;
+      const userPromptEmpty = !(optsIn.userPrompt != null && String(optsIn.userPrompt).trim());
+      const effectivePromptInfo = (template && userPromptEmpty)
+        ? { prompt: template.seed || '', source: 'template', preview: (template.seed && template.seed.length > 40) ? template.seed.slice(0, 37) + '...' : (template.seed || '') }
+        : promptInfo;
       const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
       const patchSummaryBase = {
         requestedSource: requestedPresetId,
@@ -241,10 +359,15 @@
         source: 'llm_v0',
         preset: 'llm_v0',
         requestedUserPrompt: requestedUserPrompt,
-        executedUserPromptSource: promptInfo.source,
-        executedUserPromptPreview: promptInfo.preview,
+        executedUserPromptSource: effectivePromptInfo.source,
+        executedUserPromptPreview: effectivePromptInfo.preview,
       };
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
+      const intentForSummary = (optsIn.intent && typeof optsIn.intent === 'object') ? optsIn.intent : null;
+      if (intentForSummary && (intentForSummary.fixPitch || intentForSummary.tightenRhythm || intentForSummary.reduceOutliers)) {
+        patchSummaryBase.intent = intentForSummary;
+      }
+      patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
       function fail(reason, summaryExtras){
         return {
@@ -408,7 +531,18 @@
       }
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
-      let baseUserContent = promptInfo.prompt + clipHint;
+      // PR-B2-min / PR-E3: Goals and Directives from intent + template
+      const intent = (optsIn.intent && typeof optsIn.intent === 'object')
+        ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
+        : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+      const hasGoals = intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers || !!template;
+      const directivesBlock = hasGoals ? buildDirectivesBlock(template, intent) : '';
+      const goalsPrefix = !directivesBlock && (intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers)
+        ? ('Goals: ' + [intent.fixPitch ? 'fix pitch (correct wrong notes)' : null, intent.tightenRhythm ? 'tighten rhythm (align timing)' : null, intent.reduceOutliers ? 'reduce outliers (smooth extreme values)' : null].filter(Boolean).join('; ') + '.\n\n')
+        : '';
+      const promptBody = (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
+
+      let baseUserContent = promptBody + clipHint;
       if (!safeMode){
         baseUserContent = 'User prompt may require pitch/timing changes; do not respond with velocity-only unless explicitly requested.\n\n' + baseUserContent;
       }
@@ -457,7 +591,7 @@
                 ops: 0,
                 byOp: {},
                 examples: [],
-              }),
+              }, _computePatchTypeSummary([])),
             };
           }
 
@@ -510,6 +644,27 @@
           }
           if (debugCapture) debugCapture.validateErrors = [];
 
+          // PR-B3b: Full-mode Quality Gate — velocity-only unacceptable when intent requires pitch/timing
+          const gateRequired = !safeMode && (intent.fixPitch || intent.tightenRhythm);
+          if (gateRequired && opsN > 0){
+            const ps = _computePatchTypeSummary(patchObj.ops);
+            if (ps.isVelocityOnly){
+              const patchSummary = Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: 'quality_velocity_only',
+                ops: opsN,
+                byOp: _opsByOp(patchObj.ops),
+                examples: [],
+              }, ps);
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: 'quality_velocity_only',
+                patchSummary,
+              };
+            }
+          }
+
           const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
           if (!applied || !applied.clip){
             return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops) });
@@ -534,7 +689,7 @@
               ops: opsN,
               byOp: _opsByOp(patchObj.ops),
               examples: [],
-            }),
+            }, _computePatchTypeSummary(patchObj.ops)),
           };
 
           opts.setProjectFromV2(project);
@@ -572,6 +727,11 @@
           let fixDetail = '';
           if (res1.reason === 'llm_no_valid_json'){
             fixDetail = 'no valid JSON object found';
+          } else if (res1.reason === 'patch_rejected' && res1.detail === 'quality_velocity_only'){
+            const hintParts = ['velocity-only patch rejected'];
+            if (intent.fixPitch) hintParts.push('output setNote with pitch change');
+            if (intent.tightenRhythm) hintParts.push('output moveNote or setNote startBeat/durationBeat');
+            fixDetail = hintParts.length > 1 ? hintParts.join('; ') + ' — do not output velocity-only' : 'intent requires pitch or timing changes; output setNote with pitch and/or moveNote/setNote startBeat/durationBeat';
           } else if (res1.reason === 'patch_rejected'){
             fixDetail = (res1.detail && typeof res1.detail === 'string') ? res1.detail : 'patch validation failed';
             if (fixDetail.length > 200) fixDetail = fixDetail.slice(0, 197) + '...';
@@ -672,6 +832,7 @@
       };
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
       if (requestedPresetId && !SAFE_PRESET_ALLOWLIST[requestedPresetId]) patchSummaryBase.reason = 'unknown_preset_fallback';
+      patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
       if (opsN === 0){
         return {
@@ -684,7 +845,7 @@
             ops:0,
             byOp:{},
             examples:[]
-          })
+          }, _computePatchTypeSummary([]))
         };
       }
 
@@ -750,7 +911,7 @@
           ops:opsN,
           byOp:_opsByOp(patch.ops),
           examples
-        })
+        }, _computePatchTypeSummary(patch.ops))
       };
 
       opts.setProjectFromV2(project);

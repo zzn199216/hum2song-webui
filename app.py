@@ -25,6 +25,7 @@ from core.utils import TaskManager, cleanup_old_files, ensure_dir
 from routers.generation import router as generation_router
 from routers.health import router as health_router
 
+from routers.export import router as export_router
 from routers.score import router as score_router
 
 logger = logging.getLogger("hum2song")
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(generation_router)
     app.include_router(score_router)
+    app.include_router(export_router)
 
     # ---- Static ----
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

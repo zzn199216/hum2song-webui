@@ -71,14 +71,16 @@
     }
   }
 
-function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset){
+function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset, selectedClipId){
     clip = clip || {};
     stats = stats || {};
     fmtSec = (typeof fmtSec === 'function') ? fmtSec : _defaultFmtSec;
     escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
 
     const id = escapeHtml(clip.id || '');
+    const isSelected = selectedClipId && String(clip.id || '') === String(selectedClipId);
     const presetVal = (selectedPreset != null && selectedPreset !== '') ? String(selectedPreset) : '';
+    const presetLabel = presetVal === 'dynamics_accent' ? 'Dynamics Accent' : presetVal === 'dynamics_level' ? 'Dynamics Level' : presetVal === 'duration_gentle' ? 'Duration Gentle' : 'Default';
     const name = escapeHtml(clip.name || 'Untitled');
     const notes = Number(stats.count ?? stats.notes ?? 0) || 0;
     const spanSec = Number(stats.spanSec ?? 0) || 0;
@@ -114,44 +116,10 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
       : '';
 
 
-    let revHtml = '';
-    if (revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 1){
-      const active = String(revInfo.activeRevisionId || headRevId || '');
-      const items = revInfo.items || [];
-      const activeItem = items.find(it => String(it.revisionId || '') === active) || items.find(it => it.isActive) || items[0] || null;
-      const hasParent = !!(activeItem && activeItem.parentRevisionId);
-
-      const opts = items.map(it => {
-        const ridRaw = String(it.revisionId || '');
-        const rid = escapeHtml(ridRaw);
-        let label = it.label;
-        if (!label){
-          const shortRid = _shortRev(ridRaw);
-          const shortPar = _shortRev(it.parentRevisionId || '');
-          label = it.parentRevisionId ? (`Rev ${shortRid}${shortPar ? ` ← ${shortPar}` : ''}`) : (`Original ${shortRid}`);
-        }
-        label = escapeHtml(label);
-        const sel = (ridRaw === active) ? ' selected' : '';
-        return `<option value="${rid}"${sel}>${label}</option>`;
-      }).join('');
-
-      const selectDisabled = (items.length <= 1) ? ' disabled' : '';
-      const rollbackDisabled = hasParent ? '' : ' disabled';
-      const useDisabled = (items.length <= 1) ? ' disabled' : '';
-      const abDisabled = hasParent ? '' : ' disabled';
-
-      revHtml = (
-        `<div class="clip-revisions" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">` +
-          `<span style="font-size:12px; opacity:0.7;">Version</span>` +
-          `<select data-act="revSelect" data-id="${id}" style="padding:4px 6px; max-width:260px;"${selectDisabled}>${opts}</select>` +
-          `<button class="btn" data-act="revActivate" data-id="${id}" style="padding:4px 8px;"${useDisabled}>Use</button>` +
-          `<button class="btn" data-act="rollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>Rollback</button>` +
-          `<button class="btn" data-act="abToggle" data-id="${id}" style="padding:4px 8px;"${abDisabled}>A/B</button>` +
-        `</div>`
-      );
-    }
-// Optimize feedback (shown after clicking Optimize, even when no-op)
-    let optStatusHtml = '';
+    // PR-D2a: History (versions/Use/Rollback/A-B) moved to Inspector; not rendered per-card.
+// Optimize feedback: short line for primary, full block for advanced
+    let lastOptimizeShort = '';
+    let optStatusFullHtml = '';
     try{
       const agent = clip && clip.meta && clip.meta.agent;
       if (agent){
@@ -174,6 +142,9 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
           }
 
           const when = _fmtTs(agent.appliedAt);
+
+          // Short line for primary
+          lastOptimizeShort = `Last: ${escapeHtml(msg)}`;
 
           // PR-3: Display executedPreset, ops, reason from patchSummary (compute BEFORE using in template)
           let presetBadge = '';
@@ -199,59 +170,96 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
           ].filter(Boolean);
           const badgeText = badgeParts.length > 0 ? ` | ${badgeParts.join(' | ')}` : '';
 
-          let detailHtml = '';
-          try{
-            if (agent.patchSummary && typeof agent.patchSummary === 'object'){
-              const js = _safeJson(agent.patchSummary, 2200);
-              detailHtml =
-                `<details class="clip-opt-detail" style="margin-top:6px; font-size:12px; opacity:0.85;">` +
-                  `<summary style="cursor:pointer; user-select:none;">Patch summary</summary>` +
-                  `<pre style="white-space:pre-wrap; margin:6px 0 0 0; padding:6px; border-radius:8px; background:rgba(255,255,255,0.04); max-width:420px; overflow:auto;">` +
-                    `${escapeHtml(js)}` +
-                  `</pre>` +
-                `</details>`;
-            }
-          }catch(_){ /* ignore */ }
-          
-          optStatusHtml =
+          optStatusFullHtml =
             `<div class="clip-opt-status" data-role="optStatus" data-id="${id}" ` +
             `style="margin-top:6px; font-size:12px; opacity:0.75;">` +
             `Optimize: ${escapeHtml(msg)}${badgeText}` +
             (when ? ` · ${escapeHtml(when)}` : ``) +
-            `</div>` +
-            detailHtml;
+            `</div>`;
         }
       }
     }catch(_){ /* ignore */ }
 
+    const lastLineHtml = lastOptimizeShort ? `<div class="clip-last-opt" style="font-size:11px; opacity:0.75; margin-top:2px;">${lastOptimizeShort}</div>` : '';
 
+    const advancedHtml =
+      `<details class="clipAdvanced" style="margin-top:6px; font-size:12px;">` +
+        `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Details</summary>` +
+        `<div class="clip-advanced-content" style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">` +
+          revLine +
+          optStatusFullHtml +
+          `<div style="margin-top:8px;">` +
+            `<button class="btn" data-act="remove" data-id="${id}" style="padding:4px 8px;">Remove</button>` +
+          `</div>` +
+        `</div>` +
+      `</details>`;
 
     return (
-      `<div class="clip-card" data-clip-id="${id}">` +
+      `<div class="clip-card clipCard${isSelected ? ' clipSelected' : ''}" data-clip-id="${id}">` +
         `<div class="clip-title">${name}</div>` +
         `<div class="clip-sub">${notes} notes · ${fmtSec(spanSec)}</div>` +
-        revLine +
-        `<div class="clip-actions" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">` +
+        lastLineHtml +
+        `<div class="clip-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center;">` +
           `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
           `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
           `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
-          `<select data-act="optimizePreset" data-id="${id}" style="padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit;">` +
-            `<option value=""${presetVal === '' ? ' selected' : ''}>Default</option>` +
-            `<option value="dynamics_accent"${presetVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
-            `<option value="dynamics_level"${presetVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
-            `<option value="duration_gentle"${presetVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
-          `</select>` +
+          (presetVal ? `<span class="clip-preset-label" style="font-size:11px; opacity:0.7;">Preset: ${escapeHtml(presetLabel)}</span>` : '') +
           `<button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
-          `<button class="btn" data-act="remove" data-id="${id}">Remove</button>` +
         `</div>` +
-        optStatusHtml +
-        revHtml +
+        advancedHtml +
       `</div>`
     );
+  }
+
+  /** PR-D2a: History controls HTML for Inspector (versions + Use/Rollback/A-B). */
+  function historyControlsHTML(clipId, revInfo, escapeHtml){
+    escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
+    const id = escapeHtml(clipId || '');
+    const clip = {};
+    const headRevId = '';
+    const headParentId = '';
+    let revHtml = '';
+    if (revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 1){
+      const active = String(revInfo.activeRevisionId || '');
+      const items = revInfo.items || [];
+      const activeItem = items.find(it => String(it.revisionId || '') === active) || items.find(it => it && it.isActive) || items[0] || null;
+      const hasParent = !!(activeItem && activeItem.parentRevisionId);
+
+      const opts = items.map(it => {
+        const ridRaw = String(it.revisionId || '');
+        const rid = escapeHtml(ridRaw);
+        let label = it.label;
+        if (!label){
+          const shortRid = _shortRev(ridRaw);
+          const shortPar = _shortRev(it.parentRevisionId || '');
+          label = it.parentRevisionId ? (`Rev ${shortRid}${shortPar ? ` ← ${shortPar}` : ''}`) : (`Original ${shortRid}`);
+        }
+        label = escapeHtml(label);
+        const sel = (ridRaw === active) ? ' selected' : '';
+        return `<option value="${rid}"${sel}>${label}</option>`;
+      }).join('');
+
+      const selectDisabled = (items.length <= 1) ? ' disabled' : '';
+      const rollbackDisabled = hasParent ? '' : ' disabled';
+      const useDisabled = (items.length <= 1) ? ' disabled' : '';
+      const abDisabled = hasParent ? '' : ' disabled';
+
+      revHtml = (
+        `<div class="clip-revisions" style="margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">` +
+          `<span style="font-size:12px; opacity:0.7;">Version</span>` +
+          `<select data-act="inspRevSelect" data-id="${id}" style="padding:4px 6px; max-width:220px;"${selectDisabled}>${opts}</select>` +
+          `<button class="btn" data-act="inspRevActivate" data-id="${id}" style="padding:4px 8px;"${useDisabled}>Use</button>` +
+          `<button class="btn" data-act="inspRollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>Rollback</button>` +
+          `<button class="btn" data-act="inspAbToggle" data-id="${id}" style="padding:4px 8px;"${abDisabled}>A/B</button>` +
+        `</div>`
+      );
+    }
+    return revHtml;
   }
 
   return {
     emptyMessage,
     clipCardInnerHTML,
+    historyControlsHTML,
   };
 });

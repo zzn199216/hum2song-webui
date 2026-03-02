@@ -59,6 +59,39 @@
         return s.length > 6 ? s.slice(-6) : s;
       }
 
+      // PR-B3a: Format patch type summary for Quick Optimize display.
+      // PR-E5b: Append templateId + promptVersion from promptMeta when present.
+      function _formatPromptMetaSuffix(ps){
+        if (!ps || !ps.promptMeta || typeof ps.promptMeta !== 'object') return '';
+        const pm = ps.promptMeta;
+        const id = (pm.templateId != null && String(pm.templateId).trim()) ? String(pm.templateId) : 'Custom';
+        const ver = (pm.promptVersion != null && String(pm.promptVersion).trim()) ? String(pm.promptVersion) : 'manual_v0';
+        return 'Template: ' + id + ' (' + ver + ')';
+      }
+      function _formatPatchTypeSummary(ps){
+        if (!ps || typeof ps !== 'object') return '';
+        let base = '';
+        if ((ps.ops != null && ps.ops === 0) || ps.noChanges) base = '(no changes)';
+        else if (ps.isVelocityOnly === true) base = 'Changed: velocity only';
+        else {
+          const parts = [];
+          if (ps.hasPitchChange === true) parts.push('pitch ✓');
+          if (ps.hasTimingChange === true) parts.push('timing ✓');
+          if (ps.hasStructuralChange === true) parts.push('structure ✓');
+          base = parts.length === 0 ? 'Changed: velocity only' : 'Changed: ' + parts.join(' ');
+        }
+        const suffix = _formatPromptMetaSuffix(ps);
+        return suffix ? base + ' | ' + suffix : base;
+      }
+
+      // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
+      const TEMPLATES_V1_UI = {
+        fix_pitch_v1: { label: 'Fix Pitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
+        tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
+        clean_outliers_v1: { label: 'Clean Outliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
+        bluesy_v1: { label: 'Bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
+      };
+
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
       // may be out of scope, causing a runtime ReferenceError and resulting in a blank
@@ -364,7 +397,7 @@
 
         // Ensure Tone.js is available in the browser.
         // - In Node tests there is no `document`, so this must be guarded.
-        // - In the browser, local vendor may be missing; we attempt a CDN fallback.
+        // - Default: try local vendor only. CDN only if window.H2S_ALLOW_CDN_TONE === true.
         async ensureTone(){
           const r = (typeof window !== 'undefined') ? window : global;
           if (r && r.Tone) return true;
@@ -376,7 +409,10 @@
             if (r.Tone) return true;
           }
 
-          const SRC = 'https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js';
+          const SRC_LOCAL = '/static/pianoroll/vendor/tone/Tone.js';
+          const SRC_CDN = 'https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js';
+          const sources = [SRC_LOCAL];
+          if (r && r.H2S_ALLOW_CDN_TONE === true) sources.push(SRC_CDN);
 
           return await new Promise((resolve) => {
             try {
@@ -391,13 +427,21 @@
                 return;
               }
 
-              const s = document.createElement('script');
-              s.src = SRC;
-              s.async = true;
-              s.onload = () => resolve(!!r.Tone);
-              s.onerror = () => resolve(false);
-              document.head.appendChild(s);
-              setTimeout(() => resolve(!!r.Tone), 3000);
+              let idx = 0;
+              let toId = 0;
+              const tryNext = () => {
+                if (r.Tone) return resolve(true);
+                if (idx >= sources.length) return resolve(false);
+                if (toId) clearTimeout(toId);
+                const s = document.createElement('script');
+                s.src = sources[idx++];
+                s.async = true;
+                s.onload = () => resolve(!!r.Tone);
+                s.onerror = () => tryNext();
+                document.head.appendChild(s);
+                toId = setTimeout(() => resolve(!!r.Tone), 3000);
+              };
+              tryNext();
             } catch(e){
               resolve(false);
             }
@@ -662,6 +706,7 @@
       this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
       this.modalRequestDraw();
       this.modalBindControls();
+      this.modalUpdateEditorOptimizeUI();
       log(`Open editor: ${clip.name}`);
     },
 
@@ -906,15 +951,52 @@
           const preset = app.getOptimizePresetForClip(clipId);
           sel.value = (preset != null && preset !== '') ? String(preset) : '';
         }
+        const opts = app && typeof app.getOptimizeOptions === 'function' ? app.getOptimizeOptions(clipId) : null;
         const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-        if (promptEl && app && typeof app.getOptimizeOptions === 'function'){
-          if (document.activeElement !== promptEl){
-            const opts = app.getOptimizeOptions(clipId);
-            promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
-          }
+        if (promptEl && document.activeElement !== promptEl){
+          promptEl.value = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? opts.userPrompt : '';
+        }
+        const intent = (opts && opts.intent && typeof opts.intent === 'object') ? opts.intent : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+        const fixPitchEl = (typeof document !== 'undefined') ? document.getElementById('qoptFixPitch') : null;
+        const tightenRhythmEl = (typeof document !== 'undefined') ? document.getElementById('qoptTightenRhythm') : null;
+        const reduceOutliersEl = (typeof document !== 'undefined') ? document.getElementById('qoptReduceOutliers') : null;
+        if (fixPitchEl) fixPitchEl.checked = !!intent.fixPitch;
+        if (tightenRhythmEl) tightenRhythmEl.checked = !!intent.tightenRhythm;
+        if (reduceOutliersEl) reduceOutliersEl.checked = !!intent.reduceOutliers;
+        this._selectedTemplateId = (opts && opts.templateId != null && String(opts.templateId).trim()) ? String(opts.templateId).trim() : null;
+        const templateLabelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeTemplateLabel') : null;
+        if (templateLabelEl) {
+          const tmpl = this._selectedTemplateId && TEMPLATES_V1_UI[this._selectedTemplateId] ? TEMPLATES_V1_UI[this._selectedTemplateId] : null;
+          templateLabelEl.textContent = tmpl ? ('Template: ' + tmpl.label) : 'Template: Custom';
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
+        const quickPresetEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
+        const quickModeEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeMode') : null;
+        const quickModelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeModel') : null;
+        if (quickPresetEl && app && typeof app.getOptimizePresetForClip === 'function'){
+          const preset = app.getOptimizePresetForClip(clipId);
+          quickPresetEl.value = (preset != null && preset !== '') ? String(preset) : 'llm_v0';
+        }
+        try{
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api){
+            const cfg = api.loadLlmConfig();
+            if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? 'Full mode' : 'Safe mode';
+            if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ('Model: ' + cfg.model) : 'Model: (unset)';
+          } else {
+            if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+            if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
+          }
+        }catch(_){
+          if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+          if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
+        }
+        const quickSummaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
+        if (quickSummaryEl){
+          const ps = (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) || null;
+          quickSummaryEl.textContent = ps ? _formatPatchTypeSummary(ps) : '(no result yet)';
+        }
       }catch(e){}
     },
 
@@ -1183,7 +1265,7 @@
       const setOptimizeControlsDisabled = (disabled) => {
         const doc = typeof document !== 'undefined' ? document : null;
         if (!doc) return;
-        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt'];
+        const ids = ['editorOptimizePreset', 'editorOptimizePrompt', 'btnEditorOptimize', 'btnEditorRegenerateOptimize', 'btnEditorUndoOptimize', 'btnEditorResetOptimizePrompt', 'editorQuickOptimizePreset', 'btnEditorQuickOptimize', 'qoptFixPitch', 'qoptTightenRhythm', 'qoptReduceOutliers'];
         for (const id of ids) {
           const el = doc.getElementById(id);
           if (!el) continue;
@@ -1191,17 +1273,61 @@
           else el.disabled = !!disabled;
         }
       };
+      // PR-B2-min: Read intent + preset + prompt from Quick Optimize UI for setOptimizeOptions
+      const readOptimizeOptionsFromUI = () => {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return { requestedPresetId: null, userPrompt: null, intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: false } };
+        const sel = doc.getElementById('editorOptimizePreset') || doc.getElementById('editorQuickOptimizePreset');
+        const promptEl = doc.getElementById('editorOptimizePrompt');
+        const fixPitch = doc.getElementById('qoptFixPitch');
+        const tightenRhythm = doc.getElementById('qoptTightenRhythm');
+        const reduceOutliers = doc.getElementById('qoptReduceOutliers');
+        const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
+        const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
+        const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
+        const intent = {
+          fixPitch: !!(fixPitch && fixPitch.checked),
+          tightenRhythm: !!(tightenRhythm && tightenRhythm.checked),
+          reduceOutliers: !!(reduceOutliers && reduceOutliers.checked)
+        };
+        const g = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
+        const rt = (g && g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+        const app = (g && g.H2SApp) ? g.H2SApp : null;
+        const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+        let templateId = (rt && rt._selectedTemplateId != null && String(rt._selectedTemplateId).trim()) ? String(rt._selectedTemplateId).trim() : null;
+        if (!templateId && clipId && app && typeof app.getOptimizeOptions === 'function') {
+          const stored = app.getOptimizeOptions(clipId);
+          templateId = (stored && stored.templateId != null && String(stored.templateId).trim()) ? String(stored.templateId).trim() : null;
+        }
+        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null };
+      };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;
         if (!doc) return;
         const el = doc.getElementById('editorOptStatus');
         if (el) el.textContent = text || '';
       };
+      // PR-B4b: Actionable quality gate message (model-unset hint when applicable).
+      const getQualityGateFailureMessage = (forStatus) => {
+        let modelHint = '';
+        try {
+          const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+          if (api) {
+            const cfg = api.loadLlmConfig();
+            const m = (cfg && cfg.model != null) ? String(cfg.model).trim() : '';
+            if (!m) modelHint = 'Model is unset — open Advanced → LLM Settings to choose a model. ';
+          }
+        } catch (_) {}
+        const base = 'Quality gate failed (velocity-only). Try: (1) switch to a stronger model, (2) turn off Tighten Rhythm, or (3) add prompt: "fix pitch/timing, not just dynamics".';
+        if (forStatus) return modelHint + 'Quality gate failed. See summary for next steps.';
+        return modelHint + base;
+      };
       // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
       const llmFriendlyReason = (reason) => {
         const r = (reason != null && typeof reason === 'string') ? reason : '';
         if (/llm_config_missing|llm_client_not_loaded/i.test(r)) return 'Please configure Base URL and Model in Advanced → LLM Settings.';
         if (/llm_no_valid_json/i.test(r)) return 'LLM response did not contain a valid JSON patch.';
+        if (/quality_velocity_only/i.test(r)) return getQualityGateFailureMessage(true);
         if (/patch_rejected|ops_not_array|op\[/.test(r)) return 'Patch validation failed (LLM output not accepted).';
         if (/timeout|request timeout/i.test(r)) return 'LLM request timed out.';
         if (/401|403|Unauthorized/i.test(r)) return 'Unauthorized (check token).';
@@ -1242,7 +1368,11 @@
         if (presetId === 'llm_v0') {
           const detail = (res.detail != null && typeof res.detail === 'string') ? res.detail : '';
           const isSafeModeRejection = res.reason === 'patch_rejected' && (detail.indexOf('disallowed_op') >= 0 || detail.indexOf('disallowed_field') >= 0);
-          const msg = isSafeModeRejection ? 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.' : llmFriendlyReason(res.reason);
+          const isQualityGateRejection = res.reason === 'patch_rejected' && detail === 'quality_velocity_only';
+          let msg;
+          if (isSafeModeRejection) msg = 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.';
+          else if (isQualityGateRejection) msg = getQualityGateFailureMessage(true);
+          else msg = llmFriendlyReason(res.reason);
           return 'failed: ' + msg + getLlmModeLabel('llm_v0');
         }
         const ps = res.patchSummary;
@@ -1303,12 +1433,9 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.optimizeClip !== 'function') return;
-              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
-              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
-              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              if (app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId);
+              const presetId = opts.requestedPresetId;
               setEditorOptStatus('running...');
               setOptimizeControlsDisabled(true);
               Promise.resolve(app.optimizeClip(clipId)).then(function(res){
@@ -1324,6 +1451,19 @@
                 if (el && clip && clip.meta && clip.meta.agent){
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
                   else if (typeof clip.meta.agent.patchOps === 'number') el.textContent = JSON.stringify({ ops: clip.meta.agent.patchOps }, null, 2);
+                }
+                const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
+                const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
+                if (summaryEl){
+                  if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
+                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
+                    const qgMsg = getQualityGateFailureMessage(false);
+                    const tmplSuffix = ps && _formatPromptMetaSuffix(ps) ? (' <span style="font-size:10px; opacity:0.85;">| ' + _formatPromptMetaSuffix(ps) + '</span>') : '';
+                    summaryEl.innerHTML = qgMsg + tmplSuffix + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
+                    const link = summaryEl.querySelector('.qopt-simplify');
+                    if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
+                  }
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
@@ -1354,12 +1494,8 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.setOptimizeOptions !== 'function') return;
-              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-              const sel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
-              const value = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              const promptVal = (value.trim() !== '') ? value.trim() : null;
-              app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              app.setOptimizeOptions(opts, clipId);
             }catch(e){}
           };
         }
@@ -1379,16 +1515,126 @@
               const clipId = rt.state.modal && rt.state.modal.clipId;
               if (!clipId) return;
               const app = g.H2SApp;
-              const val = (ev.target && ev.target.value) ? String(ev.target.value).trim() : null;
-              const promptEl = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePrompt') : null;
-              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
-              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: val, userPrompt: promptVal }, clipId);
+              if (!app || typeof app.setOptimizeOptions !== 'function') return;
+              const opts = readOptimizeOptionsFromUI();
+              opts.requestedPresetId = (ev.target && ev.target.value) ? String(ev.target.value).trim() || null : null;
+              app.setOptimizeOptions(opts, clipId);
             }catch(e){}
           };
         }
         selPreset.removeEventListener('change', H.onPresetChange);
         selPreset.addEventListener('change', H.onPresetChange);
+      }
+
+      // PR-B1: Quick Optimize — sync preset to main, reuse btnEditorOptimize (no new optimize path)
+      const quickPresetSel = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
+      const btnQuickOptimize = (typeof document !== 'undefined') ? document.getElementById('btnEditorQuickOptimize') : null;
+      if (quickPresetSel){
+        if (!H.onQuickPresetChange){
+          H.onQuickPresetChange = (ev) => {
+            try{
+              const mainSel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const val = (ev.target && ev.target.value != null) ? String(ev.target.value) : '';
+              if (mainSel){ mainSel.value = val; mainSel.dispatchEvent(new Event('change', { bubbles: true })); }
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (rt && typeof rt.modalUpdateEditorOptimizeUI === 'function') rt.modalUpdateEditorOptimizeUI();
+            }catch(e){}
+          };
+        }
+        quickPresetSel.removeEventListener('change', H.onQuickPresetChange, true);
+        quickPresetSel.addEventListener('change', H.onQuickPresetChange, true);
+      }
+      if (btnQuickOptimize){
+        if (!H.onQuickOptimizeClick){
+          H.onQuickOptimizeClick = (ev) => {
+            try{
+              ev.preventDefault();
+              ev.stopPropagation();
+              const quickSel = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
+              const mainSel = (typeof document !== 'undefined') ? document.getElementById('editorOptimizePreset') : null;
+              const val = (quickSel && quickSel.value != null) ? String(quickSel.value) : '';
+              if (mainSel){ mainSel.value = val; }
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              const app = g.H2SApp;
+              const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+              if (clipId && app && app.setOptimizeOptions) app.setOptimizeOptions(readOptimizeOptionsFromUI(), clipId);
+              const btnOpt = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimize') : null;
+              if (btnOpt) btnOpt.click();
+            }catch(e){}
+          };
+        }
+        btnQuickOptimize.removeEventListener('click', H.onQuickOptimizeClick, true);
+        btnQuickOptimize.addEventListener('click', H.onQuickOptimizeClick, true);
+      }
+
+      // PR-E2: Template buttons — set templateId, intent, prompt, preset llm_v0; persist; no auto-run
+      const templatesContainer = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeTemplates') : null;
+      if (templatesContainer && !H.onTemplateButtonClick){
+        H.onTemplateButtonClick = (ev) => {
+          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-template-id]') : null;
+          if (!btn) return;
+          const templateId = btn.getAttribute('data-template-id');
+          if (!templateId || !TEMPLATES_V1_UI[templateId]) return;
+          const tmpl = TEMPLATES_V1_UI[templateId];
+          const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+          const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+          if (!clipId) return;
+          const app = g.H2SApp;
+          if (!app || typeof app.setOptimizeOptions !== 'function') return;
+          try {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const quickPresetEl = document.getElementById('editorQuickOptimizePreset');
+            const mainPresetEl = document.getElementById('editorOptimizePreset');
+            if (rt) rt._selectedTemplateId = templateId;
+            if (quickPresetEl) quickPresetEl.value = 'llm_v0';
+            if (mainPresetEl) mainPresetEl.value = 'llm_v0';
+            const fixPitchEl = document.getElementById('qoptFixPitch');
+            const tightenRhythmEl = document.getElementById('qoptTightenRhythm');
+            const reduceOutliersEl = document.getElementById('qoptReduceOutliers');
+            if (fixPitchEl) fixPitchEl.checked = !!tmpl.intent.fixPitch;
+            if (tightenRhythmEl) tightenRhythmEl.checked = !!tmpl.intent.tightenRhythm;
+            if (reduceOutliersEl) reduceOutliersEl.checked = !!tmpl.intent.reduceOutliers;
+            const promptEl = document.getElementById('editorOptimizePrompt');
+            if (promptEl) promptEl.value = tmpl.seed || '';
+            const opts = readOptimizeOptionsFromUI();
+            opts.templateId = templateId;
+            app.setOptimizeOptions(opts, clipId);
+            const labelEl = document.getElementById('editorQuickOptimizeTemplateLabel');
+            if (labelEl) labelEl.textContent = 'Template: ' + tmpl.label;
+          } catch (e) {}
+        };
+      }
+      if (templatesContainer && H.onTemplateButtonClick){
+        templatesContainer.removeEventListener('click', H.onTemplateButtonClick, true);
+        templatesContainer.addEventListener('click', H.onTemplateButtonClick, true);
+      }
+
+      // PR-B2-min: Intent checkboxes — persist on change (bound once)
+      const intentCheckboxIds = ['qoptFixPitch', 'qoptTightenRhythm', 'qoptReduceOutliers'];
+      for (const id of intentCheckboxIds){
+        const el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+        if (el && !H.onIntentCheckboxChange){
+          H.onIntentCheckboxChange = () => {
+            try{
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              const clipId = rt && rt.state.modal && rt.state.modal.clipId;
+              if (!clipId) return;
+              const app = g.H2SApp;
+              if (!app || typeof app.setOptimizeOptions !== 'function') return;
+              const opts = readOptimizeOptionsFromUI();
+              app.setOptimizeOptions(opts, clipId);
+            }catch(e){}
+          };
+          break;
+        }
+      }
+      for (const id of intentCheckboxIds){
+        const el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+        if (el && H.onIntentCheckboxChange){
+          el.removeEventListener('change', H.onIntentCheckboxChange, true);
+          el.addEventListener('change', H.onIntentCheckboxChange, true);
+        }
       }
 
       // PR-5/PR-6b/PR-6d: Undo Optimize (Rollback) — disable during run, refresh UI, status
@@ -1433,15 +1679,12 @@
               if (!clipId) return;
               const app = g.H2SApp;
               if (!app || typeof app.optimizeClip !== 'function') return;
-              const sel = document.getElementById('editorOptimizePreset');
-              const promptEl = document.getElementById('editorOptimizePrompt');
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              const promptRaw = (promptEl && promptEl.value != null) ? String(promptEl.value) : '';
-              const promptVal = (promptRaw.trim() !== '') ? promptRaw.trim() : null;
-              if (app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: promptVal }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              if (app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId);
+              const presetId = opts.requestedPresetId;
               setEditorOptStatus('running...');
               setOptimizeControlsDisabled(true);
-              Promise.resolve(app.optimizeClip(clipId, { requestedPresetId: presetId || null, userPrompt: promptVal })).then(function(res){
+              Promise.resolve(app.optimizeClip(clipId, opts)).then(function(res){
                 if (res && res.ok && (res.ops != null && res.ops > 0)){
                   rt.modalRefreshDraftFromClip();
                 } else {
@@ -1450,6 +1693,19 @@
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
+                const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
+                const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
+                if (summaryEl){
+                  if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
+                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
+                    const qgMsg = getQualityGateFailureMessage(false);
+                    const tmplSuffix = ps && _formatPromptMetaSuffix(ps) ? (' <span style="font-size:10px; opacity:0.85;">| ' + _formatPromptMetaSuffix(ps) + '</span>') : '';
+                    summaryEl.innerHTML = qgMsg + tmplSuffix + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
+                    const link = summaryEl.querySelector('.qopt-simplify');
+                    if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
+                  }
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
+                }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
                   saveLlmDebug(clipId, res.llmDebug);
@@ -1481,9 +1737,9 @@
               const app = g.H2SApp;
               const promptEl = document.getElementById('editorOptimizePrompt');
               if (promptEl) promptEl.value = '';
-              const sel = document.getElementById('editorOptimizePreset');
-              const presetId = (sel && sel.value) ? String(sel.value).trim() : null;
-              if (app && app.setOptimizeOptions) app.setOptimizeOptions({ requestedPresetId: presetId || null, userPrompt: null }, clipId);
+              const opts = readOptimizeOptionsFromUI();
+              opts.userPrompt = null;
+              if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId);
             }catch(e){}
           };
         }
@@ -1515,6 +1771,8 @@
               const velocityOnly = (velocityOnlyEl && velocityOnlyEl.checked === true) ? true : false;
               api.saveLlmConfig({ baseUrl: baseUrl, model: model, authToken: authToken, velocityOnly: velocityOnly });
               if (statusEl) statusEl.textContent = 'Saved';
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (rt && typeof rt.modalUpdateEditorOptimizeUI === 'function') rt.modalUpdateEditorOptimizeUI();
             }catch(e){}
           };
         }
@@ -1549,6 +1807,8 @@
                 if (modelSelectEl) modelSelectEl.value = '';
                 if (statusEl) statusEl.textContent = 'Config reset';
               }
+              const rt = (g.H2SApp && g.H2SApp.editorRt) ? g.H2SApp.editorRt : null;
+              if (rt && typeof rt.modalUpdateEditorOptimizeUI === 'function') rt.modalUpdateEditorOptimizeUI();
             }catch(e){}
           };
         }

@@ -134,14 +134,16 @@
     .clipCard{
       border:1px solid var(--border);
       border-radius:14px;
-      padding:10px;
+      padding:8px 10px;
       background: rgba(0,0,0,.18);
       display:flex;
       flex-direction:column;
-      gap:8px;
+      gap:6px;
       cursor:grab;
     }
     .clipCard:hover{ border-color: rgba(59,130,246,.45); }
+    .clipCard.clipSelected{ border-color: rgba(80,140,255,0.8); background: rgba(80,140,255,0.08); }
+    .clipAdvanced summary{ font-size:11px; }
     .clipTitle{ font-weight:800; font-size:13px; }
     .clipMeta{ display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
     .miniBtns{ display:flex; gap:8px; }
@@ -483,10 +485,10 @@
       color: #111;
     }
     /* Preset and Gateway Preset dropdowns — same readability pattern */
-    #editorOptimizePreset, #editorLlmGatewayPreset{
+    #editorOptimizePreset, #editorLlmGatewayPreset, #editorQuickOptimizePreset{
       color: rgba(255,255,255,.90);
     }
-    #editorOptimizePreset option, #editorLlmGatewayPreset option{
+    #editorOptimizePreset option, #editorLlmGatewayPreset option, #editorQuickOptimizePreset option{
       background: #fff;
       color: #111;
     }
@@ -515,13 +517,18 @@
       <span style="opacity:.8;">Studio</span>
       <span class="badge">MVP</span>
     </div>
-    <div class="row">
-      <button id="btnRecord" class="btn icon" title="Record (not implemented)" disabled>R</button>
-      <button id="btnStop" class="btn icon" title="Stop">S</button>
+    <div class="row" style="align-items:center; gap:8px;">
+      <button id="btnRecord" class="btn" title="Record mic (R)">&#128308; Record</button>
+      <span id="studioRecordTimer" class="smallmuted" style="display:none; min-width:42px; font-variant-numeric:tabular-nums;">00:00</span>
+      <canvas id="studioRecordWaveform" width="160" height="28" style="display:none; vertical-align:middle; background:rgba(0,0,0,.25); border-radius:6px;" title="Recording waveform"></canvas>
+      <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
+      <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
       <button id="btnUpload" class="btn">Upload WAV</button>
     </div>
     <div class="spacer"></div>
+    <div id="studioImportStatus" class="smallmuted" style="min-width:120px;"></div>
+    <button id="btnCancelImport" class="btn ghost" style="display:none;">Cancel</button>
     <div class="smallmuted">Local clips + timeline. Double-click a clip to edit.</div>
   </div>
 
@@ -536,9 +543,13 @@
         <div class="col">
           <div class="pill">Generate: upload WAV -> backend -> clip auto-added</div>
           <div class="row">
-            <button id="btnUseLast" class="btn primary" style="opacity:.6" disabled>Use last recording</button>
+            <button id="btnUseLast" class="btn primary" style="opacity:.6" disabled title="Generate clip from last recording">Use last recording</button>
             <button id="btnClear" class="btn ghost">Clear</button>
           </div>
+          <label class="row" style="align-items:center; gap:6px; margin-top:4px; font-size:11px; cursor:pointer;">
+            <input type="checkbox" id="chkAutoOpenAfterImport" checked />
+            <span>Auto-open editor after import</span>
+          </label>
           <div class="hr"></div>
           <div id="clipList" class="col"></div>
         </div>
@@ -590,7 +601,16 @@
         <div class="hr"></div>
 
         <div class="insSection">
-          <h4>Selection</h4>
+          <h4>Clip Details</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected from Clip Library (shows History & Results).</div>
+          <div id="selectedClipBox" class="muted">Click a clip in the library to view History.</div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="insSection">
+          <h4>Timeline Selection</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected instance on timeline (start/transpose/edit).</div>
           <div id="selectionBox" class="muted">Select a clip instance on timeline.</div>
         </div>
 
@@ -600,6 +620,8 @@
           <h4>Actions</h4>
           <div class="col">
             <button id="btnExportProject" class="btn">Export Project JSON</button>
+            <button id="btnExportMidi" class="btn">Export MIDI</button>
+            <button id="btnExportWav" class="btn">Export WAV</button>
             <button id="btnImportProject" class="btn">Import Project JSON</button>
           </div>
         </div>
@@ -671,18 +693,53 @@
               </div>
             </details>
             <div class="hr"></div>
-            <div class="help" style="font-size:11px; opacity:0.85; margin-bottom:2px;">Prompt (blank = default)</div>
-            <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
-            <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
-            <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
-            <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
-            <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
-            <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
+            <div style="margin-bottom:10px; padding:8px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.15);">
+              <div style="font-weight:700; margin-bottom:6px;">Quick Optimize</div>
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+                <select id="editorQuickOptimizePreset" class="btn" style="padding:6px 8px; font-size:12px;">
+                  <option value="">Default</option>
+                  <option value="noop">No-op</option>
+                  <option value="dynamics_accent">Dynamics Accent</option>
+                  <option value="dynamics_level">Dynamics Level</option>
+                  <option value="duration_gentle">Duration Gentle</option>
+                  <option value="llm_v0" selected>LLM v0</option>
+                </select>
+                <button id="btnEditorQuickOptimize" class="btn primary" type="button">Run Optimize</button>
+              </div>
+              <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
+                <span id="editorQuickOptimizeTemplateLabel" class="muted">Template: Custom</span>
+                <div id="editorQuickOptimizeTemplates" style="display:flex; gap:4px; flex-wrap:wrap;">
+                  <button type="button" class="btn mini" data-template-id="fix_pitch_v1">Fix Pitch</button>
+                  <button type="button" class="btn mini" data-template-id="tighten_rhythm_v1">Tighten Rhythm</button>
+                  <button type="button" class="btn mini" data-template-id="clean_outliers_v1">Clean Outliers</button>
+                  <button type="button" class="btn mini" data-template-id="bluesy_v1">Bluesy</button>
+                </div>
+              </div>
+              <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /> Fix Pitch</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /> Tighten Rhythm</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /> Reduce Outliers</label>
+              </div>
+              <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                <span id="editorQuickOptimizeMode" class="badge">Safe mode</span>
+                <span id="editorQuickOptimizeModel" class="muted">Model: (unset)</span>
+              </div>
+              <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
+            </div>
             <details class="help" style="margin-top:8px;">
               <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
               <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
                 <span>Rev: <span id="editorRevId">-</span></span>
                 <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
+                <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;">Prompt (blank = default)</div>
+                <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
+                <div style="margin-top:6px;">
+                  <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
+                  <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
+                  <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
+                </div>
+                <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
+                <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
                   <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
                   <div class="col" style="gap:6px;">
@@ -748,8 +805,8 @@
     </div>
   </div>
 
-  <!-- Tone.js (UMD) -->
-  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+  <!-- Tone.js (UMD) - local vendor -->
+  <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
   <script src="/static/pianoroll/project.js"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
@@ -768,6 +825,8 @@
   <script src="/static/pianoroll/llm_client.js"></script>
   <script src="/static/pianoroll/controllers/editor_runtime.js"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
+  <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
+  <script src="/static/pianoroll/controllers/export_wav_controller.js"></script>
   <script src="/static/pianoroll/app.js"></script>
 </body>
 </html>

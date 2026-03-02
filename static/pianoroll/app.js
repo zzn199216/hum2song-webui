@@ -480,7 +480,23 @@ setOptimizeOptions(arg0, arg1){
     opts = (arg0 && typeof arg0 === 'object') ? arg0 : null;
   }
   const preset = opts && (opts.requestedPresetId != null ? opts.requestedPresetId : opts.presetId != null ? opts.presetId : opts.preset);
-  const normalizedOpts = opts ? { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: opts.userPrompt != null ? opts.userPrompt : null } : null;
+  const defaultIntent = { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+  const existingOpts = cid ? this.getOptimizeOptions(cid) : null;
+  const intent = (opts && opts.intent && typeof opts.intent === 'object')
+    ? { fixPitch: !!opts.intent.fixPitch, tightenRhythm: !!opts.intent.tightenRhythm, reduceOutliers: !!opts.intent.reduceOutliers }
+    : (existingOpts && existingOpts.intent && typeof existingOpts.intent === 'object')
+      ? { fixPitch: !!existingOpts.intent.fixPitch, tightenRhythm: !!existingOpts.intent.tightenRhythm, reduceOutliers: !!existingOpts.intent.reduceOutliers }
+      : defaultIntent;
+  const rawTemplateId = opts && opts.templateId;
+  const templateId = rawTemplateId !== undefined
+    ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
+    : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
+  const normalizedOpts = opts ? {
+    requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+    userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
+    intent,
+    templateId: templateId || null
+  } : null;
   this._lastOptimizeOptions = normalizedOpts;
   if (cid) {
     this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
@@ -523,7 +539,14 @@ async optimizeClip(clipId, optOverride){
   let options = optOverride;
   if (options && typeof options === 'object') {
     const preset = options.requestedPresetId != null ? options.requestedPresetId : options.presetId != null ? options.presetId : options.preset;
-    options = { requestedPresetId: (preset != null && preset !== '') ? String(preset) : null, userPrompt: options.userPrompt != null ? options.userPrompt : null };
+    const intent = options.intent && typeof options.intent === 'object'
+      ? { fixPitch: !!options.intent.fixPitch, tightenRhythm: !!options.intent.tightenRhythm, reduceOutliers: !!options.intent.reduceOutliers }
+      : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+    options = {
+      requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+      userPrompt: options.userPrompt != null ? options.userPrompt : null,
+      intent
+    };
   }
   return await this.agentCtrl.optimizeClip(clipId, options);
 },
@@ -541,6 +564,7 @@ rollbackClipRevision(clipId){
 
     state: {
       selectedInstanceId: null,
+      selectedClipId: null,
       activeTrackIndex: 0,
       activeTrackId: null,
       draggingInstance: null,
@@ -549,6 +573,10 @@ rollbackClipRevision(clipId){
       transportPlaying: false,
       transportStartPerf: 0,
       lastUploadTaskId: null,
+      recordingActive: false,
+      lastRecordedFile: null,
+      importCancelled: false,
+      autoOpenAfterImport: true,
       modal: {
         show: false,
         clipId: null,
@@ -680,7 +708,20 @@ if (typeof localStorage !== 'undefined') {
 
       // Transport buttons
       $('#btnPlayProject').addEventListener('click', (ev) => { try{ _unlockAudioFromGesture(); }catch(e){} return this.playProject(); });
-      $('#btnStop').addEventListener('click', () => this.stopProject());
+      $('#btnStop').addEventListener('click', () => { this.stopProjectReset(); });
+      $('#btnRecord').addEventListener('click', () => {
+        try{ _unlockAudioFromGesture(); }catch(e){}
+        if (this.state.recordingActive) this.stopRecording();
+        else this.startRecording();
+      });
+      $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
+      const chkAutoOpen = $('#chkAutoOpenAfterImport');
+      if (chkAutoOpen) {
+        chkAutoOpen.checked = !!this.state.autoOpenAfterImport;
+        chkAutoOpen.addEventListener('change', () => { this.state.autoOpenAfterImport = chkAutoOpen.checked; });
+      }
+      const btnCancelImport = $('#btnCancelImport');
+      if (btnCancelImport) btnCancelImport.addEventListener('click', () => { this.state.importCancelled = true; });
       this._initMasterVolumeUI();
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
 
@@ -710,10 +751,14 @@ $('#rngPitchCenter').addEventListener('input', () => {
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 
       window.addEventListener('keydown', (ev) => {
-        if (!this.state.modal.show) return;
         const path = (ev.composedPath && ev.composedPath()) || (ev.target ? [ev.target] : []);
         const inInput = path.some((el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
         if (inInput) return;
+        if (!this.state.modal.show){
+          if (ev.key === 'r' || ev.key === 'R'){ try{ _unlockAudioFromGesture(); }catch(e){} if (this.state.recordingActive) this.stopRecording(); else this.startRecording(); ev.preventDefault(); }
+          if (ev.key === 's' || ev.key === 'S'){ if (!this.state.recordingActive) this.stopProjectReset(); ev.preventDefault(); }
+          return;
+        }
         if (ev.key === 'Escape'){ this.closeModal(false); ev.preventDefault(); }
         if (ev.key === 'Delete' || ev.key === 'Backspace'){ this.modalDeleteSelectedNote(); ev.preventDefault(); }
         if (ev.key === ' '){ this.modalTogglePlay(); ev.preventDefault(); }
@@ -738,6 +783,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onEdit: (clipId) => this.openClipEditor(clipId),
             onRemove: (clipId) => this.deleteClip(clipId),
             onOptimize: (clipId) => this.optimizeClip(clipId),
+            onSelectClip: (clipId) => { this.state.selectedClipId = clipId; this.render(); },
           });
         }
       }catch(e){
@@ -1120,6 +1166,8 @@ ensureTrackButtons(){
       this.renderClipList();
       this.renderTimeline();
       this.renderSelection();
+      this.renderSelectedClip();
+      try{ this.updateRecordButtonStates(); }catch(e){}
     },
 
     renderClipList(){
@@ -1180,6 +1228,162 @@ renderTimeline(){
   const tracks = $('#tracks');
   tracks.innerHTML = '<div class="muted" style="padding:12px;">Timeline controller not loaded.</div>';
 },
+
+    renderSelectedClip(){
+      const box = $('#selectedClipBox');
+      if (!box) return;
+      const clipId = this.state.selectedClipId;
+      if (!clipId){
+        box.className = 'muted';
+        box.textContent = 'Click a clip in the library to view History.';
+        return;
+      }
+      const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+      const p2 = this.getProjectV2();
+      let clip = p2 && p2.clips ? p2.clips[clipId] : null;
+      if (!clip) clip = (this.project.clips || []).find(c => c && c.id === clipId);
+      if (!clip){
+        this.state.selectedClipId = null;
+        box.className = 'muted';
+        box.textContent = 'Click a clip in the library to view History.';
+        return;
+      }
+      const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
+      const view = (typeof window !== 'undefined' && window.H2SLibraryView && window.H2SLibraryView.historyControlsHTML) ? window.H2SLibraryView : null;
+      let historyHtml = '';
+      if (view) historyHtml = view.historyControlsHTML(clipId, revInfo, escapeHtml);
+      // PR-D2c: Sync button when Clip Details (library) vs Timeline Selection differ
+      let syncHtml = '';
+      const timelineInst = this.state.selectedInstanceId && (this.project.instances || []).find(x => x.id === this.state.selectedInstanceId);
+      const timelineClipId = timelineInst ? timelineInst.clipId : null;
+      if (clipId && timelineClipId && clipId !== timelineClipId){
+        syncHtml = `<div style="margin-bottom:6px;"><a href="#" data-act="inspSyncClip" data-id="${escapeHtml(timelineClipId)}" style="font-size:12px; opacity:0.9;">Sync to timeline clip</a></div>`;
+      }
+      const ps = (clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) ||
+        (clip.meta && clip.meta.patchSummary) ||
+        (clip.meta && clip.meta.agent && clip.meta.agent.lastResult && clip.meta.agent.lastResult.patchSummary) ||
+        null;
+      let resultsHtml = '';
+      if (ps && typeof ps === 'object'){
+        const parts = [];
+        if (typeof ps.ops === 'number') parts.push(`ops: ${ps.ops}`);
+        if (ps.isVelocityOnly === true) parts.push('velocity only');
+        else {
+          if (ps.hasPitchChange === true) parts.push('pitch ✓');
+          if (ps.hasTimingChange === true) parts.push('timing ✓');
+          if (ps.hasStructuralChange === true) parts.push('structure ✓');
+        }
+        if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
+        if (ps.promptMeta && typeof ps.promptMeta === 'object') {
+          const id = (ps.promptMeta.templateId != null && String(ps.promptMeta.templateId).trim()) ? String(ps.promptMeta.templateId) : 'Custom';
+          const ver = (ps.promptMeta.promptVersion != null && String(ps.promptMeta.promptVersion).trim()) ? String(ps.promptMeta.promptVersion) : 'manual_v0';
+          parts.push(`Template: ${escapeHtml(id)} (${escapeHtml(ver)})`);
+        }
+        resultsHtml = parts.length > 0 ? parts.join(' · ') : 'No key fields.';
+      } else {
+        resultsHtml = 'No patch summary yet.';
+      }
+      const storedPreset = this.getOptimizePresetForClip ? this.getOptimizePresetForClip(clipId) : null;
+      const presetSelVal = (storedPreset != null && storedPreset !== '') ? String(storedPreset) : '';
+      const optimizeSettingsHtml = (
+        `<details class="clipOptimizeSettings" style="margin-top:6px;">` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Optimize Settings</summary>` +
+          `<div style="margin-top:6px;">` +
+            `<label style="font-size:12px; opacity:0.8;">Preset</label>` +
+            `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
+              `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
+              `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
+              `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
+              `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
+            `</select>` +
+          `</div>` +
+        `</details>`
+      );
+      box.className = '';
+      box.innerHTML = (
+        syncHtml +
+        `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
+        optimizeSettingsHtml +
+        `<details class="selectedClipResults" style="margin-top:6px;">` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Results</summary>` +
+          `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
+        `</details>` +
+        (historyHtml ? (
+          `<details class="clipAdvanced" style="margin-top:6px;">` +
+            `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
+            `<div style="margin-top:6px;">${historyHtml}</div>` +
+          `</details>`
+        ) : '<div class="muted" style="font-size:12px; margin-top:4px;">No revision history.</div>')
+      );
+      box.__h2sApp = this;
+      if (!box.__h2sSelectedClipBound){
+        const self = this;
+        box.__h2sSelectedClipBound = true;
+        box.__h2sClickHandler = function(ev){
+          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+          if (!btn) return;
+          const act = btn.getAttribute('data-act');
+          const cid = btn.getAttribute('data-id');
+          if (!cid) return;
+          const p2 = self.getProjectV2();
+          if (!P) return;
+          if (act === 'inspRollbackRev' && P.rollbackClipRevision){
+            const res = P.rollbackClipRevision(p2, cid);
+            if (res && res.ok && self.setProjectFromV2) self.setProjectFromV2(p2);
+            self.render();
+            return;
+          }
+          if (act === 'inspAbToggle' && P.toggleClipAB){
+            const res = P.toggleClipAB(p2, cid);
+            if (res && res.ok && self.setProjectFromV2) self.setProjectFromV2(p2);
+            self.render();
+            return;
+          }
+          if (act === 'inspRevActivate'){
+            const sels = box.querySelectorAll('select[data-act="inspRevSelect"]');
+            const sel = Array.from(sels || []).find(s => (s.getAttribute('data-id') || '') === cid) || null;
+            const revId = sel ? sel.value : null;
+            if (!revId || !P.setClipActiveRevision) return;
+            const target = p2 || self.project;
+            const res = P.setClipActiveRevision(target, cid, revId);
+            if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+            self.render();
+            return;
+          }
+          if (act === 'inspSyncClip'){
+            ev.preventDefault();
+            if (cid) self.state.selectedClipId = cid;
+            self.render();
+            return;
+          }
+        };
+        box.__h2sChangeHandler = function(ev){
+          const el = ev.target;
+          if (!el || !el.getAttribute) return;
+          const act = el.getAttribute('data-act');
+          const cid = el.getAttribute('data-id');
+          const self = box.__h2sApp;
+          if (act === 'inspOptimizePreset'){
+            const presetId = (el.value && String(el.value).trim()) || null;
+            if (cid && self && typeof self.setOptimizeOptions === 'function'){
+              self.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, cid);
+            }
+            self.render();
+            return;
+          }
+          if (act !== 'inspRevSelect') return;
+          if (!cid || !P || !P.setClipActiveRevision) return;
+          const revId = el.value;
+          const p2 = self.getProjectV2();
+          const target = p2 || self.project;
+          const res = P.setClipActiveRevision(target, cid, revId);
+          if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+          self.render();
+        };
+        box.addEventListener('click', box.__h2sClickHandler, true);
+        box.addEventListener('change', box.__h2sChangeHandler);
+      }
+    },
 
     renderSelection(){
       if (this.selectionCtrl && this.selectionCtrl.render){
@@ -1270,6 +1474,7 @@ renderTimeline(){
         const ok = (this.project.instances || []).some(x => x.id === this.state.selectedInstanceId);
         if (!ok) this.state.selectedInstanceId = null;
       }
+      if (this.state.selectedClipId === clipId) this.state.selectedClipId = null;
 
       persist();
       log('Removed clip.');
@@ -1330,23 +1535,53 @@ renderTimeline(){
     async pickWavAndGenerate(){
       const f = await this.pickFile('.wav,.mp3,.m4a,.flac,.ogg');
       if (!f) return;
+      await this.uploadFileAndGenerate(f);
+    },
 
-      // Auto-generate on selection
-      log(`Uploading ${f.name} ...`);
+    /** PR-C2: Set import status (upload/generate progress). showCancel: only during active import. */
+    setImportStatus(text, showCancel){
+      if (typeof document === 'undefined') return;
+      const el = $('#studioImportStatus');
+      if (el) el.textContent = text || '';
+      const btn = $('#btnCancelImport');
+      if (btn) btn.style.display = (text && showCancel) ? 'inline-block' : 'none';
+    },
+
+    /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording. */
+    async uploadFileAndGenerate(f){
+      if (!f || !(f instanceof Blob)) return;
+      const file = f instanceof File ? f : new File([f], (f.name || 'recording.webm'), { type: (f.type || 'audio/webm') });
+      this.state.importCancelled = false;
+      this.setImportStatus('Uploading audio...', true);
+      log(`Uploading ${file.name} ...`);
       try{
         const fd = new FormData();
-        fd.append('file', f, f.name);
+        fd.append('file', file, file.name);
         const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
         const tid = res.task_id || res.id || res.taskId || res.task || null;
-        if (!tid) throw new Error('generate returned no task_id');
+        if (!tid){
+          this.setImportStatus('Failed: Server did not return task ID.', false);
+          log('generate returned no task_id');
+          alert('Upload failed: server did not return a task ID. Check backend logs.');
+          return;
+        }
         this.state.lastUploadTaskId = tid;
         log(`Generate queued: ${tid}`);
+        this.setImportStatus('Processing... (task: ' + String(tid).slice(0, 8) + '...)', true);
         await this.pollTaskUntilDone(tid);
-        // Load score and add to library
+        if (this.state.importCancelled){
+          this.setImportStatus('Cancelled.', false);
+          log('Import cancelled by user');
+          return;
+        }
+        this.setImportStatus('Fetching result...', true);
         const score = await fetchJson(API.score(tid));
+        if (this.state.importCancelled){
+          this.setImportStatus('Cancelled.', false);
+          return;
+        }
+        this.setImportStatus('Creating clip...', true);
 
-        // BPM init rule: on the very first clip import, initialize project BPM
-        // from score.tempo_bpm (or score.bpm) if it looks valid.
         if ((this.project.clips || []).length === 0){
           const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
           if (typeof srcBpm === 'number' && isFinite(srcBpm) && srcBpm >= 30 && srcBpm <= 300){
@@ -1356,28 +1591,257 @@ renderTimeline(){
           }
         }
 
-        const clip = H2SProject.createClipFromScore(score, { name: f.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
-        // Trace source tempo (for v2 migration).
+        const clip = H2SProject.createClipFromScore(score, { name: file.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
         if (!clip.meta) clip.meta = {};
         if (typeof score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = score.tempo_bpm;
         else if (typeof score.bpm === 'number') clip.meta.sourceTempoBpm = score.bpm;
         this.project.clips.unshift(clip);
-        // Also add instance to timeline at playhead
         this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
         persist();
         this.render();
+        this.setImportStatus('Done', false);
         log(`Clip added: ${clip.name}`);
+        const cidNew = clip.id;
+        if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
+          setTimeout(() => this.openClipEditor(cidNew), 0);
+        }
+        setTimeout(() => this.setImportStatus('', false), 2000);
       }catch(e){
-        log(`Error: ${String(e && e.message ? e.message : e)}`);
-        alert('Generate failed. Check log.');
+        if (this.state.importCancelled){
+          this.setImportStatus('Cancelled.', false);
+          log('Import cancelled by user');
+        }else{
+          const msg = (e && e.message) ? String(e.message) : String(e);
+          const short = msg.length > 80 ? msg.slice(0, 77) + '...' : msg;
+          this.setImportStatus('Failed: ' + short, false);
+          log('Upload/generate error: ' + msg);
+          console.error('[Studio] uploadFileAndGenerate error', e);
+          let userMsg = 'Generate failed. ';
+          if (/timeout/i.test(msg)) userMsg += 'Processing timed out. Try a shorter clip.';
+          else if (/task failed/i.test(msg)) userMsg += 'Backend task failed. Check server logs.';
+          else if (/fetch|network/i.test(msg)) userMsg += 'Network error. Check connection and server.';
+          else userMsg += 'See status bar and console for details.';
+          alert(userMsg);
+        }
       }
     },
 
+    /** PR-C5.3b: Reliable isPlaying for S button visibility. */
+    _isPlaying(){
+      if (this.audioCtrl && typeof this.audioCtrl.playing === 'boolean') return this.audioCtrl.playing;
+      if (this.state && this.state.transportPlaying) return true;
+      try{
+        if (typeof window !== 'undefined' && window.Tone && window.Tone.Transport) return String(window.Tone.Transport.state) === 'started';
+      }catch(e){}
+      return false;
+    },
+
+    /** PR-C1/PR-C5: Recording state machine + Recording panel UI. */
+    updateRecordButtonStates(){
+      if (typeof document === 'undefined') return;
+      const rec = $('#btnRecord');
+      const stp = document.getElementById('btnStop');
+      const useLast = $('#btnUseLast');
+      const timerEl = $('#studioRecordTimer');
+      const waveEl = $('#studioRecordWaveform');
+      const statusEl = $('#studioRecordStatus');
+      const active = !!this.state.recordingActive;
+      if (rec) {
+        rec.textContent = active ? '\u23F9 Stop' : '\u{1F534} Record';
+        rec.title = active ? 'Stop recording' : 'Record mic (R)';
+        rec.disabled = false;
+      }
+      if (stp) {
+        const playing = this._isPlaying();
+        stp.style.visibility = playing ? 'visible' : 'hidden';
+        stp.style.pointerEvents = playing ? '' : 'none';
+        stp.title = 'Stop + Reset (S)';
+      }
+      if (useLast) {
+        useLast.disabled = !this.state.lastRecordedFile;
+        useLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
+      }
+      if (timerEl) timerEl.style.display = active ? '' : 'none';
+      if (waveEl) waveEl.style.display = active ? '' : 'none';
+    },
+
+    async startRecording(){
+      if (this.state.recordingActive) return;
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function'){
+        log('Microphone not available in this environment.');
+        return;
+      }
+      const statusEl = typeof document !== 'undefined' ? $('#studioRecordStatus') : null;
+      const timerEl = typeof document !== 'undefined' ? $('#studioRecordTimer') : null;
+      const waveEl = typeof document !== 'undefined' ? $('#studioRecordWaveform') : null;
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        const recorder = new MediaRecorder(stream);
+        const chunks = [];
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+          stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunks, { type: mime });
+          const ext = mime.indexOf('webm') >= 0 ? 'webm' : 'ogg';
+          this.state.lastRecordedFile = new File([blob], `recording.${ext}`, { type: blob.type || 'audio/webm' });
+          this.state.recordingActive = false;
+          this._stopRecordingUI();
+          const durSec = this._recordingStartMs ? (Date.now() - this._recordingStartMs) / 1000 : 0;
+          const mm = Math.floor(durSec / 60);
+          const ss = Math.floor(durSec % 60);
+          const durStr = `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+          if (statusEl) { statusEl.dataset.recordingStatus = '1'; statusEl.textContent = `Recording stopped (${durStr})`; }
+          setTimeout(() => { if (statusEl) { statusEl.textContent = ''; delete statusEl.dataset.recordingStatus; } }, 2000);
+          this.updateRecordButtonStates();
+          log('Recording stopped.');
+        };
+        recorder.onerror = (e) => {
+          this.state.recordingActive = false;
+          this._stopRecordingUI();
+          this.updateRecordButtonStates();
+          log(`Recording error: ${e.error || 'unknown'}`);
+        };
+        this._mediaRecorder = recorder;
+        this._recordedChunks = chunks;
+        recorder.start(200);
+        this.state.recordingActive = true;
+        this._recordingStartMs = Date.now();
+        this._startRecordingUI(stream, waveEl, timerEl);
+        this.updateRecordButtonStates();
+        log('Recording started.');
+      }catch(e){
+        this.state.recordingActive = false;
+        if (statusEl) statusEl.textContent = 'Microphone permission denied.';
+        this.updateRecordButtonStates();
+        this.setImportStatus('Microphone permission denied.', false);
+        log(`Microphone access denied or unavailable: ${String(e && e.message ? e.message : e)}`);
+        alert('Cannot access microphone. Please allow mic permission and try again.');
+        setTimeout(() => { this.setImportStatus('', false); if (statusEl) statusEl.textContent = ''; }, 5000);
+      }
+    },
+
+    _startRecordingUI(stream, waveEl, timerEl){
+      if (typeof document === 'undefined') return;
+      const self = this;
+      const statusEl = $('#studioRecordStatus');
+      this._recordingTimerInterval = setInterval(() => {
+        if (!self.state.recordingActive || !timerEl) return;
+        const elapsed = (Date.now() - (self._recordingStartMs || 0)) / 1000;
+        const mm = Math.floor(elapsed / 60);
+        const ss = Math.floor(elapsed % 60);
+        timerEl.textContent = `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+      }, 200);
+      if (waveEl && stream){
+        const CtxClass = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || (typeof AudioContext !== 'undefined' ? AudioContext : null);
+        if (!CtxClass){
+          if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+          return;
+        }
+        (async () => {
+          try{
+            const audioCtx = new CtxClass();
+            await audioCtx.resume().catch(() => {});
+            this._recAudioCtx = audioCtx;
+            const src = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            src.connect(analyser);
+            const z = audioCtx.createGain();
+            z.gain.value = 0;
+            analyser.connect(z);
+            z.connect(audioCtx.destination);
+            this._recAnalyser = analyser;
+            this._recZeroGain = z;
+            this._recStreamSrc = src;
+            const data = new Uint8Array(analyser.fftSize);
+            const canvas = waveEl;
+            const w = canvas.width;
+            const h = canvas.height;
+            const sliceWidth = w / data.length;
+            const draw = () => {
+              try{
+                if (!self.state.recordingActive || !analyser) return;
+                const ctx2d = canvas.getContext('2d');
+                if (!ctx2d){
+                  if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+                  return;
+                }
+                analyser.getByteTimeDomainData(data);
+                ctx2d.clearRect(0, 0, w, h);
+                ctx2d.strokeStyle = 'rgba(239,68,68,.7)';
+                ctx2d.lineWidth = 2;
+                ctx2d.beginPath();
+                let x = 0;
+                for (let i = 0; i < data.length; i++){
+                  const v = data[i] / 128.0;
+                  const y = v * (h / 2);
+                  if (i === 0) ctx2d.moveTo(x, y);
+                  else ctx2d.lineTo(x, y);
+                  x += sliceWidth;
+                }
+                ctx2d.stroke();
+                ctx2d.strokeStyle = 'rgba(255,255,255,.15)';
+                ctx2d.lineWidth = 1;
+                ctx2d.beginPath();
+                ctx2d.moveTo(0, h / 2);
+                ctx2d.lineTo(w, h / 2);
+                ctx2d.stroke();
+              }catch(err){
+                if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+                log('Waveform draw error: ' + err);
+                return;
+              }
+              self._recordingWaveformRaf = requestAnimationFrame(draw);
+            };
+            draw();
+          }catch(err){
+            log('Waveform init failed: ' + err);
+            if (statusEl) statusEl.textContent = 'Waveform unavailable (recording still works).';
+          }
+        })();
+      }
+    },
+
+    _stopRecordingUI(){
+      if (typeof document === 'undefined') return;
+      if (this._recordingTimerInterval){ clearInterval(this._recordingTimerInterval); this._recordingTimerInterval = null; }
+      if (this._recordingWaveformRaf){ cancelAnimationFrame(this._recordingWaveformRaf); this._recordingWaveformRaf = null; }
+      if (this._recStreamSrc){ try{ this._recStreamSrc.disconnect(); }catch(e){} this._recStreamSrc = null; }
+      if (this._recAnalyser){ try{ this._recAnalyser.disconnect(); }catch(e){} this._recAnalyser = null; }
+      if (this._recZeroGain){ try{ this._recZeroGain.disconnect(); }catch(e){} this._recZeroGain = null; }
+      if (this._recAudioCtx){ this._recAudioCtx.close().catch(() => {}); this._recAudioCtx = null; }
+      const timerEl = $('#studioRecordTimer');
+      const waveEl = $('#studioRecordWaveform');
+      if (timerEl){ timerEl.textContent = '00:00'; timerEl.style.display = 'none'; }
+      if (waveEl){
+        waveEl.style.display = 'none';
+        const g = waveEl.getContext('2d');
+        if (g) g.clearRect(0, 0, waveEl.width, waveEl.height);
+      }
+    },
+
+    stopRecording(){
+      if (!this.state.recordingActive || !this._mediaRecorder) return;
+      try{
+        if (this._mediaRecorder.state !== 'inactive') this._mediaRecorder.stop();
+      }catch(e){ log(`Stop recording: ${e}`); }
+      this._stopRecordingUI();
+      this._mediaRecorder = null;
+      this._recordedChunks = null;
+    },
+
+    useLastRecording(){
+      if (!this.state.lastRecordedFile) return;
+      this.uploadFileAndGenerate(this.state.lastRecordedFile);
+    },
+
     async pollTaskUntilDone(taskId){
-      // backend seems to expose GET /tasks/{id} with status
       const maxWaitMs = 180000;
       const start = performance.now();
       while (true){
+        if (this.state.importCancelled) throw new Error('Cancelled by user');
         const data = await fetchJson(API.task(taskId));
         const status = String((data.status || data.state || data.task_status || data.taskStatus || '')).toLowerCase();
         if (status.includes('completed') || status.includes('done') || status === 'success'){
@@ -1514,13 +1978,16 @@ renderTimeline(){
         alert('Audio engine not ready (AudioController missing).');
         return false;
       }
-      return await this.audioCtrl.playProject();
+      const result = await this.audioCtrl.playProject();
+      this.updateRecordButtonStates();
+      return result;
     },
 
     stopProject(){
       if (this.audioCtrl && this.audioCtrl.stop){
         // Delegate to AudioController
         this.audioCtrl.stop();
+        this.updateRecordButtonStates();
         return;
       }
       if (window.Tone){
@@ -1528,6 +1995,23 @@ renderTimeline(){
       }
       this.state.transportPlaying = false;
       log('Project stop.');
+      persist();
+      this.render();
+    },
+
+    /** PR-C5.3: Stop playback and reset playhead to start. S key / S button. */
+    stopProjectReset(){
+      if (this.audioCtrl && this.audioCtrl.stop){
+        this.audioCtrl.stop(true);
+        this.updateRecordButtonStates();
+        return;
+      }
+      if (window.Tone){
+        try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(e){}
+      }
+      this.state.transportPlaying = false;
+      if (this.project && this.project.ui) this.project.ui.playheadSec = 0;
+      log('Project stop (reset).');
       persist();
       this.render();
     },

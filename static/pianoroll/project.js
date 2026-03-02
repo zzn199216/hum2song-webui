@@ -998,16 +998,26 @@ function beginNewClipRevision(project, clipId, opts){
       return 0;
     }
 
-    // Emit tracks in project order.
+    // PR-F1.1: Build mute map (tracks[i].muted); skip muted tracks in export.
+    const mutedByTid = new Map();
+    for (const t of (p.tracks || [])){
+      if (!t) continue;
+      const tid = t.trackId || t.id;
+      if (tid != null) mutedByTid.set(tid, !!t.muted);
+    }
+
+    // Emit tracks in project order (skip muted tracks).
     for (const tid of trackOrder){
+      if (mutedByTid.get(tid)) continue;
       const arr = trackBuckets[tid] || [];
       arr.sort(cmp);
       out.tracks.push({ trackId: tid, notes: arr });
     }
 
-    // Emit any buckets not in project order (shouldn't happen, but be safe).
+    // Emit any buckets not in project order (skip muted; shouldn't happen, but be safe).
     for (const tid of Object.keys(trackBuckets)){
       if (trackOrder.indexOf(tid) >= 0) continue;
+      if (mutedByTid.get(tid)) continue;
       const arr = trackBuckets[tid] || [];
       arr.sort(cmp);
       out.tracks.push({ trackId: tid, notes: arr });

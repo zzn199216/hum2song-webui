@@ -19,13 +19,23 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
    .\venv\Scripts\activate
    pip install -r requirements.txt
    ```
-2. Start the server:
+2. Start the server (from project root; required for correct app import):
    ```powershell
    uvicorn app:app
    ```
    (Optional: add `--reload` for local development.)
+   - **Export MIDI 404?** Run `python scripts/check_export_routes.py` to verify routes; restart uvicorn to pick up changes.
 3. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 4. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+
+**Studio (Hum2Song Studio) — first run:**
+- Open [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) to start.
+- **Controls:** R = record toggle, P = play/pause (button), S = stop + reset playhead (S appears only while playing; does not stop recording).
+- **Quick Optimize:** Choose Preset + Goals (Fix Pitch / Tighten Rhythm / Reduce Outliers) → Run Optimize.
+- **Advanced** is collapsed by default and contains Prompt, Regenerate, LLM Settings, and Debug.
+- **Quality gate:** In Full mode, if Fix Pitch or Tighten Rhythm is enabled, velocity-only patches are rejected once and you'll see actionable guidance.
+- **Tone.js** loads locally by default (`/static/pianoroll/vendor/tone/Tone.js`); CDN fallback only if `window.H2S_ALLOW_CDN_TONE === true`.
+- E2E validation: see [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md). Phase C covers Recording/Import → auto-open editor → Quick Optimize.
 
 ---
 

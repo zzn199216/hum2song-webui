@@ -10,6 +10,72 @@ def _default_tempo_ts() -> Tuple[float, str]:
     return 120.0, "4/4"
 
 
+def flattened_to_score_doc(flat: dict) -> ScoreDoc:
+    """
+    Convert flattened JSON (H2SProject.flatten output) to ScoreDoc.
+
+    Input shape:
+        { bpm, tracks: [{ trackId?, notes: [{ pitch, startSec, durationSec, velocity? }] }] }
+    """
+    bpm = flat.get("bpm")
+    if bpm is None or not isinstance(bpm, (int, float)):
+        raise ValueError("Missing or invalid 'bpm'")
+    bpm_f = float(bpm)
+    if bpm_f <= 0:
+        raise ValueError("bpm must be > 0")
+
+    tracks_raw = flat.get("tracks")
+    if not isinstance(tracks_raw, list):
+        raise ValueError("Missing or invalid 'tracks' (must be array)")
+
+    tracks: List[Track] = []
+    for ti, tr_raw in enumerate(tracks_raw):
+        if not isinstance(tr_raw, dict):
+            raise ValueError(f"Track[{ti}] must be object")
+        notes_raw = tr_raw.get("notes")
+        if not isinstance(notes_raw, list):
+            raise ValueError(f"Track[{ti}].notes must be array")
+
+        name = str(tr_raw.get("trackId") or tr_raw.get("name") or f"Track{ti + 1}")
+        track = Track(name=name, notes=[])
+
+        for ni, n_raw in enumerate(notes_raw):
+            if not isinstance(n_raw, dict):
+                raise ValueError(f"Track[{ti}].notes[{ni}] must be object")
+            pitch = n_raw.get("pitch")
+            start_sec = n_raw.get("startSec")
+            dur_sec = n_raw.get("durationSec")
+            if pitch is None or start_sec is None or dur_sec is None:
+                raise ValueError(f"Track[{ti}].notes[{ni}] requires pitch, startSec, durationSec")
+
+            pitch_int = int(pitch)
+            if not (0 <= pitch_int <= 127):
+                raise ValueError(f"Track[{ti}].notes[{ni}]: pitch must be 0-127")
+            start_f = float(start_sec)
+            dur_f = float(dur_sec)
+            if start_f < 0:
+                raise ValueError(f"Track[{ti}].notes[{ni}]: startSec must be >= 0")
+            if dur_f <= 0:
+                raise ValueError(f"Track[{ti}].notes[{ni}]: durationSec must be > 0")
+
+            vel = n_raw.get("velocity")
+            vel_int = 64 if vel is None else max(1, min(127, int(vel)))
+
+            track.notes.append(
+                NoteEvent(pitch=pitch_int, start=start_f, duration=dur_f, velocity=vel_int)
+            )
+
+        track.notes.sort(key=lambda n: (n.start, n.pitch))
+        tracks.append(track)
+
+    return ScoreDoc(
+        version=1,
+        tempo_bpm=bpm_f,
+        time_signature="4/4",
+        tracks=tracks,
+    )
+
+
 def midi_to_score(midi_path: Path) -> ScoreDoc:
     """
     MIDI -> ScoreDoc (seconds-based), aiming to be timing-lossless.

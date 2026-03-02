@@ -126,19 +126,29 @@
       }
       const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
       const getPresetForClip = (app && typeof app.getOptimizePresetForClip === 'function') ? app.getOptimizePresetForClip.bind(app) : null;
+      const selectedClipId = (app && app.state && app.state.selectedClipId) ? app.state.selectedClipId : null;
       let html = '';
       for (const clip of clips){
         const stats = _clipStats(project, clip);
         const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
         const selectedPreset = getPresetForClip ? getPresetForClip(clip.id) : null;
-        html += view.clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset);
+        html += view.clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset, selectedClipId);
       }
       rootEl.innerHTML = html;
     }
 
     function _handleClick(e){
       const btn = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
-      if (!btn) return;
+      if (!btn){
+        const t = e.target;
+        if (t && t.closest && t.closest('details, summary, button, select, input, textarea, a')) return;
+        const card = t && t.closest ? t.closest('.clip-card, .clipCard') : null;
+        if (card){
+          const clipId = card.getAttribute('data-clip-id');
+          if (clipId && typeof opts.onSelectClip === 'function') opts.onSelectClip(clipId);
+        }
+        return;
+      }
       const act = btn.getAttribute('data-act');
       const clipId = btn.getAttribute('data-id') || btn.getAttribute('data-clip-id');
       if (!act || !clipId) return;
@@ -170,22 +180,12 @@
       }
 
       // T3-4: Optimize (agent runner v0)
+      // PR-D2d: Preset moved to Inspector; Optimize uses stored per-clip options via getOptimizeOptions.
       if (act === 'optimize'){
         // Important: bind this handler in capture phase so we can reliably intercept
         // optimize clicks even if a fallback listener is added later.
         // This also prevents double-handling (e.g. App fallback + controller).
         try{ e.preventDefault(); e.stopPropagation(); }catch(_){ /* ignore */ }
-        
-        // PR-3: Read preset from card (robust: .clip-card then single [data-act="optimizePreset"])
-        const cardEl = (e.target && e.target.closest) ? e.target.closest('.clip-card') : null;
-        const presetSel = cardEl ? cardEl.querySelector('[data-act="optimizePreset"]') : null;
-        const presetId = (presetSel && presetSel.value) ? String(presetSel.value).trim() : null;
-        if (app && typeof app.setOptimizeOptions === 'function'){
-          app.setOptimizeOptions({
-            requestedPresetId: presetId || null,
-            userPrompt: null,
-          }, clipId);
-        }
         
         const fn = (app && typeof app.optimizeClip === 'function') ? app.optimizeClip : null;
         if (!fn){
@@ -213,104 +213,14 @@
         return;
       }
 
-      // T3-1/T3-4: rollback current revision to parent (v2-only)
-      if (act === 'rollbackRev'){
-        if (!projectV2 || !(P && typeof P.rollbackClipRevision === 'function')){
-          console.warn('[LibraryController] rollbackClipRevision not available (need v2 project)');
-          return;
-        }
-        const res = P.rollbackClipRevision(projectV2, clipId);
-        if (res && res.ok){
-          if (app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-          _notifyChanged('clipRevision');
-          render();
-        }else{
-          console.warn('[LibraryController] rollbackClipRevision failed', res);
-        }
-        return;
-      }
-
-      // T3-1/T3-4: toggle A/B between current and parent revision
-      if (act === 'abToggle'){
-        if (!projectV2 || !(P && typeof P.toggleClipAB === 'function')){
-          console.warn('[LibraryController] toggleClipAB not available (need v2 project)');
-          return;
-        }
-        const res = P.toggleClipAB(projectV2, clipId);
-        if (res && res.ok){
-          if (app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-          _notifyChanged('clipRevision');
-          render();
-        }else{
-          console.warn('[LibraryController] toggleClipAB failed', res);
-        }
-        return;
-      }
-
-      // T3-1: activate selected revision
-      if (act === 'revActivate'){
-        const escId = (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') ? CSS.escape(clipId) : clipId;
-        const sel = rootEl.querySelector(`select[data-act="revSelect"][data-id="${escId}"]`)
-                  || rootEl.querySelector(`select[data-act="revSelect"][data-id="${clipId}"]`);
-        const revId = sel ? sel.value : null;
-        if (!revId) return;
-        const targetProject = projectV2 || getProject();
-        if (P && typeof P.setClipActiveRevision === 'function'){
-          const res = P.setClipActiveRevision(targetProject, clipId, revId);
-          if (res && res.ok){
-            if (projectV2 && app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-            _notifyChanged('clipRevision');
-            render();
-          }else{
-            console.warn('[LibraryController] setClipActiveRevision failed', res);
-          }
-        }
-        return;
-      }
-
+      // PR-D2a: rollbackRev, abToggle, revActivate moved to Inspector
     }
 
     function _handleChange(e){
       const el = e.target;
       if (!el || !el.getAttribute) return;
-      const act = el.getAttribute('data-act');
-
-      // PR-3: Preset dropdown change — store per-clip so dropdown persists and Optimize uses it
-      if (act === 'optimizePreset'){
-        const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
-        const presetId = (el.value && String(el.value).trim()) || null;
-        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
-        if (clipId && app && typeof app.setOptimizeOptions === 'function'){
-          app.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, clipId);
-        }
-        return;
-      }
-
-      // On revision select change, immediately activate the chosen revision (v2-only when available).
-      if (act === 'revSelect'){
-        const clipId = el.getAttribute('data-id') || el.getAttribute('data-clip-id');
-        const revId = el.value;
-        if (!clipId || !revId) return;
-
-        const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
-        const projectV2 = getProjectV2();
-        const targetProject = projectV2 || getProject();
-
-        if (!(P && typeof P.setClipActiveRevision === 'function')){
-          console.warn('[LibraryController] setClipActiveRevision not available');
-          return;
-        }
-
-        const res = P.setClipActiveRevision(targetProject, clipId, revId);
-        if (res && res.ok){
-          if (projectV2 && app && typeof app.setProjectFromV2 === 'function') app.setProjectFromV2(projectV2);
-          _notifyChanged('clipRevision');
-          render();
-        }else{
-          console.warn('[LibraryController] setClipActiveRevision failed', res);
-        }
-        return;
-      }
+      // PR-D2d: optimizePreset moved to Inspector (inspOptimizePreset)
+      // PR-D2a: revSelect moved to Inspector (inspRevSelect)
     }
 
     if (rootEl){
@@ -321,14 +231,22 @@
         if (prev){
           // removeEventListener must match the same capture flag used in addEventListener.
           rootEl.removeEventListener('click', prev.click, true);
+          rootEl.removeEventListener('click', prev.summaryClick);
           rootEl.removeEventListener('change', prev.change);
         }
       }catch(_){ /* ignore */ }
+      function _handleSummaryClick(e){
+        const t = e.target;
+        if (t && t.closest && t.closest('.clipAdvanced summary, summary')){
+          e.stopPropagation();
+        }
+      }
       try{
-        rootEl.__h2sLibraryHandlers = { click: _handleClick, change: _handleChange };
+        rootEl.__h2sLibraryHandlers = { click: _handleClick, summaryClick: _handleSummaryClick, change: _handleChange };
       }catch(_){ /* ignore */ }
       // Use capture so Optimize can be handled even if a fallback listener is attached later.
       rootEl.addEventListener('click', _handleClick, true);
+      rootEl.addEventListener('click', _handleSummaryClick, false);
       rootEl.addEventListener('change', _handleChange);
     }
 
