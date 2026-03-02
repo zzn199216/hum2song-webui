@@ -2028,21 +2028,33 @@ renderTimeline(){
         }
 
         function refreshUploadStatus(){
-          if (!uploadStatus || !selPack || !window.H2SInstrumentLibraryStore) return;
+          if (!uploadStatus || !selPack) return;
           const packId = selPack.value;
           if (!packId){
             refreshAllPacksStatus();
             return;
           }
-          const packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) || {};
-          const pack = packs[packId];
-          const required = (pack && pack.requiredKeys) ? pack.requiredKeys : (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).slice();
-          window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
-            const have = keys || [];
-            const missing = required.filter(k => have.indexOf(k) < 0);
-            if (have.length === 0) setUploadStatus('No local samples. Use baseUrl or upload (e.g. C3, Ds4, A1..A6).');
-            else setUploadStatus('Local: ' + have.sort().join(', ') + (missing.length ? ' | Missing: ' + missing.join(', ') : ' (complete)'));
-          });
+          const probe = (window.H2SProject && window.H2SProject.probeSamplerAvailability) ? window.H2SProject.probeSamplerAvailability : null;
+          if (!probe){
+            if (window.H2SInstrumentLibraryStore){
+              const packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) || {};
+              const pack = packs[packId];
+              const required = (pack && pack.requiredKeys) ? pack.requiredKeys : (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).slice();
+              window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
+                const have = keys || [];
+                const missing = required.filter(k => have.indexOf(k) < 0);
+                setUploadStatus(have.length === 0 ? 'No local samples.' : 'Local: ' + have.sort().join(', ') + (missing.length ? ' | Missing: ' + missing.join(', ') : ' (complete)'));
+              });
+            } else setUploadStatus('');
+            return;
+          }
+          probe(packId).then(info => {
+            const av = info.availableKeys || [];
+            const miss = info.missingKeys || [];
+            const src = info.source || '';
+            if (av.length === 0) setUploadStatus('No samples. Use baseUrl or upload (e.g. A1..A6.mp3).');
+            else setUploadStatus('Available (' + (src === 'local' ? 'local' : 'remote') + '): ' + av.sort().join(', ') + (miss.length ? ' | Missing: ' + miss.join(', ') : ' (complete)'));
+          }).catch(() => setUploadStatus(''));
         }
 
         function refreshAllPacksStatus(){

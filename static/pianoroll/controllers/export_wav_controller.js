@@ -88,8 +88,10 @@
 
     return resolveUrls(pack, desc.packId).then(function(resolved){
       var urls = resolved.urls;
-      if (!urls || Object.keys(urls).length === 0){
-        if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+      var keyCount = urls ? Object.keys(urls).length : 0;
+      if (!urls || keyCount < 2){
+        var msg = resolved.fallbackReason || 'Sampler pack missing. See docs to install samples. Using default synth.';
+        if (typeof setStatusFn === 'function') setStatusFn(msg);
         return makeSynthByInstrumentSync(Tone, 'default');
       }
       return new Promise(function(resolve){

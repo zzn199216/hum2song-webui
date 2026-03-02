@@ -87,6 +87,21 @@ You can upload sample files (A1..A6) directly in the UI. They are stored in Inde
 
 ---
 
+## Partial packs (PR-INS2g.1)
+
+Packs with incomplete sample sets are supported. For example, a violin folder with only `A4.mp3`, `A5.mp3`, and `A6.mp3` will work; the app probes which files exist and builds the sampler from available keys only.
+
+**Behavior:**
+
+- The app probes sample existence (HEAD requests) per key and extension (mp3, ogg, wav).
+- Only keys with existing files are used; no repeated 404s for missing samples.
+- If **fewer than 2 keys** are available, the pack falls back to the default synth with status: *"Sampler pack incomplete (0/1 sample(s) found)."*
+- Instrument Library status shows **Available (local/remote):** keys you have, **Missing:** keys not found.
+
+**Complete packs** (piano, bass) behave unchanged. Export WAV uses the same mapping as playback.
+
+---
+
 ## Troubleshooting
 
 **Symptom:** You select "Sampler: Piano" but hear the default synth instead.

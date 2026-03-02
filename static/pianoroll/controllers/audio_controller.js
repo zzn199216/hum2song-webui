@@ -176,10 +176,12 @@ function _disposeTrackSynths(){
     }
 
     let resolved;
-    try{ resolved = await resolveUrls(pack, desc.packId); }catch(e){ resolved = { urls: {}, objectUrls: [] }; }
+    try{ resolved = await resolveUrls(pack, desc.packId); }catch(e){ resolved = { urls: {}, objectUrls: [], fallbackReason: null }; }
     const urls = resolved.urls;
-    if (!urls || Object.keys(urls).length === 0){
-      onLog('Sampler pack missing. See docs to install samples. Using default synth.');
+    const keyCount = urls ? Object.keys(urls).length : 0;
+    if (!urls || keyCount < 2){
+      const msg = resolved.fallbackReason || 'Sampler pack missing. See docs to install samples. Using default synth.';
+      onLog(msg);
       return _makeSynthByInstrument('default');
     }
 
@@ -192,7 +194,7 @@ function _disposeTrackSynths(){
       };
       const timeout = setTimeout(function(){
         settle(_makeSynthByInstrument('default'));
-        onLog('Sampler pack missing. See docs to install samples. Using default synth.');
+        onLog(resolved.fallbackReason || 'Sampler pack missing. See docs to install samples. Using default synth.');
         try{ if (sampler && sampler.dispose) sampler.dispose(); }catch(e){}
       }, SAMPLER_LOAD_TIMEOUT_MS);
 

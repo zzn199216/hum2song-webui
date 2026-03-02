@@ -170,11 +170,65 @@
     return base + '/' + subdir.replace(/^\//, '');
   }
 
-  /** PR-INS2e: Resolve sampler urls with local store override. Returns { urls: object, objectUrls: string[] }.
-   *  Fallback chain: local IndexedDB -> baseUrl -> default baseUrl. objectUrls should be revoked when done. */
+  var PROBE_EXTENSIONS = ['mp3', 'ogg', 'wav'];
+  var PROBE_TIMEOUT_MS = 800;
+  var PROBE_CACHE = {};
+  var PROBE_CACHE_TTL_MS = 120000;
+
+  /** PR-INS2g.1: Probe which sample files exist at baseUrl. Returns { availableKeys, urlMap }.
+   *  Tries .mp3, .ogg, .wav per key. Caches results by packId+baseUrl. */
+  function probeSamplerFiles(baseUrl, keys, pack){
+    if (!baseUrl || !keys || !keys.length || !pack || !pack.urls) return Promise.resolve({ availableKeys: [], urlMap: {} });
+    var cacheKey = (typeof window !== 'undefined') ? (pack.instrumentSubdir + ':' + baseUrl) : null;
+    if (cacheKey && PROBE_CACHE[cacheKey]){
+      var cached = PROBE_CACHE[cacheKey];
+      if (Date.now() - (cached.ts || 0) < PROBE_CACHE_TTL_MS) return Promise.resolve(cached);
+    }
+    var base = baseUrl.replace(/\/+$/, '') + '/';
+    var concurrency = 3;
+    var idx = 0;
+    function next(){
+      if (idx >= keys.length) return Promise.resolve();
+      var k = keys[idx++];
+      var def = pack.urls[k];
+      var basename = (def && def.replace(/\.[^/.]+$/, '')) ? def.replace(/\.[^/.]+$/, '') : k.replace(/#/g, 's');
+      function tryExt(j){
+        if (j >= PROBE_EXTENSIONS.length) return Promise.resolve(null);
+        var url = base + basename + '.' + PROBE_EXTENSIONS[j];
+        var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var t = ctrl ? setTimeout(function(){ ctrl.abort(); }, PROBE_TIMEOUT_MS) : null;
+        return fetch(url, { method: 'HEAD', signal: ctrl ? ctrl.signal : undefined }).then(function(r){
+          if (t) clearTimeout(t);
+          return r.ok ? { k: k, url: url } : tryExt(j + 1);
+        }).catch(function(){ if (t) clearTimeout(t); return tryExt(j + 1); });
+      }
+      return tryExt(0).then(function(r){ return r; });
+    }
+    var results = [];
+    function runBatch(){
+      var batch = [];
+      while (batch.length < concurrency && idx < keys.length){ batch.push(next()); }
+      if (!batch.length) return Promise.resolve();
+      return Promise.all(batch).then(function(arr){
+        for (var i = 0; i < arr.length; i++) if (arr[i]) results.push(arr[i]);
+        return runBatch();
+      });
+    }
+    return runBatch().then(function(){
+      var availableKeys = results.map(function(r){ return r.k; });
+      var urlMap = {};
+      for (var i = 0; i < results.length; i++) urlMap[results[i].k] = results[i].url;
+      var out = { availableKeys: availableKeys, urlMap: urlMap };
+      if (cacheKey) PROBE_CACHE[cacheKey] = { availableKeys: availableKeys, urlMap: urlMap, ts: Date.now() };
+      return out;
+    });
+  }
+
+  /** PR-INS2e/INS2g.1: Resolve sampler urls. Local IndexedDB first (no probe). Else probe baseUrl for available keys.
+   *  Returns { urls, objectUrls, fallbackReason? }. If <2 keys available, fallbackReason is set. */
   function resolveSamplerUrlsForPack(pack, packId){
-    var result = { urls: {}, objectUrls: [] };
-    if (!pack || !pack.urls || !packId) return result;
+    var result = { urls: {}, objectUrls: [], fallbackReason: null };
+    if (!pack || !pack.urls || !packId) return Promise.resolve(result);
     var baseUrl = getResolvedSamplerBaseUrl(pack) || pack.baseUrlDefault || '';
     var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
     var keys = (pack.requiredKeys && pack.requiredKeys.length) ? pack.requiredKeys : Object.keys(pack.urls);
@@ -189,15 +243,51 @@
         return null;
       });
     })).then(function(localResults){
+      var localKeys = [];
       for (var i = 0; i < keys.length; i++){
-        var k = keys[i];
         var loc = localResults[i];
-        if (loc && loc.url) result.urls[k] = loc.url;
-        else if (baseUrl && pack.urls[k]) result.urls[k] = baseUrl.replace(/\/+$/, '') + '/' + pack.urls[k];
-        else result.urls[k] = pack.urls[k];
+        if (loc && loc.url){ result.urls[loc.k] = loc.url; localKeys.push(loc.k); }
       }
       if (store && store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
-      return result;
+
+      if (localKeys.length > 0){
+        result.availableKeys = localKeys;
+        if (localKeys.length < 2) result.fallbackReason = 'Sampler pack incomplete (' + localKeys.length + ' sample(s) found).';
+        return result;
+      }
+
+      if (!baseUrl){ result.fallbackReason = 'Sampler pack missing. See docs to install samples.'; return result; }
+      return probeSamplerFiles(baseUrl, keys, pack).then(function(probed){
+        result.availableKeys = probed.availableKeys || [];
+        for (var k in (probed.urlMap || {})) result.urls[k] = probed.urlMap[k];
+        if (result.availableKeys.length < 2) result.fallbackReason = 'Sampler pack incomplete (' + result.availableKeys.length + ' sample(s) found).';
+        return result;
+      });
+    });
+  }
+
+  /** PR-INS2g.1: Probe sampler availability for status display. Returns { availableKeys, missingKeys, source }. */
+  function probeSamplerAvailability(packId){
+    var packs = (typeof SAMPLER_PACKS !== 'undefined') ? SAMPLER_PACKS : {};
+    var pack = packs[packId];
+    if (!pack || !pack.urls) return Promise.resolve({ availableKeys: [], missingKeys: [], source: null });
+    var keys = (pack.requiredKeys && pack.requiredKeys.length) ? pack.requiredKeys : Object.keys(pack.urls);
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    if (!store || !store.getSample) return Promise.resolve({ availableKeys: [], missingKeys: keys, source: null });
+    return Promise.all(keys.map(function(k){ return store.getSample(packId, k); })).then(function(blobs){
+      var availableKeys = [];
+      for (var i = 0; i < keys.length; i++) if (blobs[i] && blobs[i] instanceof Blob) availableKeys.push(keys[i]);
+      if (availableKeys.length > 0){
+        var missingKeys = keys.filter(function(k){ return availableKeys.indexOf(k) < 0; });
+        return { availableKeys: availableKeys, missingKeys: missingKeys, source: 'local' };
+      }
+      var baseUrl = getResolvedSamplerBaseUrl(pack) || pack.baseUrlDefault || '';
+      if (!baseUrl) return { availableKeys: [], missingKeys: keys, source: null };
+      return probeSamplerFiles(baseUrl, keys, pack).then(function(probed){
+        var av = probed.availableKeys || [];
+        var missing = keys.filter(function(k){ return av.indexOf(k) < 0; });
+        return { availableKeys: av, missingKeys: missing, source: 'remote' };
+      });
     });
   }
 
@@ -1618,5 +1708,6 @@ function toggleClipAB(projectV2, clipId){
     setSamplerBaseUrl,
     getResolvedSamplerBaseUrl,
     resolveSamplerUrlsForPack,
+    probeSamplerAvailability,
   };
 })();
