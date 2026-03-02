@@ -2028,7 +2028,7 @@ renderTimeline(){
           if (!uploadStatus || !selPack || !window.H2SInstrumentLibraryStore) return;
           const packId = selPack.value;
           if (!packId){
-            setUploadStatus('');
+            refreshAllPacksStatus();
             return;
           }
           window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
@@ -2037,6 +2037,21 @@ renderTimeline(){
             const missing = valid.filter(k => have.indexOf(k) < 0);
             if (have.length === 0) setUploadStatus('No local samples. Use baseUrl or upload A1..A6 (mp3/wav).');
             else setUploadStatus('Local: ' + have.sort().join(', ') + (missing.length ? ' | Missing: ' + missing.join(', ') : ' (complete)'));
+          });
+        }
+
+        function refreshAllPacksStatus(){
+          if (!uploadStatus || !window.H2SInstrumentLibraryStore || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
+          const packs = window.H2SProject.SAMPLER_PACKS;
+          const validKeys = (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).length;
+          Promise.all(Object.keys(packs).map(packId => window.H2SInstrumentLibraryStore.listSamples(packId))).then(results => {
+            const parts = [];
+            Object.keys(packs).forEach((packId, i) => {
+              const keys = results[i] || [];
+              const label = (packs[packId].label || packId).split(' ')[0];
+              parts.push(label + ': ' + keys.length + '/' + validKeys);
+            });
+            setUploadStatus(parts.length ? parts.join(' | ') : 'No packs.');
           });
         }
 
@@ -2074,6 +2089,45 @@ renderTimeline(){
             if (!window.H2SInstrumentLibraryStore) return;
             setUploadStatus('Clearing...');
             window.H2SInstrumentLibraryStore.clearPack(packId).then(() => { setUploadStatus('Cleared.'); refreshUploadStatus(); });
+          });
+        }
+
+        const inpFolder = document.getElementById('inpSamplerFolder');
+        const btnFolder = document.getElementById('btnSamplerFolder');
+        if (inpFolder && btnFolder && window.H2SInstrumentLibraryStore && window.H2SProject && window.H2SProject.SAMPLER_PACKS){
+          btnFolder.addEventListener('click', () => { inpFolder.click(); });
+          inpFolder.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = '';
+            if (!files.length){ refreshUploadStatus(); return; }
+            const packs = window.H2SProject.SAMPLER_PACKS;
+            const subdirToPackId = {};
+            for (const packId of Object.keys(packs)){
+              const subdir = (packs[packId].instrumentSubdir || '').replace(/\/+$/, '').toLowerCase();
+              if (subdir) subdirToPackId[subdir] = packId;
+            }
+            const store = window.H2SInstrumentLibraryStore;
+            const toImport = [];
+            let unknownSubdir = 0, invalidFilename = 0;
+            for (let i = 0; i < files.length; i++){
+              const path = files[i].webkitRelativePath || files[i].name || '';
+              const parsed = store.parsePackAndNoteFromRelativePath(path, subdirToPackId);
+              if (parsed) toImport.push({ file: files[i], packId: parsed.packId, noteKey: parsed.noteKey });
+              else {
+                const subdir = (path.split(/[/\\]/)[0] || '').toLowerCase();
+                const noteKey = store.parseNoteKeyFromFilename(files[i].name);
+                if (subdir && !subdirToPackId[subdir]) unknownSubdir++;
+                else if (!noteKey) invalidFilename++;
+              }
+            }
+            if (!toImport.length){ setUploadStatus('No valid files. ' + (unknownSubdir ? unknownSubdir + ' unknown subdir, ' : '') + (invalidFilename ? invalidFilename + ' invalid filename.' : '')); return; }
+            setUploadStatus('Importing ' + toImport.length + ' file(s)...');
+            Promise.all(toImport.map(x => store.putSample(x.packId, x.noteKey, x.file, x.file.name))).then(() => {
+              refreshAllPacksStatus();
+              let msg = 'Imported ' + toImport.length + '.';
+              if (unknownSubdir || invalidFilename) msg += ' Skipped: ' + (unknownSubdir ? unknownSubdir + ' unknown subdir, ' : '') + (invalidFilename ? invalidFilename + ' invalid.' : '');
+              setUploadStatus(msg);
+            }).catch(() => { setUploadStatus('Import failed.'); });
           });
         }
 

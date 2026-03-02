@@ -20,6 +20,20 @@
     return VALID_NOTE_KEYS.indexOf(base) >= 0 ? base : null;
   }
 
+  /** PR-INS2f: Parse packId + noteKey from webkitRelativePath (e.g. "piano/A1.mp3").
+   *  subdirToPackId: { 'piano': 'tonejs:piano', 'strings': 'tonejs:strings', ... }
+   *  Returns { packId, noteKey } or null if unknown subdir or invalid filename. */
+  function parsePackAndNoteFromRelativePath(relativePath, subdirToPackId){
+    if (!relativePath || typeof relativePath !== 'string' || !subdirToPackId || typeof subdirToPackId !== 'object') return null;
+    var parts = relativePath.replace(/\\/g, '/').split('/');
+    var subdir = (parts[0] || '').toLowerCase();
+    var basename = parts[parts.length - 1] || '';
+    var packId = subdirToPackId[subdir];
+    if (!packId) return null;
+    var noteKey = parseNoteKeyFromFilename(basename);
+    return noteKey ? { packId: packId, noteKey: noteKey } : null;
+  }
+
   function openDb(){
     if (typeof indexedDB === 'undefined') return Promise.resolve(null);
     return new Promise(function(resolve, reject){
@@ -127,6 +141,7 @@
 
   var api = {
     parseNoteKeyFromFilename: parseNoteKeyFromFilename,
+    parsePackAndNoteFromRelativePath: parsePackAndNoteFromRelativePath,
     VALID_NOTE_KEYS: VALID_NOTE_KEYS,
     putSample: putSample,
     getSample: getSample,

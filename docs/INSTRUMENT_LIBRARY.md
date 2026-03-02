@@ -79,6 +79,8 @@ You can upload sample files (A1..A6) directly in the UI. They are stored in Inde
 4. Status shows recognized keys and any missing keys.
 5. Use **Clear local samples** to remove uploaded samples for the selected pack and revert to baseUrl/default.
 
+**Import Folder (PR-INS2f):** Click **Import Folder** and choose a folder containing instrument subfolders (`piano/`, `strings/`, `bass/`, `guitar-acoustic/`, `guitar-electric/`). Each subfolder should have A1..A6 samples (e.g. `piano/A1.mp3`). The app auto-detects the pack from the subfolder name and imports into IndexedDB. Unknown subdirs and invalid filenames are skipped and reported.
+
 **Fallback chain:** local IndexedDB → user baseUrl → default baseUrl → default synth.
 
 ---
