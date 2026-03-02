@@ -18,21 +18,23 @@ Place sample files under:
 /static/pianoroll/vendor/tonejs-instruments/samples/<instrument>/
 ```
 
-Each pack expects a minimal set of samples (A1.mp3 … A6.mp3) for repitching. Example layout:
+Each pack uses its **natural keys** (scientific pitch note names). Supported filename patterns (PR-INS2g):
+
+- **Legacy:** `A1.mp3`, `A2.wav`, … `A6` (piano)
+- **Scientific pitch:** `C3.mp3`, `Ds4.wav` (s = sharp), `F#2.mp3`, `Bb3.mp3` (b = flat)
+
+Example layout:
 
 ```
 static/pianoroll/vendor/tonejs-instruments/samples/
-├── piano/
-│   ├── A1.mp3  … A6.mp3
-├── strings/
-│   ├── A1.mp3  … A6.mp3
-├── bass/
-│   ├── A1.mp3  … A6.mp3
-├── guitar-acoustic/
-│   ├── A1.mp3  … A6.mp3
-└── guitar-electric/
-    ├── A1.mp3  … A6.mp3
+├── piano/          → A1..A6
+├── violin/         → C4, E4, G3, G4, A3, A4  (Strings pack)
+├── bass-electric/  → E1, G1, Cs2, E2, G2, Cs3  (Bass pack)
+├── guitar-acoustic/→ C3, D3, E3, G3, A3, C4
+└── guitar-electric/→ C3, D3, E3, G3, A3, C4
 ```
+
+Packs use upstream sample filenames (e.g. Ds4, Cs2); no renaming needed.
 
 Samples are resolved relative to the site root. Example: with server at `http://127.0.0.1:8000`, the piano `A1` sample is fetched from:
 
@@ -42,17 +44,17 @@ http://127.0.0.1:8000/static/pianoroll/vendor/tonejs-instruments/samples/piano/A
 
 ---
 
-## Supported sampler packs (PR-INS2d)
+## Supported sampler packs (PR-INS2d/INS2g)
 
-| packId | Dropdown label | instrumentSubdir |
-|--------|----------------|------------------|
-| `tonejs:piano` | Sampler: Piano | `piano/` |
-| `tonejs:strings` | Sampler: Strings | `strings/` |
-| `tonejs:bass` | Sampler: Bass | `bass/` |
-| `tonejs:guitar-acoustic` | Sampler: Guitar Acoustic | `guitar-acoustic/` |
-| `tonejs:guitar-electric` | Sampler: Guitar Electric | `guitar-electric/` |
+| packId | Dropdown label | requiredKeys (minimal) |
+|--------|----------------|------------------------|
+| `tonejs:piano` | Sampler: Piano | A1..A6 |
+| `tonejs:strings` | Sampler: Strings | C4, E4, G3, G4, A3, A4 |
+| `tonejs:bass` | Sampler: Bass | E1, G1, C#2, E2, G2, C#3 |
+| `tonejs:guitar-acoustic` | Sampler: Guitar Acoustic | C3, D3, E3, G3, A3, C4 |
+| `tonejs:guitar-electric` | Sampler: Guitar Electric | C3, D3, E3, G3, A3, C4 |
 
-Each pack uses `baseUrlDefault` (or user baseUrl + subdir) and a minimal `urls` set (A1…A6, .mp3). `Tone.Sampler` repitches these samples across the MIDI range.
+Each pack defines `requiredKeys` and `urls` (Tone note key → filename). Use upstream filenames (e.g. `Ds4.mp3` for D#, `Cs2.mp3` for C#).
 
 ---
 
@@ -79,7 +81,7 @@ You can upload sample files (A1..A6) directly in the UI. They are stored in Inde
 4. Status shows recognized keys and any missing keys.
 5. Use **Clear local samples** to remove uploaded samples for the selected pack and revert to baseUrl/default.
 
-**Import Folder (PR-INS2f):** Click **Import Folder** and choose a folder containing instrument subfolders (`piano/`, `strings/`, `bass/`, `guitar-acoustic/`, `guitar-electric/`). Each subfolder should have A1..A6 samples (e.g. `piano/A1.mp3`). The app auto-detects the pack from the subfolder name and imports into IndexedDB. Unknown subdirs and invalid filenames are skipped and reported.
+**Import Folder (PR-INS2f):** Click **Import Folder** and choose a folder with instrument subfolders (`piano/`, `violin/`, `bass-electric/`, `guitar-acoustic/`, `guitar-electric/`). Use scientific pitch filenames (e.g. `piano/A1.mp3`, `guitar-acoustic/Ds4.mp3`). The app auto-detects the pack from the subfolder name and imports into IndexedDB.
 
 **Fallback chain:** local IndexedDB → user baseUrl → default baseUrl → default synth.
 
@@ -101,8 +103,9 @@ You can upload sample files (A1..A6) directly in the UI. They are stored in Inde
 
 **Fixes:**
 
-- Ensure the instrument folder exists (e.g. `samples/piano/`, `samples/strings/`) under `static/pianoroll/vendor/tonejs-instruments/`.
-- Ensure the required `.mp3` files (A1–A6) are present for that pack.
+- Ensure the instrument folder exists (e.g. `samples/piano/`, `samples/guitar-acoustic/`).
+- Ensure the required sample files for that pack are present (see table above; e.g. piano needs A1..A6, guitar needs C3, D3, E3, G3, A3, C4).
+- The Strings pack uses `violin/`; Bass uses `bass-electric/` (per tonejs-instruments layout).
 - Check the browser Network tab for 404 responses to sample URLs.
 - Verify the dev server is serving files from the `static/` directory.
 

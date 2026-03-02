@@ -10,15 +10,32 @@
 
   const DB_NAME = 'hum2song_studio_instrument_library';
   const STORE_NAME = 'sampler_samples';
-  const VALID_NOTE_KEYS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
+  const VALID_NOTE_KEYS_LEGACY = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
   var _objectUrlsByPack = {};
 
-  /** Parse note key from filename (A1.mp3, a2.wav -> A1, A2). Returns null if invalid. */
+  /** PR-INS2g: Parse scientific pitch note key from filename.
+   *  Accepts: A1..A6 (legacy), C3, Ds4, F#2, Bb3, Cs5, Gs2 (s=sharp, b=flat, #=sharp).
+   *  Returns canonical key (e.g. Ds4 -> D#4 for Tone) or null if invalid. */
   function parseNoteKeyFromFilename(filename){
     if (!filename || typeof filename !== 'string') return null;
-    var base = filename.replace(/\.[^/.]+$/, '').toUpperCase();
-    return VALID_NOTE_KEYS.indexOf(base) >= 0 ? base : null;
+    var base = filename.replace(/\.[^/.]+$/, '').trim();
+    if (!base) return null;
+
+    var m = base.match(/^([A-Ga-g])([#bs]?)(-?\d+)$/);
+    if (!m) {
+      var up = base.toUpperCase();
+      return VALID_NOTE_KEYS_LEGACY.indexOf(up) >= 0 ? up : null;
+    }
+    var note = m[1].toUpperCase();
+    var acc = (m[2] || '').toLowerCase();
+    var oct = m[3];
+    var accidental = '';
+    if (acc === '#' || acc === 's') accidental = '#';
+    else if (acc === 'b') accidental = 'b';
+    return note + accidental + oct;
   }
+
+  var VALID_NOTE_KEYS = VALID_NOTE_KEYS_LEGACY;
 
   /** PR-INS2f: Parse packId + noteKey from webkitRelativePath (e.g. "piano/A1.mp3").
    *  subdirToPackId: { 'piano': 'tonejs:piano', 'strings': 'tonejs:strings', ... }

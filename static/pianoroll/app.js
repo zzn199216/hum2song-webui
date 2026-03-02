@@ -2006,9 +2006,12 @@ renderTimeline(){
           btnTest.addEventListener('click', () => {
             setStatus('Testing...');
             const P = window.H2SProject;
-            const pack = (P && P.SAMPLER_PACKS && P.SAMPLER_PACKS['tonejs:piano']) || null;
+            const packId = selPack && selPack.value;
+            const pack = (packId && P && P.SAMPLER_PACKS && P.SAMPLER_PACKS[packId]) || (P && P.SAMPLER_PACKS && P.SAMPLER_PACKS['tonejs:piano']) || null;
             const baseUrl = (P && P.getResolvedSamplerBaseUrl && pack) ? P.getResolvedSamplerBaseUrl(pack) : null;
-            const testUrl = baseUrl ? (baseUrl.replace(/\/+$/, '') + '/A1.mp3') : null;
+            const firstKey = (pack && pack.requiredKeys && pack.requiredKeys[0]) || (pack && pack.urls && Object.keys(pack.urls)[0]) || 'A1';
+            const filename = (pack && pack.urls && pack.urls[firstKey]) || (firstKey + '.mp3');
+            const testUrl = baseUrl ? (baseUrl.replace(/\/+$/, '') + '/' + filename) : null;
             if (!testUrl){
               setStatus('No base URL configured.');
               return;
@@ -2031,11 +2034,13 @@ renderTimeline(){
             refreshAllPacksStatus();
             return;
           }
+          const packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) || {};
+          const pack = packs[packId];
+          const required = (pack && pack.requiredKeys) ? pack.requiredKeys : (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).slice();
           window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
-            const valid = (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).slice();
             const have = keys || [];
-            const missing = valid.filter(k => have.indexOf(k) < 0);
-            if (have.length === 0) setUploadStatus('No local samples. Use baseUrl or upload A1..A6 (mp3/wav).');
+            const missing = required.filter(k => have.indexOf(k) < 0);
+            if (have.length === 0) setUploadStatus('No local samples. Use baseUrl or upload (e.g. C3, Ds4, A1..A6).');
             else setUploadStatus('Local: ' + have.sort().join(', ') + (missing.length ? ' | Missing: ' + missing.join(', ') : ' (complete)'));
           });
         }
@@ -2043,13 +2048,14 @@ renderTimeline(){
         function refreshAllPacksStatus(){
           if (!uploadStatus || !window.H2SInstrumentLibraryStore || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
           const packs = window.H2SProject.SAMPLER_PACKS;
-          const validKeys = (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).length;
           Promise.all(Object.keys(packs).map(packId => window.H2SInstrumentLibraryStore.listSamples(packId))).then(results => {
             const parts = [];
             Object.keys(packs).forEach((packId, i) => {
               const keys = results[i] || [];
-              const label = (packs[packId].label || packId).split(' ')[0];
-              parts.push(label + ': ' + keys.length + '/' + validKeys);
+              const pack = packs[packId];
+              const required = (pack && pack.requiredKeys) ? pack.requiredKeys.length : 6;
+              const label = (pack && pack.label || packId).split(' ')[0];
+              parts.push(label + ': ' + keys.length + '/' + required);
             });
             setUploadStatus(parts.length ? parts.join(' | ') : 'No packs.');
           });
@@ -2103,8 +2109,11 @@ renderTimeline(){
             const packs = window.H2SProject.SAMPLER_PACKS;
             const subdirToPackId = {};
             for (const packId of Object.keys(packs)){
-              const subdir = (packs[packId].instrumentSubdir || '').replace(/\/+$/, '').toLowerCase();
+              const p = packs[packId];
+              const subdir = (p.instrumentSubdir || '').replace(/\/+$/, '').toLowerCase();
               if (subdir) subdirToPackId[subdir] = packId;
+              const aliases = p.subdirAliases || [];
+              for (let a = 0; a < aliases.length; a++) subdirToPackId[aliases[a].toLowerCase()] = packId;
             }
             const store = window.H2SInstrumentLibraryStore;
             const toImport = [];
