@@ -2022,17 +2022,23 @@ renderTimeline(){
           });
         }
 
-        if (selPack && window.H2SProject.SAMPLER_PACKS){
+        function refreshPackDropdown(){
+          if (!selPack || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
           const packs = window.H2SProject.SAMPLER_PACKS;
-          selPack.innerHTML = Object.keys(packs).map(k => `<option value="${k}">${packs[k].label || k}</option>`).join('');
+          let html = Object.keys(packs).map(k => `<option value="${k}">${(packs[k].label || k).replace(/</g,'&lt;')}</option>`).join('');
+          const custom = window.__h2s_custom_instruments || [];
+          if (custom.length){
+            html += '<optgroup label="My Instruments">';
+            custom.forEach(c => { html += '<option value="' + (c.packId || '').replace(/"/g,'&quot;') + '">' + (c.displayName || c.packId || '').replace(/</g,'&lt;') + '</option>'; });
+            html += '</optgroup>';
+          }
+          selPack.innerHTML = html;
         }
+        if (selPack && window.H2SProject && window.H2SProject.SAMPLER_PACKS) refreshPackDropdown();
 
         function updateUploadButtonLabel(){
-          if (!btnUpload || !selPack || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
-          const packId = selPack.value;
-          const pack = packId ? window.H2SProject.SAMPLER_PACKS[packId] : null;
-          const label = (pack && pack.label) ? pack.label.replace(/^Sampler:\s*/i, '') : (packId || 'pack');
-          btnUpload.textContent = 'Upload samples (to ' + label + ')';
+          if (!btnUpload) return;
+          btnUpload.textContent = 'Upload samples (creates new instrument)';
         }
 
         function refreshUploadStatus(){
@@ -2040,6 +2046,16 @@ renderTimeline(){
           const packId = selPack.value;
           if (!packId){
             refreshAllPacksStatus();
+            return;
+          }
+          const isCustom = packId.indexOf('user:') === 0;
+          if (isCustom && window.H2SInstrumentLibraryStore){
+            window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
+              const have = keys || [];
+              if (have.length === 0) setUploadStatus('No samples in this custom instrument.');
+              else if (have.length === 1) setUploadStatus('Available (local): ' + have[0] + ' (oneshot).');
+              else setUploadStatus('Available (local): ' + have.sort().join(', ') + ' (sampler).');
+            });
             return;
           }
           const probe = (window.H2SProject && window.H2SProject.probeSamplerAvailability) ? window.H2SProject.probeSamplerAvailability : null;
@@ -2085,7 +2101,7 @@ renderTimeline(){
         }
 
         if (selPack){
-          selPack.addEventListener('change', () => { updateUploadButtonLabel(); refreshUploadStatus(); });
+          selPack.addEventListener('change', refreshUploadStatus);
           updateUploadButtonLabel();
         }
 
@@ -2094,9 +2110,7 @@ renderTimeline(){
           inpUpload.addEventListener('change', (e) => {
             const files = Array.from(e.target.files || []);
             e.target.value = '';
-            if (!files.length || !selPack || !window.H2SInstrumentLibraryStore) return;
-            const packId = selPack.value;
-            if (!packId){ setUploadStatus('Select a pack first.'); return; }
+            if (!files.length || !window.H2SInstrumentLibraryStore) return;
             const store = window.H2SInstrumentLibraryStore;
             const toUpload = [];
             let skipped = 0;
@@ -2106,11 +2120,23 @@ renderTimeline(){
               else skipped++;
             }
             if (!toUpload.length){ setUploadStatus(skipped ? skipped + ' file(s) skipped. Tips: use names like A4.mp3 or C4.wav.' : 'No recognizable samples. Tips: A1..A6 or C3/Ds4/F#2/Bb3.'); return; }
-            setUploadStatus('Uploading ' + toUpload.length + ' file(s)...');
-            Promise.all(toUpload.map(x => store.putSample(packId, x.key, x.file, x.file.name))).then(() => {
-              refreshUploadStatus();
-              setUploadStatus('Uploaded ' + toUpload.length + '. ' + (skipped ? skipped + ' skipped.' : ''));
-            }).catch(() => { setUploadStatus('Upload failed.'); });
+            const uniqueKeys = [...new Set(toUpload.map(x => x.key))];
+            const baseName = (files[0] && files[0].name) ? files[0].name.replace(/\.[^/.]+$/, '').trim().slice(0, 32) || 'Uploaded' : 'Uploaded';
+            const kind = uniqueKeys.length >= 2 ? 'sampler' : 'oneshot';
+            setUploadStatus('Creating custom instrument...');
+            store.createCustomInstrument(baseName, kind).then(({ packId, displayName }) => {
+              setUploadStatus('Uploading ' + toUpload.length + ' sample(s)...');
+              return Promise.all(toUpload.map(x => store.putSample(packId, x.key, x.file, x.file.name))).then(() => {
+                let msg = 'Created ' + displayName + ' and uploaded ' + toUpload.length + '.';
+                if (skipped) msg += ' Skipped: ' + skipped + '.';
+                msg += ' To use: select it in the track instrument dropdown.';
+                setUploadStatus(msg);
+                return store.listCustomInstruments().then(list => {
+                  window.__h2s_custom_instruments = list;
+                  if (window.H2SApp && typeof window.H2SApp.renderTimeline === 'function') window.H2SApp.renderTimeline();
+                });
+              });
+            }).then(() => refreshUploadStatus()).catch(() => { setUploadStatus('Upload failed.'); });
           });
         }
 
@@ -2118,51 +2144,72 @@ renderTimeline(){
           btnClear.addEventListener('click', () => {
             const packId = selPack.value;
             if (!packId){ setUploadStatus('Select a pack first.'); return; }
-            if (!window.H2SInstrumentLibraryStore) return;
-            setUploadStatus('Clearing...');
-            window.H2SInstrumentLibraryStore.clearPack(packId).then(() => { setUploadStatus('Cleared.'); refreshUploadStatus(); });
+            const store = window.H2SInstrumentLibraryStore;
+            if (!store) return;
+            const isCustom = packId.indexOf('user:') === 0;
+            setUploadStatus(isCustom ? 'Deleting instrument...' : 'Clearing...');
+            (isCustom ? store.deleteCustomInstrument(packId) : store.clearPack(packId)).then(() => {
+              setUploadStatus(isCustom ? 'Deleted.' : 'Cleared.');
+              if (isCustom && store.listCustomInstruments){
+                return store.listCustomInstruments().then(list => {
+                  window.__h2s_custom_instruments = list;
+                  refreshPackDropdown();
+                  if (window.H2SApp && typeof window.H2SApp.renderTimeline === 'function') window.H2SApp.renderTimeline();
+                });
+              }
+            }).then(() => refreshUploadStatus()).catch(() => setUploadStatus('Failed.'));
           });
         }
 
         const inpFolder = document.getElementById('inpSamplerFolder');
         const btnFolder = document.getElementById('btnSamplerFolder');
-        if (inpFolder && btnFolder && window.H2SInstrumentLibraryStore && window.H2SProject && window.H2SProject.SAMPLER_PACKS){
-          btnFolder.addEventListener('click', () => {
-            if (!selPack || !selPack.value){ setUploadStatus('Select a pack first.'); return; }
-            inpFolder.click();
-          });
+        if (inpFolder && btnFolder && window.H2SInstrumentLibraryStore){
+          btnFolder.addEventListener('click', () => inpFolder.click());
           inpFolder.addEventListener('change', (e) => {
             const files = Array.from(e.target.files || []);
             e.target.value = '';
             if (!files.length){ refreshUploadStatus(); return; }
-            const packId = selPack && selPack.value;
-            if (!packId){ setUploadStatus('Select a pack first.'); return; }
-            const pack = window.H2SProject.SAMPLER_PACKS[packId];
-            const packLabel = (pack && pack.label) ? pack.label.replace(/^Sampler:\s*/i, '') : packId;
             const store = window.H2SInstrumentLibraryStore;
             const toImport = [];
             let skipped = 0;
             for (let i = 0; i < files.length; i++){
               const noteKey = store.parseNoteKeyFromFilename(files[i].name);
-              if (noteKey) toImport.push({ file: files[i], packId, noteKey });
+              if (noteKey) toImport.push({ file: files[i], noteKey });
               else skipped++;
             }
-            if (!toImport.length){
-              setUploadStatus('No recognizable samples found. Tips: sample files must be named like A4.mp3 or C4.wav. Folder name doesn\'t matter; pack is chosen above.');
+            const uniqueKeys = [...new Set(toImport.map(x => x.noteKey))];
+            if (uniqueKeys.length === 0){
+              setUploadStatus('No recognizable samples found. Tips: sample files must be named like A4.mp3 or C4.wav.');
               return;
             }
-            setUploadStatus('Importing ' + toImport.length + ' sample(s)...');
-            const recognized = toImport.map(x => x.noteKey).sort();
-            Promise.all(toImport.map(x => store.putSample(x.packId, x.noteKey, x.file, x.file.name))).then(() => {
-              refreshUploadStatus();
-              let msg = 'Imported ' + toImport.length + ' sample(s) into ' + packLabel + '. Recognized: ' + [...new Set(recognized)].join(', ');
-              if (skipped) msg += '. Skipped: ' + skipped + ' (unknown names).';
-              setUploadStatus(msg);
-            }).catch(() => { setUploadStatus('Import failed.'); });
+            const baseName = (files[0] && files[0].webkitRelativePath) ? files[0].webkitRelativePath.split(/[/\\]/)[0] || 'Imported' : 'Imported';
+            const kind = uniqueKeys.length >= 2 ? 'sampler' : 'oneshot';
+            setUploadStatus('Creating custom instrument...');
+            store.createCustomInstrument(baseName, kind).then(({ packId, displayName }) => {
+              setUploadStatus('Importing ' + toImport.length + ' sample(s)...');
+              return Promise.all(toImport.map(x => store.putSample(packId, x.noteKey, x.file, x.file.name))).then(() => {
+                const recognized = [...new Set(toImport.map(x => x.noteKey))].sort();
+                let msg = 'Created ' + displayName + ' and imported ' + toImport.length + ' sample(s). Recognized: ' + recognized.join(', ');
+                if (skipped) msg += '. Skipped: ' + skipped + ' (unknown names).';
+                msg += ' To use: select it in the track instrument dropdown.';
+                setUploadStatus(msg);
+                return store.listCustomInstruments().then(list => {
+                  window.__h2s_custom_instruments = list;
+                  if (window.H2SApp && typeof window.H2SApp.renderTimeline === 'function') window.H2SApp.renderTimeline();
+                });
+              });
+            }).then(() => refreshUploadStatus()).catch(() => setUploadStatus('Import failed.'));
           });
         }
 
         refreshUploadStatus();
+        if (window.H2SInstrumentLibraryStore && window.H2SInstrumentLibraryStore.listCustomInstruments){
+          window.H2SInstrumentLibraryStore.listCustomInstruments().then(list => {
+            window.__h2s_custom_instruments = list;
+            refreshPackDropdown();
+            if (typeof this.renderTimeline === 'function') this.renderTimeline();
+          });
+        }
       }catch(e){}
     },
 	async playProject(){

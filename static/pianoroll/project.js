@@ -74,9 +74,9 @@
   };
 
   /**
-   * PR-INS1/INS2a: Normalize instrument to descriptor shape.
-   * Accepts legacy string (e.g. 'pad', 'sampler:tonejs:piano') or structured descriptor.
-   * Returns { kind: 'tone_synth'|'sampler', presetId?: string, packId?: string, params: {} }
+   * PR-INS1/INS2a/INS2e.2: Normalize instrument to descriptor shape.
+   * Accepts legacy string (e.g. 'pad', 'sampler:tonejs:piano', 'sampler:user:xxx', 'oneshot:user:xxx') or structured descriptor.
+   * Returns { kind: 'tone_synth'|'sampler'|'oneshot', presetId?: string, packId?: string, params: {} }
    */
   function normalizeInstrument(instr){
     if (typeof instr === 'string' && instr.trim()){
@@ -85,11 +85,18 @@
         const packId = s.slice(8).trim() || 'tonejs:piano';
         return { kind: 'sampler', packId: packId, params: {} };
       }
+      if (s.indexOf('oneshot:') === 0){
+        const packId = s.slice(8).trim();
+        return { kind: 'oneshot', packId: packId, params: {} };
+      }
       return { kind: 'tone_synth', presetId: s, params: {} };
     }
     if (instr && typeof instr === 'object'){
       if (instr.kind === 'sampler' && typeof instr.packId === 'string'){
         return { kind: 'sampler', packId: instr.packId, params: instr.params || {} };
+      }
+      if (instr.kind === 'oneshot' && typeof instr.packId === 'string'){
+        return { kind: 'oneshot', packId: instr.packId, params: instr.params || {} };
       }
       if (instr.kind === 'tone_synth' && typeof instr.presetId === 'string'){
         return { kind: 'tone_synth', presetId: instr.presetId, params: instr.params || {} };
@@ -262,6 +269,49 @@
         for (var k in (probed.urlMap || {})) result.urls[k] = probed.urlMap[k];
         if (result.availableKeys.length < 2) result.fallbackReason = 'Sampler pack incomplete (' + result.availableKeys.length + ' sample(s) found).';
         return result;
+      });
+    });
+  }
+
+  /** PR-INS2e.2: Resolve URLs for custom sampler (IndexedDB only). Returns { urls, objectUrls, fallbackReason? }. */
+  function resolveCustomSamplerUrls(packId){
+    var result = { urls: {}, objectUrls: [], fallbackReason: null };
+    if (!packId || packId.indexOf('user:') !== 0) return Promise.resolve(result);
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    if (!store || !store.listSamples || !store.getSample) return Promise.resolve(result);
+    return store.listSamples(packId).then(function(keys){
+      if (!keys || !keys.length) return result;
+      return Promise.all(keys.map(function(k){
+        return store.getSample(packId, k).then(function(blob){
+          if (blob && blob instanceof Blob){
+            var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+            if (url){ result.objectUrls.push(url); return { k: k, url: url }; }
+          }
+          return null;
+        });
+      })).then(function(arr){
+        for (var i = 0; i < arr.length; i++) if (arr[i]) result.urls[arr[i].k] = arr[i].url;
+        if (store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
+        if (Object.keys(result.urls).length < 2) result.fallbackReason = 'Custom sampler needs >=2 samples.';
+        return result;
+      });
+    });
+  }
+
+  /** PR-INS2e.2: Resolve single URL for custom oneshot (IndexedDB). Returns { url, objectUrls } or null. */
+  function resolveCustomOneshotUrl(packId){
+    if (!packId || packId.indexOf('user:') !== 0) return Promise.resolve(null);
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    if (!store || !store.listSamples || !store.getSample) return Promise.resolve(null);
+    return store.listSamples(packId).then(function(keys){
+      if (!keys || keys.length === 0) return null;
+      var k = keys[0];
+      return store.getSample(packId, k).then(function(blob){
+        if (!blob || !(blob instanceof Blob)) return null;
+        var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+        if (!url) return null;
+        if (store.registerObjectUrls) store.registerObjectUrls(packId, [url]);
+        return { url: url, objectUrls: [url] };
       });
     });
   }
@@ -1708,6 +1758,8 @@ function toggleClipAB(projectV2, clipId){
     setSamplerBaseUrl,
     getResolvedSamplerBaseUrl,
     resolveSamplerUrlsForPack,
+    resolveCustomSamplerUrls,
+    resolveCustomOneshotUrl,
     probeSamplerAvailability,
   };
 })();

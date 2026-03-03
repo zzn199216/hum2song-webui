@@ -640,15 +640,15 @@
             <div id="samplerBaseUrlStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
 
             <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
-              <label style="font-size:11px; color:var(--muted);">Upload local samples (PR-INS2e)</label>
-              <select id="selSamplerPack" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;"></select>
+              <label style="font-size:11px; color:var(--muted);">Built-in packs &amp; My Instruments (PR-INS2e)</label>
+              <select id="selSamplerPack" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;" title="Select to view status or Clear/Delete"></select>
               <p id="samplerUploadHelp" class="muted" style="font-size:10px; margin:6px 0 0 0; line-height:1.4;">Minimum: &gt;=2 samples. Recommended: 6+. Supported names: A1..A6 or C3/Ds4/F#2/Bb3 (case-insensitive). Missing keys pitch-shifted from nearest.</p>
               <input type="file" id="inpSamplerUpload" multiple accept="audio/*" style="display:none;" />
               <div style="display:flex; gap:6px; margin-top:6px;">
                 <button id="btnSamplerUpload" class="btn mini">Upload samples</button>
                 <button id="btnClearSamplerPack" class="btn mini danger">Clear local samples</button>
               </div>
-              <p id="samplerImportFolderHelp" class="muted" style="font-size:10px; margin:6px 0 0 0;">Import Folder: samples go into the pack selected above. Folder name is ignored.</p>
+              <p id="samplerImportFolderHelp" class="muted" style="font-size:10px; margin:6px 0 0 0;">Import Folder: creates a new instrument (name from folder). Add to track dropdown → My Instruments.</p>
               <input type="file" id="inpSamplerFolder" webkitdirectory directory multiple style="display:none;" />
               <button id="btnSamplerFolder" class="btn mini" style="margin-top:6px;">Import Folder</button>
               <div id="samplerUploadStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>

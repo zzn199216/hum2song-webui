@@ -74,19 +74,54 @@
       ? window.H2SProject.normalizeInstrument(instr)
       : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
 
+    if (desc.kind === 'oneshot' && desc.packId){
+      var resolveOneshot = (window.H2SProject && window.H2SProject.resolveCustomOneshotUrl) ? window.H2SProject.resolveCustomOneshotUrl : null;
+      if (!resolveOneshot) return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
+      return resolveOneshot(desc.packId).then(function(res){
+        if (!res || !res.url) return makeSynthByInstrumentSync(Tone, 'default');
+        return new Promise(function(resolve){
+          var p = new Tone.Player({ url: res.url, onload: function(){ resolve(p); } });
+          p.toDestination();
+          setTimeout(function(){ resolve(p); }, 3000);
+        }).then(function(p){
+          return { triggerAttackRelease: function(f, d, t){ try{ p.start(t, 0, d || 0.1); }catch(e){} }, toDestination: function(){ return p; }, dispose: function(){ try{ if (p.dispose) p.dispose(); }catch(e){} } };
+        });
+      }).catch(function(){ return makeSynthByInstrumentSync(Tone, 'default'); });
+    }
+
     if (desc.kind !== 'sampler' || !desc.packId){
       return Promise.resolve(makeSynthByInstrumentSync(Tone, instr));
     }
 
+    var packId = desc.packId;
+    var isCustom = packId.indexOf('user:') === 0;
+
+    if (isCustom){
+      var resolveCustom = (window.H2SProject && window.H2SProject.resolveCustomSamplerUrls) ? window.H2SProject.resolveCustomSamplerUrls : null;
+      if (!resolveCustom) return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
+      return resolveCustom(packId).then(function(resolved){
+        var urls = resolved.urls;
+        var keyCount = urls ? Object.keys(urls).length : 0;
+        if (!urls || keyCount < 2){
+          if (typeof setStatusFn === 'function') setStatusFn(resolved.fallbackReason || 'Custom sampler needs >=2 samples.');
+          return makeSynthByInstrumentSync(Tone, 'default');
+        }
+        return new Promise(function(resolve){
+          var sampler = new Tone.Sampler({ urls: urls, onload: function(){ resolve(sampler); } });
+          setTimeout(function(){ resolve(sampler); }, SAMPLER_LOAD_TIMEOUT_MS);
+        });
+      }).catch(function(){ return makeSynthByInstrumentSync(Tone, 'default'); });
+    }
+
     var packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) ? window.H2SProject.SAMPLER_PACKS : {};
-    var pack = packs[desc.packId];
+    var pack = packs[packId];
     var resolveUrls = (window.H2SProject && window.H2SProject.resolveSamplerUrlsForPack) ? window.H2SProject.resolveSamplerUrlsForPack : null;
     if (!pack || !pack.urls || !resolveUrls){
       if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
       return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
     }
 
-    return resolveUrls(pack, desc.packId).then(function(resolved){
+    return resolveUrls(pack, packId).then(function(resolved){
       var urls = resolved.urls;
       var keyCount = urls ? Object.keys(urls).length : 0;
       if (!urls || keyCount < 2){

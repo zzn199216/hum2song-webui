@@ -505,7 +505,7 @@
 
           const sel = document.createElement('select');
           sel.className = 'trackInstrumentSelect';
-          sel.innerHTML = [
+          var builtin = [
             { v: 'default', l: 'default' },
             { v: 'bass', l: 'bass' },
             { v: 'lead', l: 'lead' },
@@ -517,7 +517,19 @@
             { v: 'sampler:tonejs:bass', l: 'Sampler: Bass' },
             { v: 'sampler:tonejs:guitar-acoustic', l: 'Sampler: Guitar Acoustic' },
             { v: 'sampler:tonejs:guitar-electric', l: 'Sampler: Guitar Electric' },
-          ].map(x=>`<option value="${x.v}">${x.l}</option>`).join('');
+          ];
+          var custom = (typeof window !== 'undefined' && window.__h2s_custom_instruments) ? window.__h2s_custom_instruments : [];
+          var opts = builtin.map(x=>'<option value="' + (x.v) + '">' + (ctrl._escapeHtml(x.l)) + '</option>').join('');
+          if (custom.length){
+            opts += '<optgroup label="' + (ctrl._escapeHtml('My Instruments')) + '">';
+            for (var i = 0; i < custom.length; i++){
+              var c = custom[i];
+              var val = (c.kind === 'oneshot') ? ('oneshot:' + c.packId) : ('sampler:' + c.packId);
+              opts += '<option value="' + (ctrl._escapeHtml(val)) + '">' + (ctrl._escapeHtml(c.displayName || c.packId)) + '</option>';
+            }
+            opts += '</optgroup>';
+          }
+          sel.innerHTML = opts;
           sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
           sel.title = 'Instrument';
           sel.style.width = '100%';

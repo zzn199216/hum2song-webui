@@ -71,19 +71,32 @@ You can set a custom root path so samples are loaded from anywhere (local folder
 
 ---
 
-## Upload local samples (PR-INS2e)
+## Upload local samples (PR-INS2e/INS2e.2)
 
-You can upload sample files (A1..A6) directly in the UI. They are stored in IndexedDB and override baseUrl for playback and Export WAV.
+You can upload sample files to create new custom instruments or (with baseUrl) use built-in packs.
 
 1. Open **Inspector** → expand **Instrument Library**.
-2. Select a pack from the "Upload local samples" dropdown (e.g. Piano).
-3. Click **Upload samples** and choose files named `A1.mp3`, `A2.wav`, etc. (case-insensitive; only A1–A6 accepted).
-4. Status shows recognized keys and any missing keys.
-5. Use **Clear local samples** to remove uploaded samples for the selected pack and revert to baseUrl/default.
+2. Click **Upload samples (creates new instrument)** and choose files named `A1.mp3`, `C4.wav`, etc. (A1..A6 or C3/Ds4/F#2/Bb3).
+3. A new instrument is created (name from first file). It appears in **My Instruments** in the track dropdown.
+4. The dropdown shows built-in packs and My Instruments. Select one to view status. Use **Clear local samples** to clear built-in pack samples, or **delete** a custom instrument entirely.
 
-**Import Folder (PR-INS2e.1):** Select a pack above, then click **Import Folder** and choose any folder. The folder name is ignored; all recognizable sample files (e.g. `A4.mp3`, `C4.wav`) under the chosen folder are imported into the selected pack. Use scientific pitch filenames (A1..A6 or C3/Ds4/F#2/Bb3).
+**Import Folder (PR-INS2e.2):** Click **Import Folder** and choose any folder. Creates a **new instrument** named from the folder (e.g. `tuba/` → 自定义：tuba). All recognizable sample files (e.g. `A4.mp3`, `C4.wav`) under the folder are imported. Requires ≥2 different note keys for sampler; 1 key creates a oneshot. New instruments appear in **My Instruments** in the track dropdown.
+
+**Upload samples (PR-INS2e.2):** Click **Upload samples** to create a **new instrument** from selected files. Name is derived from the first filename. Same rules: ≥2 keys → sampler, 1 key → oneshot.
 
 **Fallback chain:** local IndexedDB → user baseUrl → default baseUrl → default synth.
+
+---
+
+## My Instruments (PR-INS2e.2)
+
+Import Folder and Upload samples create **custom instruments** that appear in the track dropdown under **My Instruments**. Built-in packs (Piano, Strings, etc.) are no longer overwritten.
+
+**Naming:** Custom instruments use the prefix 自定义： (Chinese: "custom") + base name. If a name exists, a suffix is added: (2), (3), etc.
+
+**To delete:** Open Inspector → Instrument Library, select the instrument from the dropdown (under My Instruments), and click **Clear local samples**. For custom instruments this removes the instrument from the registry and deletes all its samples.
+
+**Sampler vs oneshot:** ≥2 different note keys (e.g. A4, C4) → sampler (pitch-shifted playback). 1 key → oneshot (same sample for all pitches; overlapping notes retrigger).
 
 ---
 

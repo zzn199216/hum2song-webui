@@ -1,15 +1,17 @@
-/* Hum2Song Studio - Instrument Library Store (PR-INS2e)
-   IndexedDB persistence for user-uploaded sampler samples.
+/* Hum2Song Studio - Instrument Library Store (PR-INS2e, PR-INS2e.2)
+   IndexedDB persistence for user-uploaded sampler samples + custom instruments registry.
    - DB: hum2song_studio_instrument_library
-   - Store: sampler_samples
-   - Key: packId:noteKey (e.g. "tonejs:piano:A1")
-   - Value: { blob, filename, mime, updatedAt }
+   - Store: sampler_samples (packId:noteKey -> { blob, filename, mime, updatedAt })
+   - Store: custom_instruments (PR-INS2e.2) packId -> { packId, displayName, kind, createdAt, updatedAt }
 */
 (function(root){
   'use strict';
 
   const DB_NAME = 'hum2song_studio_instrument_library';
+  const DB_VERSION = 2;
   const STORE_NAME = 'sampler_samples';
+  const CUSTOM_INSTRUMENTS_STORE = 'custom_instruments';
+  const CUSTOM_PREFIX = '\u81ea\u5b9a\u4e49\uff1a'; // 自定义：
   const VALID_NOTE_KEYS_LEGACY = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
   var _objectUrlsByPack = {};
 
@@ -55,14 +57,13 @@
     if (typeof indexedDB === 'undefined') return Promise.resolve(null);
     return new Promise(function(resolve, reject){
       try{
-        var req = indexedDB.open(DB_NAME, 1);
+        var req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onerror = function(){ reject(req.error); };
         req.onsuccess = function(){ resolve(req.result); };
         req.onupgradeneeded = function(ev){
           var db = ev.target.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)){
-            db.createObjectStore(STORE_NAME);
-          }
+          if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+          if (!db.objectStoreNames.contains(CUSTOM_INSTRUMENTS_STORE)) db.createObjectStore(CUSTOM_INSTRUMENTS_STORE);
         };
       }catch(e){ resolve(null); }
     });
@@ -156,6 +157,63 @@
     }
   }
 
+  /** PR-INS2e.2: Create custom instrument. Returns { packId, displayName }. Collision: suffix " (2)", " (3)"... */
+  function createCustomInstrument(displayNameBase, kind){
+    var base = (displayNameBase && String(displayNameBase).trim()) ? String(displayNameBase).trim() : 'Imported';
+    var safe = base.replace(/[\s\u200b-\u200f\ufffe\uffff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 64) || 'Imported';
+    var packId = 'user:' + safe.toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 32) + '_' + Date.now().toString(36);
+    return openDb().then(function(db){
+      if (!db) return Promise.reject(new Error('IndexedDB unavailable'));
+      return listCustomInstruments().then(function(existing){
+        var displayName = CUSTOM_PREFIX + safe;
+        var n = 1;
+        while (existing.some(function(e){ return e.displayName === displayName; })){
+          n++;
+          displayName = CUSTOM_PREFIX + safe + ' (' + n + ')';
+        }
+        var rec = { packId: packId, displayName: displayName, kind: (kind === 'oneshot') ? 'oneshot' : 'sampler', createdAt: Date.now(), updatedAt: Date.now() };
+        return new Promise(function(resolve, reject){
+          var tx = db.transaction(CUSTOM_INSTRUMENTS_STORE, 'readwrite');
+          var store = tx.objectStore(CUSTOM_INSTRUMENTS_STORE);
+          var req = store.put(rec, packId);
+          req.onsuccess = function(){ resolve({ packId: packId, displayName: displayName }); };
+          req.onerror = function(){ reject(req.error); };
+        });
+      });
+    });
+  }
+
+  /** PR-INS2e.2: List custom instruments. */
+  function listCustomInstruments(){
+    return openDb().then(function(db){
+      if (!db) return [];
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(CUSTOM_INSTRUMENTS_STORE, 'readonly');
+        var store = tx.objectStore(CUSTOM_INSTRUMENTS_STORE);
+        var req = store.getAll();
+        req.onsuccess = function(){ resolve(req.result || []); };
+        req.onerror = function(){ resolve([]); };
+      });
+    });
+  }
+
+  /** PR-INS2e.2: Delete custom instrument (registry + samples). */
+  function deleteCustomInstrument(packId){
+    if (!packId) return Promise.resolve();
+    return clearPack(packId).then(function(){
+      return openDb().then(function(db){
+        if (!db) return;
+        return new Promise(function(resolve, reject){
+          var tx = db.transaction(CUSTOM_INSTRUMENTS_STORE, 'readwrite');
+          var store = tx.objectStore(CUSTOM_INSTRUMENTS_STORE);
+          var req = store.delete(packId);
+          req.onsuccess = function(){ resolve(); };
+          req.onerror = function(){ resolve(); };
+        });
+      });
+    });
+  }
+
   var api = {
     parseNoteKeyFromFilename: parseNoteKeyFromFilename,
     parsePackAndNoteFromRelativePath: parsePackAndNoteFromRelativePath,
@@ -165,6 +223,10 @@
     listSamples: listSamples,
     clearPack: clearPack,
     registerObjectUrls: registerObjectUrls,
+    createCustomInstrument: createCustomInstrument,
+    listCustomInstruments: listCustomInstruments,
+    deleteCustomInstrument: deleteCustomInstrument,
+    CUSTOM_PREFIX: CUSTOM_PREFIX,
   };
 
   if (typeof module === 'object' && module.exports){

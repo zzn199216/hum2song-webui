@@ -157,18 +157,73 @@ function _disposeTrackSynths(){
 
   const SAMPLER_LOAD_TIMEOUT_MS = 4000;
 
-  /** PR-INS2a/INS2e: Async instrument creation; for sampler resolves urls (local->baseUrl->default), awaits load or falls back on timeout. */
+  /** PR-INS2a/INS2e/INS2e.2: Async instrument creation. Handles tone_synth, sampler (built-in + custom), oneshot. */
   async function _makeSynthByInstrumentAsync(instr){
     const desc = (G.H2SProject && typeof G.H2SProject.normalizeInstrument === 'function')
       ? G.H2SProject.normalizeInstrument(instr)
       : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
 
+    if (desc.kind === 'oneshot' && desc.packId){
+      const resolveOneshot = (G.H2SProject && G.H2SProject.resolveCustomOneshotUrl) ? G.H2SProject.resolveCustomOneshotUrl : null;
+      if (!resolveOneshot) return _makeSynthByInstrument('default');
+      const res = await resolveOneshot(desc.packId).catch(function(){ return null; });
+      if (!res || !res.url){ onLog('Custom oneshot missing sample.'); return _makeSynthByInstrument('default'); }
+      return new Promise(function(resolve){
+        var player = new G.Tone.Player({
+          url: res.url,
+          onload: function(){ resolve(player); }
+        });
+        player.toDestination();
+        setTimeout(function(){ resolve(player); }, 2500);
+      }).then(function(p){
+        if (!p) return _makeSynthByInstrument('default');
+        return {
+          triggerAttackRelease: function(freq, dur, time, vel){
+            try{ p.start(time, 0, dur || 0.1); }catch(e){}
+          },
+          toDestination: function(){ return p; },
+          dispose: function(){ try{ if (p.dispose) p.dispose(); }catch(e){} }
+        };
+      });
+    }
+
     if (desc.kind !== 'sampler' || !desc.packId){
       return _makeSynthByInstrument(instr);
     }
 
+    const packId = desc.packId;
+    const isCustom = packId.indexOf('user:') === 0;
+
+    if (isCustom){
+      const resolveCustom = (G.H2SProject && G.H2SProject.resolveCustomSamplerUrls) ? G.H2SProject.resolveCustomSamplerUrls : null;
+      if (!resolveCustom){
+        onLog('Custom sampler not supported.');
+        return _makeSynthByInstrument('default');
+      }
+      let resolved;
+      try{ resolved = await resolveCustom(packId); }catch(e){ resolved = { urls: {}, objectUrls: [], fallbackReason: null }; }
+      const urls = resolved.urls;
+      const keyCount = urls ? Object.keys(urls).length : 0;
+      if (!urls || keyCount < 2){
+        onLog(resolved.fallbackReason || 'Custom sampler needs >=2 samples.');
+        return _makeSynthByInstrument('default');
+      }
+      return new Promise(function(resolve){
+        var settled = false;
+        function settle(s){ if (settled) return; settled = true; resolve(s); }
+        var t = setTimeout(function(){
+          settle(_makeSynthByInstrument('default'));
+          try{ if (sam && sam.dispose) sam.dispose(); }catch(e){}
+        }, SAMPLER_LOAD_TIMEOUT_MS);
+        var sam;
+        try{
+          sam = new G.Tone.Sampler({ urls: urls, onload: function(){ clearTimeout(t); settle(sam); } });
+        }catch(e){ clearTimeout(t); settle(_makeSynthByInstrument('default')); return; }
+      });
+    }
+
     const packs = (G.H2SProject && G.H2SProject.SAMPLER_PACKS) ? G.H2SProject.SAMPLER_PACKS : {};
-    const pack = packs[desc.packId];
+    const pack = packs[packId];
     const resolveUrls = (G.H2SProject && G.H2SProject.resolveSamplerUrlsForPack) ? G.H2SProject.resolveSamplerUrlsForPack : null;
     if (!pack || !pack.urls || !resolveUrls){
       onLog('Sampler pack missing. See docs to install samples. Using default synth.');
@@ -176,7 +231,7 @@ function _disposeTrackSynths(){
     }
 
     let resolved;
-    try{ resolved = await resolveUrls(pack, desc.packId); }catch(e){ resolved = { urls: {}, objectUrls: [], fallbackReason: null }; }
+    try{ resolved = await resolveUrls(pack, packId); }catch(e){ resolved = { urls: {}, objectUrls: [], fallbackReason: null }; }
     const urls = resolved.urls;
     const keyCount = urls ? Object.keys(urls).length : 0;
     if (!urls || keyCount < 2){
