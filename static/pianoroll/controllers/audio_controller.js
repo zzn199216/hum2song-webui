@@ -123,6 +123,8 @@
     let rafId = 0;
     let stopTimer = 0;
     let _trackSynths = [];
+    const synthByTrackId = new Map();
+    const lastInstrumentKeyByTid = new Map();
 
 
     async function ensureTone(){
@@ -138,6 +140,8 @@ function _disposeTrackSynths(){
     try{ s.dispose(); }catch(e){}
   }
   _trackSynths = [];
+  synthByTrackId.clear();
+  lastInstrumentKeyByTid.clear();
 }
 
   function _makeSynthByInstrument(instr){
@@ -208,6 +212,11 @@ function _disposeTrackSynths(){
         onLog(resolved.fallbackReason || 'Custom sampler needs >=2 samples.');
         return _makeSynthByInstrument('default');
       }
+      if (typeof window !== 'undefined' && window.H2S_DEBUG_INSTRUMENT){
+        var urlKeys = Object.keys(urls);
+        var firstUrl = urlKeys[0] ? urls[urlKeys[0]] : '';
+        console.log('[Audio] customSampler urlsCount:' + urlKeys.length + ' firstUrlPrefix:' + (firstUrl ? String(firstUrl).substring(0, 40) : ''));
+      }
       return new Promise(function(resolve){
         var settled = false;
         function settle(s){ if (settled) return; settled = true; resolve(s); }
@@ -217,7 +226,7 @@ function _disposeTrackSynths(){
         }, SAMPLER_LOAD_TIMEOUT_MS);
         var sam;
         try{
-          sam = new G.Tone.Sampler({ urls: urls, onload: function(){ clearTimeout(t); settle(sam); } });
+          sam = new G.Tone.Sampler({ urls: urls, baseUrl: '', onload: function(){ clearTimeout(t); settle(sam); } });
         }catch(e){ clearTimeout(t); settle(_makeSynthByInstrument('default')); return; }
       });
     }
@@ -257,6 +266,7 @@ function _disposeTrackSynths(){
       try{
         sampler = new G.Tone.Sampler({
           urls: urls,
+          baseUrl: '',
           onload: function(){
             clearTimeout(timeout);
             if (!settled) settle(sampler);
@@ -348,37 +358,67 @@ let maxT = 0;
 
 if (projectV2 && G.H2SProject && typeof G.H2SProject.flatten === 'function'){
   const flat2 = G.H2SProject.flatten(projectV2);
+  const p2 = projectV2;
 
-  // Build track meta per trackId (v2 truth)
-  const metaByTrackId = new Map();
+  // PR-INS2e.2.2: instrument from project tracks (source of truth); meta for mute/vol only
+  const instrByTid = new Map();
   try{
-    for (const t of (projectV2.tracks || [])){
+    for (const t of (p2.tracks || [])){
       if (!t) continue;
       const tid = t.trackId || t.id;
       if (!tid) continue;
-      metaByTrackId.set(tid, { instrument: (t.instrument || 'default'), muted: !!t.muted, gainDb: (Number.isFinite(Number(t.gainDb)) ? Number(t.gainDb) : 0) });
+      instrByTid.set(tid, String(t.instrument || 'default'));
     }
   }catch(e){}
 
-  const synthByTrackId = new Map();
-  const getSynth = async (trackId) => {
-    if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
-    const meta = metaByTrackId.get(trackId) || {instrument:'default', muted:false, gainDb:0};
+  const metaByTrackId = new Map();
+  try{
+    for (const t of (p2.tracks || [])){
+      if (!t) continue;
+      const tid = t.trackId || t.id;
+      if (!tid) continue;
+      metaByTrackId.set(tid, { muted: !!t.muted, gainDb: (Number.isFinite(Number(t.gainDb)) ? Number(t.gainDb) : 0) });
+    }
+  }catch(e){}
+
+  const getSynth = async (trackId, instrumentKey) => {
+    const meta = metaByTrackId.get(trackId) || { muted: false, gainDb: 0 };
     if (meta.muted) return null;
-    const inst = meta.instrument || 'default';
-    const s = await _makeSynthByInstrumentAsync(inst);
+    const key = instrumentKey || 'default';
+    const lastKey = lastInstrumentKeyByTid.get(trackId);
+    if (synthByTrackId.has(trackId) && lastKey !== key){
+      const old = synthByTrackId.get(trackId);
+      try{ if (old && old.dispose) old.dispose(); }catch(e){}
+      const idx = _trackSynths.indexOf(old);
+      if (idx >= 0) _trackSynths.splice(idx, 1);
+      synthByTrackId.delete(trackId);
+      lastInstrumentKeyByTid.delete(trackId);
+    }
+    if (synthByTrackId.has(trackId)) return synthByTrackId.get(trackId);
+    const s = await _makeSynthByInstrumentAsync(key);
     if (!s) return null;
     const dest = (s.toDestination && s.toDestination.call) ? s.toDestination() : s;
     try{ if (dest && dest.volume && Number.isFinite(meta.gainDb)) dest.volume.value = meta.gainDb; }catch(e){};
     _trackSynths.push(dest);
     synthByTrackId.set(trackId, dest);
+    lastInstrumentKeyByTid.set(trackId, key);
+    if (typeof window !== 'undefined' && window.H2S_DEBUG_INSTRUMENT){
+      try{
+        var cname = s && s.constructor ? s.constructor.name : '?';
+        var isSampler = cname.indexOf('Sampler') >= 0 || (G.Tone.Sampler && s instanceof G.Tone.Sampler);
+        var dbg = '[Audio] tid:' + trackId + ' instrumentKey:' + key + ' constructor:' + cname + ' isSampler:' + isSampler;
+        if (isSampler && s){
+          var bufs = s._buffers || (s._sampler && s._sampler._buffers);
+          if (bufs){ var keys = Object.keys(bufs); if (keys.length) dbg += ' loadedKeys:' + keys.slice(0, 2).join(','); }
+        }
+        console.log(dbg);
+      }catch(e){}
+    }
     return dest;
   };
 
   const trackIdsNeeded = [...new Set((flat2.tracks || []).map(tr => tr && (tr.trackId || tr.id)).filter(Boolean))];
-  for (const tid of trackIdsNeeded){
-    await getSynth(tid);
-  }
+  await Promise.all(trackIdsNeeded.map(tid => getSynth(tid, instrByTid.get(tid) || 'default')));
 
   for (const tr of (flat2.tracks || [])){
     const tid = tr && (tr.trackId || tr.id);
@@ -398,7 +438,10 @@ vel = clamp(vel, 0.01, 1);
       if (t + dur > maxT) maxT = t + dur;
       G.Tone.Transport.schedule((time) => {
         try{
-          s.triggerAttackRelease(G.Tone.Frequency(n.pitch, 'midi'), dur, time, vel);
+          var pitch = n.pitch;
+          var isSampler = (s.constructor && s.constructor.name && s.constructor.name.indexOf('Sampler') >= 0) || (G.Tone.Sampler && s instanceof G.Tone.Sampler);
+          var trigArg = isSampler ? G.Tone.Frequency(pitch, 'midi').toNote() : G.Tone.Frequency(pitch, 'midi');
+          s.triggerAttackRelease(trigArg, dur, time, vel);
         }catch(e){}
       }, t);
     }

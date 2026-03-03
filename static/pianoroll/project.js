@@ -273,46 +273,99 @@
     });
   }
 
-  /** PR-INS2e.2: Resolve URLs for custom sampler (IndexedDB only). Returns { urls, objectUrls, fallbackReason? }. */
+  /** PR-INS2e.2.4e: Scan IDB sampler_samples by prefix packId: -> { keys, records }. No per-key get. */
+  function scanPackRecords(packId){
+    if (!packId || typeof indexedDB === 'undefined') return Promise.resolve({ keys: [], records: new Map() });
+    var DB_NAME = 'hum2song_studio_instrument_library';
+    var STORE_NAME = 'sampler_samples';
+    var prefix = packId + ':';
+    return new Promise(function(resolve, reject){
+      var req = indexedDB.open(DB_NAME, 2);
+      req.onerror = function(){ resolve({ keys: [], records: new Map() }); };
+      req.onsuccess = function(){
+        var db = req.result;
+        if (!db || !db.objectStoreNames.contains(STORE_NAME)){ resolve({ keys: [], records: new Map() }); return; }
+        var tx = db.transaction(STORE_NAME, 'readonly');
+        var store = tx.objectStore(STORE_NAME);
+        var keys = [];
+        var records = new Map();
+        var cr = store.openCursor();
+        cr.onsuccess = function(){
+          var cur = cr.result;
+          if (!cur){ resolve({ keys: keys, records: records }); return; }
+          var k = String(cur.key);
+          if (k.indexOf(prefix) === 0){
+            var noteKey = k.slice(prefix.length);
+            keys.push(noteKey);
+            records.set(noteKey, cur.value);
+          }
+          cur.continue();
+        };
+        cr.onerror = function(){ resolve({ keys: keys, records: records }); };
+      };
+    });
+  }
+
+  function _extractBlob(rec){
+    if (!rec) return null;
+    var blob = (rec instanceof Blob) ? rec : (rec.blob || rec.file || rec.data);
+    if (!blob) return null;
+    if (blob instanceof Blob) return blob;
+    if (typeof blob.slice === 'function' && 'size' in blob && 'type' in blob) return blob;
+    return null;
+  }
+
+  /** PR-INS2e.2/INS2e.2.4/INS2e.2.4e: Resolve URLs for custom sampler (IDB prefix scan). Returns { urls, objectUrls, fallbackReason? }. */
   function resolveCustomSamplerUrls(packId){
     var result = { urls: {}, objectUrls: [], fallbackReason: null };
     if (!packId || packId.indexOf('user:') !== 0) return Promise.resolve(result);
     var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
-    if (!store || !store.listSamples || !store.getSample) return Promise.resolve(result);
-    return store.listSamples(packId).then(function(keys){
-      if (!keys || !keys.length) return result;
-      return Promise.all(keys.map(function(k){
-        return store.getSample(packId, k).then(function(blob){
-          if (blob && blob instanceof Blob){
-            var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
-            if (url){ result.objectUrls.push(url); return { k: k, url: url }; }
-          }
-          return null;
-        });
-      })).then(function(arr){
-        for (var i = 0; i < arr.length; i++) if (arr[i]) result.urls[arr[i].k] = arr[i].url;
-        if (store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
-        if (Object.keys(result.urls).length < 2) result.fallbackReason = 'Custom sampler needs >=2 samples.';
-        return result;
-      });
+    var debug = (typeof window !== 'undefined' && window.H2S_DEBUG_INSTRUMENT);
+    return scanPackRecords(packId).then(function(scanned){
+      var keys = scanned.keys || [];
+      var recMap = scanned.records || new Map();
+      var firstRec = keys.length ? recMap.get(keys[0]) : null;
+      var hasBlobField = !!(firstRec && typeof firstRec === 'object' && 'blob' in firstRec);
+      for (var i = 0; i < keys.length; i++){
+        var noteKey = keys[i];
+        var rec = recMap.get(noteKey);
+        var blob = _extractBlob(rec);
+        if (blob){
+          var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+          if (url){ result.urls[noteKey] = url; result.objectUrls.push(url); }
+        }
+      }
+      if (store && store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
+      var urlCount = Object.keys(result.urls).length;
+      if (urlCount < 2) result.fallbackReason = 'Custom sampler needs >=2 samples.';
+      if (debug){
+        var urlKeys = Object.keys(result.urls);
+        var firstUrl = urlKeys[0] ? result.urls[urlKeys[0]] : '';
+        var urlPrefix = firstUrl ? String(firstUrl).substring(0, 30) : '';
+        console.log('[resolveCustomSamplerUrls] packId:' + packId + ' keyCount:' + keys.length + ' urlCount:' + urlCount + ' recHasBlobField:' + hasBlobField + ' first2Keys:' + urlKeys.slice(0, 2).join(',') + ' urlPrefix:' + urlPrefix + ' isBlobUrl:' + (String(firstUrl).indexOf('blob:') === 0));
+      }
+      return result;
     });
   }
 
-  /** PR-INS2e.2: Resolve single URL for custom oneshot (IndexedDB). Returns { url, objectUrls } or null. */
+  /** PR-INS2e.2/INS2e.2.4e: Resolve single URL for custom oneshot (IDB prefix scan). Returns { url, objectUrls } or null. */
   function resolveCustomOneshotUrl(packId){
     if (!packId || packId.indexOf('user:') !== 0) return Promise.resolve(null);
     var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
-    if (!store || !store.listSamples || !store.getSample) return Promise.resolve(null);
-    return store.listSamples(packId).then(function(keys){
-      if (!keys || keys.length === 0) return null;
-      var k = keys[0];
-      return store.getSample(packId, k).then(function(blob){
-        if (!blob || !(blob instanceof Blob)) return null;
-        var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
-        if (!url) return null;
-        if (store.registerObjectUrls) store.registerObjectUrls(packId, [url]);
-        return { url: url, objectUrls: [url] };
-      });
+    return scanPackRecords(packId).then(function(scanned){
+      var keys = scanned.keys || [];
+      var recMap = scanned.records || new Map();
+      for (var i = 0; i < keys.length; i++){
+        var blob = _extractBlob(recMap.get(keys[i]));
+        if (blob){
+          var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+          if (url){
+            if (store && store.registerObjectUrls) store.registerObjectUrls(packId, [url]);
+            return { url: url, objectUrls: [url] };
+          }
+        }
+      }
+      return null;
     });
   }
 

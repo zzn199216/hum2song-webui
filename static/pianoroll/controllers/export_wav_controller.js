@@ -107,7 +107,7 @@
           return makeSynthByInstrumentSync(Tone, 'default');
         }
         return new Promise(function(resolve){
-          var sampler = new Tone.Sampler({ urls: urls, onload: function(){ resolve(sampler); } });
+          var sampler = new Tone.Sampler({ urls: urls, baseUrl: '', onload: function(){ resolve(sampler); } });
           setTimeout(function(){ resolve(sampler); }, SAMPLER_LOAD_TIMEOUT_MS);
         });
       }).catch(function(){ return makeSynthByInstrumentSync(Tone, 'default'); });
@@ -146,6 +146,7 @@
         try{
           sampler = new Tone.Sampler({
             urls: urls,
+            baseUrl: '',
             onload: function(){
               clearTimeout(timeout);
               if (!settled) settle(sampler);

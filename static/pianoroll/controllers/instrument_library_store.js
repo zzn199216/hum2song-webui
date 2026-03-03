@@ -87,6 +87,15 @@
 
   function getSample(packId, noteKey){
     if (!packId || !noteKey) return Promise.resolve(null);
+    return getSampleRecord(packId, noteKey).then(function(rec){
+      if (!rec) return null;
+      var blob = (rec instanceof Blob) ? rec : (rec.blob || rec.file || rec.data);
+      return (blob && (blob instanceof Blob || (typeof blob.slice === 'function' && 'size' in blob))) ? blob : null;
+    });
+  }
+
+  function getSampleRecord(packId, noteKey){
+    if (!packId || !noteKey) return Promise.resolve(null);
     return openDb().then(function(db){
       if (!db) return null;
       return new Promise(function(resolve, reject){
@@ -94,10 +103,7 @@
         var store = tx.objectStore(STORE_NAME);
         var key = packId + ':' + noteKey;
         var req = store.get(key);
-        req.onsuccess = function(){
-          var row = req.result;
-          resolve(row && row.blob ? row.blob : null);
-        };
+        req.onsuccess = function(){ resolve(req.result); };
         req.onerror = function(){ resolve(null); };
       });
     });
@@ -220,6 +226,7 @@
     VALID_NOTE_KEYS: VALID_NOTE_KEYS,
     putSample: putSample,
     getSample: getSample,
+    getSampleRecord: getSampleRecord,
     listSamples: listSamples,
     clearPack: clearPack,
     registerObjectUrls: registerObjectUrls,
