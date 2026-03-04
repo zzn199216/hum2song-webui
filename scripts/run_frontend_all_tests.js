@@ -19,5 +19,6 @@ runOne('scripts/tests/agent_patchsummary_smoke.test.js');
 runOne('scripts/tests/regression_phaseB_invariants.test.js');
 runOne('scripts/tests/regression_templates_directives.test.js');
 runOne('scripts/tests/instrument_library_store.test.js');
+runOne('scripts/tests/i18n.test.js');
 
 console.log('\nAll frontend tests (contracts + editor + numeric invariants + timeline) passed.');
