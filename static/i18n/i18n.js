@@ -39,7 +39,9 @@
 
   function _getVal(dict, key){
     if (!dict || typeof dict !== 'object') return undefined;
-    var parts = String(key).split('.');
+    var k = String(key).trim();
+    if (dict[k] != null && typeof dict[k] === 'string') return dict[k];
+    var parts = k.split('.');
     var o = dict;
     for (var i = 0; i < parts.length && o != null; i++) o = o[parts[i]];
     return (o != null && typeof o === 'string') ? o : undefined;
@@ -73,6 +75,18 @@
     return fetchFn(url).then(function(r){ if (!r.ok) throw new Error('i18n.load: ' + r.status); return r.json(); }).then(function(d){ register(lang, d); return d; });
   }
 
+  function loadManifest(opts){
+    opts = opts || {};
+    var fetchFn = opts.fetchFn || (typeof G.fetch === 'function' ? G.fetch : null);
+    if (!fetchFn) return Promise.reject(new Error('i18n.loadManifest: fetch unavailable and opts.fetchFn not provided'));
+    var base = (opts.baseUrl != null) ? opts.baseUrl : '/static/i18n';
+    var url = base.replace(/\/+$/, '') + '/manifest.json';
+    return fetchFn(url).then(function(r){ if (!r.ok) throw new Error('i18n.loadManifest: ' + r.status); return r.json(); }).then(function(arr){
+      _manifest = Array.isArray(arr) ? arr : DEFAULT_LIST;
+      return _manifest;
+    });
+  }
+
   function availableLanguages(){
     if (_manifest && Array.isArray(_manifest)) return _manifest;
     return DEFAULT_LIST;
@@ -98,6 +112,7 @@
     t: t,
     register: register,
     load: load,
+    loadManifest: loadManifest,
     availableLanguages: availableLanguages,
     init: init,
     _setManifest: setManifest,

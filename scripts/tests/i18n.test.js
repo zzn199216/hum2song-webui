@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* PR-G1a: i18n Core - minimal tests for register, t, setLang, fallback, persistence. */
+/* PR-G1a/G1b: i18n Core - minimal tests for register, t, setLang, fallback, persistence, loadManifest. */
 'use strict';
 
 function assert(cond, msg){
@@ -31,4 +31,17 @@ assert(I18N.availableLanguages().length >= 2, 'availableLanguages returns at lea
 I18N.init();
 assert(typeof I18N.getLang() === 'string', 'init sets lang');
 
-console.log('PASS i18n register, t, setLang, fallback, persistence');
+// PR-G1b: loadManifest with injectable fetchFn
+if (I18N.loadManifest){
+  const mockManifest = [{ code: 'xx', label: 'TestLang' }];
+  const mockFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve(mockManifest) });
+  I18N.loadManifest({ fetchFn: mockFetch }).then(function(){
+    try {
+      const list = I18N.availableLanguages();
+      assert(Array.isArray(list) && list.length >= 1 && list[0].code === 'xx', 'loadManifest updates availableLanguages');
+      console.log('PASS i18n register, t, setLang, fallback, persistence, loadManifest');
+    } catch (e) { console.error(e); process.exit(1); }
+  }).catch(function(e){ console.error(e); process.exit(1); });
+} else {
+  console.log('PASS i18n register, t, setLang, fallback, persistence');
+}

@@ -728,6 +728,9 @@ if (typeof localStorage !== 'undefined') {
       // PR-INS2c: Instrument Library (sampler baseUrl)
       this._initInstrumentLibraryUI();
 
+      // PR-G1b: Language switch (Inspector dropdown)
+      this._initLangDropdown();
+
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
       $('#btnModalCancel').addEventListener('click', () => this.closeModal(false));
@@ -1910,6 +1913,46 @@ renderTimeline(){
           Tone.Destination.volume.value = v;
         }
       }catch(e){}
+    },
+    _initLangDropdown(){
+      try{
+        if (typeof document === 'undefined' || typeof window.I18N === 'undefined') return;
+        const sel = document.getElementById('selLang');
+        if (!sel) return;
+        const I18N = window.I18N;
+        I18N.init();
+
+        const populate = () => {
+          const list = I18N.availableLanguages();
+          sel.innerHTML = '';
+          for (const it of list){
+            const opt = document.createElement('option');
+            opt.value = (it && it.code) ? String(it.code) : '';
+            opt.textContent = (it && it.label) ? String(it.label) : opt.value;
+            sel.appendChild(opt);
+          }
+          const cur = I18N.getLang();
+          if (list.some(it => (it && it.code) === cur)) sel.value = cur;
+          else sel.value = (list[0] && list[0].code) || 'en';
+        };
+
+        const onLangChange = async () => {
+          const lang = sel.value;
+          if (!lang) return;
+          try{
+            await I18N.load(lang);
+            I18N.setLang(lang);
+            this.render();
+          }catch(e){ console.warn('[i18n] load locale failed', e); }
+        };
+
+        sel.addEventListener('change', onLangChange);
+
+        Promise.all([
+          I18N.loadManifest ? I18N.loadManifest().catch(() => {}) : Promise.resolve(),
+          I18N.load(I18N.getLang()).catch(() => {})
+        ]).then(() => { populate(); }).catch(() => { populate(); });
+      }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
     },
     _initMasterVolumeUI(){
       // Browser-only, safe if called multiple times.
