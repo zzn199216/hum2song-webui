@@ -758,8 +758,14 @@ $('#rngPitchCenter').addEventListener('input', () => {
       const velocityCanvas = $('#velocityCanvas');
       const velocitySplitter = $('#velocitySplitter');
       if (canvas) canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
-      if (velocityCanvas) velocityCanvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
-      if (velocitySplitter) velocitySplitter.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      if (velocityCanvas && !velocityCanvas.__h2s_vel_bound) {
+        velocityCanvas.__h2s_vel_bound = true;
+        velocityCanvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      }
+      if (velocitySplitter && !velocitySplitter.__h2s_vel_bound) {
+        velocitySplitter.__h2s_vel_bound = true;
+        velocitySplitter.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      }
       window.addEventListener('pointermove', (ev) => this.modalPointerMove(ev));
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 

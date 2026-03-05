@@ -919,15 +919,21 @@
         canvas.height = wrapH;
       }
 
-      // Velocity lane: match grid width; height from state
+      // Velocity lane: match grid width; height from state; HiDPI
       if (velocityCanvas && velocityLaneWrap){
         const collapsed = !!this.state.modal.velocityLaneCollapsed;
         velocityLaneWrap.classList.toggle('collapsed', collapsed);
         $('#velocitySplitter').classList.toggle('collapsed', collapsed);
         if (!collapsed){
           const vh = Math.max(48, Math.min(200, Number(this.state.modal.velocityLaneHeight) || 80));
-          velocityCanvas.width = w;
-          velocityCanvas.height = Math.max(48, vh - 22);
+          const cssH = vh - 22;
+          const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+          velocityCanvas.width = Math.round(w * dpr);
+          velocityCanvas.height = Math.round(cssH * dpr);
+          velocityCanvas.style.width = w + 'px';
+          velocityCanvas.style.height = cssH + 'px';
+          this.state.modal.velocityLaneCssW = w;
+          this.state.modal.velocityLaneCssH = cssH;
           velocityLaneWrap.style.height = vh + 'px';
         }
       }
@@ -1258,27 +1264,39 @@
       const ctx = vCanvas.getContext('2d');
       if (!ctx) return;
 
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+      ctx.scale(dpr, dpr);
+
       const padL = this.state.modal.padL;
       const pxPerSec = this.state.modal.pxPerSec;
-      const laneH = vCanvas.height;
+      const laneH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : (vCanvas.height / dpr);
+      const padV = 4;
+      const drawH = Math.max(4, laneH - padV);
       const notes = this.modalAllNotes();
       const selectedId = this.state.modal.selectedNoteId;
 
-      ctx.clearRect(0, 0, vCanvas.width, vCanvas.height);
-      ctx.fillStyle = 'rgba(0,0,0,.15)';
-      ctx.fillRect(0, 0, vCanvas.width, laneH);
+      const cssW = this.state.modal.velocityLaneCssW != null ? this.state.modal.velocityLaneCssW : (vCanvas.width / dpr);
+      ctx.fillStyle = '#12161c';
+      ctx.fillRect(0, 0, cssW, laneH);
 
-      const BAR_MIN_W = 4;
+      const clampBarW = (x) => H2SProject.clamp(x, 6, 14);
       for (const n of notes){
         const vel = H2SProject.clamp(Math.round(Number(n.velocity) ?? 100), 1, 127);
-        const x = padL + n.start * pxPerSec;
-        const w = Math.max(BAR_MIN_W, n.duration * pxPerSec);
-        const barHeight = (vel / 127) * laneH;
-        const y = laneH - barHeight;
+        const noteX = padL + n.start * pxPerSec;
+        const noteW = n.duration * pxPerSec;
+        const barW = clampBarW(Math.max(0, noteW - 2));
+        const barX = noteX + (noteW - barW) / 2;
+        const barHeight = (vel / 127) * drawH;
+        const barY = laneH - barHeight - padV / 2;
         const selected = (n.id === selectedId);
-        ctx.fillStyle = selected ? 'rgba(96,165,250,.9)' : 'rgba(59,130,246,.75)';
-        ctx.strokeStyle = selected ? 'rgba(255,255,255,.7)' : 'rgba(29,78,216,.8)';
-        roundRect(ctx, x, y, w, barHeight, 4);
+        ctx.fillStyle = selected ? 'rgba(96,165,250,.92)' : 'rgba(59,130,246,.68)';
+        ctx.strokeStyle = selected ? 'rgba(255,255,255,.85)' : 'rgba(29,78,216,.65)';
+        ctx.lineWidth = selected ? 1.5 : 1;
+        roundRect(ctx, barX, barY, barW, Math.max(2, barHeight), 4);
         ctx.fill();
         ctx.stroke();
       }
@@ -2248,24 +2266,28 @@
       return null;
     },
 
-    modalVelocityHitTest(px, py){
+    modalVelocityHitTest(pxCss, pyCss){
       const vCanvas = $('#velocityCanvas');
       if (!vCanvas) return null;
       const padL = this.state.modal.padL;
       const pxPerSec = this.state.modal.pxPerSec;
-      const laneH = vCanvas.height;
-      if (py < 0 || py > laneH) return null;
+      const laneH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : 48;
+      const padV = 4;
+      const drawH = Math.max(4, laneH - padV);
+      if (pyCss < 0 || pyCss > laneH) return null;
 
+      const clampBarW = (x) => H2SProject.clamp(x, 6, 14);
       const notes = this.modalAllNotes();
-      const BAR_MIN_W = 4;
       for (let i = notes.length - 1; i >= 0; i--){
         const n = notes[i];
         const vel = H2SProject.clamp(Math.round(Number(n.velocity) ?? 100), 1, 127);
-        const x = padL + n.start * pxPerSec;
-        const w = Math.max(BAR_MIN_W, n.duration * pxPerSec);
-        const barHeight = (vel / 127) * laneH;
-        const y = laneH - barHeight;
-        if (px >= x && px <= x + w && py >= y && py <= laneH) return { type:'velocity', noteId:n.id };
+        const noteX = padL + n.start * pxPerSec;
+        const noteW = n.duration * pxPerSec;
+        const barW = clampBarW(Math.max(0, noteW - 2));
+        const barX = noteX + (noteW - barW) / 2;
+        const barHeight = (vel / 127) * drawH;
+        const barY = laneH - barHeight - padV / 2;
+        if (pxCss >= barX && pxCss <= barX + barW && pyCss >= barY && pyCss <= laneH) return { type:'velocity', noteId:n.id };
       }
       return null;
     },
@@ -2374,23 +2396,29 @@ async modalPlay(){
         const vCanvas = $('#velocityCanvas');
         if (!vCanvas) return;
         const rect = vCanvas.getBoundingClientRect();
-        const scaleX = rect.width ? (vCanvas.width / rect.width) : 1;
-        const scaleY = rect.height ? (vCanvas.height / rect.height) : 1;
-        const px = (ev.clientX - rect.left) * scaleX;
-        const py = (ev.clientY - rect.top) * scaleY;
-        const hit = this.modalVelocityHitTest(px, py);
+        const pxCss = ev.clientX - rect.left;
+        const pyCss = ev.clientY - rect.top;
+        const hit = this.modalVelocityHitTest(pxCss, pyCss);
         if (hit){
-          const noteId = hit.noteId;
-          const idsToUpdate = this.state.modal.selectedNoteId ? [this.state.modal.selectedNoteId] : [noteId];
-          if (this.state.modal.selectedNoteId && this.state.modal.selectedNoteId !== noteId) idsToUpdate.push(noteId);
-          this.state.modal.selectedNoteId = noteId;
-          const found = this.modalFindNoteById(noteId);
+          const draggedNoteId = hit.noteId;
+          const currentSelectedIds = (this.state.modal.selectedNoteIds && this.state.modal.selectedNoteIds.length >= 2)
+            ? this.state.modal.selectedNoteIds
+            : (this.state.modal.selectedNoteId ? [this.state.modal.selectedNoteId] : []);
+          let targets;
+          if (currentSelectedIds.length >= 2 && currentSelectedIds.indexOf(draggedNoteId) >= 0){
+            targets = currentSelectedIds;
+          } else {
+            targets = [draggedNoteId];
+            this.state.modal.selectedNoteId = draggedNoteId;
+            this.state.modal.selectedNoteIds = null;
+          }
+          this._velDragTargets = targets;
+          const found = this.modalFindNoteById(draggedNoteId);
           if (!found) return;
           const v0 = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
-          this.state.modal.drag.noteId = noteId;
-          this.state.modal.drag.startY = py;
+          this.state.modal.drag.noteId = draggedNoteId;
+          this.state.modal.drag.startY = pyCss;
           this.state.modal.drag.origVelocity = v0;
-          this.state.modal.drag.velocityNoteIds = idsToUpdate;
           this.state.modal.mode = 'drag_velocity';
           $('#editorStatus').textContent = 'Drag to set velocity...';
           this.modalRequestDraw();
@@ -2489,16 +2517,15 @@ async modalPlay(){
         const vCanvas = $('#velocityCanvas');
         if (!vCanvas) return;
         const rect = vCanvas.getBoundingClientRect();
-        const scaleY = rect.height ? (vCanvas.height / rect.height) : 1;
-        const py = (ev.clientY - rect.top) * scaleY;
-        const laneH = vCanvas.height;
+        const pyCss = ev.clientY - rect.top;
+        const laneH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : 48;
         const step = ev.shiftKey ? 4 : 1;
-        let v = Math.round(127 * (1 - py / laneH));
+        let v = Math.round(127 * (1 - pyCss / laneH));
         v = H2SProject.clamp(v, 1, 127);
         if (step > 1) v = Math.round(v / step) * step;
         v = H2SProject.clamp(v, 1, 127);
-        const ids = m.drag.velocityNoteIds || [m.drag.noteId];
-        for (const id of ids){
+        const targets = this._velDragTargets || [m.drag.noteId];
+        for (const id of targets){
           const found = this.modalFindNoteById(id);
           if (found) found.note.velocity = v;
         }
