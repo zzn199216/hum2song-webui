@@ -93,13 +93,19 @@
       var btn = document.createElement('button');
       btn.id = 'btnExportFlatten';
       btn.className = exportProjectBtn.className || 'btn';
-      btn.textContent = 'Export Flatten JSON';
+      btn.setAttribute('data-i18n', 'inspector.exportFlattenJson');
+      btn.textContent = (window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t('inspector.exportFlattenJson') : 'Export Flatten JSON';
 
       // Insert right after Export Project button.
       var parent = exportProjectBtn.parentNode;
       if (!parent) return false;
       parent.insertBefore(btn, exportProjectBtn.nextSibling);
       existing = btn;
+    }
+    // Refresh label on each ensure (handles recreate + language switch)
+    if (existing){
+      existing.setAttribute('data-i18n', 'inspector.exportFlattenJson');
+      existing.textContent = (window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t('inspector.exportFlattenJson') : 'Export Flatten JSON';
     }
 
     bindOnce(existing);

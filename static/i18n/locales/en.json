@@ -11,6 +11,9 @@
   "opt.run": "Run Optimize",
   "opt.optimize": "Optimize",
   "opt.preset": "Preset",
+  "opt.dynamicsAccent": "Dynamics Accent",
+  "opt.dynamicsLevel": "Dynamics Level",
+  "opt.durationGentle": "Duration Gentle",
   "opt.safe": "Safe mode",
   "opt.full": "Full mode",
   "opt.advanced": "Advanced",
@@ -53,6 +56,10 @@
   "inst.baseUrl": "Base URL",
   "inst.instrumentLibrary": "Instrument Library",
   "inst.save": "Save",
+  "inst.clearLocalSamples": "Clear local samples",
+  "inst.builtinAndMyInstruments": "Built-in packs & My Instruments",
+  "inst.samplerUploadHelp": "Minimum: >=2 samples. Recommended: 6+. Supported names: A1..A6 or C3/Ds4/F#2/Bb3 (case-insensitive). Missing keys pitch-shifted from nearest.",
+  "inst.importFolderHelp": "Import Folder: creates a new instrument (name from folder). Add to track dropdown → My Instruments.",
 
   "top.record": "Record",
   "top.stop": "Stop",
@@ -76,9 +83,11 @@
   "cliplib.preset": "Preset",
   "cliplib.default": "Default",
   "cliplib.lastOptimized": "Last optimized",
+  "cliplib.last": "Last",
 
   "timeline.bpm": "BPM",
   "timeline.snap": "Snap",
+  "timeline.snapLabel": "Snap:",
   "timeline.playhead": "Playhead",
   "timeline.tipDrag": "Tip: drag clip blocks; double-click to open editor.",
   "timeline.log": "Log",
@@ -97,6 +106,11 @@
   "inspector.actions": "Actions",
   "inspector.exportProjectJson": "Export Project JSON",
   "inspector.importProjectJson": "Import Project JSON",
+  "inspector.exportFlattenJson": "Export Flatten JSON",
 
-  "actions.clear": "Clear"
+  "actions.clear": "Clear",
+  "actions.exportFlattenJson": "Export Flatten JSON",
+  "actions.edit": "Edit",
+  "actions.duplicate": "Duplicate",
+  "actions.remove": "Remove"
 }

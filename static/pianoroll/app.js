@@ -983,7 +983,8 @@ try{
         if (!bpmInp) return;
 
         const label = document.createElement('span');
-        label.textContent = ((window.I18N && window.I18N.t) ? window.I18N.t('timeline.snap') : 'Snap') + ':';
+        label.setAttribute('data-i18n', 'timeline.snapLabel');
+        label.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('timeline.snapLabel') : 'Snap:';
         label.className = 'miniLabel';
 
         const sel = document.createElement('select');
@@ -1242,6 +1243,7 @@ renderTimeline(){
       const clipId = this.state.selectedClipId;
       if (!clipId){
         box.className = 'muted';
+        box.setAttribute('data-i18n', 'inspector.clickClipHint');
         box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.clickClipHint') : 'Click a clip in the library to view History.';
         return;
       }
@@ -1252,6 +1254,7 @@ renderTimeline(){
       if (!clip){
         this.state.selectedClipId = null;
         box.className = 'muted';
+        box.setAttribute('data-i18n', 'inspector.clickClipHint');
         box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.clickClipHint') : 'Click a clip in the library to view History.';
         return;
       }
@@ -1307,6 +1310,7 @@ renderTimeline(){
           `</div>` +
         `</details>`
       );
+      box.removeAttribute('data-i18n');
       box.className = '';
       box.innerHTML = (
         syncHtml +
@@ -1404,25 +1408,29 @@ renderTimeline(){
       const id = this.state.selectedInstanceId;
       if (!id){
         box.className = 'muted';
+        box.setAttribute('data-i18n', 'inspector.selectInstanceHint');
         box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.selectInstanceHint') : 'Select a clip instance on timeline.';
         return;
       }
       const inst = this.project.instances.find(x => x.id === id);
       if (!inst){
         box.className = 'muted';
+        box.setAttribute('data-i18n', 'inspector.selectInstanceHint');
         box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.selectInstanceHint') : 'Select a clip instance on timeline.';
         return;
       }
       const clip = this.project.clips.find(c => c.id === inst.clipId);
+      box.removeAttribute('data-i18n');
       box.className = '';
+      const _t2 = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
       box.innerHTML = `
         <div class="kv"><b>Clip</b><span>${escapeHtml(clip ? clip.name : inst.clipId)}</span></div>
         <div class="kv"><b>Start</b><span>${fmtSec(inst.startSec)}</span></div>
         <div class="kv"><b>Transpose</b><span>${inst.transpose || 0}</span></div>
         <div class="row" style="margin-top:10px;">
-          <button id="btnSelEdit" class="btn mini">Edit</button>
-          <button id="btnSelDup" class="btn mini">Duplicate</button>
-          <button id="btnSelDel" class="btn mini danger">Remove</button>
+          <button id="btnSelEdit" class="btn mini">${escapeHtml(_t2('actions.edit'))}</button>
+          <button id="btnSelDup" class="btn mini">${escapeHtml(_t2('actions.duplicate'))}</button>
+          <button id="btnSelDel" class="btn mini danger">${escapeHtml(_t2('actions.remove'))}</button>
         </div>
       `;
       box.querySelector('#btnSelEdit').addEventListener('click', () => this.openClipEditor(inst.clipId));
@@ -1985,6 +1993,7 @@ renderTimeline(){
         wrap.style.marginLeft = '10px';
 
         const lab = document.createElement('span');
+        lab.setAttribute('data-i18n', 'top.vol');
         lab.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('top.vol') : 'Vol';
         lab.style.fontSize = '12px';
         lab.style.opacity = '0.85';

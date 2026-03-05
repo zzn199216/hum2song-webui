@@ -11,6 +11,9 @@
   "opt.run": "运行优化",
   "opt.optimize": "优化",
   "opt.preset": "预设",
+  "opt.dynamicsAccent": "力度重音",
+  "opt.dynamicsLevel": "力度等级",
+  "opt.durationGentle": "时长柔和",
   "opt.safe": "安全模式",
   "opt.full": "完整模式",
   "opt.advanced": "高级",
@@ -53,6 +56,10 @@
   "inst.baseUrl": "基础 URL",
   "inst.instrumentLibrary": "乐器库",
   "inst.save": "保存",
+  "inst.clearLocalSamples": "清除本地采样",
+  "inst.builtinAndMyInstruments": "内置包与我的乐器",
+  "inst.samplerUploadHelp": "最少：>=2 个采样。建议：6+。支持的名称：A1..A6 或 C3/Ds4/F#2/Bb3（不区分大小写）。缺失的键将从最近键移调。",
+  "inst.importFolderHelp": "导入文件夹：创建新乐器（名称取自文件夹）。添加到轨道下拉 → 我的乐器。",
 
   "top.record": "录音",
   "top.stop": "停止",
@@ -76,9 +83,11 @@
   "cliplib.preset": "预设",
   "cliplib.default": "默认",
   "cliplib.lastOptimized": "上次优化",
+  "cliplib.last": "上次",
 
   "timeline.bpm": "BPM",
   "timeline.snap": "吸附",
+  "timeline.snapLabel": "吸附:",
   "timeline.playhead": "播放头",
   "timeline.tipDrag": "提示：拖动片段块；双击打开编辑器。",
   "timeline.log": "日志",
@@ -97,6 +106,11 @@
   "inspector.actions": "操作",
   "inspector.exportProjectJson": "导出项目 JSON",
   "inspector.importProjectJson": "导入项目 JSON",
+  "inspector.exportFlattenJson": "导出扁平 JSON",
 
-  "actions.clear": "清除"
+  "actions.clear": "清除",
+  "actions.exportFlattenJson": "导出扁平 JSON",
+  "actions.edit": "编辑",
+  "actions.duplicate": "复制",
+  "actions.remove": "移除"
 }

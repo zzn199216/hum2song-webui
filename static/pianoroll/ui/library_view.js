@@ -77,10 +77,14 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     fmtSec = (typeof fmtSec === 'function') ? fmtSec : _defaultFmtSec;
     escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
 
+    const _tDefaults = { 'cliplib.play':'Play', 'cliplib.addToSong':'Add to Song', 'cliplib.edit':'Edit', 'cliplib.remove':'Remove', 'cliplib.optimize':'Optimize', 'cliplib.details':'Details', 'cliplib.preset':'Preset', 'cliplib.default':'Default', 'cliplib.notes':'notes', 'cliplib.lastOptimized':'Last optimized', 'cliplib.last':'Last', 'opt.dynamicsAccent':'Dynamics Accent', 'opt.dynamicsLevel':'Dynamics Level', 'opt.durationGentle':'Duration Gentle' };
+    const win = (typeof window !== 'undefined') ? window : null;
+    const t = (win && win.I18N && typeof win.I18N.t === 'function') ? (k) => win.I18N.t(k) : (k) => (_tDefaults[k] !== undefined ? _tDefaults[k] : k);
+
     const id = escapeHtml(clip.id || '');
     const isSelected = selectedClipId && String(clip.id || '') === String(selectedClipId);
     const presetVal = (selectedPreset != null && selectedPreset !== '') ? String(selectedPreset) : '';
-    const presetLabel = presetVal === 'dynamics_accent' ? 'Dynamics Accent' : presetVal === 'dynamics_level' ? 'Dynamics Level' : presetVal === 'duration_gentle' ? 'Duration Gentle' : 'Default';
+    const presetLabel = presetVal === 'dynamics_accent' ? t('opt.dynamicsAccent') : presetVal === 'dynamics_level' ? t('opt.dynamicsLevel') : presetVal === 'duration_gentle' ? t('opt.durationGentle') : t('cliplib.default');
     const name = escapeHtml(clip.name || 'Untitled');
     const notes = Number(stats.count ?? stats.notes ?? 0) || 0;
     const spanSec = Number(stats.spanSec ?? 0) || 0;
@@ -144,7 +148,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
           const when = _fmtTs(agent.appliedAt);
 
           // Short line for primary
-          lastOptimizeShort = `Last: ${escapeHtml(msg)}`;
+          lastOptimizeShort = `${t('cliplib.last')}: ${escapeHtml(msg)}`;
 
           // PR-3: Display executedPreset, ops, reason from patchSummary (compute BEFORE using in template)
           let presetBadge = '';
@@ -184,12 +188,12 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
 
     const advancedHtml =
       `<details class="clipAdvanced" style="margin-top:6px; font-size:12px;">` +
-        `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Details</summary>` +
+        `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(t('cliplib.details'))}</summary>` +
         `<div class="clip-advanced-content" style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">` +
           revLine +
           optStatusFullHtml +
           `<div style="margin-top:8px;">` +
-            `<button class="btn" data-act="remove" data-id="${id}" style="padding:4px 8px;">Remove</button>` +
+            `<button class="btn" data-act="remove" data-id="${id}" style="padding:4px 8px;">${escapeHtml(t('cliplib.remove'))}</button>` +
           `</div>` +
         `</div>` +
       `</details>`;
@@ -197,14 +201,14 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     return (
       `<div class="clip-card clipCard${isSelected ? ' clipSelected' : ''}" data-clip-id="${id}">` +
         `<div class="clip-title">${name}</div>` +
-        `<div class="clip-sub">${notes} notes · ${fmtSec(spanSec)}</div>` +
+        `<div class="clip-sub">${notes} ${t('cliplib.notes')} · ${fmtSec(spanSec)}</div>` +
         lastLineHtml +
         `<div class="clip-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center;">` +
-          `<button class="btn" data-act="play" data-id="${id}">Play</button>` +
-          `<button class="btn" data-act="add" data-id="${id}">Add to Song</button>` +
-          `<button class="btn" data-act="edit" data-id="${id}">Edit</button>` +
-          (presetVal ? `<span class="clip-preset-label" style="font-size:11px; opacity:0.7;">Preset: ${escapeHtml(presetLabel)}</span>` : '') +
-          `<button class="btn" data-act="optimize" data-id="${id}">Optimize</button>` +
+          `<button class="btn" data-act="play" data-id="${id}">${escapeHtml(t('cliplib.play'))}</button>` +
+          `<button class="btn" data-act="add" data-id="${id}">${escapeHtml(t('cliplib.addToSong'))}</button>` +
+          `<button class="btn" data-act="edit" data-id="${id}">${escapeHtml(t('cliplib.edit'))}</button>` +
+          (presetVal ? `<span class="clip-preset-label" style="font-size:11px; opacity:0.7;">${escapeHtml(t('cliplib.preset'))}: ${escapeHtml(presetLabel)}</span>` : '') +
+          `<button class="btn" data-act="optimize" data-id="${id}">${escapeHtml(t('cliplib.optimize'))}</button>` +
         `</div>` +
         advancedHtml +
       `</div>`
