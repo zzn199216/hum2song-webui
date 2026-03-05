@@ -706,6 +706,7 @@
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
       this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+      this.modalSetupVelocityScrollSync();
       this.modalRequestDraw();
       this.modalBindControls();
       this.modalUpdateEditorOptimizeUI();
@@ -879,6 +880,9 @@
     modalResizeCanvasToContent(){
       const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
+      const gridWrap = $('.editorGridWrap') || wrap;
+      const velocityCanvas = $('#velocityCanvas');
+      const velocityLaneWrap = $('#velocityLaneWrap');
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
       const span = Math.max(4, st.spanSec);
       const w = Math.max(1200, Math.ceil(span * this.state.modal.pxPerSec) + 140);
@@ -890,7 +894,8 @@
       // draw() adds top/bottom pad=2 rows (≈ +4 rows); count them so we don't "almost fit but no scroll".
       const pitchSpanPadded = pitchSpan > 0 ? (pitchSpan + 4) : 0;
 
-      const wrapH = Math.max(320, wrap.clientHeight - 2);
+      const gridAreaH = (gridWrap && gridWrap.clientHeight > 0) ? gridWrap.clientHeight : wrap.clientHeight;
+      const wrapH = Math.max(320, gridAreaH - 2);
 
       // Visual row size (zoom)
       const ROW_H = Math.max(12, Math.round(16 * (Number(this.state.modal.pitchZoom || 1))));
@@ -913,21 +918,45 @@
       } else {
         canvas.height = wrapH;
       }
+
+      // Velocity lane: match grid width; height from state
+      if (velocityCanvas && velocityLaneWrap){
+        const collapsed = !!this.state.modal.velocityLaneCollapsed;
+        velocityLaneWrap.classList.toggle('collapsed', collapsed);
+        $('#velocitySplitter').classList.toggle('collapsed', collapsed);
+        if (!collapsed){
+          const vh = Math.max(48, Math.min(200, Number(this.state.modal.velocityLaneHeight) || 80));
+          velocityCanvas.width = w;
+          velocityCanvas.height = Math.max(48, vh - 22);
+          velocityLaneWrap.style.height = vh + 'px';
+        }
+      }
     },
 
     // When vertical pitch scrolling is enabled, scroll so pitchCenter sits near the viewport center.
+    modalSetupVelocityScrollSync(){
+      if (typeof document === 'undefined' || !$) return;
+      const gridWrap = $('.editorGridWrap');
+      const velWrap = $('.editorVelocityLaneCanvasWrap');
+      if (!gridWrap || !velWrap || gridWrap.__h2s_vel_scroll_synced) return;
+      gridWrap.__h2s_vel_scroll_synced = true;
+      gridWrap.addEventListener('scroll', () => {
+        if (velWrap) velWrap.scrollLeft = gridWrap.scrollLeft;
+      });
+    },
+
     modalAutoScrollPitchToCenter(){
       if (!this.state.modal.show) return;
       if (!this.state.modal.usePitchVScroll) return;
-      const wrap = $('#canvasWrap');
+      const gridWrap = $('.editorGridWrap');
       const canvas = $('#canvas');
-      if (!wrap || !canvas) return;
+      if (!gridWrap || !canvas) return;
       const rowH = Number(this.state.modal.rowH) || 16;
       const pitch = (this.state.modal.pitchCenter != null) ? Number(this.state.modal.pitchCenter) : 60;
       const y = (this.state.modal.padT || PITCH_PAD_T) + (127 - pitch) * rowH;
-      const target = y - (wrap.clientHeight / 2);
-      const maxScroll = Math.max(0, (canvas.height || 0) - wrap.clientHeight);
-      wrap.scrollTop = Math.max(0, Math.min(maxScroll, target));
+      const target = y - (gridWrap.clientHeight / 2);
+      const maxScroll = Math.max(0, (canvas.height || 0) - gridWrap.clientHeight);
+      gridWrap.scrollTop = Math.max(0, Math.min(maxScroll, target));
     },
 
     modalUpdateRightPanel(){
@@ -1217,7 +1246,57 @@
       ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
       ctx.fillText(`Cursor: ${fmtSec(this.state.modal.cursorSec)} (click empty grid to move; click note to select)`, 10, 14);
 
+      this.modalDrawVelocityLane();
       this.modalUpdateRightPanel();
+    },
+
+    modalDrawVelocityLane(){
+      if (!this.state.modal.show) return;
+      if (!!this.state.modal.velocityLaneCollapsed) return;
+      const vCanvas = $('#velocityCanvas');
+      if (!vCanvas) return;
+      const ctx = vCanvas.getContext('2d');
+      if (!ctx) return;
+
+      const padL = this.state.modal.padL;
+      const pxPerSec = this.state.modal.pxPerSec;
+      const laneH = vCanvas.height;
+      const notes = this.modalAllNotes();
+      const selectedId = this.state.modal.selectedNoteId;
+
+      ctx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+      ctx.fillStyle = 'rgba(0,0,0,.15)';
+      ctx.fillRect(0, 0, vCanvas.width, laneH);
+
+      const BAR_MIN_W = 4;
+      for (const n of notes){
+        const vel = H2SProject.clamp(Math.round(Number(n.velocity) ?? 100), 1, 127);
+        const x = padL + n.start * pxPerSec;
+        const w = Math.max(BAR_MIN_W, n.duration * pxPerSec);
+        const barHeight = (vel / 127) * laneH;
+        const y = laneH - barHeight;
+        const selected = (n.id === selectedId);
+        ctx.fillStyle = selected ? 'rgba(96,165,250,.9)' : 'rgba(59,130,246,.75)';
+        ctx.strokeStyle = selected ? 'rgba(255,255,255,.7)' : 'rgba(29,78,216,.8)';
+        roundRect(ctx, x, y, w, barHeight, 4);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      const lbl = $('#velocityLaneLabel');
+      if (lbl){
+        let v = null;
+        const m = this.state.modal;
+        const selId = m.selectedNoteId;
+        if (m.mode === 'drag_velocity' && m.drag.noteId){
+          const found = this.modalFindNoteById(m.drag.noteId);
+          if (found) v = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
+        } else if (selId){
+          const found = this.modalFindNoteById(selId);
+          if (found) v = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
+        }
+        lbl.textContent = v != null ? ('Vel: ' + v) : 'Vel: —';
+      }
     },
 
     modalAllNotes(){
@@ -2169,6 +2248,28 @@
       return null;
     },
 
+    modalVelocityHitTest(px, py){
+      const vCanvas = $('#velocityCanvas');
+      if (!vCanvas) return null;
+      const padL = this.state.modal.padL;
+      const pxPerSec = this.state.modal.pxPerSec;
+      const laneH = vCanvas.height;
+      if (py < 0 || py > laneH) return null;
+
+      const notes = this.modalAllNotes();
+      const BAR_MIN_W = 4;
+      for (let i = notes.length - 1; i >= 0; i--){
+        const n = notes[i];
+        const vel = H2SProject.clamp(Math.round(Number(n.velocity) ?? 100), 1, 127);
+        const x = padL + n.start * pxPerSec;
+        const w = Math.max(BAR_MIN_W, n.duration * pxPerSec);
+        const barHeight = (vel / 127) * laneH;
+        const y = laneH - barHeight;
+        if (px >= x && px <= x + w && py >= y && py <= laneH) return { type:'velocity', noteId:n.id };
+      }
+      return null;
+    },
+
 
 // ---- Playback inside modal (Clip Editor) ----
 modalTogglePlay(){
@@ -2252,7 +2353,52 @@ async modalPlay(){
 },
     modalPointerDown(ev){
       if (!this.state.modal.show) return;
-      const wrap = $('#canvasWrap');
+      const target = ev.target;
+      const isVelocityCanvas = target && target.id === 'velocityCanvas';
+      const isSplitter = target && (target.id === 'velocitySplitter' || target.closest && target.closest('#velocitySplitter'));
+
+      if (isSplitter){
+        if (ev.detail === 2){
+          this.state.modal.velocityLaneCollapsed = !this.state.modal.velocityLaneCollapsed;
+          this.modalResizeCanvasToContent();
+          this.modalRequestDraw();
+          return;
+        }
+        this.state.modal.mode = 'resize_velocity_lane';
+        this.state.modal.drag.startY = ev.clientY;
+        this.state.modal.drag.origLaneHeight = this.state.modal.velocityLaneHeight;
+        return;
+      }
+
+      if (isVelocityCanvas){
+        const vCanvas = $('#velocityCanvas');
+        if (!vCanvas) return;
+        const rect = vCanvas.getBoundingClientRect();
+        const scaleX = rect.width ? (vCanvas.width / rect.width) : 1;
+        const scaleY = rect.height ? (vCanvas.height / rect.height) : 1;
+        const px = (ev.clientX - rect.left) * scaleX;
+        const py = (ev.clientY - rect.top) * scaleY;
+        const hit = this.modalVelocityHitTest(px, py);
+        if (hit){
+          const noteId = hit.noteId;
+          const idsToUpdate = this.state.modal.selectedNoteId ? [this.state.modal.selectedNoteId] : [noteId];
+          if (this.state.modal.selectedNoteId && this.state.modal.selectedNoteId !== noteId) idsToUpdate.push(noteId);
+          this.state.modal.selectedNoteId = noteId;
+          const found = this.modalFindNoteById(noteId);
+          if (!found) return;
+          const v0 = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
+          this.state.modal.drag.noteId = noteId;
+          this.state.modal.drag.startY = py;
+          this.state.modal.drag.origVelocity = v0;
+          this.state.modal.drag.velocityNoteIds = idsToUpdate;
+          this.state.modal.mode = 'drag_velocity';
+          $('#editorStatus').textContent = 'Drag to set velocity...';
+          this.modalRequestDraw();
+          return;
+        }
+        return;
+      }
+
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
       const scaleX = rect.width ? (canvas.width / rect.width) : 1;
@@ -2329,9 +2475,41 @@ async modalPlay(){
     modalPointerMove(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
+
+      if (m.mode === 'resize_velocity_lane'){
+        const dy = ev.clientY - m.drag.startY;
+        let h = Math.max(48, Math.min(200, (m.drag.origLaneHeight || 80) + dy));
+        this.state.modal.velocityLaneHeight = h;
+        this.modalResizeCanvasToContent();
+        this.modalRequestDraw();
+        return;
+      }
+
+      if (m.mode === 'drag_velocity'){
+        const vCanvas = $('#velocityCanvas');
+        if (!vCanvas) return;
+        const rect = vCanvas.getBoundingClientRect();
+        const scaleY = rect.height ? (vCanvas.height / rect.height) : 1;
+        const py = (ev.clientY - rect.top) * scaleY;
+        const laneH = vCanvas.height;
+        const step = ev.shiftKey ? 4 : 1;
+        let v = Math.round(127 * (1 - py / laneH));
+        v = H2SProject.clamp(v, 1, 127);
+        if (step > 1) v = Math.round(v / step) * step;
+        v = H2SProject.clamp(v, 1, 127);
+        const ids = m.drag.velocityNoteIds || [m.drag.noteId];
+        for (const id of ids){
+          const found = this.modalFindNoteById(id);
+          if (found) found.note.velocity = v;
+        }
+        m.dirty = true;
+        $('#editorStatus').textContent = 'Vel: ' + v;
+        this.modalRequestDraw();
+        return;
+      }
+
       if (m.mode !== 'drag_note' && m.mode !== 'resize_note') return;
 
-      const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
       const scaleX = rect.width ? (canvas.width / rect.width) : 1;
@@ -2394,8 +2572,7 @@ async modalPlay(){
     modalPointerUp(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
-      // finalize note drag/resize
-      if (m.mode === 'drag_note' || m.mode === 'resize_note'){
+      if (m.mode === 'drag_note' || m.mode === 'resize_note' || m.mode === 'drag_velocity' || m.mode === 'resize_velocity_lane'){
         m.mode = 'none';
         try { $('#editorStatus').textContent = 'Ready.'; } catch(e){}
         this.modalRequestDraw();

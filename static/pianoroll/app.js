@@ -592,7 +592,7 @@ rollbackClipRevision(clipId){
         rowH: 16,
         padL: 60,
         padT: 20,
-        mode: 'none', // drag_note | resize_note
+        mode: 'none', // drag_note | resize_note | drag_velocity | resize_velocity_lane
         drag: {
           noteId: null,
           startX: 0,
@@ -600,7 +600,10 @@ rollbackClipRevision(clipId){
           origStart: 0,
           origPitch: 60,
           origDur: 0.3,
+          origVelocity: 80,
         },
+        velocityLaneHeight: 80,
+        velocityLaneCollapsed: false,
         isPlaying: false,
         snapLastNonOff: '16',
         synth: null,
@@ -750,9 +753,13 @@ $('#rngPitchCenter').addEventListener('input', () => {
         this.modalRequestDraw();
       });
 
-      // Canvas interactions
+      // Canvas interactions (grid + velocity lane + splitter)
       const canvas = $('#canvas');
-      canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      const velocityCanvas = $('#velocityCanvas');
+      const velocitySplitter = $('#velocitySplitter');
+      if (canvas) canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      if (velocityCanvas) velocityCanvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      if (velocitySplitter) velocitySplitter.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
       window.addEventListener('pointermove', (ev) => this.modalPointerMove(ev));
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 

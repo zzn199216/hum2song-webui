@@ -428,7 +428,60 @@
       background:
         linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
       position:relative;
+      display:flex;
+      flex-direction:column;
     }
+    .editorCanvasStack{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      position:relative;
+    }
+    .editorGridWrap{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+    }
+    .editorVelocitySplitter{
+      flex-shrink:0;
+      height:6px;
+      background:rgba(255,255,255,.08);
+      cursor:ns-resize;
+      border-top:1px solid var(--border);
+      position:relative;
+    }
+    .editorVelocitySplitter:hover{ background:rgba(96,165,250,.25); }
+    .editorVelocitySplitter.collapsed{ height:4px; }
+    .editorVelocityLaneWrap{
+      flex-shrink:0;
+      min-height:0;
+      overflow:hidden;
+      background:rgba(0,0,0,.25);
+      border-top:1px solid rgba(255,255,255,.06);
+      display:flex;
+      flex-direction:column;
+    }
+    .editorVelocityLaneWrap.collapsed{ display:none; }
+    .editorVelocityLaneHeader{
+      height:22px;
+      flex-shrink:0;
+      display:flex;
+      align-items:center;
+      padding:0 8px;
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(0,0,0,.2);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .editorVelocityLaneHeader span#velocityLaneLabel{ font-weight:700; }
+    .editorVelocityLaneCanvasWrap{
+      flex:1;
+      min-height:48px;
+      overflow:auto;
+      position:relative;
+    }
+    #velocityCanvas{ display:block; }
     canvas{ display:block; }
     .editorRight{
       width: 280px;
@@ -702,7 +755,20 @@
             <button id="btnEditorOptimize" class="btn" type="button" data-i18n="opt.optimize">Optimize</button>
           </div>
           <div id="canvasWrap" class="editorCanvasWrap">
-            <canvas id="canvas" width="1400" height="540"></canvas>
+            <div class="editorCanvasStack">
+              <div class="editorGridWrap">
+                <canvas id="canvas" width="1400" height="540"></canvas>
+              </div>
+              <div id="velocitySplitter" class="editorVelocitySplitter" title="Drag to resize velocity lane"></div>
+              <div id="velocityLaneWrap" class="editorVelocityLaneWrap">
+                <div class="editorVelocityLaneHeader">
+                  <span id="velocityLaneLabel">Vel: —</span>
+                </div>
+                <div class="editorVelocityLaneCanvasWrap">
+                  <canvas id="velocityCanvas" width="1400" height="64"></canvas>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="editorRight">
@@ -718,6 +784,7 @@
                 <div data-i18n="editor.helpStep2">2) Press Insert Note: add a default note at the selected cell.</div>
                 <div data-i18n="editor.helpStep3">3) Click a note: select; drag to move; drag the right edge to resize.</div>
                 <div data-i18n="editor.helpStep4">4) Press Delete: delete selected note.</div>
+                <div>5) Velocity lane (below grid): drag bars to set velocity (1-127); Shift for fine adjustment.</div>
                 <div style="margin-top:8px; color:rgba(255,255,255,.62);" data-i18n="editor.helpCancelSave">
                   Cancel discards changes; Save writes back into the clip.
                 </div>
