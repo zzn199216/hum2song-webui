@@ -1261,27 +1261,32 @@
       if (!!this.state.modal.velocityLaneCollapsed) return;
       const vCanvas = $('#velocityCanvas');
       if (!vCanvas) return;
+
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+      const cssW = this.state.modal.velocityLaneCssW != null ? this.state.modal.velocityLaneCssW : 1200;
+      const cssH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : 48;
+
+      vCanvas.style.width = cssW + 'px';
+      vCanvas.style.height = cssH + 'px';
+      vCanvas.width = Math.round(cssW * dpr);
+      vCanvas.height = Math.round(cssH * dpr);
+
       const ctx = vCanvas.getContext('2d');
       if (!ctx) return;
 
-      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
-      ctx.clearRect(0, 0, vCanvas.width, vCanvas.height);
-      ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#12161c';
+      ctx.fillRect(0, 0, cssW, cssH);
 
       const padL = this.state.modal.padL;
       const pxPerSec = this.state.modal.pxPerSec;
-      const laneH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : (vCanvas.height / dpr);
+      const laneH = cssH;
       const padV = 4;
       const drawH = Math.max(4, laneH - padV);
       const notes = this.modalAllNotes();
       const selectedId = this.state.modal.selectedNoteId;
-
-      const cssW = this.state.modal.velocityLaneCssW != null ? this.state.modal.velocityLaneCssW : (vCanvas.width / dpr);
-      ctx.fillStyle = '#12161c';
-      ctx.fillRect(0, 0, cssW, laneH);
 
       const clampBarW = (x) => H2SProject.clamp(x, 6, 14);
       for (const n of notes){
