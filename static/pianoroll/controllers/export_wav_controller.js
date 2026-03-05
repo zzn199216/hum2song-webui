@@ -263,11 +263,11 @@
     if (btn){ btn.disabled = true; }
     exportWavCancelled = false;
     exportWavActive = true;
-    setStatus('Preparing audio render...', true);
+    setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.preparing') : 'Preparing audio render...', true);
 
     try {
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
-      setStatus('Rendering audio...', true);
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.rendering') : 'Rendering audio...', true);
       var metaByTrackId = {};
       for (var i = 0; i < (p2.tracks || []).length; i++){
         var t = p2.tracks[i];
@@ -323,8 +323,8 @@
         transport.start(0);
       }, totalSec);
 
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
-      setStatus('Encoding WAV...', true);
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.encoding') : 'Encoding WAV...', true);
 
       var buf = (result && result.buffer) ? result.buffer : result;
       var blob = audioBufferToWav(buf);
@@ -333,9 +333,9 @@
         alert('Export WAV: failed to encode audio buffer.');
         return;
       }
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
-      setStatus('Downloading...', false);
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.downloading') : 'Downloading...', false);
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
 
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
@@ -362,7 +362,7 @@
   function onCancelClick(){
     if (exportWavActive){
       exportWavCancelled = true;
-      setStatus('Cancelled.', false);
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
     }
   }
 

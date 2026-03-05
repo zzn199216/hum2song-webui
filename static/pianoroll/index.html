@@ -518,37 +518,37 @@
       <span class="badge">MVP</span>
     </div>
     <div class="row" style="align-items:center; gap:8px;">
-      <button id="btnRecord" class="btn" title="Record mic (R)">&#128308; Record</button>
+      <button id="btnRecord" class="btn" title="Record mic (R)" data-i18n="top.record">&#128308; Record</button>
       <span id="studioRecordTimer" class="smallmuted" style="display:none; min-width:42px; font-variant-numeric:tabular-nums;">00:00</span>
       <canvas id="studioRecordWaveform" width="160" height="28" style="display:none; vertical-align:middle; background:rgba(0,0,0,.25); border-radius:6px;" title="Recording waveform"></canvas>
       <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
       <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
-      <button id="btnUpload" class="btn">Upload WAV</button>
+      <button id="btnUpload" class="btn" data-i18n="top.uploadWav">Upload WAV</button>
     </div>
     <div class="spacer"></div>
     <div id="studioImportStatus" class="smallmuted" style="min-width:120px;"></div>
-    <button id="btnCancelImport" class="btn ghost" style="display:none;">Cancel</button>
-    <div class="smallmuted">Local clips + timeline. Double-click a clip to edit.</div>
+    <button id="btnCancelImport" class="btn ghost" style="display:none;" data-i18n="common.cancel">Cancel</button>
+    <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>
   </div>
 
   <div class="layout">
     <!-- Left -->
     <div class="panel">
       <div class="panelHeader">
-        <h3>Clip Library</h3>
+        <h3 data-i18n="cliplib.title">Clip Library</h3>
         <button id="btnNewTrack" class="btn icon" title="Add track (MVP: 1 track only)" disabled>+</button>
       </div>
       <div class="panelBody">
         <div class="col">
-          <div class="pill">Generate: upload WAV -> backend -> clip auto-added</div>
+          <div class="pill" data-i18n="cliplib.generatePill">Generate: upload WAV -> backend -> clip auto-added</div>
           <div class="row">
-            <button id="btnUseLast" class="btn primary" style="opacity:.6" disabled title="Generate clip from last recording">Use last recording</button>
-            <button id="btnClear" class="btn ghost">Clear</button>
+            <button id="btnUseLast" class="btn primary" style="opacity:.6" disabled title="Generate clip from last recording" data-i18n="cliplib.useLastRecording">Use last recording</button>
+            <button id="btnClear" class="btn ghost" data-i18n="cliplib.clear">Clear</button>
           </div>
           <label class="row" style="align-items:center; gap:6px; margin-top:4px; font-size:11px; cursor:pointer;">
             <input type="checkbox" id="chkAutoOpenAfterImport" checked />
-            <span>Auto-open editor after import</span>
+            <span data-i18n="cliplib.autoOpenAfterImport">Auto-open editor after import</span>
           </label>
           <div class="hr"></div>
           <div id="clipList" class="col"></div>
@@ -561,11 +561,11 @@
       <div class="transport">
         <button id="btnPlayheadToStart" class="btn icon" title="Go to start">|&lt;</button>
         <div class="bpmBox">
-          <span class="muted">BPM</span>
+          <span class="muted" data-i18n="timeline.bpm">BPM</span>
           <input id="inpBpm" type="number" min="30" max="260" value="120" />
         </div>
         <div class="pill" id="lblPlayhead">Playhead: 0.00s</div>
-        <div class="hint">Tip: drag clip blocks; double-click to open editor.</div>
+        <div class="hint" data-i18n="timeline.tipDrag">Tip: drag clip blocks; double-click to open editor.</div>
       </div>
 
       <div class="timeline">
@@ -575,8 +575,8 @@
 
       <div class="panel" style="height:180px;">
         <div class="panelHeader">
-          <h3>Log</h3>
-          <button id="btnClearLog" class="btn mini">Clear</button>
+          <h3 data-i18n="timeline.log">Log</h3>
+          <button id="btnClearLog" class="btn mini" data-i18n="actions.clear">Clear</button>
         </div>
         <div class="panelBody">
           <div id="log" class="log"></div>
@@ -587,56 +587,56 @@
     <!-- Right -->
     <div class="panel">
       <div class="panelHeader">
-        <h3>Inspector</h3>
+        <h3 data-i18n="inspector.title">Inspector</h3>
         <select id="selLang" class="btn mini" title="Language" style="margin-left:auto; min-width:90px;"></select>
         <span class="badge">MVP</span>
       </div>
       <div class="panelBody">
         <div class="insSection">
-          <h4>Project</h4>
-          <div class="kv"><b>Tracks</b><span id="kvTracks">1</span></div>
-          <div class="kv"><b>Clips</b><span id="kvClips">0</span></div>
-          <div class="kv"><b>Instances</b><span id="kvInst">0</span></div>
+          <h4 data-i18n="inspector.project">Project</h4>
+          <div class="kv"><b data-i18n="inspector.tracks">Tracks</b><span id="kvTracks">1</span></div>
+          <div class="kv"><b data-i18n="inspector.clips">Clips</b><span id="kvClips">0</span></div>
+          <div class="kv"><b data-i18n="inspector.instances">Instances</b><span id="kvInst">0</span></div>
         </div>
 
         <div class="hr"></div>
 
         <div class="insSection">
-          <h4>Clip Details</h4>
-          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected from Clip Library (shows History & Results).</div>
+          <h4 data-i18n="inspector.clipDetails">Clip Details</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.clipDetailsHint">Selected from Clip Library (shows History & Results).</div>
           <div id="selectedClipBox" class="muted">Click a clip in the library to view History.</div>
         </div>
 
         <div class="hr"></div>
 
         <div class="insSection">
-          <h4>Timeline Selection</h4>
-          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected instance on timeline (start/transpose/edit).</div>
+          <h4 data-i18n="inspector.timelineSelection">Timeline Selection</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.timelineSelectionHint">Selected instance on timeline (start/transpose/edit).</div>
           <div id="selectionBox" class="muted">Select a clip instance on timeline.</div>
         </div>
 
         <div class="hr"></div>
 
         <div class="insSection">
-          <h4>Actions</h4>
+          <h4 data-i18n="inspector.actions">Actions</h4>
           <div class="col">
-            <button id="btnExportProject" class="btn">Export Project JSON</button>
-            <button id="btnExportMidi" class="btn">Export MIDI</button>
-            <button id="btnExportWav" class="btn">Export WAV</button>
-            <button id="btnImportProject" class="btn">Import Project JSON</button>
+            <button id="btnExportProject" class="btn" data-i18n="inspector.exportProjectJson">Export Project JSON</button>
+            <button id="btnExportMidi" class="btn" data-i18n="export.exportMIDI">Export MIDI</button>
+            <button id="btnExportWav" class="btn" data-i18n="export.exportWAV">Export WAV</button>
+            <button id="btnImportProject" class="btn" data-i18n="inspector.importProjectJson">Import Project JSON</button>
           </div>
         </div>
 
         <div class="hr"></div>
 
         <details id="instrumentLibraryBox" class="insSection">
-          <summary style="cursor:pointer; font-weight:700;">Instrument Library</summary>
+          <summary style="cursor:pointer; font-weight:700;" data-i18n="inst.instrumentLibrary">Instrument Library</summary>
           <div style="margin-top:8px;">
-            <label style="font-size:11px; color:var(--muted);">Sampler baseUrl</label>
+            <label style="font-size:11px; color:var(--muted);" data-i18n="inst.baseUrl">Base URL</label>
             <input id="inpSamplerBaseUrl" type="text" placeholder="(default)" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;" />
             <div style="display:flex; gap:6px; margin-top:6px;">
-              <button id="btnSaveSamplerBaseUrl" class="btn mini">Save</button>
-              <button id="btnTestSampler" class="btn mini">Test Load</button>
+              <button id="btnSaveSamplerBaseUrl" class="btn mini" data-i18n="inst.save">Save</button>
+              <button id="btnTestSampler" class="btn mini" data-i18n="inst.testLoad">Test Load</button>
             </div>
             <div id="samplerBaseUrlStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
 
@@ -646,12 +646,12 @@
               <p id="samplerUploadHelp" class="muted" style="font-size:10px; margin:6px 0 0 0; line-height:1.4;">Minimum: &gt;=2 samples. Recommended: 6+. Supported names: A1..A6 or C3/Ds4/F#2/Bb3 (case-insensitive). Missing keys pitch-shifted from nearest.</p>
               <input type="file" id="inpSamplerUpload" multiple accept="audio/*" style="display:none;" />
               <div style="display:flex; gap:6px; margin-top:6px;">
-                <button id="btnSamplerUpload" class="btn mini">Upload samples</button>
+                <button id="btnSamplerUpload" class="btn mini" data-i18n="inst.upload">Upload samples</button>
                 <button id="btnClearSamplerPack" class="btn mini danger">Clear local samples</button>
               </div>
               <p id="samplerImportFolderHelp" class="muted" style="font-size:10px; margin:6px 0 0 0;">Import Folder: creates a new instrument (name from folder). Add to track dropdown → My Instruments.</p>
               <input type="file" id="inpSamplerFolder" webkitdirectory directory multiple style="display:none;" />
-              <button id="btnSamplerFolder" class="btn mini" style="margin-top:6px;">Import Folder</button>
+              <button id="btnSamplerFolder" class="btn mini" style="margin-top:6px;" data-i18n="inst.importFolder">Import Folder</button>
               <div id="samplerUploadStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
             </div>
           </div>
@@ -667,7 +667,7 @@
         <div class="title" id="modalTitle">Editing Clip</div>
         <div class="sub" id="modalSub"></div>
         <div class="spacer"></div>
-        <button id="btnModalCancel" class="btn">Cancel</button>
+        <button id="btnModalCancel" class="btn" data-i18n="common.cancel">Cancel</button>
         <button id="btnModalSave" class="btn primary">Save</button>
         <button id="btnModalClose" class="btn">Close</button>
       </div>
@@ -690,7 +690,7 @@
             </select>
             <span class="pill">Pitch view</span>
             <input id="rngPitchCenter" type="range" min="0" max="127" value="60" style="width:160px;" />
-            <span class="pill" style="margin-left:8px;">Preset</span>
+            <span class="pill" style="margin-left:8px;" data-i18n="opt.preset">Preset</span>
             <select id="editorOptimizePreset" class="btn" style="padding:6px 8px; font-size:13px;">
               <option value="">Default</option>
               <option value="noop">No-op</option>
@@ -699,7 +699,7 @@
               <option value="duration_gentle">Duration Gentle</option>
               <option value="llm_v0">LLM v0</option>
             </select>
-            <button id="btnEditorOptimize" class="btn" type="button">Optimize</button>
+            <button id="btnEditorOptimize" class="btn" type="button" data-i18n="opt.optimize">Optimize</button>
           </div>
           <div id="canvasWrap" class="editorCanvasWrap">
             <canvas id="canvas" width="1400" height="540"></canvas>
@@ -725,7 +725,7 @@
             </details>
             <div class="hr"></div>
             <div style="margin-bottom:10px; padding:8px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.15);">
-              <div style="font-weight:700; margin-bottom:6px;">Quick Optimize</div>
+              <div style="font-weight:700; margin-bottom:6px;" data-i18n="opt.quickOptimize">Quick Optimize</div>
               <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
                 <select id="editorQuickOptimizePreset" class="btn" style="padding:6px 8px; font-size:12px;">
                   <option value="">Default</option>
@@ -735,7 +735,7 @@
                   <option value="duration_gentle">Duration Gentle</option>
                   <option value="llm_v0" selected>LLM v0</option>
                 </select>
-                <button id="btnEditorQuickOptimize" class="btn primary" type="button">Run Optimize</button>
+                <button id="btnEditorQuickOptimize" class="btn primary" type="button" data-i18n="opt.run">Run Optimize</button>
               </div>
               <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
                 <span id="editorQuickOptimizeTemplateLabel" class="muted">Template: Custom</span>
@@ -758,16 +758,16 @@
               <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
             </div>
             <details class="help" style="margin-top:8px;">
-              <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
+              <summary style="cursor:pointer; font-weight:700;" data-i18n="opt.advanced">Advanced</summary>
               <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
                 <span>Rev: <span id="editorRevId">-</span></span>
                 <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
                 <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;">Prompt (blank = default)</div>
                 <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
                 <div style="margin-top:6px;">
-                  <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
-                  <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
-                  <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
+                  <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;" data-i18n="opt.regenerate">Regenerate</button>
+                  <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;" data-i18n="opt.undoOptimize">Undo Optimize</button>
+                  <button id="btnEditorResetOptimizePrompt" class="btn" type="button" data-i18n="opt.resetPrompt">Reset to default prompt</button>
                 </div>
                 <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
                 <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>

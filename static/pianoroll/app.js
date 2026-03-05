@@ -878,7 +878,7 @@ H2SProject: (typeof window !== 'undefined') ? window.H2SProject : null,
               this.project.ui.playheadSec = sec;
               const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
               const beat = (sec * bpm) / 60;
-              $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+              $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
               if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
                 this.timelineCtrl.setPlayheadSec(sec);
               } else {
@@ -944,7 +944,7 @@ try{
       this.project.ui.playheadSec = sec;
       const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
       const beat = (sec * bpm) / 60;
-      $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+      $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
 
       if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
         this.timelineCtrl.setPlayheadSec(sec);
@@ -983,7 +983,7 @@ try{
         if (!bpmInp) return;
 
         const label = document.createElement('span');
-        label.textContent = 'Snap:';
+        label.textContent = ((window.I18N && window.I18N.t) ? window.I18N.t('timeline.snap') : 'Snap') + ':';
         label.className = 'miniLabel';
 
         const sel = document.createElement('select');
@@ -1174,6 +1174,7 @@ ensureTrackButtons(){
       this.renderSelection();
       this.renderSelectedClip();
       try{ this.updateRecordButtonStates(); }catch(e){}
+      try{ this._updateI18nLabels(); }catch(e){}
     },
 
     renderClipList(){
@@ -1188,7 +1189,7 @@ ensureTrackButtons(){
       if (this.project.clips.length === 0){
         const d = document.createElement('div');
         d.className = 'muted';
-        d.textContent = 'No clips yet. Upload WAV to generate one.';
+        d.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('cliplib.noClips') : 'No clips yet. Upload WAV to generate one.';
         root.appendChild(d);
         return;
       }
@@ -1203,12 +1204,12 @@ ensureTrackButtons(){
         });
 el.innerHTML = `
           <div class="clipTitle">${escapeHtml(clip.name)}</div>
-          <div class="clipMeta"><span>${st.count} notes</span><span>${fmtSec(st.spanSec)}</span></div>
+          <div class="clipMeta"><span>${st.count} ${(window.I18N && window.I18N.t) ? window.I18N.t('cliplib.notes') : 'notes'}</span><span>${fmtSec(st.spanSec)}</span></div>
           <div class="miniBtns">
-            <button class="btn mini" data-act="play">Play</button>
-            <button class="btn mini" data-act="add">Add</button>
-            <button class="btn mini" data-act="edit">Edit</button>
-            <button class="btn mini danger" data-act="remove">Remove</button>
+            <button class="btn mini" data-act="play">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.play') : 'Play')}</button>
+            <button class="btn mini" data-act="add">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.addToSong') : 'Add to Song')}</button>
+            <button class="btn mini" data-act="edit">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.edit') : 'Edit')}</button>
+            <button class="btn mini danger" data-act="remove">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.remove') : 'Remove')}</button>
           </div>
         `;
 
@@ -1241,7 +1242,7 @@ renderTimeline(){
       const clipId = this.state.selectedClipId;
       if (!clipId){
         box.className = 'muted';
-        box.textContent = 'Click a clip in the library to view History.';
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.clickClipHint') : 'Click a clip in the library to view History.';
         return;
       }
       const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
@@ -1251,7 +1252,7 @@ renderTimeline(){
       if (!clip){
         this.state.selectedClipId = null;
         box.className = 'muted';
-        box.textContent = 'Click a clip in the library to view History.';
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.clickClipHint') : 'Click a clip in the library to view History.';
         return;
       }
       const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
@@ -1269,15 +1270,16 @@ renderTimeline(){
         (clip.meta && clip.meta.patchSummary) ||
         (clip.meta && clip.meta.agent && clip.meta.agent.lastResult && clip.meta.agent.lastResult.patchSummary) ||
         null;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
       let resultsHtml = '';
       if (ps && typeof ps === 'object'){
         const parts = [];
         if (typeof ps.ops === 'number') parts.push(`ops: ${ps.ops}`);
-        if (ps.isVelocityOnly === true) parts.push('velocity only');
+        if (ps.isVelocityOnly === true) parts.push(_t('opt.velocityOnly'));
         else {
-          if (ps.hasPitchChange === true) parts.push('pitch ✓');
-          if (ps.hasTimingChange === true) parts.push('timing ✓');
-          if (ps.hasStructuralChange === true) parts.push('structure ✓');
+          if (ps.hasPitchChange === true) parts.push(_t('opt.pitch'));
+          if (ps.hasTimingChange === true) parts.push(_t('opt.timing'));
+          if (ps.hasStructuralChange === true) parts.push(_t('opt.structure'));
         }
         if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
         if (ps.promptMeta && typeof ps.promptMeta === 'object') {
@@ -1293,9 +1295,9 @@ renderTimeline(){
       const presetSelVal = (storedPreset != null && storedPreset !== '') ? String(storedPreset) : '';
       const optimizeSettingsHtml = (
         `<details class="clipOptimizeSettings" style="margin-top:6px;">` +
-          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Optimize Settings</summary>` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.optimizeSettings'))}</summary>` +
           `<div style="margin-top:6px;">` +
-            `<label style="font-size:12px; opacity:0.8;">Preset</label>` +
+            `<label style="font-size:12px; opacity:0.8;">${escapeHtml(_t('opt.preset'))}</label>` +
             `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
               `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
               `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
@@ -1311,7 +1313,7 @@ renderTimeline(){
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
         optimizeSettingsHtml +
         `<details class="selectedClipResults" style="margin-top:6px;">` +
-          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Results</summary>` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.resultSummary'))}</summary>` +
           `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
         `</details>` +
         (historyHtml ? (
@@ -1402,13 +1404,13 @@ renderTimeline(){
       const id = this.state.selectedInstanceId;
       if (!id){
         box.className = 'muted';
-        box.textContent = 'Select a clip instance on timeline.';
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.selectInstanceHint') : 'Select a clip instance on timeline.';
         return;
       }
       const inst = this.project.instances.find(x => x.id === id);
       if (!inst){
         box.className = 'muted';
-        box.textContent = 'Select a clip instance on timeline.';
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.selectInstanceHint') : 'Select a clip instance on timeline.';
         return;
       }
       const clip = this.project.clips.find(c => c.id === inst.clipId);
@@ -1558,7 +1560,7 @@ renderTimeline(){
       if (!f || !(f instanceof Blob)) return;
       const file = f instanceof File ? f : new File([f], (f.name || 'recording.webm'), { type: (f.type || 'audio/webm') });
       this.state.importCancelled = false;
-      this.setImportStatus('Uploading audio...', true);
+      this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.uploading') : 'Uploading audio...', true);
       log(`Uploading ${file.name} ...`);
       try{
         const fd = new FormData();
@@ -1573,20 +1575,20 @@ renderTimeline(){
         }
         this.state.lastUploadTaskId = tid;
         log(`Generate queued: ${tid}`);
-        this.setImportStatus('Processing... (task: ' + String(tid).slice(0, 8) + '...)', true);
+        this.setImportStatus(((window.I18N && window.I18N.t) ? window.I18N.t('io.processing') : 'Processing...') + ' (task: ' + String(tid).slice(0, 8) + '...)', true);
         await this.pollTaskUntilDone(tid);
         if (this.state.importCancelled){
-          this.setImportStatus('Cancelled.', false);
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           log('Import cancelled by user');
           return;
         }
-        this.setImportStatus('Fetching result...', true);
+        this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.fetching') : 'Fetching...', true);
         const score = await fetchJson(API.score(tid));
         if (this.state.importCancelled){
-          this.setImportStatus('Cancelled.', false);
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           return;
         }
-        this.setImportStatus('Creating clip...', true);
+        this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creatingClip') : 'Creating clip...', true);
 
         if ((this.project.clips || []).length === 0){
           const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
@@ -1605,7 +1607,7 @@ renderTimeline(){
         this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
         persist();
         this.render();
-        this.setImportStatus('Done', false);
+        this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
         log(`Clip added: ${clip.name}`);
         const cidNew = clip.id;
         if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
@@ -1614,7 +1616,7 @@ renderTimeline(){
         setTimeout(() => this.setImportStatus('', false), 2000);
       }catch(e){
         if (this.state.importCancelled){
-          this.setImportStatus('Cancelled.', false);
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           log('Import cancelled by user');
         }else{
           const msg = (e && e.message) ? String(e.message) : String(e);
@@ -1653,7 +1655,7 @@ renderTimeline(){
       const statusEl = $('#studioRecordStatus');
       const active = !!this.state.recordingActive;
       if (rec) {
-        rec.textContent = active ? '\u23F9 Stop' : '\u{1F534} Record';
+        rec.textContent = active ? ('\u23F9 ' + ((window.I18N && window.I18N.t) ? window.I18N.t('top.stop') : 'Stop')) : ('\u{1F534} ' + ((window.I18N && window.I18N.t) ? window.I18N.t('top.record') : 'Record'));
         rec.title = active ? 'Stop recording' : 'Record mic (R)';
         rec.disabled = false;
       }
@@ -1942,6 +1944,7 @@ renderTimeline(){
           try{
             await I18N.load(lang);
             I18N.setLang(lang);
+            this._updateI18nLabels();
             this.render();
           }catch(e){ console.warn('[i18n] load locale failed', e); }
         };
@@ -1951,8 +1954,18 @@ renderTimeline(){
         Promise.all([
           I18N.loadManifest ? I18N.loadManifest().catch(() => {}) : Promise.resolve(),
           I18N.load(I18N.getLang()).catch(() => {})
-        ]).then(() => { populate(); }).catch(() => { populate(); });
+        ]).then(() => { populate(); this._updateI18nLabels(); }).catch(() => { populate(); this._updateI18nLabels(); });
       }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
+    },
+    _updateI18nLabels(){
+      try{
+        if (typeof document === 'undefined' || !window.I18N || typeof window.I18N.t !== 'function') return;
+        const I18N = window.I18N;
+        document.querySelectorAll('[data-i18n]').forEach(function(el){
+          const k = el.getAttribute('data-i18n');
+          if (k) el.textContent = I18N.t(k);
+        });
+      }catch(e){}
     },
     _initMasterVolumeUI(){
       // Browser-only, safe if called multiple times.
@@ -1972,7 +1985,7 @@ renderTimeline(){
         wrap.style.marginLeft = '10px';
 
         const lab = document.createElement('span');
-        lab.textContent = 'Vol';
+        lab.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('top.vol') : 'Vol';
         lab.style.fontSize = '12px';
         lab.style.opacity = '0.85';
 
@@ -2071,7 +2084,7 @@ renderTimeline(){
           let html = Object.keys(packs).map(k => `<option value="${k}">${(packs[k].label || k).replace(/</g,'&lt;')}</option>`).join('');
           const custom = window.__h2s_custom_instruments || [];
           if (custom.length){
-            html += '<optgroup label="My Instruments">';
+            html += '<optgroup label="' + escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inst.myInstruments') : 'My Instruments') + '">';
             custom.forEach(c => { html += '<option value="' + (c.packId || '').replace(/"/g,'&quot;') + '">' + (c.displayName || c.packId || '').replace(/</g,'&lt;') + '</option>'; });
             html += '</optgroup>';
           }
@@ -2166,7 +2179,7 @@ renderTimeline(){
             const uniqueKeys = [...new Set(toUpload.map(x => x.key))];
             const baseName = (files[0] && files[0].name) ? files[0].name.replace(/\.[^/.]+$/, '').trim().slice(0, 32) || 'Uploaded' : 'Uploaded';
             const kind = uniqueKeys.length >= 2 ? 'sampler' : 'oneshot';
-            setUploadStatus('Creating custom instrument...');
+            setUploadStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creating') : 'Creating custom instrument...');
             store.createCustomInstrument(baseName, kind).then(({ packId, displayName }) => {
               setUploadStatus('Uploading ' + toUpload.length + ' sample(s)...');
               return Promise.all(toUpload.map(x => store.putSample(packId, x.key, x.file, x.file.name))).then(() => {
@@ -2227,7 +2240,7 @@ renderTimeline(){
             }
             const baseName = (files[0] && files[0].webkitRelativePath) ? files[0].webkitRelativePath.split(/[/\\]/)[0] || 'Imported' : 'Imported';
             const kind = uniqueKeys.length >= 2 ? 'sampler' : 'oneshot';
-            setUploadStatus('Creating custom instrument...');
+            setUploadStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creating') : 'Creating custom instrument...');
             store.createCustomInstrument(baseName, kind).then(({ packId, displayName }) => {
               setUploadStatus('Importing ' + toImport.length + ' sample(s)...');
               return Promise.all(toImport.map(x => store.putSample(packId, x.noteKey, x.file, x.file.name))).then(() => {

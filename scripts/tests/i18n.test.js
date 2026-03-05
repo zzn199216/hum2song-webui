@@ -1,9 +1,24 @@
 #!/usr/bin/env node
-/* PR-G1a/G1b: i18n Core - minimal tests for register, t, setLang, fallback, persistence, loadManifest. */
+/* PR-G1a/G1b/G1c: i18n Core - minimal tests for register, t, setLang, fallback, persistence, loadManifest, zh-covers-en. */
 'use strict';
+
+const fs = require('fs');
+const path = require('path');
 
 function assert(cond, msg){
   if (!cond) throw new Error(msg || 'Assertion failed');
+}
+
+// PR-G1c: zh.json must have all keys from en.json
+var enPath = path.join(__dirname, '../../static/i18n/locales/en.json');
+var zhPath = path.join(__dirname, '../../static/i18n/locales/zh.json');
+if (fs.existsSync(enPath) && fs.existsSync(zhPath)){
+  var en = JSON.parse(fs.readFileSync(enPath, 'utf8'));
+  var zh = JSON.parse(fs.readFileSync(zhPath, 'utf8'));
+  var enKeys = Object.keys(en);
+  for (var i = 0; i < enKeys.length; i++){
+    assert(zh[enKeys[i]] != null, 'zh.json missing key: ' + enKeys[i]);
+  }
 }
 
 const I18N = require('../../static/i18n/i18n.js');

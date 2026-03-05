@@ -74,7 +74,7 @@
     if (btn){
       btn.disabled = true;
     }
-    setStatus('Exporting MIDI...');
+    setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.exportingMidi') : 'Exporting MIDI...');
 
     try {
       var flat = H.flatten(p2);
@@ -114,7 +114,7 @@
       a.click();
       a.remove();
       setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
-      setStatus('MIDI exported.');
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.midiExported') : 'MIDI exported.');
       setTimeout(function(){ setStatus(''); }, 2000);
     } catch(e){
       setStatus('');

@@ -70,15 +70,16 @@
       }
       function _formatPatchTypeSummary(ps){
         if (!ps || typeof ps !== 'object') return '';
+        const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
         let base = '';
         if ((ps.ops != null && ps.ops === 0) || ps.noChanges) base = '(no changes)';
-        else if (ps.isVelocityOnly === true) base = 'Changed: velocity only';
+        else if (ps.isVelocityOnly === true) base = 'Changed: ' + t('opt.velocityOnly');
         else {
           const parts = [];
-          if (ps.hasPitchChange === true) parts.push('pitch ✓');
-          if (ps.hasTimingChange === true) parts.push('timing ✓');
-          if (ps.hasStructuralChange === true) parts.push('structure ✓');
-          base = parts.length === 0 ? 'Changed: velocity only' : 'Changed: ' + parts.join(' ');
+          if (ps.hasPitchChange === true) parts.push(t('opt.pitch'));
+          if (ps.hasTimingChange === true) parts.push(t('opt.timing'));
+          if (ps.hasStructuralChange === true) parts.push(t('opt.structure'));
+          base = parts.length === 0 ? 'Changed: ' + t('opt.velocityOnly') : 'Changed: ' + parts.join(' ');
         }
         const suffix = _formatPromptMetaSuffix(ps);
         return suffix ? base + ' | ' + suffix : base;
@@ -982,20 +983,20 @@
           const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
           if (api){
             const cfg = api.loadLlmConfig();
-            if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? 'Full mode' : 'Safe mode';
+            if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.full') : 'Full mode') : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode');
             if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ('Model: ' + cfg.model) : 'Model: (unset)';
           } else {
-            if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+            if (quickModeEl) quickModeEl.textContent = (typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode';
             if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
           }
         }catch(_){
-          if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+          if (quickModeEl) quickModeEl.textContent = (typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode';
           if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
         }
         const quickSummaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
         if (quickSummaryEl){
           const ps = (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) || null;
-          quickSummaryEl.textContent = ps ? _formatPatchTypeSummary(ps) : '(no result yet)';
+          quickSummaryEl.textContent = ps ? _formatPatchTypeSummary(ps) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
         }
       }catch(e){}
     },
@@ -1318,8 +1319,9 @@
             if (!m) modelHint = 'Model is unset — open Advanced → LLM Settings to choose a model. ';
           }
         } catch (_) {}
-        const base = 'Quality gate failed (velocity-only). Try: (1) switch to a stronger model, (2) turn off Tighten Rhythm, or (3) add prompt: "fix pitch/timing, not just dynamics".';
-        if (forStatus) return modelHint + 'Quality gate failed. See summary for next steps.';
+        const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+        const base = t('opt.lowQualityVelocityOnly');
+        if (forStatus) return modelHint + t('opt.lowQualityShort');
         return modelHint + base;
       };
       // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
@@ -1343,7 +1345,8 @@
           if (!api) return '';
           const cfg = api.loadLlmConfig();
           const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
-          return safeMode ? ' [Safe mode]' : ' [Full mode]';
+          const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+          return safeMode ? (' [' + t('opt.safe') + ']') : (' [' + t('opt.full') + ']');
         } catch (_) { return ''; }
       };
       const statusFromResult = (res, clip, presetId) => {
@@ -1360,7 +1363,7 @@
             let line = 'ok, ops=' + ops + ' (' + opTypes + ')' + modeLabel;
             const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
             const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
-            if (safeMode) line += ' velocity-only';
+            if (safeMode) line += ' ' + ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.velocityOnly') : 'velocity-only');
             return line;
           }
           return 'ok, ops=' + (res.ops ?? 0) + ' (preset=' + preset + ', prompt=' + promptSrc + ')';
@@ -1463,7 +1466,7 @@
                     const link = summaryEl.querySelector('.qopt-simplify');
                     if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
                   }
-                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? (((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)') + ' | ' + _formatPromptMetaSuffix(ps)) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
@@ -1704,7 +1707,7 @@
                     const link = summaryEl.querySelector('.qopt-simplify');
                     if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
                   }
-                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? (((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)') + ' | ' + _formatPromptMetaSuffix(ps)) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
