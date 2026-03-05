@@ -990,17 +990,18 @@ try{
         const sel = document.createElement('select');
         sel.id = 'selTimelineSnap';
         sel.className = 'mini';
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
         const opts = [
-          {v:'off', t:'Off'},
-          {v:'4', t:'1/4'},
-          {v:'8', t:'1/8'},
-          {v:'16', t:'1/16'},
-          {v:'32', t:'1/32'},
+          {v:'off', k:'snap.off'},
+          {v:'4', k:'snap.1_4'},
+          {v:'8', k:'snap.1_8'},
+          {v:'16', k:'snap.1_16'},
+          {v:'32', k:'snap.1_32'},
         ];
         for (const o of opts){
           const op = document.createElement('option');
           op.value = o.v;
-          op.textContent = o.t;
+          op.textContent = _t(o.k);
           sel.appendChild(op);
         }
         sel.value = '16';
@@ -1972,6 +1973,10 @@ renderTimeline(){
         document.querySelectorAll('[data-i18n]').forEach(function(el){
           const k = el.getAttribute('data-i18n');
           if (k) el.textContent = I18N.t(k);
+        });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){
+          const k = el.getAttribute('data-i18n-placeholder');
+          if (k && el.placeholder !== undefined) el.placeholder = I18N.t(k);
         });
       }catch(e){}
     },

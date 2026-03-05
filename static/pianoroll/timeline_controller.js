@@ -179,12 +179,13 @@
           sel.id = 'selTimelineSnap';
           sel.className = 'sel';
           sel.style.marginLeft = '8px';
+          const _tSnap = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
           const opts = [
-            ['off','Snap: Off'],
-            ['4','1/16'],
-            ['8','1/32'],
-            ['16','1/64'],
-            ['32','1/128'],
+            ['off', _tSnap('snap.labelOff')],
+            ['4', _tSnap('snap.1_16')],
+            ['8', _tSnap('snap.1_32')],
+            ['16', _tSnap('snap.1_64')],
+            ['32', _tSnap('snap.1_128')],
           ];
           for (const [val, label] of opts) {
             const o = document.createElement('option');
@@ -325,10 +326,11 @@
           label.className = 'trackLabel';
           // Track header (stacked): name -> volume -> instrument
           const track = (proj.tracks||[])[ti] || {};
-          const trackName = (track && track.name) ? track.name : ('Track ' + (ti+1));
+          const _t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+          const trackName = (track && track.name) ? track.name : (_t('trackpanel.trackN').replace('{n}', String(ti+1)));
 
           label.style.cursor = 'pointer';
-          label.title = 'Set as target track';
+          label.title = _t('trackpanel.setTargetTrack');
           label.style.display = 'flex';
           label.style.flexDirection = 'column';
           label.style.alignItems = 'stretch';
@@ -360,7 +362,7 @@
           muteBtn.className = "trackMuteBtn";
           muteBtn.type = "button";
           muteBtn.textContent = "M";
-          muteBtn.title = "Mute track";
+          muteBtn.title = _t('trackpanel.muteTrack');
           muteBtn.style.position = "absolute";
           muteBtn.style.top = "6px";
           muteBtn.style.right = "6px";
@@ -404,7 +406,7 @@
           volWrap.style.gap = '6px';
 
           const volLab = document.createElement('span');
-          volLab.textContent = 'Vol';
+          volLab.textContent = _t('trackpanel.vol');
           volLab.style.opacity = '0.85';
           volLab.style.fontSize = '12px';
           volWrap.appendChild(volLab);
@@ -416,7 +418,7 @@
           vol.step = '1';
           vol.value = (typeof track.gainDb === 'number') ? String(track.gainDb) : '0';
           vol.style.width = '100%';
-          vol.title = 'Track volume (dB)';
+          vol.title = _t('trackpanel.trackVolumeDb');
           // Show value bubble while dragging (0-100 like Windows volume)
           const volBubble = document.createElement('div');
           volBubble.className = 'trackVolBubble';
@@ -506,22 +508,22 @@
           const sel = document.createElement('select');
           sel.className = 'trackInstrumentSelect';
           var builtin = [
-            { v: 'default', l: 'default' },
-            { v: 'bass', l: 'bass' },
-            { v: 'lead', l: 'lead' },
-            { v: 'pad', l: 'pad' },
-            { v: 'pluck', l: 'pluck' },
-            { v: 'drum', l: 'drum' },
-            { v: 'sampler:tonejs:piano', l: 'Sampler: Piano' },
-            { v: 'sampler:tonejs:strings', l: 'Sampler: Strings' },
-            { v: 'sampler:tonejs:bass', l: 'Sampler: Bass' },
-            { v: 'sampler:tonejs:guitar-acoustic', l: 'Sampler: Guitar Acoustic' },
-            { v: 'sampler:tonejs:guitar-electric', l: 'Sampler: Guitar Electric' },
+            { v: 'default', l: 'dropdown.default' },
+            { v: 'bass', l: 'dropdown.bass' },
+            { v: 'lead', l: 'dropdown.lead' },
+            { v: 'pad', l: 'dropdown.pad' },
+            { v: 'pluck', l: 'dropdown.pluck' },
+            { v: 'drum', l: 'dropdown.drum' },
+            { v: 'sampler:tonejs:piano', l: 'dropdown.samplerPiano' },
+            { v: 'sampler:tonejs:strings', l: 'dropdown.samplerStrings' },
+            { v: 'sampler:tonejs:bass', l: 'dropdown.samplerBass' },
+            { v: 'sampler:tonejs:guitar-acoustic', l: 'dropdown.samplerGuitarAcoustic' },
+            { v: 'sampler:tonejs:guitar-electric', l: 'dropdown.samplerGuitarElectric' },
           ];
           var custom = (typeof window !== 'undefined' && window.__h2s_custom_instruments) ? window.__h2s_custom_instruments : [];
-          var opts = builtin.map(x=>'<option value="' + (x.v) + '">' + (ctrl._escapeHtml(x.l)) + '</option>').join('');
+          var opts = builtin.map(x=>'<option value="' + (x.v) + '">' + (ctrl._escapeHtml(_t(x.l))) + '</option>').join('');
           if (custom.length){
-            opts += '<optgroup label="' + (ctrl._escapeHtml('My Instruments')) + '">';
+            opts += '<optgroup label="' + (ctrl._escapeHtml(_t('inst.myInstruments'))) + '">';
             for (var i = 0; i < custom.length; i++){
               var c = custom[i];
               var val = (c.kind === 'oneshot') ? ('oneshot:' + c.packId) : ('sampler:' + c.packId);
@@ -531,7 +533,7 @@
           }
           sel.innerHTML = opts;
           sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
-          sel.title = 'Instrument';
+          sel.title = _t('trackpanel.instrument');
           sel.style.width = '100%';
           sel.addEventListener('pointerdown', (e)=>{ e.stopPropagation(); });
           sel.addEventListener('click', (e)=>{ e.stopPropagation(); });
@@ -609,14 +611,16 @@
                 noteCount: (typeof st.count === 'number') ? st.count : 0,
                 fmtSec: ctrl._fmtSec.bind(ctrl),
                 escapeHtml: ctrl._escapeHtml.bind(ctrl),
+                notesLabel: _t('trackpanel.notes'),
+                removeLabel: _t('actions.remove'),
               });
             } else {
               el.innerHTML = `
                 <div class="instBody" data-role="inst-body">
                   <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
-                  <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
+                  <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} ${_t('trackpanel.notes')}</span></div>
                 </div>
-                <button class="instRemove" type="button" data-act="remove" title="Remove" aria-label="Remove">×</button>
+                <button class="instRemove" type="button" data-act="remove" title="${ctrl._escapeHtml(_t('actions.remove'))}" aria-label="${ctrl._escapeHtml(_t('actions.remove'))}">×</button>
               `;
             }
 

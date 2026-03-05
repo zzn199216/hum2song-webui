@@ -5,6 +5,7 @@
     function create(opts){
       opts = opts || {};
       const root = (typeof window !== 'undefined') ? window : global;
+      const _t = (root && root.I18N && typeof root.I18N.t === 'function') ? root.I18N.t.bind(root.I18N) : function(k){ return k; };
       const H2SProject = opts.H2SProject || (root && root.H2SProject) || null;
       const H2SApp = opts.H2SApp || (root && root.H2SApp) || (root && root.window && root.window.H2SApp) || null;
 
@@ -87,10 +88,10 @@
 
       // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
       const TEMPLATES_V1_UI = {
-        fix_pitch_v1: { label: 'Fix Pitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
-        tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
-        clean_outliers_v1: { label: 'Clean Outliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
-        bluesy_v1: { label: 'Bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
+        fix_pitch_v1: { label: 'Fix Pitch', labelKey: 'editor.fixPitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
+        tighten_rhythm_v1: { label: 'Tighten Rhythm', labelKey: 'editor.tightenRhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
+        clean_outliers_v1: { label: 'Clean Outliers', labelKey: 'editor.cleanOutliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
+        bluesy_v1: { label: 'Bluesy', labelKey: 'editor.bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
       };
 
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
@@ -560,7 +561,7 @@
           const testStatusEl = document.getElementById('editorLlmTestStatus');
           // PR-8J/8K: Populate Model select dropdown from defaults (fallback to hardcoded list)
           if (modelSelectEl){
-            modelSelectEl.innerHTML = '<option value="">(Select a model...)</option>';
+            modelSelectEl.innerHTML = '<option value="">' + _t('editor.selectModel') + '</option>';
             try{
               const defaults = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_DEFAULTS) ? globalThis.H2S_LLM_DEFAULTS : null;
               const suggestions = (defaults && Array.isArray(defaults.modelSuggestions)) ? defaults.modelSuggestions : ['gpt-4o-mini', 'gpt-4.1-mini', 'deepseek-chat', 'deepseek-reasoner', 'deepseek/deepseek-chat', 'deepseek/deepseek-reasoner'];
@@ -622,7 +623,7 @@
             if (testStatusEl) testStatusEl.textContent = '';
             if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
             if (gatewayPresetEl) gatewayPresetEl.value = 'custom';
-            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
+            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = _t('editor.llmConfigNotLoaded'); }
             if (saveBtn) saveBtn.disabled = true;
             if (resetBtn) resetBtn.disabled = true;
             if (testBtn) testBtn.disabled = true;
@@ -695,12 +696,12 @@
         this.state.modal.pitchZoom = z;
       }catch(e){ this.state.modal.pitchZoom = 1.25; }
 
-      $('#modalTitle').textContent = `Editing: ${clip.name}`;
-      $('#modalSub').textContent = `notes ${st.count} | pitch ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | span ${fmtSec(st.spanSec)}`;
+      $('#modalTitle').textContent = (_t('editor.editingName') || 'Editing: {name}').replace('{name}', clip.name || '');
+      $('#modalSub').textContent = `${_t('editor.notes')} ${st.count} | ${_t('editor.pitch')} ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | ${_t('editor.span')} ${fmtSec(st.spanSec)}`;
       $('#modal').classList.add('show');
       $('#modal').setAttribute('aria-hidden', 'false');
 
-      $('#editorStatus').textContent = 'Tip: Q toggle Snap, [ ] change grid, hold Alt to bypass Snap while dragging.';
+      $('#editorStatus').textContent = _t('editor.tipSnap');
 
       this.modalUpdateRightPanel();
       this.modalResizeCanvasToContent();
@@ -825,7 +826,7 @@
         this.state.modal.snapLastNonOff = val;
       }
       if (!opts || !opts.silent){
-        $('#editorStatus').textContent = `Snap = ${val === 'off' ? 'Off' : ('1/' + val)}  (Q toggle, [ ] grid, Alt bypass)`;
+        $('#editorStatus').textContent = (_t('editor.snapStatusFmt') || 'Snap = {val}  (Q toggle, [ ] grid, Alt bypass)').replace('{val}', val === 'off' ? _t('snap.off') : ('1/' + val));
       }
       this.modalRequestDraw();
     },
@@ -934,8 +935,8 @@
       $('#kvClipNotes').textContent = String(st.count);
       $('#kvClipPitch').textContent = `${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)}`;
       $('#kvClipSpan').textContent = fmtSec(st.spanSec);
-      $('#pillCursor').textContent = `Cursor: ${fmtSec(this.state.modal.cursorSec)}`;
-      $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
+      $('#pillCursor').textContent = (_t('editor.cursorFmt') || 'Cursor: {sec}').replace('{sec}', fmtSec(this.state.modal.cursorSec));
+      $('#pillSnap').textContent = $('#selSnap').value === 'off' ? _t('editor.snapOff') : (_t('editor.snapFmt') || 'Snap 1/{n}').replace('{n}', $('#selSnap').value);
     },
 
     // PR-4/PR-6b: Update Editor Optimize preset, prompt, and status from current clip (e.g. after Optimize).
@@ -968,7 +969,8 @@
         const templateLabelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeTemplateLabel') : null;
         if (templateLabelEl) {
           const tmpl = this._selectedTemplateId && TEMPLATES_V1_UI[this._selectedTemplateId] ? TEMPLATES_V1_UI[this._selectedTemplateId] : null;
-          templateLabelEl.textContent = tmpl ? ('Template: ' + tmpl.label) : 'Template: Custom';
+          const lbl = tmpl ? (_t('editor.template') + ': ' + (tmpl.labelKey ? _t(tmpl.labelKey) : tmpl.label)) : (_t('editor.template') + ': ' + _t('editor.templateCustom'));
+          templateLabelEl.textContent = lbl;
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
@@ -984,10 +986,10 @@
           if (api){
             const cfg = api.loadLlmConfig();
             if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.full') : 'Full mode') : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode');
-            if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ('Model: ' + cfg.model) : 'Model: (unset)';
+            if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ((_t('editor.modelFmt') || 'Model: {model}').replace('{model}', cfg.model)) : _t('editor.modelUnset');
           } else {
             if (quickModeEl) quickModeEl.textContent = (typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode';
-            if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
+            if (quickModelEl) quickModelEl.textContent = _t('editor.modelUnset');
           }
         }catch(_){
           if (quickModeEl) quickModeEl.textContent = (typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode';
@@ -1908,7 +1910,7 @@
               const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
               const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
               if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){
-                setTestStatus('LLM module not loaded.');
+                setTestStatus(_t('editor.llmConfigNotLoaded'));
                 return;
               }
               const baseEl = doc.getElementById('editorLlmBaseUrl');
@@ -1918,7 +1920,7 @@
               const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
               const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
               if (!baseUrl || !model){
-                setTestStatus('Please set Base URL and Model first');
+                setTestStatus(_t('editor.pleaseSetBaseUrlAndModel'));
                 return;
               }
               setTestStatus('Testing...');
@@ -1933,9 +1935,9 @@
                 })
                 .catch(function(err){
                   const msg = (err && err.message) ? String(err.message) : '';
-                  if (/401|403|Unauthorized/i.test(msg)) setTestStatus('Unauthorized (check token)');
-                  else if (/404|not found/i.test(msg)) setTestStatus('Endpoint not found (check Base URL)');
-                  else if (/timeout|request timeout/i.test(msg)) setTestStatus('Timeout (gateway unreachable?)');
+                  if (/401|403|Unauthorized/i.test(msg)) setTestStatus(_t('editor.unauthorized'));
+                  else if (/404|not found/i.test(msg)) setTestStatus(_t('editor.endpointNotFound'));
+                  else if (/timeout|request timeout/i.test(msg)) setTestStatus(_t('editor.timeout'));
                   else setTestStatus('Connection failed');
                 });
             }catch(e){}
@@ -1959,7 +1961,7 @@
               const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt || ''; };
               const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
               if (!client || typeof client.listModels !== 'function'){
-                setStatus('LLM module not loaded.');
+                setStatus(_t('editor.llmConfigNotLoaded'));
                 return;
               }
               const baseEl = doc.getElementById('editorLlmBaseUrl');
@@ -1967,10 +1969,10 @@
               const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
               const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
               if (!baseUrl){
-                setStatus('Please set Base URL first');
+                setStatus(_t('editor.pleaseSetBaseUrl'));
                 return;
               }
-              setStatus('Loading...');
+              setStatus(_t('common.loading'));
               const cfg = { baseUrl: baseUrl, authToken: authToken };
               client.listModels(cfg, { timeoutMs: 8000 })
                 .then(function(res){
@@ -1989,7 +1991,7 @@
                   const selectEl = doc.getElementById('editorLlmModelSelect');
                   if (selectEl){
                     const currentValue = selectEl.value;
-                    selectEl.innerHTML = '<option value="">(Select a model...)</option>';
+                    selectEl.innerHTML = '<option value="">' + _t('editor.selectModel') + '</option>';
                     const selectCap = 50;
                     for (var j = 0; j < ids.length && j < selectCap; j++){
                       var opt2 = doc.createElement('option');
@@ -1999,14 +2001,14 @@
                     }
                     if (currentValue) selectEl.value = currentValue;
                   }
-                  setStatus('Loaded ' + ids.length + ' models');
+                  setStatus((_t('editor.loadedModels') || 'Loaded {n} models').replace('{n}', ids.length));
                 })
                 .catch(function(err){
                   const msg = (err && err.message) ? String(err.message) : '';
-                  if (/401|403|Unauthorized/i.test(msg)) setStatus('Unauthorized (check token)');
-                  else if (/404|not found/i.test(msg)) setStatus('Endpoint not found (check Base URL)');
-                  else if (/timeout|request timeout/i.test(msg)) setStatus('Timeout (gateway unreachable?)');
-                  else setStatus('Failed to load models');
+                  if (/401|403|Unauthorized/i.test(msg)) setStatus(_t('editor.unauthorized'));
+                  else if (/404|not found/i.test(msg)) setStatus(_t('editor.endpointNotFound'));
+                  else if (/timeout|request timeout/i.test(msg)) setStatus(_t('editor.timeout'));
+                  else setStatus(_t('editor.failedLoadModels'));
                 });
             }catch(e){}
           };
@@ -2042,7 +2044,7 @@
                 rt.modalResizeCanvasToContent();
                 rt.modalAutoScrollPitchToCenter();
                 rt.modalRequestDraw();
-                try{ $('#editorStatus').textContent = `Pitch zoom = ${next}x (press Z to cycle)`; }catch(e){}
+                try{ $('#editorStatus').textContent = (_t('editor.pitchZoomFmt') || 'Pitch zoom = {n}x (press Z to cycle)').replace('{n}', next); }catch(e){}
                 return;
               }
               if (k === 'Insert'){

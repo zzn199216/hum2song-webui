@@ -34,6 +34,8 @@
     args = args || {};
     const escapeHtml = args.escapeHtml || _defaultEscapeHtml;
     const fmtSec = args.fmtSec || ((x)=> (Number(x||0).toFixed(2) + 's'));
+    const notesLabel = (args.notesLabel != null && String(args.notesLabel)) ? String(args.notesLabel) : 'notes';
+    const removeLabel = (args.removeLabel != null && String(args.removeLabel)) ? String(args.removeLabel) : 'Remove';
 
     const clipName = escapeHtml(args.clipName || '');
     const startSec = (typeof args.startSec === 'number') ? args.startSec : 0;
@@ -44,9 +46,9 @@
     return `
       <div class="instBody inst-body" data-role="inst-body">
         <div class="instTitle inst-title">${clipName}</div>
-        <div class="instSub inst-sub"><span>${fmtSec(startSec)}</span><span>${noteCount} notes</span></div>
+        <div class="instSub inst-sub"><span>${fmtSec(startSec)}</span><span>${noteCount} ${escapeHtml(notesLabel)}</span></div>
       </div>
-      <button class="instRemove btn-inst-remove" type="button" data-act="remove" title="Remove" aria-label="Remove">×</button>
+      <button class="instRemove btn-inst-remove" type="button" data-act="remove" title="${escapeHtml(removeLabel)}" aria-label="${escapeHtml(removeLabel)}">×</button>
     `;
   }
 

@@ -668,36 +668,36 @@
         <div class="sub" id="modalSub"></div>
         <div class="spacer"></div>
         <button id="btnModalCancel" class="btn" data-i18n="common.cancel">Cancel</button>
-        <button id="btnModalSave" class="btn primary">Save</button>
-        <button id="btnModalClose" class="btn">Close</button>
+        <button id="btnModalSave" class="btn primary" data-i18n="editor.save">Save</button>
+        <button id="btnModalClose" class="btn" data-i18n="editor.close">Close</button>
       </div>
       <div class="modalBody">
         <div class="editorLeft">
           <div class="editorTools">
             <button id="btnClipPlay" class="btn icon primary" title="Play">P</button>
             <button id="btnClipStop" class="btn icon" title="Stop">S</button>
-            <button id="btnInsertNote" class="btn">Insert Note</button>
-            <button id="btnDeleteNote" class="btn danger">Delete Note</button>
+            <button id="btnInsertNote" class="btn" data-i18n="editor.insertNote">Insert Note</button>
+            <button id="btnDeleteNote" class="btn danger" data-i18n="editor.deleteNote">Delete Note</button>
             <span class="pill" id="pillCursor">Cursor: 0.00s</span>
-            <span class="pill" id="pillSnap">Snap</span>
+            <span class="pill" id="pillSnap" data-i18n="editor.snap">Snap</span>
             <select id="selSnap" class="btn" style="padding:8px 10px;">
-              <option value="off">Snap: Off</option>
-              <option value="64">Snap: 1/64</option>
-              <option value="32">Snap: 1/32</option>
-              <option value="16" selected>Snap: 1/16</option>
-              <option value="8">Snap: 1/8</option>
-              <option value="4">Snap: 1/4</option>
+              <option value="off" data-i18n="snap.labelOff">Snap: Off</option>
+              <option value="64" data-i18n="snap.label1_64">Snap: 1/64</option>
+              <option value="32" data-i18n="snap.label1_32">Snap: 1/32</option>
+              <option value="16" selected data-i18n="snap.label1_16">Snap: 1/16</option>
+              <option value="8" data-i18n="snap.label1_8">Snap: 1/8</option>
+              <option value="4" data-i18n="snap.label1_4">Snap: 1/4</option>
             </select>
-            <span class="pill">Pitch view</span>
+            <span class="pill" data-i18n="editor.pitchView">Pitch view</span>
             <input id="rngPitchCenter" type="range" min="0" max="127" value="60" style="width:160px;" />
             <span class="pill" style="margin-left:8px;" data-i18n="opt.preset">Preset</span>
             <select id="editorOptimizePreset" class="btn" style="padding:6px 8px; font-size:13px;">
-              <option value="">Default</option>
-              <option value="noop">No-op</option>
-              <option value="dynamics_accent">Dynamics Accent</option>
-              <option value="dynamics_level">Dynamics Level</option>
-              <option value="duration_gentle">Duration Gentle</option>
-              <option value="llm_v0">LLM v0</option>
+              <option value="" data-i18n="cliplib.default">Default</option>
+              <option value="noop" data-i18n="opt.noop">No-op</option>
+              <option value="dynamics_accent" data-i18n="opt.dynamicsAccent">Dynamics Accent</option>
+              <option value="dynamics_level" data-i18n="opt.dynamicsLevel">Dynamics Level</option>
+              <option value="duration_gentle" data-i18n="opt.durationGentle">Duration Gentle</option>
+              <option value="llm_v0" data-i18n="opt.llmV0">LLM v0</option>
             </select>
             <button id="btnEditorOptimize" class="btn" type="button" data-i18n="opt.optimize">Optimize</button>
           </div>
@@ -707,18 +707,18 @@
         </div>
         <div class="editorRight">
           <div id="editorRightScroll" class="editor-right-scroll">
-            <div class="kv"><b>Notes</b><span id="kvClipNotes">0</span></div>
-            <div class="kv"><b>Pitch</b><span id="kvClipPitch">-</span></div>
-            <div class="kv"><b>Span</b><span id="kvClipSpan">-</span></div>
+            <div class="kv"><b data-i18n="editor.notes">Notes</b><span id="kvClipNotes">0</span></div>
+            <div class="kv"><b data-i18n="editor.pitch">Pitch</b><span id="kvClipPitch">-</span></div>
+            <div class="kv"><b data-i18n="editor.span">Span</b><span id="kvClipSpan">-</span></div>
             <details class="help" style="margin-bottom:8px;">
-              <summary style="cursor:pointer; font-weight:700;">Help</summary>
+              <summary style="cursor:pointer; font-weight:700;" data-i18n="editor.help">Help</summary>
               <div style="margin-top:6px; padding-left:4px;">
-                <div style="font-weight:900; margin-bottom:6px;">How to edit (MVP)</div>
-                <div>1) Click empty grid: set cursor and choose a cell.</div>
-                <div>2) Press <span class="kbd">Insert Note</span>: add a default note at the selected cell.</div>
-                <div>3) Click a note: select; drag to move; drag the right edge to resize.</div>
-                <div>4) Press <span class="kbd">Delete</span>: delete selected note.</div>
-                <div style="margin-top:8px; color:rgba(255,255,255,.62);">
+                <div style="font-weight:900; margin-bottom:6px;" data-i18n="editor.howToEdit">How to edit (MVP)</div>
+                <div data-i18n="editor.helpStep1">1) Click empty grid: set cursor and choose a cell.</div>
+                <div data-i18n="editor.helpStep2">2) Press Insert Note: add a default note at the selected cell.</div>
+                <div data-i18n="editor.helpStep3">3) Click a note: select; drag to move; drag the right edge to resize.</div>
+                <div data-i18n="editor.helpStep4">4) Press Delete: delete selected note.</div>
+                <div style="margin-top:8px; color:rgba(255,255,255,.62);" data-i18n="editor.helpCancelSave">
                   Cancel discards changes; Save writes back into the clip.
                 </div>
               </div>
@@ -728,42 +728,42 @@
               <div style="font-weight:700; margin-bottom:6px;" data-i18n="opt.quickOptimize">Quick Optimize</div>
               <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
                 <select id="editorQuickOptimizePreset" class="btn" style="padding:6px 8px; font-size:12px;">
-                  <option value="">Default</option>
-                  <option value="noop">No-op</option>
-                  <option value="dynamics_accent">Dynamics Accent</option>
-                  <option value="dynamics_level">Dynamics Level</option>
-                  <option value="duration_gentle">Duration Gentle</option>
-                  <option value="llm_v0" selected>LLM v0</option>
+                  <option value="" data-i18n="cliplib.default">Default</option>
+                  <option value="noop" data-i18n="opt.noop">No-op</option>
+                  <option value="dynamics_accent" data-i18n="opt.dynamicsAccent">Dynamics Accent</option>
+                  <option value="dynamics_level" data-i18n="opt.dynamicsLevel">Dynamics Level</option>
+                  <option value="duration_gentle" data-i18n="opt.durationGentle">Duration Gentle</option>
+                  <option value="llm_v0" selected data-i18n="opt.llmV0">LLM v0</option>
                 </select>
                 <button id="btnEditorQuickOptimize" class="btn primary" type="button" data-i18n="opt.run">Run Optimize</button>
               </div>
               <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
                 <span id="editorQuickOptimizeTemplateLabel" class="muted">Template: Custom</span>
                 <div id="editorQuickOptimizeTemplates" style="display:flex; gap:4px; flex-wrap:wrap;">
-                  <button type="button" class="btn mini" data-template-id="fix_pitch_v1">Fix Pitch</button>
-                  <button type="button" class="btn mini" data-template-id="tighten_rhythm_v1">Tighten Rhythm</button>
-                  <button type="button" class="btn mini" data-template-id="clean_outliers_v1">Clean Outliers</button>
-                  <button type="button" class="btn mini" data-template-id="bluesy_v1">Bluesy</button>
+                  <button type="button" class="btn mini" data-template-id="fix_pitch_v1" data-i18n="editor.fixPitch">Fix Pitch</button>
+                  <button type="button" class="btn mini" data-template-id="tighten_rhythm_v1" data-i18n="editor.tightenRhythm">Tighten Rhythm</button>
+                  <button type="button" class="btn mini" data-template-id="clean_outliers_v1" data-i18n="editor.cleanOutliers">Clean Outliers</button>
+                  <button type="button" class="btn mini" data-template-id="bluesy_v1" data-i18n="editor.bluesy">Bluesy</button>
                 </div>
               </div>
               <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /> Fix Pitch</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /> Tighten Rhythm</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /> Reduce Outliers</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /><span data-i18n="editor.fixPitch">Fix Pitch</span></label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /><span data-i18n="editor.tightenRhythm">Tighten Rhythm</span></label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /><span data-i18n="editor.reduceOutliers">Reduce Outliers</span></label>
               </div>
               <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-                <span id="editorQuickOptimizeMode" class="badge">Safe mode</span>
-                <span id="editorQuickOptimizeModel" class="muted">Model: (unset)</span>
+                <span id="editorQuickOptimizeMode" class="badge" data-i18n="opt.safe">Safe mode</span>
+                <span id="editorQuickOptimizeModel" class="muted" data-i18n="editor.modelUnset">Model: (unset)</span>
               </div>
               <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
             </div>
             <details class="help" style="margin-top:8px;">
               <summary style="cursor:pointer; font-weight:700;" data-i18n="opt.advanced">Advanced</summary>
               <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
-                <span>Rev: <span id="editorRevId">-</span></span>
-                <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
-                <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;">Prompt (blank = default)</div>
-                <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
+                <span><span data-i18n="editor.rev">Rev</span>: <span id="editorRevId">-</span></span>
+                <span style="margin-left:8px;"><span data-i18n="editor.parent">Parent</span>: <span id="editorParentRevId">-</span></span>
+                <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;" data-i18n="editor.promptLabel">Prompt (blank = default)</div>
+                <textarea id="editorOptimizePrompt" rows="5" data-i18n-placeholder="editor.promptPlaceholder" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
                 <div style="margin-top:6px;">
                   <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;" data-i18n="opt.regenerate">Regenerate</button>
                   <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;" data-i18n="opt.undoOptimize">Undo Optimize</button>
@@ -772,64 +772,64 @@
                 <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
                 <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
-                  <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
+                  <div style="font-weight:700; margin-bottom:6px;" data-i18n="editor.llmSettings">LLM Settings (Scaffold)</div>
                   <div class="col" style="gap:6px;">
-                    <label class="muted" style="margin:0;">Gateway Preset</label>
+                    <label class="muted" style="margin:0;" data-i18n="editor.gatewayPreset">Gateway Preset</label>
                     <select id="editorLlmGatewayPreset" class="btn" style="width:100%; padding:6px; font-size:12px;">
-                      <option value="custom">Custom</option>
-                      <option value="deepseek">DeepSeek (Cloud)</option>
-                      <option value="ollama">Ollama (Local)</option>
+                      <option value="custom" data-i18n="editor.gatewayCustom">Custom</option>
+                      <option value="deepseek" data-i18n="editor.gatewayDeepseek">DeepSeek (Cloud)</option>
+                      <option value="ollama" data-i18n="editor.gatewayOllama">Ollama (Local)</option>
                     </select>
-                    <div class="muted" style="font-size:11px; margin-top:-2px; margin-bottom:2px;">DeepSeek: paste API key in Auth Token. Ollama: requires local install.</div>
-                    <label class="muted" style="margin:0;">Base URL</label>
-                    <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                    <label class="muted" style="margin:0;">Model</label>
+                    <div class="muted" style="font-size:11px; margin-top:-2px; margin-bottom:2px;" data-i18n="editor.deepseekOllamaHint">DeepSeek: paste API key in Auth Token. Ollama: requires local install.</div>
+                    <label class="muted" style="margin:0;" data-i18n="editor.baseUrl">Base URL</label>
+                    <input id="editorLlmBaseUrl" type="text" data-i18n-placeholder="editor.baseUrlPlaceholder" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label class="muted" style="margin:0;" data-i18n="editor.model">Model</label>
                     <select id="editorLlmModelSelect" class="btn" style="width:100%; padding:6px; font-size:12px; margin-bottom:4px;">
-                      <option value="">(Select a model...)</option>
+                      <option value="" data-i18n="editor.selectModel">(Select a model...)</option>
                     </select>
                     <datalist id="editorLlmModelList"></datalist>
                     <div class="row" style="gap:6px; align-items:center;">
-                      <input id="editorLlmModel" type="text" list="editorLlmModelList" placeholder="Model name" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                      <button id="btnEditorLlmLoadModels" type="button" class="btn mini">Load Models</button>
+                      <input id="editorLlmModel" type="text" list="editorLlmModelList" data-i18n-placeholder="editor.modelPlaceholder" placeholder="Model name" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                      <button id="btnEditorLlmLoadModels" type="button" class="btn mini" data-i18n="editor.loadModels">Load Models</button>
                     </div>
                     <div id="editorLlmModelLoadStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
-                    <label class="muted" style="margin:0;">Auth Token</label>
-                    <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label class="muted" style="margin:0;" data-i18n="editor.authToken">Auth Token</label>
+                    <input id="editorLlmAuthToken" type="password" data-i18n-placeholder="editor.authOptional" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
                     <div class="editor-llm-row">
                       <label class="editor-llm-checkbox">
                         <input type="checkbox" id="editorLlmVelocityOnly" checked />
-                        <span>Velocity-only (Safe mode)</span>
+                        <span data-i18n="editor.velocityOnlySafe">Velocity-only (Safe mode)</span>
                       </label>
                     </div>
                     <div class="row" style="margin-top:4px;">
-                      <button id="btnEditorLlmSave" type="button" class="btn mini">Save</button>
-                      <button id="btnEditorLlmReset" type="button" class="btn mini">Reset</button>
-                      <button id="btnEditorLlmTest" type="button" class="btn mini">Test Connection</button>
+                      <button id="btnEditorLlmSave" type="button" class="btn mini" data-i18n="inst.save">Save</button>
+                      <button id="btnEditorLlmReset" type="button" class="btn mini" data-i18n="common.reset">Reset</button>
+                      <button id="btnEditorLlmTest" type="button" class="btn mini" data-i18n="editor.testConnection">Test Connection</button>
                     </div>
-                    <div id="editorLlmConfigWarning" class="muted" style="display:none;">LLM config module not loaded.</div>
+                    <div id="editorLlmConfigWarning" class="muted" style="display:none;" data-i18n="editor.llmConfigNotLoaded">LLM config module not loaded.</div>
                     <div id="editorLlmConfigStatus" class="muted" style="min-height:1em;"></div>
                     <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                   </div>
                 </div>
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
                   <details class="help" style="margin-top:0;">
-                    <summary style="cursor:pointer; font-weight:700;">LLM Debug</summary>
+                    <summary style="cursor:pointer; font-weight:700;" data-i18n="editor.llmDebug">LLM Debug</summary>
                     <div style="margin-top:6px; font-size:11px; opacity:0.85;">
                       <div class="row" style="margin-bottom:6px;">
-                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini">Clear Debug</button>
+                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini" data-i18n="editor.clearDebug">Clear Debug</button>
                       </div>
-                      <label class="muted" style="margin:0; display:block;">Last raw output:</label>
+                      <label class="muted" style="margin:0; display:block;" data-i18n="editor.lastRawOutput">Last raw output:</label>
                       <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;">Last extracted patch:</label>
+                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.lastExtractedPatch">Last extracted patch:</label>
                       <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;">Errors + attempt:</label>
+                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.errorsAndAttempt">Errors + attempt:</label>
                       <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
                     </div>
                   </details>
                 </div>
               </div>
             </details>
-            <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
+            <div class="help" id="editorStatus" style="margin-top:6px;" data-i18n="editor.ready">Ready.</div>
           </div>
         </div>
       </div>
