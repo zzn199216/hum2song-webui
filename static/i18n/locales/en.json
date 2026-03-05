@@ -61,6 +61,7 @@
   "inst.builtinAndMyInstruments": "Built-in packs & My Instruments",
   "inst.samplerUploadHelp": "Minimum: >=2 samples. Recommended: 6+. Supported names: A1..A6 or C3/Ds4/F#2/Bb3 (case-insensitive). Missing keys pitch-shifted from nearest.",
   "inst.importFolderHelp": "Import Folder: creates a new instrument (name from folder). Add to track dropdown → My Instruments.",
+  "inst.customPrefix": "Custom: ",
 
   "top.record": "Record",
   "top.stop": "Stop",

@@ -527,7 +527,10 @@
             for (var i = 0; i < custom.length; i++){
               var c = custom[i];
               var val = (c.kind === 'oneshot') ? ('oneshot:' + c.packId) : ('sampler:' + c.packId);
-              opts += '<option value="' + (ctrl._escapeHtml(val)) + '">' + (ctrl._escapeHtml(c.displayName || c.packId)) + '</option>';
+              var raw = (c.displayName || c.packId || '');
+              var stripped = raw.replace(/^自定义[:：]\s*/i, '').replace(/^Custom:\s*/i, '').trim() || raw;
+              var displayLabel = _t('inst.customPrefix') + stripped;
+              opts += '<option value="' + (ctrl._escapeHtml(val)) + '">' + (ctrl._escapeHtml(displayLabel)) + '</option>';
             }
             opts += '</optgroup>';
           }

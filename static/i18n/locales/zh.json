@@ -61,6 +61,7 @@
   "inst.builtinAndMyInstruments": "内置包与我的乐器",
   "inst.samplerUploadHelp": "最少：>=2 个采样。建议：6+。支持的名称：A1..A6 或 C3/Ds4/F#2/Bb3（不区分大小写）。缺失的键将从最近键移调。",
   "inst.importFolderHelp": "导入文件夹：创建新乐器（名称取自文件夹）。添加到轨道下拉 → 我的乐器。",
+  "inst.customPrefix": "自定义：",
 
   "top.record": "录音",
   "top.stop": "停止",
