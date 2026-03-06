@@ -153,9 +153,10 @@
       const clipId = btn.getAttribute('data-id') || btn.getAttribute('data-clip-id');
       if (!act || !clipId) return;
 
-      // Prefer explicit callbacks; fallback to common app methods if opts.app is provided.
       const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
       const projectV2 = getProjectV2();
+
+      if (typeof opts.onSelectClip === 'function') opts.onSelectClip(clipId);
 
       if (act === 'play'){
         if (typeof opts.onPlay === 'function') return opts.onPlay(clipId);

@@ -74,10 +74,9 @@ const libView = require('../static/pianoroll/ui/library_view.js');
 })();
 
 (function testTimelineControllerSourceContract(){
-  // Source-level contract: controller should bind events to instBody if present.
   const p = path.join(__dirname, '..', 'static', 'pianoroll', 'timeline_controller.js');
   const src = fs.readFileSync(p, 'utf8');
-  assert(src.includes("querySelector('.instBody')") || src.includes('querySelector(\".instBody\")'), 'timeline_controller must query .instBody');
+  assert(src.includes('instancePointerDown'), 'timeline_controller must handle instance pointerdown');
   assert(src.includes('data-act=\"remove\"') || src.includes('[data-act=\"remove\"]'), 'timeline_controller must handle [data-act="remove"]');
   pass('timeline controller binds to instBody + data-act remove');
 })();

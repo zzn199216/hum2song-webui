@@ -100,7 +100,7 @@
   "inspector.clips": "Clips",
   "inspector.instances": "Instances",
   "inspector.clipDetails": "Clip Details",
-  "inspector.clipDetailsHint": "Selected from Clip Library (shows History & Results).",
+  "inspector.clipDetailsHint": "Selected from Clip Library or Timeline (shows History & Results).",
   "inspector.clickClipHint": "Click a clip in the library to view History.",
   "inspector.timelineSelection": "Timeline Selection",
   "inspector.timelineSelectionHint": "Selected instance on timeline (start/transpose/edit).",

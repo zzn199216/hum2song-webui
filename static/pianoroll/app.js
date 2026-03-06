@@ -924,10 +924,13 @@ try{
       // Soft-select: update state + DOM class + inspector, WITHOUT full re-render.
       const prev = this.state.selectedInstanceId;
       this.state.selectedInstanceId = instId;
-      // If we can resolve the instance, update active track highlight.
+      let inst = null;
       try{
-        const inst = (this.project.instances||[]).find(x => x && x.id === instId);
-        if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
+        inst = (this.project.instances||[]).find(x => x && x.id === instId);
+        if (inst){
+          if (Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
+          this.state.selectedClipId = inst.clipId || this.state.selectedClipId;
+        }
       }catch(e){}
 
       // Toggle selected class in-place
@@ -939,6 +942,7 @@ try{
         this._selectedInstEl = el;
       }
       this.renderSelection();
+      this.renderSelectedClip();
     
       // Keep dynamic master volume UI alive across renders.
       this._initMasterVolumeUI();

@@ -100,7 +100,7 @@
   "inspector.clips": "片段",
   "inspector.instances": "实例",
   "inspector.clipDetails": "片段详情",
-  "inspector.clipDetailsHint": "从片段库选择（显示历史与结果）。",
+  "inspector.clipDetailsHint": "从片段库或时间线选择（显示历史与结果）。",
   "inspector.clickClipHint": "点击片段库中的片段查看历史。",
   "inspector.timelineSelection": "时间轴选择",
   "inspector.timelineSelectionHint": "时间轴上的选中实例（开始/移调/编辑）。",

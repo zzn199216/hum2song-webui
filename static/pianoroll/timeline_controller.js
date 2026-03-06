@@ -627,7 +627,7 @@
               `;
             }
 
-            // Remove button should not start drag / change playhead.
+            // Remove button: stopPropagation so it does not trigger selection/drag.
             const btnRemove = el.querySelector('[data-act="remove"], .instRemove');
             if (btnRemove){
               btnRemove.addEventListener('pointerdown', (e)=>{ e.preventDefault(); e.stopPropagation(); });
@@ -639,13 +639,10 @@
               });
             }
 
-            // IMPORTANT: selection is handled in pointerdown to keep DOM stable for drag/dblclick.
-            const hit = el.querySelector('.instBody') || el;
-            hit.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
-            // Stop bubbling so the timeline background handler won't move the playhead.
+            // Full instance block is hit area: left/right/top/bottom all select. Selection in pointerdown for drag/dblclick stability.
+            el.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
             el.addEventListener('click', (e)=>{ e.stopPropagation(); });
-            // Native dblclick is reliable as long as we don't rebuild DOM between clicks.
-            hit.addEventListener('dblclick', (e)=>{ e.stopPropagation(); dbg(ctrl,'dblclick inst', inst.id); if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId); });
+            el.addEventListener('dblclick', (e)=>{ e.stopPropagation(); dbg(ctrl,'dblclick inst', inst.id); if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId); });
 
             lane.appendChild(el);
           }
