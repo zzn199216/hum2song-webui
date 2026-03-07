@@ -356,6 +356,37 @@
       white-space:pre-wrap;
       min-height:120px;
     }
+    /* PR-UX3a: Log status bar + collapsible drawer */
+    #logPanel{
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+    #logStatusBar{
+      height:24px;
+      min-height:24px;
+      padding:0 12px;
+      display:flex;
+      align-items:center;
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(0,0,0,.25);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      cursor:pointer;
+      user-select:none;
+    }
+    #logStatusBar:hover{ background:rgba(0,0,0,.35); color:rgba(255,255,255,.85); }
+    #logStatusBar.error{ color:var(--danger); }
+    #logDrawer{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+    #logPanel.collapsed #logDrawer{ display:none; }
+    #logPanel.collapsed{ height:auto !important; min-height:24px; }
 
     /* Modal editor */
     .modal{
@@ -627,13 +658,16 @@
         <div id="tracks" class="tracks"></div>
       </div>
 
-      <div class="panel" style="height:180px;">
-        <div class="panelHeader">
-          <h3 data-i18n="timeline.log">Log</h3>
-          <button id="btnClearLog" class="btn mini" data-i18n="actions.clear">Clear</button>
-        </div>
-        <div class="panelBody">
-          <div id="log" class="log"></div>
+      <div id="logPanel" class="panel collapsed" style="height:180px;">
+        <div id="logStatusBar" title="">Ready</div>
+        <div id="logDrawer">
+          <div class="panelHeader">
+            <h3 data-i18n="timeline.log">Log</h3>
+            <button id="btnClearLog" class="btn mini" data-i18n="actions.clear">Clear</button>
+          </div>
+          <div class="panelBody">
+            <div id="log" class="log"></div>
+          </div>
         </div>
       </div>
     </div>

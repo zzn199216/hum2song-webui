@@ -93,6 +93,8 @@
   "timeline.playhead": "播放头",
   "timeline.tipDrag": "提示：拖动片段块；双击打开编辑器。",
   "timeline.log": "日志",
+  "log.ready": "就绪",
+  "log.clickToExpand": "点击展开日志",
 
   "inspector.title": "检查器",
   "inspector.project": "项目",

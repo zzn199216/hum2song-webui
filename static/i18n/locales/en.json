@@ -93,6 +93,8 @@
   "timeline.playhead": "Playhead",
   "timeline.tipDrag": "Tip: drag clip blocks; double-click to open editor.",
   "timeline.log": "Log",
+  "log.ready": "Ready",
+  "log.clickToExpand": "Click to expand log",
 
   "inspector.title": "Inspector",
   "inspector.project": "Project",

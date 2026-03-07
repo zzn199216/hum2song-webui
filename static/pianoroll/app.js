@@ -14,6 +14,7 @@
   const LS_KEY_V1 = 'hum2song_studio_project_v1';
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
+  const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
 
   // PR-UX2: Inspector Optimize templates (matches LLM_TEMPLATES_V1 in agent_controller)
   const INSPECTOR_TEMPLATES = {
@@ -215,12 +216,30 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     return (Math.round(x*100)/100).toFixed(2) + 's';
   }
 
+  let _lastLogLine = '';
+  function updateLogStatusBar(){
+    if (typeof document === 'undefined') return;
+    const bar = document.getElementById('logStatusBar');
+    if (!bar) return;
+    const statusText = (app.state && app.state.statusText != null && String(app.state.statusText).trim()) ? String(app.state.statusText).trim() : '';
+    const txt = statusText || _lastLogLine || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
+    bar.textContent = txt.length > 80 ? txt.slice(0, 77) + '...' : txt;
+    bar.classList.toggle('error', /failed|error/i.test(txt));
+    bar.title = (window.I18N && window.I18N.t) ? window.I18N.t('log.clickToExpand') : 'Click to expand log';
+  }
+  function setLogOpen(open){
+    const panel = document.getElementById('logPanel');
+    if (!panel) return;
+    panel.classList.toggle('collapsed', !open);
+    try{ localStorage.setItem(LS_KEY_LOG_OPEN, open ? '1' : '0'); }catch(e){}
+  }
   function log(msg){
     const el = $('#log');
     const t = new Date();
     const line = `[${t.toLocaleTimeString()}] ${msg}\n`;
     el.textContent = line + el.textContent;
-    // also console (debug-gated)
+    _lastLogLine = String(msg).trim();
+    if (!(app.state && app.state.statusText)) updateLogStatusBar();
     dbg(msg);
   }
 
@@ -585,6 +604,7 @@ rollbackClipRevision(clipId){
       lastRecordedFile: null,
       importCancelled: false,
       autoOpenAfterImport: true,
+      statusText: '', // PR-UX3a: central status for log status bar (set by setImportStatus, etc.)
       modal: {
         show: false,
         clipId: null,
@@ -673,7 +693,12 @@ if (typeof localStorage !== 'undefined') {
       // Bind UI
       $('#btnUpload').addEventListener('click', () => this.pickWavAndGenerate());
       $('#btnClear').addEventListener('click', () => this.clearProject());
-      $('#btnClearLog').addEventListener('click', () => $('#log').textContent = '');
+      $('#btnClearLog').addEventListener('click', () => { $('#log').textContent = ''; _lastLogLine = ''; if (typeof this.updateLogStatusBar === 'function') this.updateLogStatusBar(); });
+      // PR-UX3a: Log panel — restore open state from localStorage, bind status bar click to toggle
+      const logOpen = (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_LOG_OPEN) === '1');
+      this.setLogOpen(logOpen);
+      const logBar = $('#logStatusBar');
+      if (logBar) logBar.addEventListener('click', () => { const open = !$('#logPanel').classList.contains('collapsed'); this.setLogOpen(!open); });
 
       $('#inpBpm').addEventListener('change', () => {
         // Safety: changing BPM while the clip editor is open can corrupt
@@ -1650,6 +1675,30 @@ renderTimeline(){
       if (el) el.textContent = text || '';
       const btn = $('#btnCancelImport');
       if (btn) btn.style.display = (text && showCancel) ? 'inline-block' : 'none';
+      this.state.statusText = text || '';
+      if (typeof this.updateLogStatusBar === 'function') this.updateLogStatusBar();
+      const t = String(text || '');
+      if (/Failed|Error/i.test(t) && typeof this.setLogOpen === 'function') this.setLogOpen(true);
+    },
+    /** PR-UX3a: Update log status bar text from statusText or last log line or Ready. */
+    updateLogStatusBar(){
+      if (typeof document === 'undefined') return;
+      const bar = $('#logStatusBar');
+      if (!bar) return;
+      const status = (this.state && this.state.statusText) || _lastLogLine || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
+      const txt = String(status || '');
+      bar.textContent = txt.length > 80 ? txt.slice(0, 77) + '...' : txt;
+      bar.classList.toggle('error', /Failed|Error/i.test(String(status)));
+      bar.title = (window.I18N && window.I18N.t) ? window.I18N.t('log.clickToExpand') : 'Click to expand log';
+    },
+    /** PR-UX3a: Set log drawer open/closed and persist. */
+    setLogOpen(open){
+      const panel = $('#logPanel');
+      if (!panel) return;
+      panel.classList.toggle('collapsed', !open);
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_LOG_OPEN, open ? '1' : '0');
+      } catch (e) {}
     },
 
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording. */
