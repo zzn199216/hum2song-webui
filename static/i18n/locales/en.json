@@ -109,6 +109,7 @@
   "inspector.exportProjectJson": "Export Project JSON",
   "inspector.importProjectJson": "Import Project JSON",
   "inspector.exportFlattenJson": "Export Flatten JSON",
+  "inspector.openEditor": "Open Editor",
 
   "actions.clear": "Clear",
   "actions.exportFlattenJson": "Export Flatten JSON",

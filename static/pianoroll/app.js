@@ -15,6 +15,14 @@
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
 
+  // PR-UX2: Inspector Optimize templates (matches LLM_TEMPLATES_V1 in agent_controller)
+  const INSPECTOR_TEMPLATES = {
+    fix_pitch_v1: { label: 'Fix Pitch', labelKey: 'editor.fixPitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
+    tighten_rhythm_v1: { label: 'Tighten Rhythm', labelKey: 'editor.tightenRhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
+    clean_outliers_v1: { label: 'Clean Outliers', labelKey: 'editor.cleanOutliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
+    bluesy_v1: { label: 'Bluesy', labelKey: 'editor.bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
+  };
+
   // --- debug gate (localStorage.h2s_debug === '1') ---
   function _dbgEnabled(){
     try{
@@ -1306,7 +1314,44 @@ renderTimeline(){
         resultsHtml = 'No patch summary yet.';
       }
       const storedPreset = this.getOptimizePresetForClip ? this.getOptimizePresetForClip(clipId) : null;
+      const storedOpts = this.getOptimizeOptions ? this.getOptimizeOptions(clipId) : null;
+      const storedTemplateId = (storedOpts && storedOpts.templateId) ? String(storedOpts.templateId).trim() : null;
       const presetSelVal = (storedPreset != null && storedPreset !== '') ? String(storedPreset) : '';
+      const running = !!this.state._inspectorOptRunning;
+      const optError = (this.state._inspectorOptError != null && this.state._inspectorOptError !== '') ? String(this.state._inspectorOptError) : '';
+      let llmMode = '';
+      let llmModel = '';
+      try {
+        const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+        if (api) {
+          const cfg = api.loadLlmConfig();
+          const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+          llmMode = safeMode ? _t('opt.safe') : _t('opt.full');
+          llmModel = (cfg && cfg.model != null && String(cfg.model).trim()) ? String(cfg.model).trim() : '';
+        }
+      } catch (_) {}
+      const canUndo = !!(clip.parentRevisionId != null && String(clip.parentRevisionId).trim());
+      const templateChipsHtml = Object.keys(INSPECTOR_TEMPLATES).map(function(tid){
+        const tm = INSPECTOR_TEMPLATES[tid];
+        const label = (tm.labelKey && _t(tm.labelKey)) ? _t(tm.labelKey) : (tm.label || tid);
+        const sel = storedTemplateId === tid ? ' style="border-color:var(--accent); opacity:1;"' : '';
+        return `<button type="button" class="btn mini" data-act="inspTemplateChip" data-template-id="${escapeHtml(tid)}" data-id="${escapeHtml(clipId)}"${sel}>${escapeHtml(label)}</button>`;
+      }).join(' ');
+      const optimizeBlockHtml = (
+        `<details class="inspectorOptimize" open style="margin-top:6px;">` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.9; font-weight:600;">${escapeHtml(_t('opt.optimize'))}</summary>` +
+          `<div style="margin-top:8px;">` +
+            `<div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:8px;">${templateChipsHtml}</div>` +
+            (llmMode || llmModel ? `<div class="muted" style="font-size:11px; margin-bottom:6px;">${escapeHtml(llmMode ? llmMode + (llmModel ? ' · ' + llmModel : '') : llmModel)}</div>` : '') +
+            `<div class="row" style="gap:6px; margin-bottom:6px;">` +
+              `<button type="button" class="btn primary mini" data-act="inspRunOptimize" data-id="${escapeHtml(clipId)}"${running ? ' disabled' : ''}>${escapeHtml(_t('opt.run'))}</button>` +
+              (canUndo ? `<button type="button" class="btn mini" data-act="inspUndoOptimize" data-id="${escapeHtml(clipId)}"${running ? ' disabled' : ''}>${escapeHtml(_t('opt.undoOptimize'))}</button>` : '') +
+            `</div>` +
+            (running ? `<div class="muted" style="font-size:12px;">Running…</div>` : optError ? `<div class="muted" style="font-size:12px; color:var(--danger, #e55);">${escapeHtml(optError)}</div>` : '') +
+            `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="font-size:11px; opacity:0.8;">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inspector.openEditor') : 'Open Editor')}</a>` +
+          `</div>` +
+        `</details>`
+      );
       const optimizeSettingsHtml = (
         `<details class="clipOptimizeSettings" style="margin-top:6px;">` +
           `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.optimizeSettings'))}</summary>` +
@@ -1314,6 +1359,7 @@ renderTimeline(){
             `<label style="font-size:12px; opacity:0.8;">${escapeHtml(_t('opt.preset'))}</label>` +
             `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
               `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
+              `<option value="llm_v0"${presetSelVal === 'llm_v0' ? ' selected' : ''}>${escapeHtml(_t('opt.llmV0'))}</option>` +
               `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
               `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
               `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
@@ -1325,6 +1371,7 @@ renderTimeline(){
       box.className = '';
       box.innerHTML = (
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
+        optimizeBlockHtml +
         optimizeSettingsHtml +
         `<details class="selectedClipResults" style="margin-top:6px;">` +
           `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.resultSummary'))}</summary>` +
@@ -1342,11 +1389,49 @@ renderTimeline(){
         const self = this;
         box.__h2sSelectedClipBound = true;
         box.__h2sClickHandler = function(ev){
-          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-act],[data-template-id]') : null;
           if (!btn) return;
-          const act = btn.getAttribute('data-act');
-          const cid = btn.getAttribute('data-id');
+          const act = btn.getAttribute('data-act') || (btn.getAttribute('data-template-id') ? 'inspTemplateChip' : null);
+          const cid = btn.getAttribute('data-id') || self.state.selectedClipId;
           if (!cid) return;
+          if (act === 'inspTemplateChip'){
+            const tid = btn.getAttribute('data-template-id');
+            const tmpl = tid && INSPECTOR_TEMPLATES[tid] ? INSPECTOR_TEMPLATES[tid] : null;
+            if (tmpl && self.setOptimizeOptions){
+              self.setOptimizeOptions({ templateId: tid, intent: tmpl.intent, requestedPresetId: 'llm_v0', userPrompt: tmpl.seed || null }, cid);
+            }
+            self.renderSelectedClip();
+            return;
+          }
+          if (act === 'inspRunOptimize'){
+            if (self.state._inspectorOptRunning) return;
+            self.state._inspectorOptRunning = true;
+            self.state._inspectorOptError = '';
+            self.renderSelectedClip();
+            Promise.resolve(self.optimizeClip(cid)).then(function(res){
+              self.state._inspectorOptRunning = false;
+              self.state._inspectorOptError = '';
+              if (res && !res.ok && res.reason) self.state._inspectorOptError = (res.detail && typeof res.detail === 'string') ? res.detail : String(res.reason);
+              persist();
+              self.render();
+            }).catch(function(err){
+              self.state._inspectorOptRunning = false;
+              self.state._inspectorOptError = (err && err.message) ? String(err.message) : 'Optimize failed';
+              self.renderSelectedClip();
+            });
+            return;
+          }
+          if (act === 'inspUndoOptimize'){
+            if (self.state._inspectorOptRunning) return;
+            const res = self.rollbackClipRevision(cid);
+            if (res && res.ok){ persist(); self.render(); }
+            return;
+          }
+          if (act === 'inspOpenEditor'){
+            ev.preventDefault();
+            self.openClipEditor(cid);
+            return;
+          }
           const p2 = self.getProjectV2();
           if (!P) return;
           if (act === 'inspRollbackRev' && P.rollbackClipRevision){
