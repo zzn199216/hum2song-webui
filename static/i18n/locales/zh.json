@@ -97,6 +97,7 @@
   "log.clickToExpand": "点击展开日志",
 
   "inspector.title": "检查器",
+  "inspector.emptyState": "从片段库选择片段或时间线上的片段实例以开始。",
   "inspector.project": "项目",
   "inspector.tracks": "轨道",
   "inspector.clips": "片段",

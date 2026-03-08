@@ -15,6 +15,25 @@
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
   const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
+  const LS_KEYS_INSP = {
+    project: 'hum2song_studio_insp_project_open',
+    export: 'hum2song_studio_insp_export_open',
+    results: 'hum2song_studio_insp_results_open',
+    history: 'hum2song_studio_insp_history_open',
+  };
+  function getInspectorSectionOpen(key){
+    try{
+      const k = LS_KEYS_INSP[key];
+      if (!k) return false;
+      return localStorage.getItem(k) === '1';
+    }catch(e){ return false; }
+  }
+  function setInspectorSectionOpen(key, open){
+    try{
+      const k = LS_KEYS_INSP[key];
+      if (k) localStorage.setItem(k, open ? '1' : '0');
+    }catch(e){}
+  }
 
   // PR-UX2: Inspector Optimize templates (matches LLM_TEMPLATES_V1 in agent_controller)
   const INSPECTOR_TEMPLATES = {
@@ -700,6 +719,12 @@ if (typeof localStorage !== 'undefined') {
       const logBar = $('#logStatusBar');
       if (logBar) logBar.addEventListener('click', () => { const open = !$('#logPanel').classList.contains('collapsed'); this.setLogOpen(!open); });
 
+      // PR-UX3b: persist Inspector section collapse state when user toggles
+      const inspProject = $('#inspProject');
+      const inspExport = $('#inspExport');
+      if (inspProject) inspProject.addEventListener('toggle', () => { setInspectorSectionOpen('project', inspProject.open); });
+      if (inspExport) inspExport.addEventListener('toggle', () => { setInspectorSectionOpen('export', inspExport.open); });
+
       $('#inpBpm').addEventListener('change', () => {
         // Safety: changing BPM while the clip editor is open can corrupt
         // the sec<->beat boundary (draft seconds would be reinterpreted).
@@ -955,16 +980,10 @@ try{
     getState: () => this.state,
     onSelectInstance: (instId, el) => {
       // Soft-select: update state + DOM class + inspector, WITHOUT full re-render.
-      const prev = this.state.selectedInstanceId;
       this.state.selectedInstanceId = instId;
-      let inst = null;
-      try{
-        inst = (this.project.instances||[]).find(x => x && x.id === instId);
-        if (inst){
-          if (Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
-          this.state.selectedClipId = inst.clipId || this.state.selectedClipId;
-        }
-      }catch(e){}
+      const inst = (this.project.instances || []).find(x => x && x.id === instId);
+      if (inst && inst.clipId) this.state.selectedClipId = inst.clipId; // Do NOT clear; keep previous if inst has no clipId
+      if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
 
       // Toggle selected class in-place
       if (this._selectedInstEl && this._selectedInstEl !== el){
@@ -974,6 +993,7 @@ try{
         el.classList.add('selected');
         this._selectedInstEl = el;
       }
+      this.renderInspector();
       this.renderSelection();
       this.renderSelectedClip();
     
@@ -1211,7 +1231,26 @@ ensureTrackButtons(){
   btnDel.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); this.removeActiveTrack(); });
 },
 
-
+    renderInspector(){
+      const emptyEl = $('#inspectorEmptyState');
+      const contentEl = $('#inspectorContent');
+      const timelineEl = $('#inspectorTimelineSection');
+      const projectEl = $('#inspProject');
+      const exportEl = $('#inspExport');
+      const projectSummary = $('#inspProjectSummary');
+      const hasSelection = !!(this.state.selectedClipId || this.state.selectedInstanceId);
+      const hasInstance = !!this.state.selectedInstanceId;
+      if (emptyEl) emptyEl.style.display = hasSelection ? 'none' : '';
+      if (contentEl) contentEl.style.display = hasSelection ? '' : 'none';
+      if (timelineEl) timelineEl.style.display = hasInstance ? '' : 'none';
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const tracks = this.project.tracks.length;
+      const clips = this.project.clips.length;
+      const inst = this.project.instances.length;
+      if (projectSummary) projectSummary.textContent = `${_t('inspector.project')}: ${tracks} ${_t('inspector.tracks').toLowerCase()} · ${clips} ${_t('inspector.clips').toLowerCase()} · ${inst} ${_t('inspector.instances').toLowerCase()}`;
+      if (projectEl) projectEl.open = getInspectorSectionOpen('project');
+      if (exportEl) exportEl.open = getInspectorSectionOpen('export');
+    },
 
     render(){
       try{ this.ensureTrackButtons(); }catch(e){}
@@ -1220,6 +1259,9 @@ ensureTrackButtons(){
       $('#kvClips').textContent = String(this.project.clips.length);
       $('#kvInst').textContent = String(this.project.instances.length);
       $('#inpBpm').value = this.project.bpm;
+
+      // PR-UX3b: Inspector progressive disclosure
+      this.renderInspector();
 
       this.renderClipList();
       this.renderTimeline();
@@ -1398,12 +1440,12 @@ renderTimeline(){
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
         optimizeBlockHtml +
         optimizeSettingsHtml +
-        `<details class="selectedClipResults" style="margin-top:6px;">` +
+        `<details class="selectedClipResults" data-insp-section="results" style="margin-top:6px;"${getInspectorSectionOpen('results') ? ' open' : ''}>` +
           `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.resultSummary'))}</summary>` +
           `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
         `</details>` +
         (historyHtml ? (
-          `<details class="clipAdvanced" style="margin-top:6px;">` +
+          `<details class="clipAdvanced" data-insp-section="history" style="margin-top:6px;"${getInspectorSectionOpen('history') ? ' open' : ''}>` +
             `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
             `<div style="margin-top:6px;">${historyHtml}</div>` +
           `</details>`
@@ -1437,6 +1479,7 @@ renderTimeline(){
               self.state._inspectorOptRunning = false;
               self.state._inspectorOptError = '';
               if (res && !res.ok && res.reason) self.state._inspectorOptError = (res.detail && typeof res.detail === 'string') ? res.detail : String(res.reason);
+              if (res && res.ok) setInspectorSectionOpen('results', true);
               persist();
               self.render();
             }).catch(function(err){
@@ -1508,6 +1551,13 @@ renderTimeline(){
         };
         box.addEventListener('click', box.__h2sClickHandler, true);
         box.addEventListener('change', box.__h2sChangeHandler);
+        box.__h2sToggleHandler = function(ev){
+          const d = ev.target;
+          if (!d || d.tagName !== 'DETAILS') return;
+          const key = d.getAttribute && d.getAttribute('data-insp-section');
+          if (key === 'results' || key === 'history') setInspectorSectionOpen(key, d.open);
+        };
+        box.addEventListener('toggle', box.__h2sToggleHandler);
       }
     },
 
@@ -1637,6 +1687,7 @@ renderTimeline(){
       const inst = H2SProject.createInstance(clipId, startSec || (this.project.ui.playheadSec || 0), ti);
       this.project.instances.push(inst);
       this.state.selectedInstanceId = inst.id;
+      if (inst.clipId) this.state.selectedClipId = inst.clipId;
       persist();
       log('Added clip to timeline.');
       this.render();

@@ -679,44 +679,40 @@
         <select id="selLang" class="btn mini" title="Language" style="margin-left:auto; min-width:90px;"></select>
         <span class="badge">MVP</span>
       </div>
-      <div class="panelBody">
-        <div class="insSection">
-          <h4 data-i18n="inspector.project">Project</h4>
-          <div class="kv"><b data-i18n="inspector.tracks">Tracks</b><span id="kvTracks">1</span></div>
-          <div class="kv"><b data-i18n="inspector.clips">Clips</b><span id="kvClips">0</span></div>
-          <div class="kv"><b data-i18n="inspector.instances">Instances</b><span id="kvInst">0</span></div>
-        </div>
-
+      <div class="panelBody" id="inspectorPanelBody">
+        <div id="inspectorEmptyState" class="insSection muted" style="padding:16px; text-align:center; font-size:13px; line-height:1.5;" data-i18n="inspector.emptyState">Select a clip from the library or a clip instance on the timeline to get started.</div>
+        <div id="inspectorContent" style="display:none;">
+        <details id="inspProject" class="insSection">
+          <summary id="inspProjectSummary" style="cursor:pointer; user-select:none; font-weight:600;">Project</summary>
+          <div style="margin-top:8px;">
+            <div class="kv"><b data-i18n="inspector.tracks">Tracks</b><span id="kvTracks">1</span></div>
+            <div class="kv"><b data-i18n="inspector.clips">Clips</b><span id="kvClips">0</span></div>
+            <div class="kv"><b data-i18n="inspector.instances">Instances</b><span id="kvInst">0</span></div>
+          </div>
+        </details>
         <div class="hr"></div>
-
-        <div class="insSection">
+        <div class="insSection" id="inspectorClipSection">
           <h4 data-i18n="inspector.clipDetails">Clip Details</h4>
           <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.clipDetailsHint">Selected from Clip Library or Timeline (shows History & Results).</div>
           <div id="selectedClipBox" class="muted">Click a clip in the library to view History.</div>
         </div>
-
         <div class="hr"></div>
-
-        <div class="insSection">
+        <div class="insSection" id="inspectorTimelineSection" style="display:none;">
           <h4 data-i18n="inspector.timelineSelection">Timeline Selection</h4>
           <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.timelineSelectionHint">Selected instance on timeline (start/transpose/edit).</div>
           <div id="selectionBox" class="muted">Select a clip instance on timeline.</div>
         </div>
-
         <div class="hr"></div>
-
-        <div class="insSection">
-          <h4 data-i18n="inspector.actions">Actions</h4>
-          <div class="col">
+        <details id="inspExport" class="insSection">
+          <summary style="cursor:pointer; user-select:none; font-weight:600;" data-i18n="inspector.actions">Export & Import</summary>
+          <div class="col" style="margin-top:8px;">
             <button id="btnExportProject" class="btn" data-i18n="inspector.exportProjectJson">Export Project JSON</button>
             <button id="btnExportMidi" class="btn" data-i18n="export.exportMIDI">Export MIDI</button>
             <button id="btnExportWav" class="btn" data-i18n="export.exportWAV">Export WAV</button>
             <button id="btnImportProject" class="btn" data-i18n="inspector.importProjectJson">Import Project JSON</button>
           </div>
-        </div>
-
+        </details>
         <div class="hr"></div>
-
         <details id="instrumentLibraryBox" class="insSection">
           <summary style="cursor:pointer; font-weight:700;" data-i18n="inst.instrumentLibrary">Instrument Library</summary>
           <div style="margin-top:8px;">

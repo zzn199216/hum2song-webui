@@ -97,6 +97,7 @@
   "log.clickToExpand": "Click to expand log",
 
   "inspector.title": "Inspector",
+  "inspector.emptyState": "Select a clip from the library or a clip instance on the timeline to get started.",
   "inspector.project": "Project",
   "inspector.tracks": "Tracks",
   "inspector.clips": "Clips",
