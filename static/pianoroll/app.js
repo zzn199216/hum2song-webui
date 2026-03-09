@@ -409,6 +409,88 @@ try{
 // Controllers (optional)
 agentCtrl: null,
 
+// PR-UX6a: Command layer — runCommand + event bus
+_cmdSubs: [],
+onCommandEvent(fn){ this._cmdSubs = this._cmdSubs || []; this._cmdSubs.push(fn); return () => { this._cmdSubs = this._cmdSubs.filter(x => x !== fn); }; },
+_emitCmd(type, detail){ (this._cmdSubs || []).forEach(fn => { try { fn({ type, ...detail }); } catch (e) {} }); },
+async runCommand(command, payload){
+  payload = payload || {};
+  const startedAt = Date.now();
+  this._emitCmd('started', { command, payload, startedAt });
+  try {
+    let result = { ok: true, command, payload, startedAt, finishedAt: null, message: '', data: null };
+    switch (command) {
+      case 'open_ai_settings':
+        this.openAiSettingsDrawer();
+        result.message = 'opened';
+        break;
+      case 'close_ai_settings':
+        this.closeAiSettingsDrawer();
+        result.message = 'closed';
+        break;
+      case 'open_inspector_optimize':
+        setInspectorSectionOpen('opt', true);
+        this.render();
+        result.message = 'opened';
+        break;
+      case 'select_instance': {
+        const instId = payload.instanceId;
+        if (!instId) throw new Error('instanceId required');
+        const inst = (this.project.instances || []).find(x => x && x.id === instId);
+        if (!inst) throw new Error('instance not found');
+        this.state.selectedInstanceId = instId;
+        if (inst.clipId) this.state.selectedClipId = inst.clipId;
+        if (Number.isFinite(inst.trackIndex) && typeof this.setActiveTrackIndex === 'function') this.setActiveTrackIndex(inst.trackIndex);
+        this.render();
+        result.data = { instanceId: instId, clipId: inst.clipId };
+        break;
+      }
+      case 'select_clip': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        this.state.selectedClipId = clipId;
+        this.state.selectedInstanceId = null;
+        this.render();
+        result.data = { clipId };
+        break;
+      }
+      case 'open_editor': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        this.openClipEditor(clipId);
+        result.data = { clipId };
+        break;
+      }
+      case 'optimize_clip': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        await this.optimizeClip(clipId);
+        result.data = { clipId };
+        break;
+      }
+      case 'rollback_clip': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        const res = this.rollbackClipRevision(clipId);
+        if (res && res.ok) { persist(); this.render(); }
+        result.data = { clipId };
+        break;
+      }
+      default:
+        throw new Error('unknown command: ' + command);
+    }
+    result.finishedAt = Date.now();
+    this._emitCmd('done', { command, payload, result });
+    return result;
+  } catch (err) {
+    const finishedAt = Date.now();
+    const msg = (err && (err.message || String(err))) || 'error';
+    const error = { message: msg.slice(0, 200), finishedAt };
+    this._emitCmd('failed', { command, payload, error });
+    return { ok: false, command, payload, startedAt, finishedAt, message: error.message, data: null };
+  }
+},
+
 // --- v2 hooks: Library/Agent expect these (beats-only truth) ---
 getProjectV2(){
   // v2 beats-only doc is the only source of truth.
@@ -1011,7 +1093,7 @@ try{
       this._initMasterVolumeUI();
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
-    onOpenInspectorOptimize: () => { setInspectorSectionOpen('opt', true); this.render(); },
+    onOpenInspectorOptimize: () => this.runCommand('open_inspector_optimize'),
     onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
     onSetActiveTrackIndex: (ti) => this.setActiveTrackIndex(ti),
     onSetTrackInstrument: (trackId, instrument) => this.setTrackInstrument(trackId, instrument),
