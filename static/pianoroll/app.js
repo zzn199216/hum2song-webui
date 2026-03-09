@@ -413,6 +413,19 @@ agentCtrl: null,
 _cmdSubs: [],
 onCommandEvent(fn){ this._cmdSubs = this._cmdSubs || []; this._cmdSubs.push(fn); return () => { this._cmdSubs = this._cmdSubs.filter(x => x !== fn); }; },
 _emitCmd(type, detail){ (this._cmdSubs || []).forEach(fn => { try { fn({ type, ...detail }); } catch (e) {} }); },
+_cmdLabel(cmd){
+  const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+  if (cmd === 'optimize_clip') return _t('cmd.optimizing');
+  if (cmd === 'rollback_clip') return _t('cmd.undoing');
+  if (cmd === 'open_editor') return _t('cmd.openingEditor');
+  return cmd;
+},
+_cmdDoneLabel(cmd){
+  const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+  if (cmd === 'optimize_clip') return _t('cmd.optimized');
+  if (cmd === 'rollback_clip') return _t('cmd.undone');
+  return '';
+},
 async runCommand(command, payload){
   payload = payload || {};
   const startedAt = Date.now();
@@ -464,7 +477,8 @@ async runCommand(command, payload){
       case 'optimize_clip': {
         const clipId = payload.clipId;
         if (!clipId) throw new Error('clipId required');
-        await this.optimizeClip(clipId);
+        const optRes = await this.optimizeClip(clipId);
+        if (optRes && !optRes.ok) throw new Error(optRes.reason || optRes.detail || optRes.message || 'Optimize failed');
         result.data = { clipId };
         break;
       }
@@ -816,6 +830,24 @@ if (typeof localStorage !== 'undefined') {
       // PR-UX4c: AI Settings drawer — restore open state, bind open/close
       if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_DRAWER_OPEN) === '1') this.state.aiSettingsOpen = true;
       this._initAiSettingsDrawer();
+
+      // PR-UX6b: Status bar integrates with runCommand events
+      this.onCommandEvent((ev) => {
+        const cmd = ev.command;
+        if (cmd === 'open_ai_settings' || cmd === 'close_ai_settings') return;
+        if (ev.type === 'started') {
+          const text = this._cmdLabel(cmd);
+          if (text) this.setImportStatus(text, false);
+        } else if (ev.type === 'done') {
+          const text = this._cmdDoneLabel ? this._cmdDoneLabel(cmd) : '';
+          if (text) this.setImportStatus(text, false);
+          if (text) setTimeout(() => { if (this.state.statusText === text) this.setImportStatus('', false); }, 1500);
+        } else if (ev.type === 'failed') {
+          const msg = (ev.error && ev.error.message) ? ev.error.message : 'error';
+          const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+          this.setImportStatus(_t('cmd.failedPrefix') + ': ' + cmd + ': ' + msg, false);
+        }
+      });
 
       $('#inpBpm').addEventListener('change', () => {
         // Safety: changing BPM while the clip editor is open can corrupt
@@ -1802,10 +1834,10 @@ renderTimeline(){
             self.state._inspectorOptRunning = true;
             self.state._inspectorOptError = '';
             self.renderSelectedClip();
-            Promise.resolve(self.optimizeClip(cid)).then(function(res){
+            self.runCommand('optimize_clip', { clipId: cid }).then(function(res){
               self.state._inspectorOptRunning = false;
               self.state._inspectorOptError = '';
-              if (res && !res.ok && res.reason) self.state._inspectorOptError = (res.detail && typeof res.detail === 'string') ? res.detail : String(res.reason);
+              if (res && !res.ok && res.message) self.state._inspectorOptError = res.message;
               if (res && res.ok) {
                 setInspectorSectionOpen('opt', true);
                 setInspectorSectionOpen('opt_results', true);
@@ -1821,8 +1853,9 @@ renderTimeline(){
           }
           if (act === 'inspUndoOptimize'){
             if (self.state._inspectorOptRunning) return;
-            const res = self.rollbackClipRevision(cid);
-            if (res && res.ok){ persist(); self.render(); }
+            self.runCommand('rollback_clip', { clipId: cid }).then(function(res){
+              if (res && res.ok){ persist(); self.render(); }
+            });
             return;
           }
           if (act === 'inspOpenEditor'){

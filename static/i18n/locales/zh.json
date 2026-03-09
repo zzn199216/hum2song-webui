@@ -82,6 +82,13 @@
   "ai.modelsLoaded": "模型已加载。",
   "ai.modelsLoadFailed": "模型加载失败",
 
+  "cmd.optimizing": "正在优化…",
+  "cmd.optimized": "优化完成。",
+  "cmd.undoing": "正在撤销…",
+  "cmd.undone": "已撤销。",
+  "cmd.openingEditor": "正在打开编辑器…",
+  "cmd.failedPrefix": "失败",
+
   "cliplib.title": "片段库",
   "cliplib.useLastRecording": "使用上次录音",
   "cliplib.clear": "清除",
