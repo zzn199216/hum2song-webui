@@ -66,6 +66,8 @@
 
   "top.record": "录音",
   "top.stop": "停止",
+  "top.aiSettingsSuffix": "设置",
+  "top.aiSettingsTitle": "AI 设置",
   "top.uploadWav": "上传 WAV",
   "top.vol": "音量",
   "top.localClipsHint": "本地片段 + 时间轴。双击片段进行编辑。",

@@ -66,6 +66,12 @@
     .h2sDrawerBody{ padding:16px; overflow:auto; }
     .btnClose{ appearance:none; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; }
     .btnClose:hover{ background:rgba(255,255,255,.08); }
+    .topbarBtn.aiSettingsBtn{ display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; font-size:13px; font-weight:600; transition:.15s ease; }
+    .topbarBtn.aiSettingsBtn:hover{ background:rgba(255,255,255,.07); }
+    .topbarBtn.aiSettingsBtn.active{ background:rgba(59,130,246,.2); border-color:rgba(59,130,246,.4); }
+    .topbarBtn.aiSettingsBtn.needsAttention{ position:relative; }
+    .topbarBtn.aiSettingsBtn.needsAttention::after{ content:''; position:absolute; top:6px; right:6px; width:6px; height:6px; border-radius:50%; background:var(--danger,#ef4444); }
+    @media (max-width: 900px){ .topbarBtn.aiSettingsBtn .aiSuffix{ display:none; } }
 
     .layout{
       height: calc(100% - 54px);
@@ -622,7 +628,11 @@
       <button id="btnUpload" class="btn" data-i18n="top.uploadWav">Upload WAV</button>
     </div>
     <div class="spacer"></div>
-    <button id="btnAiSettings" class="btn" title="AI Settings">AI</button>
+    <button id="btnAiSettings" class="topbarBtn aiSettingsBtn" data-i18n-title="top.aiSettingsTitle">
+        <span class="aiIcon">⚙</span>
+        <span class="aiWord">AI</span>
+        <span class="aiSuffix" data-i18n="top.aiSettingsSuffix">Settings</span>
+      </button>
     <div id="studioImportStatus" class="smallmuted" style="min-width:120px;"></div>
     <button id="btnCancelImport" class="btn ghost" style="display:none;" data-i18n="common.cancel">Cancel</button>
     <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>

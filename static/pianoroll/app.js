@@ -1266,6 +1266,22 @@ ensureTrackButtons(){
       this.render();
     },
 
+    // PR-UX4d: Returns true when AI config is incomplete (missing baseUrl/model, or token for non-local)
+    _aiConfigNeedsAttention(){
+      try{
+        const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+        if (!api || typeof api.loadLlmConfig !== 'function') return false;
+        const cfg = api.loadLlmConfig();
+        const missingBaseUrl = !(cfg && cfg.baseUrl && String(cfg.baseUrl).trim());
+        const missingModel = !(cfg && cfg.model && String(cfg.model).trim());
+        const tokenMissing = !(cfg && cfg.authToken && String(cfg.authToken).trim());
+        const baseUrl = (cfg && cfg.baseUrl) ? String(cfg.baseUrl) : '';
+        const localEndpoint = /localhost|127\.0\.0\.1/i.test(baseUrl);
+        const needsToken = !localEndpoint;
+        return missingBaseUrl || missingModel || (needsToken && tokenMissing);
+      }catch(e){ return false; }
+    },
+
     // PR-UX4c: AI Settings panel — renders into given container (drawer body)
     renderAiSettingsPanel(container){
       if (!container) return;
@@ -1448,6 +1464,12 @@ ensureTrackButtons(){
           aiModal.setAttribute('aria-hidden', 'true');
           aiBody.innerHTML = '';
         }
+      }
+      // PR-UX4d: AI Settings button — active when drawer open, needsAttention when config incomplete
+      const btnAi = $('#btnAiSettings');
+      if (btnAi){
+        if (this.state.aiSettingsOpen) btnAi.classList.add('active'); else btnAi.classList.remove('active');
+        if (this._aiConfigNeedsAttention()) btnAi.classList.add('needsAttention'); else btnAi.classList.remove('needsAttention');
       }
       try{ this.updateRecordButtonStates(); }catch(e){}
       try{ this._updateI18nLabels(); }catch(e){}
@@ -2347,6 +2369,10 @@ renderTimeline(){
         document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){
           const k = el.getAttribute('data-i18n-placeholder');
           if (k && el.placeholder !== undefined) el.placeholder = I18N.t(k);
+        });
+        document.querySelectorAll('[data-i18n-title]').forEach(function(el){
+          const k = el.getAttribute('data-i18n-title');
+          if (k) el.title = I18N.t(k);
         });
       }catch(e){}
     },

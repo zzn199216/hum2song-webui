@@ -66,6 +66,8 @@
 
   "top.record": "Record",
   "top.stop": "Stop",
+  "top.aiSettingsSuffix": "Settings",
+  "top.aiSettingsTitle": "AI Settings",
   "top.uploadWav": "Upload WAV",
   "top.vol": "Vol",
   "top.localClipsHint": "Local clips + timeline. Double-click a clip to edit.",
