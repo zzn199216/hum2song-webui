@@ -1,6 +1,7 @@
 {
   "common.ok": "OK",
   "common.cancel": "Cancel",
+  "common.close": "Close",
   "common.loading": "Loading...",
   "common.error": "Error",
   "common.retry": "Retry",
@@ -113,6 +114,9 @@
   "inspector.importProjectJson": "Import Project JSON",
   "inspector.exportFlattenJson": "Export Flatten JSON",
   "inspector.openEditor": "Open Editor",
+  "inspector.aiSettings": "AI Settings",
+  "inspector.aiSaved": "Saved",
+  "inspector.aiReset": "Config reset",
 
   "actions.clear": "Clear",
   "actions.exportFlattenJson": "Export Flatten JSON",

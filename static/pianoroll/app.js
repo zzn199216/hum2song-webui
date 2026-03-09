@@ -15,17 +15,22 @@
   const LS_KEY_V2 = 'hum2song_studio_project_v2';
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
   const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
+  const LS_KEY_AI_DRAWER_OPEN = 'hum2song_studio_ai_drawer_open'; // PR-UX4c: persist AI Settings drawer open/closed
   const LS_KEYS_INSP = {
     project: 'hum2song_studio_insp_project_open',
     export: 'hum2song_studio_insp_export_open',
-    results: 'hum2song_studio_insp_results_open',
+    opt: 'hum2song_studio_insp_opt_open',
+    opt_adv: 'hum2song_studio_insp_opt_adv_open',
+    opt_results: 'hum2song_studio_insp_opt_results_open',
     history: 'hum2song_studio_insp_history_open',
   };
   function getInspectorSectionOpen(key){
     try{
       const k = LS_KEYS_INSP[key];
       if (!k) return false;
-      return localStorage.getItem(k) === '1';
+      const v = localStorage.getItem(k);
+      if (v === null && key === 'opt') return true; // Optimize open by default (primary action area)
+      return v === '1';
     }catch(e){ return false; }
   }
   function setInspectorSectionOpen(key, open){
@@ -624,6 +629,7 @@ rollbackClipRevision(clipId){
       importCancelled: false,
       autoOpenAfterImport: true,
       statusText: '', // PR-UX3a: central status for log status bar (set by setImportStatus, etc.)
+      aiSettingsOpen: false, // PR-UX4c: AI Settings drawer visibility
       modal: {
         show: false,
         clipId: null,
@@ -724,6 +730,10 @@ if (typeof localStorage !== 'undefined') {
       const inspExport = $('#inspExport');
       if (inspProject) inspProject.addEventListener('toggle', () => { setInspectorSectionOpen('project', inspProject.open); });
       if (inspExport) inspExport.addEventListener('toggle', () => { setInspectorSectionOpen('export', inspExport.open); });
+
+      // PR-UX4c: AI Settings drawer — restore open state, bind open/close
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_DRAWER_OPEN) === '1') this.state.aiSettingsOpen = true;
+      this._initAiSettingsDrawer();
 
       $('#inpBpm').addEventListener('change', () => {
         // Safety: changing BPM while the clip editor is open can corrupt
@@ -1231,6 +1241,164 @@ ensureTrackButtons(){
   btnDel.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); this.removeActiveTrack(); });
 },
 
+    // PR-UX4c: AI Settings drawer — init bindings (guard against double bind)
+    _initAiSettingsDrawer(){
+      if (this._aiDrawerBound) return;
+      this._aiDrawerBound = true;
+      const btnOpen = $('#btnAiSettings');
+      const btnClose = $('#btnAiSettingsClose');
+      const backdrop = $('#aiSettingsBackdrop');
+      if (btnOpen) btnOpen.addEventListener('click', () => this.openAiSettingsDrawer());
+      if (btnClose) btnClose.addEventListener('click', () => this.closeAiSettingsDrawer());
+      if (backdrop) backdrop.addEventListener('click', () => this.closeAiSettingsDrawer());
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && this.state.aiSettingsOpen) this.closeAiSettingsDrawer();
+      });
+    },
+    openAiSettingsDrawer(){
+      this.state.aiSettingsOpen = true;
+      try{ localStorage.setItem(LS_KEY_AI_DRAWER_OPEN, '1'); }catch(e){}
+      this.render();
+    },
+    closeAiSettingsDrawer(){
+      this.state.aiSettingsOpen = false;
+      try{ localStorage.setItem(LS_KEY_AI_DRAWER_OPEN, '0'); }catch(e){}
+      this.render();
+    },
+
+    // PR-UX4c: AI Settings panel — renders into given container (drawer body)
+    renderAiSettingsPanel(container){
+      if (!container) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const DEEPSEEK_URL = 'https://api.deepseek.com/v1';
+      const OLLAMA_URL = 'http://localhost:11434/v1';
+      const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+      let baseVal = ''; let modelVal = ''; let presetVal = 'custom'; let tokenVal = ''; let velocityOnly = true;
+      if (api && typeof api.loadLlmConfig === 'function'){
+        const cfg = api.loadLlmConfig();
+        baseVal = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
+        modelVal = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+        tokenVal = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
+        velocityOnly = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+        if (baseVal === DEEPSEEK_URL) presetVal = 'deepseek';
+        else if (baseVal === OLLAMA_URL) presetVal = 'ollama';
+      }
+      container.innerHTML = (
+        '<div class="col" style="gap:6px;">' +
+        '<label class="muted" style="margin:0;" data-i18n="editor.gatewayPreset">' + escapeHtml(_t('editor.gatewayPreset')) + '</label>' +
+        '<select id="inspAi_gatewayPreset" class="btn" style="width:100%; padding:6px; font-size:12px;">' +
+        '<option value="custom">' + escapeHtml(_t('editor.gatewayCustom')) + '</option>' +
+        '<option value="deepseek">' + escapeHtml(_t('editor.gatewayDeepseek')) + '</option>' +
+        '<option value="ollama">' + escapeHtml(_t('editor.gatewayOllama')) + '</option>' +
+        '</select>' +
+        '<div class="muted" style="font-size:11px; margin-top:-2px;" data-i18n="editor.deepseekOllamaHint">' + escapeHtml(_t('editor.deepseekOllamaHint')) + '</div>' +
+        '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.baseUrl')) + '</label>' +
+        '<input id="inspAi_baseUrl" type="text" placeholder="' + escapeHtml(_t('editor.baseUrlPlaceholder')) + '" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.model')) + '</label>' +
+        '<div class="row" style="gap:6px; align-items:center;">' +
+        '<input id="inspAi_model" type="text" list="inspAi_modelList" placeholder="' + escapeHtml(_t('editor.modelPlaceholder')) + '" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<button id="inspAi_btnLoadModels" type="button" class="btn mini">' + escapeHtml(_t('editor.loadModels')) + '</button>' +
+        '</div>' +
+        '<datalist id="inspAi_modelList"></datalist>' +
+        '<div id="inspAi_modelLoadStatus" class="muted" style="min-height:1em; font-size:11px;"></div>' +
+        '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.authToken')) + '</label>' +
+        '<input id="inspAi_authToken" type="password" placeholder="' + escapeHtml(_t('editor.authOptional')) + '" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<label style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
+        '<input id="inspAi_velocityOnly" type="checkbox" />' +
+        '<span>' + escapeHtml(_t('editor.velocityOnlySafe')) + '</span>' +
+        '</label>' +
+        '<div class="row" style="gap:6px;">' +
+        '<button id="inspAi_btnSave" type="button" class="btn mini">' + escapeHtml(_t('inst.save')) + '</button>' +
+        '<button id="inspAi_btnReset" type="button" class="btn mini">' + escapeHtml(_t('common.reset')) + '</button>' +
+        '<button id="inspAi_btnTest" type="button" class="btn mini">' + escapeHtml(_t('editor.testConnection')) + '</button>' +
+        '</div>' +
+        '<div id="inspAi_status" class="muted" style="min-height:1em; font-size:11px;"></div>' +
+        '</div>'
+      );
+      const presetEl = document.getElementById('inspAi_gatewayPreset');
+      const baseEl = document.getElementById('inspAi_baseUrl');
+      const modelEl = document.getElementById('inspAi_model');
+      const tokenEl = document.getElementById('inspAi_authToken');
+      const velocityOnlyEl = document.getElementById('inspAi_velocityOnly');
+      if (presetEl) presetEl.value = presetVal;
+      if (baseEl) baseEl.value = baseVal;
+      if (modelEl) modelEl.value = modelVal;
+      if (tokenEl) tokenEl.value = tokenVal;
+      if (velocityOnlyEl) velocityOnlyEl.checked = velocityOnly;
+      const self = this;
+      const applyPresetFill = function(pv){
+        if (pv === 'deepseek'){ if (baseEl) baseEl.value = DEEPSEEK_URL; if (modelEl && !modelEl.value.trim()) modelEl.value = 'deepseek-chat'; }
+        else if (pv === 'ollama'){ if (baseEl) baseEl.value = OLLAMA_URL; }
+      };
+      if (presetEl) presetEl.addEventListener('change', function(){ applyPresetFill(this.value || 'custom'); });
+      document.getElementById('inspAi_btnSave').addEventListener('click', function(){
+        if (!api || typeof api.saveLlmConfig !== 'function') return;
+        const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+        const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+        const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+        api.saveLlmConfig({ baseUrl: base, model: model, authToken: token, velocityOnly: velocityOnlyEl ? velocityOnlyEl.checked : true });
+        const st = document.getElementById('inspAi_status');
+        if (st) st.textContent = _t('inspector.aiSaved');
+        self.render();
+      });
+      document.getElementById('inspAi_btnReset').addEventListener('click', function(){
+        if (!api || typeof api.resetLlmConfig !== 'function') return;
+        const def = api.resetLlmConfig();
+        if (baseEl) baseEl.value = (def && typeof def.baseUrl === 'string') ? def.baseUrl : '';
+        if (modelEl) modelEl.value = (def && typeof def.model === 'string') ? def.model : '';
+        if (tokenEl) tokenEl.value = '';
+        if (velocityOnlyEl) velocityOnlyEl.checked = (def && typeof def.velocityOnly === 'boolean') ? def.velocityOnly : true;
+        if (presetEl) presetEl.value = 'custom';
+        const st = document.getElementById('inspAi_status');
+        if (st) st.textContent = _t('inspector.aiReset');
+        self.render();
+      });
+      document.getElementById('inspAi_btnTest').addEventListener('click', function(){
+        const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+        const st = document.getElementById('inspAi_status');
+        const setSt = function(t){ if (st) st.textContent = t || ''; };
+        if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){ setSt(_t('editor.llmConfigNotLoaded')); return; }
+        const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+        const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+        const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+        if (!base || !model){ setSt(_t('editor.pleaseSetBaseUrlAndModel')); return; }
+        setSt('Testing...');
+        client.callChatCompletions({ baseUrl: base, model: model, authToken: token }, [{ role: 'system', content: 'Reply with exactly: ok' }, { role: 'user', content: 'ping' }], { timeoutMs: 8000 })
+          .then(function(){ setSt('Connection OK'); })
+          .catch(function(err){
+            const msg = (err && err.message) ? String(err.message) : '';
+            if (/401|403|Unauthorized/i.test(msg)) setSt(_t('editor.unauthorized'));
+            else if (/404|not found/i.test(msg)) setSt(_t('editor.endpointNotFound'));
+            else if (/timeout|request timeout/i.test(msg)) setSt(_t('editor.timeout'));
+            else setSt('Connection failed');
+          });
+      });
+      document.getElementById('inspAi_btnLoadModels').addEventListener('click', function(){
+        const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+        const loadSt = document.getElementById('inspAi_modelLoadStatus');
+        const setLoadSt = function(t){ if (loadSt) loadSt.textContent = t || ''; };
+        if (!client || typeof client.listModels !== 'function'){ setLoadSt(_t('editor.llmConfigNotLoaded')); return; }
+        const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+        const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+        if (!base){ setLoadSt(_t('editor.pleaseSetBaseUrl')); return; }
+        setLoadSt(_t('common.loading'));
+        client.listModels({ baseUrl: base, authToken: token }, { timeoutMs: 8000 })
+          .then(function(res){
+            const ids = (res && Array.isArray(res.ids)) ? res.ids : [];
+            const listEl = document.getElementById('inspAi_modelList');
+            if (listEl){ listEl.innerHTML = ''; for (var i = 0; i < ids.length && i < 200; i++){ var o = document.createElement('option'); o.value = ids[i]; listEl.appendChild(o); } }
+            setLoadSt((_t('editor.loadedModels') || 'Loaded {n} models').replace('{n}', String(ids.length)));
+          })
+          .catch(function(err){
+            const msg = (err && err.message) ? String(err.message) : '';
+            if (/401|403|Unauthorized/i.test(msg)) setLoadSt(_t('editor.unauthorized'));
+            else if (/404|not found/i.test(msg)) setLoadSt(_t('editor.endpointNotFound'));
+            else if (/timeout|request timeout/i.test(msg)) setLoadSt(_t('editor.timeout'));
+            else setLoadSt(_t('editor.failedLoadModels'));
+          });
+      });
+    },
+
     renderInspector(){
       const emptyEl = $('#inspectorEmptyState');
       const contentEl = $('#inspectorContent');
@@ -1267,6 +1435,20 @@ ensureTrackButtons(){
       this.renderTimeline();
       this.renderSelection();
       this.renderSelectedClip();
+      // PR-UX4c: AI Settings drawer — show/hide and render form when open
+      const aiModal = $('#aiSettingsModal');
+      const aiBody = $('#aiSettingsModalBody');
+      if (aiModal && aiBody){
+        if (this.state.aiSettingsOpen){
+          aiModal.classList.remove('hidden');
+          aiModal.setAttribute('aria-hidden', 'false');
+          this.renderAiSettingsPanel(aiBody);
+        } else {
+          aiModal.classList.add('hidden');
+          aiModal.setAttribute('aria-hidden', 'true');
+          aiBody.innerHTML = '';
+        }
+      }
       try{ this.updateRecordButtonStates(); }catch(e){}
       try{ this._updateI18nLabels(); }catch(e){}
     },
@@ -1405,7 +1587,7 @@ renderTimeline(){
         return `<button type="button" class="btn mini" data-act="inspTemplateChip" data-template-id="${escapeHtml(tid)}" data-id="${escapeHtml(clipId)}"${sel}>${escapeHtml(label)}</button>`;
       }).join(' ');
       const optimizeBlockHtml = (
-        `<details class="inspectorOptimize" open style="margin-top:6px;">` +
+        `<details class="inspectorOptimize" data-insp-section="opt" style="margin-top:6px;"${getInspectorSectionOpen('opt') ? ' open' : ''}>` +
           `<summary style="cursor:pointer; user-select:none; opacity:0.9; font-weight:600;">${escapeHtml(_t('opt.optimize'))}</summary>` +
           `<div style="margin-top:8px;">` +
             `<div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:8px;">${templateChipsHtml}</div>` +
@@ -1416,21 +1598,23 @@ renderTimeline(){
             `</div>` +
             (running ? `<div class="muted" style="font-size:12px;">Running…</div>` : optError ? `<div class="muted" style="font-size:12px; color:var(--danger, #e55);">${escapeHtml(optError)}</div>` : '') +
             `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="font-size:11px; opacity:0.8;">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inspector.openEditor') : 'Open Editor')}</a>` +
-          `</div>` +
-        `</details>`
-      );
-      const optimizeSettingsHtml = (
-        `<details class="clipOptimizeSettings" style="margin-top:6px;">` +
-          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.optimizeSettings'))}</summary>` +
-          `<div style="margin-top:6px;">` +
-            `<label style="font-size:12px; opacity:0.8;">${escapeHtml(_t('opt.preset'))}</label>` +
-            `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
-              `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
-              `<option value="llm_v0"${presetSelVal === 'llm_v0' ? ' selected' : ''}>${escapeHtml(_t('opt.llmV0'))}</option>` +
-              `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
-              `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
-              `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
-            `</select>` +
+            `<details class="optAdvanced" data-insp-section="opt_adv" style="margin-top:10px;"${getInspectorSectionOpen('opt_adv') ? ' open' : ''}>` +
+              `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.advanced'))}</summary>` +
+              `<div style="margin-top:6px;">` +
+                `<label style="font-size:12px; opacity:0.8;">${escapeHtml(_t('opt.preset'))}</label>` +
+                `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
+                  `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
+                  `<option value="llm_v0"${presetSelVal === 'llm_v0' ? ' selected' : ''}>${escapeHtml(_t('opt.llmV0'))}</option>` +
+                  `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
+                  `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
+                  `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
+                `</select>` +
+              `</div>` +
+            `</details>` +
+            `<details class="optResults" data-insp-section="opt_results" style="margin-top:6px;"${getInspectorSectionOpen('opt_results') ? ' open' : ''}>` +
+              `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.resultSummary'))}</summary>` +
+              `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
+            `</details>` +
           `</div>` +
         `</details>`
       );
@@ -1439,11 +1623,6 @@ renderTimeline(){
       box.innerHTML = (
         `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
         optimizeBlockHtml +
-        optimizeSettingsHtml +
-        `<details class="selectedClipResults" data-insp-section="results" style="margin-top:6px;"${getInspectorSectionOpen('results') ? ' open' : ''}>` +
-          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.resultSummary'))}</summary>` +
-          `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
-        `</details>` +
         (historyHtml ? (
           `<details class="clipAdvanced" data-insp-section="history" style="margin-top:6px;"${getInspectorSectionOpen('history') ? ' open' : ''}>` +
             `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
@@ -1479,7 +1658,10 @@ renderTimeline(){
               self.state._inspectorOptRunning = false;
               self.state._inspectorOptError = '';
               if (res && !res.ok && res.reason) self.state._inspectorOptError = (res.detail && typeof res.detail === 'string') ? res.detail : String(res.reason);
-              if (res && res.ok) setInspectorSectionOpen('results', true);
+              if (res && res.ok) {
+                setInspectorSectionOpen('opt', true);
+                setInspectorSectionOpen('opt_results', true);
+              }
               persist();
               self.render();
             }).catch(function(err){
@@ -1555,7 +1737,7 @@ renderTimeline(){
           const d = ev.target;
           if (!d || d.tagName !== 'DETAILS') return;
           const key = d.getAttribute && d.getAttribute('data-insp-section');
-          if (key === 'results' || key === 'history') setInspectorSectionOpen(key, d.open);
+          if (key === 'opt' || key === 'opt_adv' || key === 'opt_results' || key === 'history') setInspectorSectionOpen(key, d.open);
         };
         box.addEventListener('toggle', box.__h2sToggleHandler);
       }

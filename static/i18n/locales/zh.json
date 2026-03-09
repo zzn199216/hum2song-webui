@@ -1,6 +1,7 @@
 {
   "common.ok": "确定",
   "common.cancel": "取消",
+  "common.close": "关闭",
   "common.loading": "加载中…",
   "common.error": "错误",
   "common.retry": "重试",
@@ -113,6 +114,9 @@
   "inspector.importProjectJson": "导入项目 JSON",
   "inspector.exportFlattenJson": "导出扁平 JSON",
   "inspector.openEditor": "打开编辑器",
+  "inspector.aiSettings": "AI 设置",
+  "inspector.aiSaved": "已保存",
+  "inspector.aiReset": "配置已重置",
 
   "actions.clear": "清除",
   "actions.exportFlattenJson": "导出扁平 JSON",

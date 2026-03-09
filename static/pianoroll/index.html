@@ -56,6 +56,16 @@
     }
     .spacer{ flex:1; }
     .smallmuted{ font-size:12px; color:var(--muted); }
+    .hidden{ display:none; }
+    .h2sModal{ position:fixed; inset:0; z-index:9999; pointer-events:none; }
+    .h2sModal:not(.hidden){ pointer-events:auto; }
+    .h2sModalBackdrop{ position:absolute; inset:0; background:rgba(0,0,0,.45); pointer-events:auto; }
+    .h2sDrawer{ position:absolute; top:0; right:0; width:min(420px, 92vw); height:100%; background:#0f141b; border-left:1px solid rgba(255,255,255,.08); box-shadow:-12px 0 32px rgba(0,0,0,.5); overflow:auto; pointer-events:auto; }
+    .h2sDrawerHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:rgba(0,0,0,.2); }
+    .h2sDrawerTitle{ font-weight:600; font-size:14px; }
+    .h2sDrawerBody{ padding:16px; overflow:auto; }
+    .btnClose{ appearance:none; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; }
+    .btnClose:hover{ background:rgba(255,255,255,.08); }
 
     .layout{
       height: calc(100% - 54px);
@@ -612,6 +622,7 @@
       <button id="btnUpload" class="btn" data-i18n="top.uploadWav">Upload WAV</button>
     </div>
     <div class="spacer"></div>
+    <button id="btnAiSettings" class="btn" title="AI Settings">AI</button>
     <div id="studioImportStatus" class="smallmuted" style="min-width:120px;"></div>
     <button id="btnCancelImport" class="btn ghost" style="display:none;" data-i18n="common.cancel">Cancel</button>
     <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>
@@ -741,6 +752,18 @@
           </div>
         </details>
       </div>
+    </div>
+  </div>
+
+  <!-- AI Settings Drawer (PR-UX4c) -->
+  <div id="aiSettingsModal" class="h2sModal hidden" aria-hidden="true">
+    <div id="aiSettingsBackdrop" class="h2sModalBackdrop"></div>
+    <div class="h2sDrawer" role="dialog" aria-modal="true" aria-label="AI Settings">
+      <div class="h2sDrawerHeader">
+        <div class="h2sDrawerTitle" data-i18n="inspector.aiSettings">AI Settings</div>
+        <button id="btnAiSettingsClose" class="btnClose" data-i18n="common.close">Close</button>
+      </div>
+      <div id="aiSettingsModalBody" class="h2sDrawerBody"></div>
     </div>
   </div>
 
