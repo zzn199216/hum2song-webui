@@ -5,6 +5,7 @@
   "common.loading": "加载中…",
   "common.error": "错误",
   "common.retry": "重试",
+  "common.required": "必填",
   "common.reset": "重置",
   "common.done": "完成",
   "common.failed": "失败",
@@ -72,6 +73,15 @@
   "top.vol": "音量",
   "top.localClipsHint": "本地片段 + 时间轴。双击片段进行编辑。",
 
+  "ai.saved": "AI 设置已保存。",
+  "ai.saveFailed": "保存失败",
+  "ai.testing": "正在测试连接…",
+  "ai.testOk": "连接成功。",
+  "ai.testFailed": "连接失败",
+  "ai.loadingModels": "正在加载模型…",
+  "ai.modelsLoaded": "模型已加载。",
+  "ai.modelsLoadFailed": "模型加载失败",
+
   "cliplib.title": "片段库",
   "cliplib.useLastRecording": "使用上次录音",
   "cliplib.clear": "清除",
@@ -123,6 +133,7 @@
   "actions.clear": "清除",
   "actions.exportFlattenJson": "导出扁平 JSON",
   "actions.edit": "编辑",
+  "actions.optimize": "优化",
   "actions.duplicate": "复制",
   "actions.remove": "移除",
 

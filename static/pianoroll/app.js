@@ -1011,6 +1011,7 @@ try{
       this._initMasterVolumeUI();
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
+    onOpenInspectorOptimize: () => { setInspectorSectionOpen('opt', true); this.render(); },
     onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
     onSetActiveTrackIndex: (ti) => this.setActiveTrackIndex(ti),
     onSetTrackInstrument: (trackId, instrument) => this.setTrackInstrument(trackId, instrument),
@@ -1266,6 +1267,25 @@ ensureTrackButtons(){
       this.render();
     },
 
+    // PR-UX5a: Set inline status in AI drawer (kind = 'ok'|'err'|'info'); textContent only, no innerHTML
+    _setAiInlineStatus(kind, text){
+      const el = document.getElementById('aiSettingsInlineStatus');
+      if (!el) return;
+      el.textContent = text || '';
+      el.classList.remove('ok', 'err', 'info');
+      if (kind === 'ok' || kind === 'err' || kind === 'info') el.classList.add(kind);
+    },
+
+    // PR-UX5a: Update validation hints and Save disabled state from current input values
+    _updateAiValidation(baseEl, modelEl, btnSave, hintBase, hintModel){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const baseUrlOk = baseEl && String(baseEl.value || '').trim().length > 0;
+      const modelOk = modelEl && String(modelEl.value || '').trim().length > 0;
+      if (btnSave){ btnSave.disabled = !(baseUrlOk && modelOk); }
+      if (hintBase){ hintBase.textContent = baseUrlOk ? '' : _t('common.required'); }
+      if (hintModel){ hintModel.textContent = modelOk ? '' : _t('common.required'); }
+    },
+
     // PR-UX4d: Returns true when AI config is incomplete (missing baseUrl/model, or token for non-local)
     _aiConfigNeedsAttention(){
       try{
@@ -1310,12 +1330,14 @@ ensureTrackButtons(){
         '<div class="muted" style="font-size:11px; margin-top:-2px;" data-i18n="editor.deepseekOllamaHint">' + escapeHtml(_t('editor.deepseekOllamaHint')) + '</div>' +
         '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.baseUrl')) + '</label>' +
         '<input id="inspAi_baseUrl" type="text" placeholder="' + escapeHtml(_t('editor.baseUrlPlaceholder')) + '" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<div class="aiHint aiHintErr" data-ai-hint="baseUrl"></div>' +
         '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.model')) + '</label>' +
         '<div class="row" style="gap:6px; align-items:center;">' +
         '<input id="inspAi_model" type="text" list="inspAi_modelList" placeholder="' + escapeHtml(_t('editor.modelPlaceholder')) + '" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
         '<button id="inspAi_btnLoadModels" type="button" class="btn mini">' + escapeHtml(_t('editor.loadModels')) + '</button>' +
         '</div>' +
         '<datalist id="inspAi_modelList"></datalist>' +
+        '<div class="aiHint aiHintErr" data-ai-hint="model"></div>' +
         '<div id="inspAi_modelLoadStatus" class="muted" style="min-height:1em; font-size:11px;"></div>' +
         '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.authToken')) + '</label>' +
         '<input id="inspAi_authToken" type="password" placeholder="' + escapeHtml(_t('editor.authOptional')) + '" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
@@ -1328,7 +1350,7 @@ ensureTrackButtons(){
         '<button id="inspAi_btnReset" type="button" class="btn mini">' + escapeHtml(_t('common.reset')) + '</button>' +
         '<button id="inspAi_btnTest" type="button" class="btn mini">' + escapeHtml(_t('editor.testConnection')) + '</button>' +
         '</div>' +
-        '<div id="inspAi_status" class="muted" style="min-height:1em; font-size:11px;"></div>' +
+        '<div id="aiSettingsInlineStatus" class="aiInlineStatus"></div>' +
         '</div>'
       );
       const presetEl = document.getElementById('inspAi_gatewayPreset');
@@ -1336,26 +1358,42 @@ ensureTrackButtons(){
       const modelEl = document.getElementById('inspAi_model');
       const tokenEl = document.getElementById('inspAi_authToken');
       const velocityOnlyEl = document.getElementById('inspAi_velocityOnly');
+      const btnSave = document.getElementById('inspAi_btnSave');
+      const hintBase = container.querySelector('[data-ai-hint="baseUrl"]');
+      const hintModel = container.querySelector('[data-ai-hint="model"]');
       if (presetEl) presetEl.value = presetVal;
       if (baseEl) baseEl.value = baseVal;
       if (modelEl) modelEl.value = modelVal;
       if (tokenEl) tokenEl.value = tokenVal;
       if (velocityOnlyEl) velocityOnlyEl.checked = velocityOnly;
       const self = this;
+      const updateValidation = function(){ self._updateAiValidation(baseEl, modelEl, btnSave, hintBase, hintModel); };
+      self._updateAiValidation(baseEl, modelEl, btnSave, hintBase, hintModel);
+      if (baseEl) baseEl.addEventListener('input', updateValidation);
+      if (baseEl) baseEl.addEventListener('change', updateValidation);
+      if (modelEl) modelEl.addEventListener('input', updateValidation);
+      if (modelEl) modelEl.addEventListener('change', updateValidation);
       const applyPresetFill = function(pv){
         if (pv === 'deepseek'){ if (baseEl) baseEl.value = DEEPSEEK_URL; if (modelEl && !modelEl.value.trim()) modelEl.value = 'deepseek-chat'; }
         else if (pv === 'ollama'){ if (baseEl) baseEl.value = OLLAMA_URL; }
       };
-      if (presetEl) presetEl.addEventListener('change', function(){ applyPresetFill(this.value || 'custom'); });
+      if (presetEl) presetEl.addEventListener('change', function(){ applyPresetFill(this.value || 'custom'); updateValidation(); });
       document.getElementById('inspAi_btnSave').addEventListener('click', function(){
+        if (btnSave && btnSave.disabled) return;
         if (!api || typeof api.saveLlmConfig !== 'function') return;
-        const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
-        const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
-        const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
-        api.saveLlmConfig({ baseUrl: base, model: model, authToken: token, velocityOnly: velocityOnlyEl ? velocityOnlyEl.checked : true });
-        const st = document.getElementById('inspAi_status');
-        if (st) st.textContent = _t('inspector.aiSaved');
-        self.render();
+        try {
+          const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+          const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+          const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+          api.saveLlmConfig({ baseUrl: base, model: model, authToken: token, velocityOnly: velocityOnlyEl ? velocityOnlyEl.checked : true });
+          self._setAiInlineStatus('ok', _t('ai.saved'));
+          if (typeof self.setImportStatus === 'function') self.setImportStatus(_t('ai.saved'), false);
+          self.render();
+        } catch (err) {
+          const msg = (err && (err.message || String(err))).slice(0, 200);
+          self._setAiInlineStatus('err', _t('ai.saveFailed') + ': ' + msg);
+          if (typeof self.setImportStatus === 'function') self.setImportStatus(_t('ai.saveFailed') + ': ' + msg, false);
+        }
       });
       document.getElementById('inspAi_btnReset').addEventListener('click', function(){
         if (!api || typeof api.resetLlmConfig !== 'function') return;
@@ -1365,52 +1403,58 @@ ensureTrackButtons(){
         if (tokenEl) tokenEl.value = '';
         if (velocityOnlyEl) velocityOnlyEl.checked = (def && typeof def.velocityOnly === 'boolean') ? def.velocityOnly : true;
         if (presetEl) presetEl.value = 'custom';
-        const st = document.getElementById('inspAi_status');
-        if (st) st.textContent = _t('inspector.aiReset');
+        self._setAiInlineStatus('ok', _t('inspector.aiReset'));
+        updateValidation();
         self.render();
       });
       document.getElementById('inspAi_btnTest').addEventListener('click', function(){
         const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
-        const st = document.getElementById('inspAi_status');
-        const setSt = function(t){ if (st) st.textContent = t || ''; };
-        if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){ setSt(_t('editor.llmConfigNotLoaded')); return; }
+        if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){ self._setAiInlineStatus('err', _t('editor.llmConfigNotLoaded')); return; }
         const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
         const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
         const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
-        if (!base || !model){ setSt(_t('editor.pleaseSetBaseUrlAndModel')); return; }
-        setSt('Testing...');
+        if (!base || !model){ self._setAiInlineStatus('err', _t('editor.pleaseSetBaseUrlAndModel')); return; }
+        self._setAiInlineStatus('info', _t('ai.testing'));
         client.callChatCompletions({ baseUrl: base, model: model, authToken: token }, [{ role: 'system', content: 'Reply with exactly: ok' }, { role: 'user', content: 'ping' }], { timeoutMs: 8000 })
-          .then(function(){ setSt('Connection OK'); })
+          .then(function(){ self._setAiInlineStatus('ok', _t('ai.testOk')); })
           .catch(function(err){
-            const msg = (err && err.message) ? String(err.message) : '';
-            if (/401|403|Unauthorized/i.test(msg)) setSt(_t('editor.unauthorized'));
-            else if (/404|not found/i.test(msg)) setSt(_t('editor.endpointNotFound'));
-            else if (/timeout|request timeout/i.test(msg)) setSt(_t('editor.timeout'));
-            else setSt('Connection failed');
+            const msg = (err && (err.message || String(err))).slice(0, 200);
+            let shortMsg = msg;
+            if (/401|403|Unauthorized/i.test(msg)) shortMsg = _t('editor.unauthorized');
+            else if (/404|not found/i.test(msg)) shortMsg = _t('editor.endpointNotFound');
+            else if (/timeout|request timeout/i.test(msg)) shortMsg = _t('editor.timeout');
+            else shortMsg = msg || _t('ai.testFailed');
+            self._setAiInlineStatus('err', _t('ai.testFailed') + ': ' + shortMsg);
           });
       });
       document.getElementById('inspAi_btnLoadModels').addEventListener('click', function(){
         const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
         const loadSt = document.getElementById('inspAi_modelLoadStatus');
         const setLoadSt = function(t){ if (loadSt) loadSt.textContent = t || ''; };
-        if (!client || typeof client.listModels !== 'function'){ setLoadSt(_t('editor.llmConfigNotLoaded')); return; }
+        if (!client || typeof client.listModels !== 'function'){ self._setAiInlineStatus('err', _t('editor.llmConfigNotLoaded')); return; }
         const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
         const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
-        if (!base){ setLoadSt(_t('editor.pleaseSetBaseUrl')); return; }
+        if (!base){ self._setAiInlineStatus('err', _t('editor.pleaseSetBaseUrl')); return; }
+        self._setAiInlineStatus('info', _t('ai.loadingModels'));
         setLoadSt(_t('common.loading'));
         client.listModels({ baseUrl: base, authToken: token }, { timeoutMs: 8000 })
           .then(function(res){
             const ids = (res && Array.isArray(res.ids)) ? res.ids : [];
             const listEl = document.getElementById('inspAi_modelList');
             if (listEl){ listEl.innerHTML = ''; for (var i = 0; i < ids.length && i < 200; i++){ var o = document.createElement('option'); o.value = ids[i]; listEl.appendChild(o); } }
-            setLoadSt((_t('editor.loadedModels') || 'Loaded {n} models').replace('{n}', String(ids.length)));
+            const loadedMsg = (_t('editor.loadedModels') || 'Loaded {n} models').replace('{n}', String(ids.length));
+            setLoadSt(loadedMsg);
+            self._setAiInlineStatus('ok', _t('ai.modelsLoaded'));
           })
           .catch(function(err){
-            const msg = (err && err.message) ? String(err.message) : '';
-            if (/401|403|Unauthorized/i.test(msg)) setLoadSt(_t('editor.unauthorized'));
-            else if (/404|not found/i.test(msg)) setLoadSt(_t('editor.endpointNotFound'));
-            else if (/timeout|request timeout/i.test(msg)) setLoadSt(_t('editor.timeout'));
-            else setLoadSt(_t('editor.failedLoadModels'));
+            const msg = (err && (err.message || String(err))).slice(0, 200);
+            let shortMsg = msg;
+            if (/401|403|Unauthorized/i.test(msg)) shortMsg = _t('editor.unauthorized');
+            else if (/404|not found/i.test(msg)) shortMsg = _t('editor.endpointNotFound');
+            else if (/timeout|request timeout/i.test(msg)) shortMsg = _t('editor.timeout');
+            else shortMsg = msg || _t('editor.failedLoadModels');
+            setLoadSt(shortMsg);
+            self._setAiInlineStatus('err', _t('ai.modelsLoadFailed') + ': ' + shortMsg);
           });
       });
     },

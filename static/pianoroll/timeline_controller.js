@@ -281,6 +281,35 @@
         if (ctrl._bound) return;
         ctrl._bound = true;
 
+        // PR-UX5b: Event delegation for instAct (Edit/Optimize) — stopPropagation so click doesn't trigger drag
+        const tracks = ctrl._tracksEl;
+        if (tracks){
+          tracks.addEventListener('pointerdown', (e)=>{
+            const btn = e.target && e.target.closest ? e.target.closest('.instAct') : null;
+            if (btn){ e.stopPropagation(); e.preventDefault(); }
+          }, true);
+          tracks.addEventListener('click', (e)=>{
+            const btn = e.target && e.target.closest ? e.target.closest('.instAct') : null;
+            if (!btn) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const act = btn.getAttribute('data-act');
+            const instId = btn.getAttribute('data-inst-id');
+            if (!instId) return;
+            const proj = config.getProject();
+            const inst = (proj.instances || []).find(x => x && x.id === instId);
+            if (!inst) return;
+            const el = btn.closest('.instance');
+            if (act === 'instEdit'){
+              config.onSelectInstance(instId, el);
+              if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId);
+            } else if (act === 'instOptimize'){
+              config.onSelectInstance(instId, el);
+              if (config.onOpenInspectorOptimize) config.onOpenInspectorOptimize();
+            }
+          }, true);
+        }
+
         // Global pointer handlers for timeline drag.
         window.addEventListener('pointermove', onPointerMove, {passive:true});
         window.addEventListener('pointerup', onPointerUp, {passive:true});
@@ -612,16 +641,23 @@
                 clipName: clip.name,
                 startSec: (typeof inst.startSec === 'number') ? inst.startSec : 0,
                 noteCount: (typeof st.count === 'number') ? st.count : 0,
+                instId: inst.id,
                 fmtSec: ctrl._fmtSec.bind(ctrl),
                 escapeHtml: ctrl._escapeHtml.bind(ctrl),
                 notesLabel: _t('trackpanel.notes'),
                 removeLabel: _t('actions.remove'),
+                editLabel: _t('actions.edit'),
+                optimizeLabel: _t('actions.optimize'),
               });
             } else {
               el.innerHTML = `
                 <div class="instBody" data-role="inst-body">
                   <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
                   <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} ${_t('trackpanel.notes')}</span></div>
+                </div>
+                <div class="instActions">
+                  <button class="instAct" type="button" data-act="instEdit" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.edit'))}</button>
+                  <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.optimize'))}</button>
                 </div>
                 <button class="instRemove" type="button" data-act="remove" title="${ctrl._escapeHtml(_t('actions.remove'))}" aria-label="${ctrl._escapeHtml(_t('actions.remove'))}">×</button>
               `;

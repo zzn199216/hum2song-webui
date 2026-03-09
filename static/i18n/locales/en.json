@@ -5,6 +5,7 @@
   "common.loading": "Loading...",
   "common.error": "Error",
   "common.retry": "Retry",
+  "common.required": "Required",
   "common.reset": "Reset",
   "common.done": "Done",
   "common.failed": "Failed",
@@ -72,6 +73,15 @@
   "top.vol": "Vol",
   "top.localClipsHint": "Local clips + timeline. Double-click a clip to edit.",
 
+  "ai.saved": "AI settings saved.",
+  "ai.saveFailed": "Save failed",
+  "ai.testing": "Testing connection…",
+  "ai.testOk": "Connection OK.",
+  "ai.testFailed": "Connection failed",
+  "ai.loadingModels": "Loading models…",
+  "ai.modelsLoaded": "Models loaded.",
+  "ai.modelsLoadFailed": "Models load failed",
+
   "cliplib.title": "Clip Library",
   "cliplib.useLastRecording": "Use last recording",
   "cliplib.clear": "Clear",
@@ -123,6 +133,7 @@
   "actions.clear": "Clear",
   "actions.exportFlattenJson": "Export Flatten JSON",
   "actions.edit": "Edit",
+  "actions.optimize": "Optimize",
   "actions.duplicate": "Duplicate",
   "actions.remove": "Remove",
 
