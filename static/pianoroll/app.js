@@ -16,6 +16,7 @@
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
   const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
   const LS_KEY_AI_DRAWER_OPEN = 'hum2song_studio_ai_drawer_open'; // PR-UX4c: persist AI Settings drawer open/closed
+  const LS_KEY_AI_ASSIST_OPEN = 'hum2song_studio_ai_assist_open'; // PR-UX7a: persist AI Assistant dock open/closed
   const LS_KEYS_INSP = {
     project: 'hum2song_studio_insp_project_open',
     export: 'hum2song_studio_insp_export_open',
@@ -726,6 +727,7 @@ rollbackClipRevision(clipId){
       autoOpenAfterImport: true,
       statusText: '', // PR-UX3a: central status for log status bar (set by setImportStatus, etc.)
       aiSettingsOpen: false, // PR-UX4c: AI Settings drawer visibility
+      aiAssistOpen: false, // PR-UX7a: AI Assistant dock open/closed (default collapsed)
       modal: {
         show: false,
         clipId: null,
@@ -829,7 +831,10 @@ if (typeof localStorage !== 'undefined') {
 
       // PR-UX4c: AI Settings drawer — restore open state, bind open/close
       if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_DRAWER_OPEN) === '1') this.state.aiSettingsOpen = true;
+      // PR-UX7a: AI Assistant dock — restore open state (default collapsed)
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_ASSIST_OPEN) === '1') this.state.aiAssistOpen = true;
       this._initAiSettingsDrawer();
+      this._initAiAssistDock();
 
       // PR-UX6b: Status bar integrates with runCommand events
       this.onCommandEvent((ev) => {
@@ -1356,6 +1361,106 @@ ensureTrackButtons(){
   btnDel.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); this.removeActiveTrack(); });
 },
 
+    // PR-UX7a: AI Assistant dock — init bindings (guard against double bind)
+    _initAiAssistDock(){
+      if (this._aiAssistBound) return;
+      this._aiAssistBound = true;
+      this._aiAssistItems = this._aiAssistItems || [];
+      const header = document.getElementById('aiAssistHeader');
+      const sendBtn = document.getElementById('aiAssistSend');
+      const body = document.getElementById('aiAssistBody');
+      if (header) header.addEventListener('click', () => {
+        this.state.aiAssistOpen = !this.state.aiAssistOpen;
+        try { localStorage.setItem(LS_KEY_AI_ASSIST_OPEN, this.state.aiAssistOpen ? '1' : '0'); } catch (e) {}
+        this.render();
+      });
+      if (sendBtn) sendBtn.addEventListener('click', () => this._aiAssistSend());
+      if (body) body.addEventListener('click', (ev) => {
+        const act = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-act');
+        const clipId = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-clip-id');
+        if (!act || !clipId) return;
+        if (act === 'aiRun') this._aiAssistRun(clipId, ev.target);
+        else if (act === 'aiOpenOptimize') this.runCommand('open_inspector_optimize');
+        else if (act === 'aiUndo') this._aiAssistUndo(clipId);
+      });
+    },
+    _aiAssistSend(){
+      const inp = document.getElementById('aiAssistInput');
+      if (!inp) return;
+      const text = String(inp.value || '').trim();
+      if (!text) return;
+      inp.value = '';
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const clipId = this.state.selectedClipId;
+      if (!clipId) {
+        this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+      } else {
+        this._aiAssistItems.push({ type: 'card', clipId, promptText: text, createdAt: Date.now() });
+      }
+      this.render();
+    },
+    async _aiAssistRun(clipId, btnEl){
+      if (!clipId) return;
+      const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
+      const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId));
+      const text = (promptText !== '' && promptText !== null) ? promptText : (card ? card.promptText : '');
+      this.setOptimizeOptions(clipId, { userPrompt: text, requestedPresetId: 'llm_v0' });
+      if (btnEl) btnEl.disabled = true;
+      await this.runCommand('optimize_clip', { clipId });
+      if (btnEl) btnEl.disabled = false;
+      this.render();
+    },
+    async _aiAssistUndo(clipId){
+      if (!clipId) return;
+      await this.runCommand('rollback_clip', { clipId });
+      this.render();
+    },
+
+    _renderAiAssistDock(){
+      const dock = document.getElementById('aiAssistDock');
+      const headerTarget = document.getElementById('aiAssistHeaderTarget');
+      const messagesEl = document.getElementById('aiAssistMessages');
+      if (!dock) return;
+      dock.classList.toggle('open', !!this.state.aiAssistOpen);
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const clipId = this.state.selectedClipId;
+      if (headerTarget) {
+        if (clipId) {
+          const clip = (this.project.clips || []).find(c => c && String(c.id) === String(clipId));
+          const name = clip ? (clip.name || clipId) : clipId;
+          headerTarget.textContent = _t('aiAssist.clipPrefix') + name;
+        } else {
+          headerTarget.textContent = _t('aiAssist.noClip');
+        }
+      }
+      if (messagesEl) {
+        const items = this._aiAssistItems || [];
+        let html = '';
+        for (const it of items) {
+          if (it.type === 'sys') {
+            html += '<div class="aiAssistSys">' + escapeHtml(it.text) + '</div>';
+          } else if (it.type === 'card') {
+            const p2 = this.getProjectV2();
+            const c = p2 && p2.clips && p2.clips[it.clipId];
+            const canUndo = !!(c && c.parentRevisionId != null && String(c.parentRevisionId).trim());
+            html += '<div class="aiAssistCard" data-clip-id="' + escapeHtml(String(it.clipId)) + '">';
+            html += '<div class="aiAssistCardPrompt">' + escapeHtml(it.promptText) + '</div>';
+            html += '<div class="aiAssistCardBtns">';
+            html += '<button type="button" class="btn primary mini" data-act="aiRun" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-prompt="' + escapeHtml(it.promptText) + '">' + escapeHtml(_t('aiAssist.run')) + '</button>';
+            html += '<button type="button" class="btn mini" data-act="aiOpenOptimize" data-clip-id="' + escapeHtml(String(it.clipId)) + '">' + escapeHtml(_t('aiAssist.openOptimize')) + '</button>';
+            if (canUndo) html += '<button type="button" class="btn mini" data-act="aiUndo" data-clip-id="' + escapeHtml(String(it.clipId)) + '">' + escapeHtml(_t('aiAssist.undo')) + '</button>';
+            html += '</div></div>';
+          }
+        }
+        messagesEl.innerHTML = html || '';
+      }
+      const inp = document.getElementById('aiAssistInput');
+      if (inp && window.I18N && window.I18N.t) {
+        const ph = _t('aiAssist.promptPlaceholder');
+        if (inp.getAttribute('data-i18n-placeholder')) inp.placeholder = ph;
+      }
+    },
+
     // PR-UX4c: AI Settings drawer — init bindings (guard against double bind)
     _initAiSettingsDrawer(){
       if (this._aiDrawerBound) return;
@@ -1629,6 +1734,8 @@ ensureTrackButtons(){
         if (this.state.aiSettingsOpen) btnAi.classList.add('active'); else btnAi.classList.remove('active');
         if (this._aiConfigNeedsAttention()) btnAi.classList.add('needsAttention'); else btnAi.classList.remove('needsAttention');
       }
+      // PR-UX7a: AI Assistant dock — header, messages, open state
+      this._renderAiAssistDock();
       try{ this.updateRecordButtonStates(); }catch(e){}
       try{ this._updateI18nLabels(); }catch(e){}
     },

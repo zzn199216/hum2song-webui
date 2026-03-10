@@ -82,6 +82,16 @@
   "ai.modelsLoaded": "Models loaded.",
   "ai.modelsLoadFailed": "Models load failed",
 
+  "aiAssist.title": "AI Assistant",
+  "aiAssist.noClip": "No clip selected",
+  "aiAssist.clipPrefix": "Clip: ",
+  "aiAssist.selectClipFirst": "Select a clip first.",
+  "aiAssist.send": "Send",
+  "aiAssist.promptPlaceholder": "Type a prompt…",
+  "aiAssist.run": "Run",
+  "aiAssist.openOptimize": "Open Optimize",
+  "aiAssist.undo": "Undo",
+
   "cmd.optimizing": "Optimizing…",
   "cmd.optimized": "Optimized.",
   "cmd.undoing": "Undoing…",

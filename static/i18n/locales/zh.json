@@ -82,6 +82,16 @@
   "ai.modelsLoaded": "模型已加载。",
   "ai.modelsLoadFailed": "模型加载失败",
 
+  "aiAssist.title": "AI 助手",
+  "aiAssist.noClip": "未选择片段",
+  "aiAssist.clipPrefix": "片段：",
+  "aiAssist.selectClipFirst": "请先选择一个片段。",
+  "aiAssist.send": "发送",
+  "aiAssist.promptPlaceholder": "输入提示…",
+  "aiAssist.run": "运行",
+  "aiAssist.openOptimize": "打开优化",
+  "aiAssist.undo": "撤销",
+
   "cmd.optimizing": "正在优化…",
   "cmd.optimized": "优化完成。",
   "cmd.undoing": "正在撤销…",
