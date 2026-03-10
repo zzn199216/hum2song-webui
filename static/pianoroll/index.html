@@ -107,9 +107,13 @@
       user-select:none;
       font-size:12px;
       font-weight:600;
+      flex:1;
+      min-width:0;
     }
     #aiAssistHeader:hover{ background:rgba(0,0,0,.35); }
     #aiAssistDock:not(.open) #aiAssistHeader{ border-bottom:none; }
+    #aiAssistHeaderTarget{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:6px; }
+    .aiAssistChevron{ margin-left:6px; color:var(--muted); font-size:10px; flex-shrink:0; }
     #aiAssistBody{ flex:1; min-height:0; display:flex; flex-direction:column; padding:8px; gap:8px; overflow:hidden; }
     #aiAssistDock:not(.open) #aiAssistBody{ display:none; }
     #aiAssistMessages{ flex:1; overflow-y:auto; font-size:12px; min-height:80px; }
@@ -822,6 +826,7 @@
     <div id="aiAssistHeader" title="">
       <span id="aiAssistHeaderTitle" data-i18n="aiAssist.title">AI Assistant</span>
       <span id="aiAssistHeaderTarget" class="muted" style="margin-left:6px;"></span>
+      <span id="aiAssistHeaderChevron" class="aiAssistChevron" aria-hidden="true"></span>
     </div>
     <div id="aiAssistBody">
       <div id="aiAssistMessages"></div>

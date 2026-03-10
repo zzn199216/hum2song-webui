@@ -83,6 +83,7 @@
   "ai.modelsLoadFailed": "Models load failed",
 
   "aiAssist.title": "AI Assistant",
+  "aiAssist.trackPrefix": "Track ",
   "aiAssist.noClip": "No clip selected",
   "aiAssist.clipPrefix": "Clip: ",
   "aiAssist.selectClipFirst": "Select a clip first.",

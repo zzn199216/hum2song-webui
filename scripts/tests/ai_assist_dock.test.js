@@ -9,7 +9,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 if (typeof globalThis.window === 'undefined') globalThis.window = {};
 globalThis.window.I18N = I18N;
 
@@ -82,6 +82,26 @@ function createFakeApp() {
     }
     this.render();
   };
+  const fmtSec = (x) => (Number(x || 0).toFixed(2) + 's');
+  app._getAiAssistTargetSummary = function () {
+    const _t = I18N.t.bind(I18N);
+    const instId = this.state.selectedInstanceId;
+    const clipId = this.state.selectedClipId;
+    const clip = clipId ? (this.project.clips || []).find(c => c && String(c.id) === String(clipId)) : null;
+    const clipName = clip ? (clip.name || clipId) : (clipId || '');
+    const prefix = _t('aiAssist.clipPrefix');
+    if (!clipId) return _t('aiAssist.noClip');
+    if (instId) {
+      const inst = (this.project.instances || []).find(i => i && String(i.id) === String(instId));
+      if (inst) {
+        const trackNum = (typeof inst.trackIndex === 'number' ? inst.trackIndex : 0) + 1;
+        const startStr = fmtSec(inst.startSec);
+        const trackPrefix = _t('aiAssist.trackPrefix');
+        return prefix + clipName + ' · ' + trackPrefix + trackNum + ' · ' + startStr;
+      }
+    }
+    return prefix + clipName;
+  };
   return { app, setOptimizeOptionsCalls, runCommandCalls, doc };
 }
 
@@ -132,4 +152,29 @@ function createFakeApp() {
   assert(runCommandCalls[0].command === 'optimize_clip', 'command should be optimize_clip');
   assert(runCommandCalls[0].payload.clipId === 'clip-1', 'payload should have correct clipId');
   console.log('PASS Run on card => runCommand optimize_clip');
+})();
+
+(function testTargetSummaryInstanceVsClip() {
+  const { app } = createFakeApp();
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', trackIndex: 0, startSec: 2.5 }];
+  app.state.selectedClipId = null;
+  app.state.selectedInstanceId = null;
+  assert(app._getAiAssistTargetSummary() === 'No clip selected', 'no selection => noClip');
+  app.state.selectedClipId = 'clip-1';
+  assert(app._getAiAssistTargetSummary() === 'Clip: Test Clip', 'clip only => clip name');
+  app.state.selectedInstanceId = 'inst-1';
+  assert(/Clip: Test Clip.*Track 1.*2\.50s/.test(app._getAiAssistTargetSummary()), 'instance => clip + track + start');
+  console.log('PASS target summary: noClip, clip-only, instance');
+})();
+
+(function testEmptyInputNotSent() {
+  const { app, doc } = createFakeApp();
+  const inp = doc.getElementById('aiAssistInput');
+  inp.value = '   ';
+  app._aiAssistSend();
+  assert(app._aiAssistItems.length === 0, 'whitespace-only should not add item');
+  inp.value = '';
+  app._aiAssistSend();
+  assert(app._aiAssistItems.length === 0, 'empty should not add item');
+  console.log('PASS empty/whitespace input not sent');
 })();

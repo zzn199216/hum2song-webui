@@ -727,7 +727,7 @@ rollbackClipRevision(clipId){
       autoOpenAfterImport: true,
       statusText: '', // PR-UX3a: central status for log status bar (set by setImportStatus, etc.)
       aiSettingsOpen: false, // PR-UX4c: AI Settings drawer visibility
-      aiAssistOpen: false, // PR-UX7a: AI Assistant dock open/closed (default collapsed)
+      aiAssistOpen: true, // PR-UX7a1: default open on first use; persisted in LS
       modal: {
         show: false,
         clipId: null,
@@ -831,8 +831,11 @@ if (typeof localStorage !== 'undefined') {
 
       // PR-UX4c: AI Settings drawer — restore open state, bind open/close
       if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_DRAWER_OPEN) === '1') this.state.aiSettingsOpen = true;
-      // PR-UX7a: AI Assistant dock — restore open state (default collapsed)
-      if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_ASSIST_OPEN) === '1') this.state.aiAssistOpen = true;
+      // PR-UX7a1: AI Assistant dock — default open on first use; persist once user toggles
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(LS_KEY_AI_ASSIST_OPEN);
+        this.state.aiAssistOpen = (stored === null) ? true : (stored === '1');
+      }
       this._initAiSettingsDrawer();
       this._initAiAssistDock();
 
@@ -1368,7 +1371,11 @@ ensureTrackButtons(){
       this._aiAssistItems = this._aiAssistItems || [];
       const header = document.getElementById('aiAssistHeader');
       const sendBtn = document.getElementById('aiAssistSend');
+      const inp = document.getElementById('aiAssistInput');
       const body = document.getElementById('aiAssistBody');
+      if (inp) inp.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); this._aiAssistSend(); }
+      });
       if (header) header.addEventListener('click', () => {
         this.state.aiAssistOpen = !this.state.aiAssistOpen;
         try { localStorage.setItem(LS_KEY_AI_ASSIST_OPEN, this.state.aiAssistOpen ? '1' : '0'); } catch (e) {}
@@ -1416,23 +1423,35 @@ ensureTrackButtons(){
       this.render();
     },
 
+    _getAiAssistTargetSummary(){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const instId = this.state.selectedInstanceId;
+      const clipId = this.state.selectedClipId;
+      const clip = clipId ? (this.project.clips || []).find(c => c && String(c.id) === String(clipId)) : null;
+      const clipName = clip ? (clip.name || clipId) : (clipId || '');
+      const prefix = _t('aiAssist.clipPrefix');
+      if (!clipId) return _t('aiAssist.noClip');
+      if (instId) {
+        const inst = (this.project.instances || []).find(i => i && String(i.id) === String(instId));
+        if (inst) {
+          const trackNum = (typeof inst.trackIndex === 'number' ? inst.trackIndex : 0) + 1;
+          const startStr = fmtSec(inst.startSec);
+          const trackPrefix = _t('aiAssist.trackPrefix');
+          return prefix + clipName + ' · ' + trackPrefix + trackNum + ' · ' + startStr;
+        }
+      }
+      return prefix + clipName;
+    },
     _renderAiAssistDock(){
       const dock = document.getElementById('aiAssistDock');
       const headerTarget = document.getElementById('aiAssistHeaderTarget');
+      const headerChevron = document.getElementById('aiAssistHeaderChevron');
       const messagesEl = document.getElementById('aiAssistMessages');
       if (!dock) return;
       dock.classList.toggle('open', !!this.state.aiAssistOpen);
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
-      const clipId = this.state.selectedClipId;
-      if (headerTarget) {
-        if (clipId) {
-          const clip = (this.project.clips || []).find(c => c && String(c.id) === String(clipId));
-          const name = clip ? (clip.name || clipId) : clipId;
-          headerTarget.textContent = _t('aiAssist.clipPrefix') + name;
-        } else {
-          headerTarget.textContent = _t('aiAssist.noClip');
-        }
-      }
+      if (headerTarget) headerTarget.textContent = this._getAiAssistTargetSummary();
+      if (headerChevron) headerChevron.textContent = this.state.aiAssistOpen ? '\u25BE' : '\u25B8';
       if (messagesEl) {
         const items = this._aiAssistItems || [];
         let html = '';

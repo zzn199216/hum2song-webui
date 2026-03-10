@@ -83,6 +83,7 @@
   "ai.modelsLoadFailed": "模型加载失败",
 
   "aiAssist.title": "AI 助手",
+  "aiAssist.trackPrefix": "轨道",
   "aiAssist.noClip": "未选择片段",
   "aiAssist.clipPrefix": "片段：",
   "aiAssist.selectClipFirst": "请先选择一个片段。",
