@@ -992,7 +992,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onEdit: (clipId) => this.openClipEditor(clipId),
             onRemove: (clipId) => this.deleteClip(clipId),
             onOptimize: (clipId) => this.optimizeClip(clipId),
-            onSelectClip: (clipId) => { this.state.selectedClipId = clipId; this.render(); },
+            onSelectClip: (clipId) => { this.state.selectedClipId = clipId; this.state.selectedInstanceId = null; this.render(); },
           });
         }
       }catch(e){
@@ -1111,13 +1111,12 @@ try{
     getProject: () => this.project,
     getState: () => this.state,
     onSelectInstance: (instId, el) => {
-      // Soft-select: update state + DOM class + inspector, WITHOUT full re-render.
       this.state.selectedInstanceId = instId;
       const inst = (this.project.instances || []).find(x => x && x.id === instId);
       if (inst && inst.clipId) this.state.selectedClipId = inst.clipId; // Do NOT clear; keep previous if inst has no clipId
       if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
 
-      // Toggle selected class in-place
+      // Toggle selected class in-place (will be reapplied by render if timeline rebuilds)
       if (this._selectedInstEl && this._selectedInstEl !== el){
         try{ this._selectedInstEl.classList.remove('selected'); }catch(e){}
       }
@@ -1125,12 +1124,8 @@ try{
         el.classList.add('selected');
         this._selectedInstEl = el;
       }
-      this.renderInspector();
-      this.renderSelection();
-      this.renderSelectedClip();
-    
-      // Keep dynamic master volume UI alive across renders.
-      this._initMasterVolumeUI();
+      // Full render so Clip Library highlight and AI Assistant target update immediately
+      this.render();
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
     onOpenInspectorOptimize: () => this.runCommand('open_inspector_optimize'),
@@ -1433,7 +1428,7 @@ ensureTrackButtons(){
       if (!clipId) return _t('aiAssist.noClip');
       if (instId) {
         const inst = (this.project.instances || []).find(i => i && String(i.id) === String(instId));
-        if (inst) {
+        if (inst && String(inst.clipId || '') === String(clipId || '')) {
           const trackNum = (typeof inst.trackIndex === 'number' ? inst.trackIndex : 0) + 1;
           const startStr = fmtSec(inst.startSec);
           const trackPrefix = _t('aiAssist.trackPrefix');

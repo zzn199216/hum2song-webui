@@ -93,7 +93,7 @@ function createFakeApp() {
     if (!clipId) return _t('aiAssist.noClip');
     if (instId) {
       const inst = (this.project.instances || []).find(i => i && String(i.id) === String(instId));
-      if (inst) {
+      if (inst && String(inst.clipId || '') === String(clipId || '')) {
         const trackNum = (typeof inst.trackIndex === 'number' ? inst.trackIndex : 0) + 1;
         const startStr = fmtSec(inst.startSec);
         const trackPrefix = _t('aiAssist.trackPrefix');
@@ -164,7 +164,11 @@ function createFakeApp() {
   assert(app._getAiAssistTargetSummary() === 'Clip: Test Clip', 'clip only => clip name');
   app.state.selectedInstanceId = 'inst-1';
   assert(/Clip: Test Clip.*Track 1.*2\.50s/.test(app._getAiAssistTargetSummary()), 'instance => clip + track + start');
-  console.log('PASS target summary: noClip, clip-only, instance');
+  // Mismatch: selectedInstanceId points to inst for clip-1, but user selected clip-2 from library
+  app.project.clips.push({ id: 'clip-2', name: 'Other Clip' });
+  app.state.selectedClipId = 'clip-2';
+  assert(app._getAiAssistTargetSummary() === 'Clip: Other Clip', 'instance/clip mismatch => clip-only, no stale track');
+  console.log('PASS target summary: noClip, clip-only, instance, mismatch');
 })();
 
 (function testEmptyInputNotSent() {
