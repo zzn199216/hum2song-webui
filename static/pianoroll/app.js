@@ -1142,7 +1142,7 @@ try{
       if (inst && inst.clipId) this.state.selectedClipId = inst.clipId; // Do NOT clear; keep previous if inst has no clipId
       if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
 
-      // Toggle selected class in-place (will be reapplied by render if timeline rebuilds)
+      // Toggle selected class in-place (no timeline rebuild — preserves dblclick + live drag)
       if (this._selectedInstEl && this._selectedInstEl !== el){
         try{ this._selectedInstEl.classList.remove('selected'); }catch(e){}
       }
@@ -1150,8 +1150,13 @@ try{
         el.classList.add('selected');
         this._selectedInstEl = el;
       }
-      // Full render so Clip Library highlight and AI Assistant target update immediately
-      this.render();
+      // Targeted updates only: inspector, selection UI, library highlight, AI target. Do NOT render timeline.
+      this.renderInspector();
+      this.renderSelection();
+      this.renderSelectedClip();
+      if (this.libraryCtrl && this.libraryCtrl.render) this.libraryCtrl.render();
+      this._renderAiAssistDock();
+      try{ this._initMasterVolumeUI(); }catch(e){}
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
     onOpenInspectorOptimize: () => this.runCommand('open_inspector_optimize'),

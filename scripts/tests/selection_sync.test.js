@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-/* Regression: timeline single-click selection must trigger full render so Clip Library
-   highlight and AI Assistant target update immediately. This test locks in the fix. */
+/* Regression: timeline selection must use targeted updates (no full render) so dblclick
+   and live drag work. Clip Library highlight and AI Assistant target still sync via
+   renderInspector, renderSelection, renderSelectedClip, libraryCtrl.render, _renderAiAssistDock. */
 'use strict';
 
 const path = require('path');
@@ -10,33 +11,32 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed');
 }
 
-// --- 1) Behavioral test: selection path must call render() ---
-(function testSelectionTriggersFullRender() {
+// --- 1) Behavioral test: selection path must NOT call render(), must call targeted updates ---
+(function testSelectionUsesTargetedUpdates() {
   const state = { selectedClipId: null, selectedInstanceId: null };
   const project = { instances: [{ id: 'inst1', clipId: 'clipA', trackIndex: 0 }] };
   let renderCount = 0;
-  let renderClipListCount = 0;
-  let renderAiAssistDockCount = 0;
+  let renderInspectorCount = 0;
+  let renderSelectionCount = 0;
+  let renderSelectedClipCount = 0;
+  let libraryRenderCount = 0;
+  let aiAssistDockCount = 0;
 
   const stub = {
     state,
     project,
     setActiveTrackIndex: () => {},
     _selectedInstEl: null,
-    render() {
-      renderCount++;
-      this.renderClipList();
-      this._renderAiAssistDock();
-    },
-    renderClipList() {
-      renderClipListCount++;
-    },
-    _renderAiAssistDock() {
-      renderAiAssistDockCount++;
-    },
+    libraryCtrl: { render() { libraryRenderCount++; } },
+    render() { renderCount++; },
+    renderInspector() { renderInspectorCount++; },
+    renderSelection() { renderSelectionCount++; },
+    renderSelectedClip() { renderSelectedClipCount++; },
+    _renderAiAssistDock() { aiAssistDockCount++; },
+    _initMasterVolumeUI() {},
   };
 
-  // Mirrors the fixed app.js onSelectInstance logic
+  // Mirrors the repaired app.js onSelectInstance logic (targeted updates, no full render)
   const onSelectInstance = (instId, el) => {
     stub.state.selectedInstanceId = instId;
     const inst = (stub.project.instances || []).find(x => x && x.id === instId);
@@ -49,7 +49,12 @@ function assert(cond, msg) {
       try { el.classList?.add('selected'); } catch (e) {}
       stub._selectedInstEl = el;
     }
-    stub.render();
+    stub.renderInspector();
+    stub.renderSelection();
+    stub.renderSelectedClip();
+    if (stub.libraryCtrl && stub.libraryCtrl.render) stub.libraryCtrl.render();
+    stub._renderAiAssistDock();
+    try { stub._initMasterVolumeUI(); } catch (e) {}
   };
 
   const mockEl = { classList: { add: () => {}, remove: () => {} } };
@@ -57,15 +62,18 @@ function assert(cond, msg) {
 
   assert(state.selectedInstanceId === 'inst1', 'selectedInstanceId should be set');
   assert(state.selectedClipId === 'clipA', 'selectedClipId should sync from instance');
-  assert(renderCount === 1, 'render() must be called exactly once');
-  assert(renderClipListCount === 1, 'renderClipList must be reached via render');
-  assert(renderAiAssistDockCount === 1, '_renderAiAssistDock must be reached via render');
+  assert(renderCount === 0, 'render() must NOT be called (avoids timeline rebuild)');
+  assert(renderInspectorCount === 1, 'renderInspector must be called');
+  assert(renderSelectionCount === 1, 'renderSelection must be called');
+  assert(renderSelectedClipCount === 1, 'renderSelectedClip must be called');
+  assert(libraryRenderCount === 1, 'libraryCtrl.render must be called for Clip Library highlight');
+  assert(aiAssistDockCount === 1, '_renderAiAssistDock must be called for AI Assistant target');
 
-  console.log('PASS selection sync: state + full render');
+  console.log('PASS selection sync: state + targeted updates (no full render)');
 })();
 
-// --- 2) Source check: app.js onSelectInstance must call this.render() ---
-(function testAppSourceCallsRender() {
+// --- 2) Source check: app.js onSelectInstance must NOT call this.render() ---
+(function testAppSourceNoFullRender() {
   const appPath = path.resolve(__dirname, '../../static/pianoroll/app.js');
   const src = fs.readFileSync(appPath, 'utf8');
 
@@ -78,9 +86,13 @@ function assert(cond, msg) {
   const handlerBody = src.slice(handlerStart, handlerEnd);
 
   assert(
-    handlerBody.includes('this.render()'),
-    'onSelectInstance must call this.render() for Clip Library + AI Assistant sync'
+    !handlerBody.includes('this.render()'),
+    'onSelectInstance must NOT call this.render() (preserves dblclick + live drag)'
+  );
+  assert(
+    handlerBody.includes('this.renderInspector()') && handlerBody.includes('this.renderSelection()'),
+    'onSelectInstance must call targeted updates (renderInspector, renderSelection, etc.)'
   );
 
-  console.log('PASS app.js onSelectInstance calls this.render()');
+  console.log('PASS app.js onSelectInstance uses targeted updates, no full render');
 })();
