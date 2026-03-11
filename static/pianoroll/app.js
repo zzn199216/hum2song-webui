@@ -49,6 +49,32 @@
     bluesy_v1: { label: 'Bluesy', labelKey: 'editor.bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
   };
 
+  /** UX7b: Keyword-based mapping from natural-language text to template/intent. Returns null fields if no match. */
+  function _mapAiAssistTextToTemplate(text){
+    if (!text || typeof text !== 'string') return { templateId: null, templateLabel: '', intent: null };
+    const t = String(text).toLowerCase().trim();
+    const rules = [
+      { id: 'bluesy_v1', keywords: ['blues', 'bluesy', 'more blues', '蓝调'] },
+      { id: 'fix_pitch_v1', keywords: ['pitch', 'out of tune', 'off pitch', '跑调', '音准', '音不准'] },
+      { id: 'tighten_rhythm_v1', keywords: ['rhythm', 'tighter rhythm', 'timing', 'more steady', '节奏', '更稳', '紧一点'] },
+      { id: 'clean_outliers_v1', keywords: ['outlier', 'weird notes', 'stray notes', 'noisy notes', '杂音', '异常音', '怪音'] },
+    ];
+    for (const r of rules){
+      for (const kw of r.keywords){
+        if (t.indexOf(kw) >= 0){
+          const tm = INSPECTOR_TEMPLATES[r.id];
+          if (tm){
+            const intent = tm.intent && typeof tm.intent === 'object'
+              ? { fixPitch: !!tm.intent.fixPitch, tightenRhythm: !!tm.intent.tightenRhythm, reduceOutliers: !!tm.intent.reduceOutliers }
+              : null;
+            return { templateId: r.id, templateLabel: tm.label || r.id, intent };
+          }
+        }
+      }
+    }
+    return { templateId: null, templateLabel: '', intent: null };
+  }
+
   // --- debug gate (localStorage.h2s_debug === '1') ---
   function _dbgEnabled(){
     try{
@@ -1397,16 +1423,28 @@ ensureTrackButtons(){
       if (!clipId) {
         this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
       } else {
-        this._aiAssistItems.push({ type: 'card', clipId, promptText: text, createdAt: Date.now() });
+        const mapped = _mapAiAssistTextToTemplate(text);
+        const card = { type: 'card', clipId, promptText: text, createdAt: Date.now() };
+        if (mapped.templateId && mapped.intent) {
+          card.templateId = mapped.templateId;
+          card.templateLabel = mapped.templateLabel;
+          card.intent = mapped.intent;
+        }
+        this._aiAssistItems.push(card);
       }
       this.render();
     },
     async _aiAssistRun(clipId, btnEl){
       if (!clipId) return;
       const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
-      const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId));
+      const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
       const text = (promptText !== '' && promptText !== null) ? promptText : (card ? card.promptText : '');
-      this.setOptimizeOptions(clipId, { userPrompt: text, requestedPresetId: 'llm_v0' });
+      const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
+      if (card && card.templateId && card.intent) {
+        opts.templateId = card.templateId;
+        opts.intent = card.intent;
+      }
+      this.setOptimizeOptions(clipId, opts);
       if (btnEl) btnEl.disabled = true;
       await this.runCommand('optimize_clip', { clipId });
       if (btnEl) btnEl.disabled = false;

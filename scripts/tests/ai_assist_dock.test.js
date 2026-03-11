@@ -10,6 +10,38 @@ function assert(cond, msg) {
 
 // Stub I18N
 const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+
+// UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
+const INSPECTOR_TEMPLATES = {
+  fix_pitch_v1: { label: 'Fix Pitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false } },
+  tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false } },
+  clean_outliers_v1: { label: 'Clean Outliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true } },
+  bluesy_v1: { label: 'Bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false } },
+};
+function mapAiAssistTextToTemplate(text) {
+  if (!text || typeof text !== 'string') return { templateId: null, templateLabel: '', intent: null };
+  const t = String(text).toLowerCase().trim();
+  const rules = [
+    { id: 'bluesy_v1', keywords: ['blues', 'bluesy', 'more blues', '蓝调'] },
+    { id: 'fix_pitch_v1', keywords: ['pitch', 'out of tune', 'off pitch', '跑调', '音准', '音不准'] },
+    { id: 'tighten_rhythm_v1', keywords: ['rhythm', 'tighter rhythm', 'timing', 'more steady', '节奏', '更稳', '紧一点'] },
+    { id: 'clean_outliers_v1', keywords: ['outlier', 'weird notes', 'stray notes', 'noisy notes', '杂音', '异常音', '怪音'] },
+  ];
+  for (const r of rules) {
+    for (const kw of r.keywords) {
+      if (t.indexOf(kw) >= 0) {
+        const tm = INSPECTOR_TEMPLATES[r.id];
+        if (tm) {
+          const intent = tm.intent && typeof tm.intent === 'object'
+            ? { fixPitch: !!tm.intent.fixPitch, tightenRhythm: !!tm.intent.tightenRhythm, reduceOutliers: !!tm.intent.reduceOutliers }
+            : null;
+          return { templateId: r.id, templateLabel: tm.label || r.id, intent };
+        }
+      }
+    }
+  }
+  return { templateId: null, templateLabel: '', intent: null };
+}
 if (typeof globalThis.window === 'undefined') globalThis.window = {};
 globalThis.window.I18N = I18N;
 
@@ -78,8 +110,31 @@ function createFakeApp() {
     if (!clipId) {
       this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
     } else {
-      this._aiAssistItems.push({ type: 'card', clipId, promptText: text, createdAt: Date.now() });
+      const mapped = mapAiAssistTextToTemplate(text);
+      const card = { type: 'card', clipId, promptText: text, createdAt: Date.now() };
+      if (mapped.templateId && mapped.intent) {
+        card.templateId = mapped.templateId;
+        card.templateLabel = mapped.templateLabel;
+        card.intent = mapped.intent;
+      }
+      this._aiAssistItems.push(card);
     }
+    this.render();
+  };
+  app._aiAssistRun = async function (clipId, btnEl) {
+    if (!clipId) return;
+    const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
+    const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
+    const text = (promptText !== '' && promptText !== null) ? promptText : (card ? card.promptText : '');
+    const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
+    if (card && card.templateId && card.intent) {
+      opts.templateId = card.templateId;
+      opts.intent = card.intent;
+    }
+    this.setOptimizeOptions(clipId, opts);
+    if (btnEl) btnEl.disabled = true;
+    await this.runCommand('optimize_clip', { clipId });
+    if (btnEl) btnEl.disabled = false;
     this.render();
   };
   const fmtSec = (x) => (Number(x || 0).toFixed(2) + 's');
@@ -142,16 +197,74 @@ function createFakeApp() {
   const { app, setOptimizeOptionsCalls, runCommandCalls } = createFakeApp();
   app.state.selectedClipId = 'clip-1';
   app._aiAssistItems.push({ type: 'card', clipId: 'clip-1', promptText: 'fix pitch', createdAt: 1 });
-  // Simulate Run button click: setOptimizeOptions + runCommand(optimize_clip)
-  app.setOptimizeOptions('clip-1', { userPrompt: 'fix pitch', requestedPresetId: 'llm_v0' });
-  app.runCommand('optimize_clip', { clipId: 'clip-1' });
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'fix pitch' : null), disabled: false };
+  app._aiAssistRun('clip-1', btnEl);
   assert(setOptimizeOptionsCalls.length === 1, 'setOptimizeOptions should be called once');
   assert(setOptimizeOptionsCalls[0].clipId === 'clip-1', 'clipId should match');
   assert(setOptimizeOptionsCalls[0].opts.requestedPresetId === 'llm_v0', 'preset should be llm_v0');
+  assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'fix pitch', 'userPrompt should match');
   assert(runCommandCalls.length === 1, 'runCommand should be called once');
   assert(runCommandCalls[0].command === 'optimize_clip', 'command should be optimize_clip');
   assert(runCommandCalls[0].payload.clipId === 'clip-1', 'payload should have correct clipId');
   console.log('PASS Run on card => runCommand optimize_clip');
+})();
+
+(function testUx7bMatchedMappingStoresTemplateIdOnCard() {
+  const { app, doc } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  const inp = doc.getElementById('aiAssistInput');
+  inp.value = 'the pitch is off';
+  app._aiAssistSend();
+  assert(app._aiAssistItems.length === 1, 'should have one card');
+  const card = app._aiAssistItems[0];
+  assert(card.type === 'card', 'should be card');
+  assert(card.templateId === 'fix_pitch_v1', 'card should store templateId fix_pitch_v1');
+  assert(card.templateLabel === 'Fix Pitch', 'card should store templateLabel');
+  assert(card.intent && card.intent.fixPitch === true, 'card should store intent with fixPitch');
+  assert(card.promptText === 'the pitch is off', 'userPrompt preserved as original text');
+  console.log('PASS UX7b matched mapping => card stores templateId, templateLabel, intent');
+})();
+
+(function testUx7bRunPassesTemplateIdAndIntent() {
+  const { app, doc, setOptimizeOptionsCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  app._aiAssistSend();
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'the pitch is off' : null), disabled: false };
+  app._aiAssistRun('clip-1', btnEl);
+  assert(setOptimizeOptionsCalls.length === 1, 'setOptimizeOptions should be called');
+  assert(setOptimizeOptionsCalls[0].opts.templateId === 'fix_pitch_v1', 'Run should pass templateId');
+  assert(setOptimizeOptionsCalls[0].opts.intent && setOptimizeOptionsCalls[0].opts.intent.fixPitch === true, 'Run should pass intent');
+  assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'the pitch is off', 'userPrompt preserved');
+  assert(setOptimizeOptionsCalls[0].opts.requestedPresetId === 'llm_v0', 'preset preserved');
+  console.log('PASS UX7b Run writes templateId + intent through setOptimizeOptions');
+})();
+
+(function testUx7bUnmatchedMappingNoTemplateId() {
+  const { app, doc, setOptimizeOptionsCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'add more dynamics';
+  app._aiAssistSend();
+  assert(app._aiAssistItems[0].templateId == null, 'unmatched card should have no templateId');
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'add more dynamics' : null), disabled: false };
+  app._aiAssistRun('clip-1', btnEl);
+  assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'add more dynamics', 'userPrompt preserved');
+  assert(setOptimizeOptionsCalls[0].opts.requestedPresetId === 'llm_v0', 'preset preserved');
+  assert(!('templateId' in setOptimizeOptionsCalls[0].opts) || setOptimizeOptionsCalls[0].opts.templateId == null, 'no templateId injected');
+  assert(!('intent' in setOptimizeOptionsCalls[0].opts) || setOptimizeOptionsCalls[0].opts.intent == null, 'no intent injected');
+  console.log('PASS UX7b unmatched prompt => Run writes only userPrompt + requestedPresetId');
+})();
+
+(function testUx7bChinesePhraseMatch() {
+  const { app, doc } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = '跑调';
+  app._aiAssistSend();
+  assert(app._aiAssistItems[0].templateId === 'fix_pitch_v1', '跑调 should map to fix_pitch_v1');
+  doc.getElementById('aiAssistInput').value = '节奏更稳';
+  app._aiAssistSend();
+  assert(app._aiAssistItems[1].templateId === 'tighten_rhythm_v1', '节奏更稳 should map to tighten_rhythm_v1');
+  console.log('PASS UX7b Chinese phrases 跑调, 节奏更稳 map correctly');
 })();
 
 (function testTargetSummaryInstanceVsClip() {
