@@ -1234,13 +1234,15 @@
         ctx.fillRect(x + w - 10, y, 10, h);
       }
 
-      // playhead (cursor)
-      const cx = padL + this.state.modal.cursorSec * pxPerSec;
-      ctx.strokeStyle = 'rgba(239,68,68,.95)';
-      ctx.beginPath();
-      ctx.moveTo(Math.floor(cx)+0.5, 0);
-      ctx.lineTo(Math.floor(cx)+0.5, canvas.height);
-      ctx.stroke();
+      // playhead (cursor) — when playing, overlay div is used; avoid double playhead
+      if (!this.state.modal.isPlaying){
+        const cx = padL + this.state.modal.cursorSec * pxPerSec;
+        ctx.strokeStyle = 'rgba(239,68,68,.95)';
+        ctx.beginPath();
+        ctx.moveTo(Math.floor(cx)+0.5, 0);
+        ctx.lineTo(Math.floor(cx)+0.5, canvas.height);
+        ctx.stroke();
+      }
 
       // top text
       ctx.fillStyle = 'rgba(255,255,255,.75)';
@@ -2354,19 +2356,36 @@ async modalPlay(){
   this.state.modal.isPlaying = true;
   try{ $('#editorStatus').textContent = 'Playing...'; }catch(e){}
 
+  // Show DOM playhead overlay (lightweight; avoids full modalDraw per frame)
+  const phEl = $('#editorPlayhead');
+  if (phEl){
+    phEl.style.display = 'block';
+    const padL = this.state.modal.padL != null ? this.state.modal.padL : 60;
+    const pxPerSec = this.state.modal.pxPerSec != null ? this.state.modal.pxPerSec : 180;
+    phEl.style.left = (padL + startAt * pxPerSec) + 'px';
+  }
+
+  // One-time redraw to clear stale canvas playhead (modalDraw skips playhead when isPlaying)
+  this.modalRequestDraw();
+
   // progress ticker (uses closure vars; do NOT reference them elsewhere)
   const tick = () => {
     if (!this.state.modal.isPlaying) return;
     const sec = startAt + (Tone.Transport.seconds || 0);
     this.state.modal.cursorSec = sec;
     try{ $('#pillCursor').textContent = `Cursor: ${fmtSec(sec)}`; }catch(e){}
-    this.modalRequestDraw();
+    // Update overlay only — no modalRequestDraw per frame
+    const ph = $('#editorPlayhead');
+    if (ph){
+      const pad = this.state.modal.padL != null ? this.state.modal.padL : 60;
+      const pps = this.state.modal.pxPerSec != null ? this.state.modal.pxPerSec : 180;
+      ph.style.left = (pad + sec * pps) + 'px';
+    }
 
     // Auto-stop when finished, and reset to start.
     if ((Tone.Transport.seconds || 0) >= maxT){
       this.modalStop();
       this.state.modal.cursorSec = 0;
-      this.modalRequestDraw();
       return;
     }
     requestAnimationFrame(tick);
@@ -2627,6 +2646,9 @@ async modalPlay(){
 
   this.state.modal.isPlaying = false;
   $('#editorStatus').textContent = 'Stopped.';
+  // Hide DOM overlay so canvas playhead is shown again
+  const phEl = $('#editorPlayhead');
+  if (phEl) phEl.style.display = 'none';
   this.modalRequestDraw();
 },
 

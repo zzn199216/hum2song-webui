@@ -546,6 +546,20 @@
       min-height:0;
       overflow:auto;
     }
+    .editorGridInner{
+      position:relative;
+      display:inline-block;
+    }
+    .editorPlayhead{
+      position:absolute;
+      top:0;
+      bottom:0;
+      width:2px;
+      background: var(--playhead);
+      pointer-events:none;
+      z-index:4;
+      display:none;
+    }
     .editorVelocitySplitter{
       flex-shrink:0;
       height:6px;
@@ -891,7 +905,10 @@
           <div id="canvasWrap" class="editorCanvasWrap">
             <div class="editorCanvasStack">
               <div class="editorGridWrap">
-                <canvas id="canvas" width="1400" height="540"></canvas>
+                <div class="editorGridInner">
+                  <canvas id="canvas" width="1400" height="540"></canvas>
+                  <div id="editorPlayhead" class="editorPlayhead"></div>
+                </div>
               </div>
               <div id="velocitySplitter" class="editorVelocitySplitter" title="Drag to resize velocity lane"></div>
               <div id="velocityLaneWrap" class="editorVelocityLaneWrap">
