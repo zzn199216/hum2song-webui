@@ -86,13 +86,8 @@
         return suffix ? base + ' | ' + suffix : base;
       }
 
-      // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
-      const TEMPLATES_V1_UI = {
-        fix_pitch_v1: { label: 'Fix Pitch', labelKey: 'editor.fixPitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
-        tighten_rhythm_v1: { label: 'Tighten Rhythm', labelKey: 'editor.tightenRhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
-        clean_outliers_v1: { label: 'Clean Outliers', labelKey: 'editor.cleanOutliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
-        bluesy_v1: { label: 'Bluesy', labelKey: 'editor.bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
-      };
+      // PR-E2 / INFRA-1a: UI-side template map — derived from shared optimize_templates_v1.js
+      const TEMPLATES_V1_UI = (root && root.H2S_OPTIMIZE_TEMPLATES_V1_MAP) ? root.H2S_OPTIMIZE_TEMPLATES_V1_MAP : {};
 
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper

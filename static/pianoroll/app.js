@@ -41,13 +41,8 @@
     }catch(e){}
   }
 
-  // PR-UX2: Inspector Optimize templates (matches LLM_TEMPLATES_V1 in agent_controller)
-  const INSPECTOR_TEMPLATES = {
-    fix_pitch_v1: { label: 'Fix Pitch', labelKey: 'editor.fixPitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
-    tighten_rhythm_v1: { label: 'Tighten Rhythm', labelKey: 'editor.tightenRhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
-    clean_outliers_v1: { label: 'Clean Outliers', labelKey: 'editor.cleanOutliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
-    bluesy_v1: { label: 'Bluesy', labelKey: 'editor.bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
-  };
+  // PR-UX2 / INFRA-1a: Inspector Optimize templates — derived from shared registry
+  const INSPECTOR_TEMPLATES = (typeof window !== 'undefined' && window.H2S_OPTIMIZE_TEMPLATES_V1_MAP) ? window.H2S_OPTIMIZE_TEMPLATES_V1_MAP : {};
 
   /** UX7b: Keyword-based mapping from natural-language text to template/intent. Returns null fields if no match. */
   function _mapAiAssistTextToTemplate(text){
@@ -2678,7 +2673,7 @@ renderTimeline(){
         Promise.all([
           I18N.loadManifest ? I18N.loadManifest().catch(() => {}) : Promise.resolve(),
           I18N.load(I18N.getLang()).catch(() => {})
-        ]).then(() => { populate(); this._updateI18nLabels(); }).catch(() => { populate(); this._updateI18nLabels(); });
+        ]).then(() => { populate(); this._updateI18nLabels(); this.render(); }).catch(() => { populate(); this._updateI18nLabels(); this.render(); });
       }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
     },
     _updateI18nLabels(){

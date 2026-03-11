@@ -4,6 +4,10 @@
 (function(ROOT){
   'use strict';
 
+  if (typeof require === 'function' && !ROOT.H2S_OPTIMIZE_TEMPLATES_V1_MAP) {
+    try { require('../core/optimize_templates_v1.js'); } catch(e) {}
+  }
+
   const H2SAgentPatch = ROOT.H2SAgentPatch;
   const H2SProject = ROOT.H2SProject;
 
@@ -14,41 +18,8 @@
   const DEFAULT_OPT_SOURCE = 'safe_stub_v0';
   const SAFE_STUB_PRESET = 'alt_110_80';
 
-  /** PR-E1: TemplateSpec v1 registry — static data only; no DOM, no localStorage. */
-  const LLM_TEMPLATES_V1 = {
-    fix_pitch_v1: {
-      id: 'fix_pitch_v1',
-      label: 'Fix Pitch',
-      promptVersion: 'tmpl_v1.fix_pitch.r1',
-      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
-      seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.',
-      directives: {},
-    },
-    tighten_rhythm_v1: {
-      id: 'tighten_rhythm_v1',
-      label: 'Tighten Rhythm',
-      promptVersion: 'tmpl_v1.tighten_rhythm.r1',
-      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
-      seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.',
-      directives: {},
-    },
-    clean_outliers_v1: {
-      id: 'clean_outliers_v1',
-      label: 'Clean Outliers',
-      promptVersion: 'tmpl_v1.clean_outliers',
-      intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
-      seed: 'Smooth extreme values; reduce outliers.',
-      directives: {},
-    },
-    bluesy_v1: {
-      id: 'bluesy_v1',
-      label: 'Bluesy',
-      promptVersion: 'tmpl_v1.bluesy',
-      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
-      seed: 'Add subtle blues inflection to timing and dynamics.',
-      directives: {},
-    },
-  };
+  /** PR-E1 / INFRA-1a: TemplateSpec v1 registry — derived from shared optimize_templates_v1.js */
+  const LLM_TEMPLATES_V1 = (ROOT.H2S_OPTIMIZE_TEMPLATES_V1_MAP || {});
 
   /** PR-E1: Resolve promptMeta from optsIn for patchSummary trace. */
   function resolvePromptMeta(optsIn){

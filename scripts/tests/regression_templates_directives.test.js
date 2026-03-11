@@ -3,12 +3,31 @@
 // 2) DIRECTIVES block in LLM user message when template or intent present
 // 3) quality_velocity_only retry hint is intent-specific
 // 4) velocity-only patch rejected when fixPitch/tightenRhythm intent on
+// INFRA-1a: shared registry contains four built-in templates with required fields
 
 const path = require('path');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed');
 }
+
+(function testInfra1aSharedRegistry() {
+  const regPath = path.resolve(__dirname, '../../static/pianoroll/core/optimize_templates_v1.js');
+  require(regPath);
+  const MAP = (typeof globalThis !== 'undefined' ? globalThis : global).H2S_OPTIMIZE_TEMPLATES_V1_MAP;
+  const ARR = (typeof globalThis !== 'undefined' ? globalThis : global).H2S_OPTIMIZE_TEMPLATES_V1;
+  assert(MAP && typeof MAP === 'object', 'INFRA-1a: H2S_OPTIMIZE_TEMPLATES_V1_MAP must exist');
+  assert(ARR && Array.isArray(ARR) && ARR.length >= 4, 'INFRA-1a: H2S_OPTIMIZE_TEMPLATES_V1 must have 4+ templates');
+  const ids = ['fix_pitch_v1', 'tighten_rhythm_v1', 'clean_outliers_v1', 'bluesy_v1'];
+  for (const id of ids) assert(MAP[id], 'INFRA-1a: map must contain ' + id);
+  const fp = MAP.fix_pitch_v1;
+  assert(fp && fp.promptVersion === 'tmpl_v1.fix_pitch.r1', 'INFRA-1a: fix_pitch_v1 promptVersion');
+  for (const id of ids) {
+    const t = MAP[id];
+    assert(t.id && t.label && t.intent && typeof t.seed === 'string', 'INFRA-1a: ' + id + ' must have id, label, intent, seed');
+  }
+  console.log('PASS INFRA-1a: shared registry contains four templates with required fields');
+})();
 
 function ensureWindowShim() {
   if (typeof globalThis.window === 'undefined') globalThis.window = {};
