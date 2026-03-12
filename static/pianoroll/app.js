@@ -1541,15 +1541,22 @@ ensureTrackButtons(){
             const c = p2 && p2.clips && p2.clips[it.clipId];
             const canUndo = !!(c && c.parentRevisionId != null && String(c.parentRevisionId).trim());
             const runState = it.runState || 'idle';
-            html += '<div class="aiAssistCard" data-clip-id="' + escapeHtml(String(it.clipId)) + '">';
+            const tl = (it.templateLabel && String(it.templateLabel).trim()) ? String(it.templateLabel).trim() : null;
+            const up = (it.usedPresetId && String(it.usedPresetId).trim()) ? String(it.usedPresetId).trim() : null;
+            const dataRunState = runState !== 'idle' ? (' data-run-state="' + escapeHtml(runState) + '"') : '';
+            html += '<div class="aiAssistCard" data-clip-id="' + escapeHtml(String(it.clipId)) + '"' + dataRunState + '>';
             html += '<div class="aiAssistCardPrompt">' + escapeHtml(it.promptText) + '</div>';
+            if (tl || up){
+              const metaText = (tl && up) ? (escapeHtml(tl) + ' · ' + escapeHtml(up)) : (tl ? escapeHtml(tl) : escapeHtml(up));
+              html += '<div class="aiAssistCardMeta">' + metaText + '</div>';
+            }
             if (runState !== 'idle'){
               let statusLine = '';
-              if (runState === 'running') statusLine = 'Running…';
-              else if (runState === 'done') statusLine = (it.resultKind === 'no-op') ? 'No-op' : (it.resultKind === 'velocity-only') ? 'Velocity only' : (it.resultKind === 'pitch/timing') ? 'Pitch/timing updated' : (it.resultKind === 'structure') ? 'Structure updated' : 'Updated';
-              else if (runState === 'failed') statusLine = 'Failed: ' + escapeHtml((it.lastError || 'error').slice(0, 80));
-              else if (runState === 'undone') statusLine = 'Undone';
-              html += '<div class="aiAssistCardStatus" style="font-size:11px;opacity:0.8;margin-bottom:6px;">' + statusLine + '</div>';
+              if (runState === 'running') statusLine = _t('aiAssist.statusRunning');
+              else if (runState === 'done') statusLine = (it.resultKind === 'no-op') ? _t('aiAssist.resultNoOp') : (it.resultKind === 'velocity-only') ? _t('aiAssist.resultVelocityOnly') : (it.resultKind === 'pitch/timing') ? _t('aiAssist.resultPitchTiming') : (it.resultKind === 'structure') ? _t('aiAssist.resultStructure') : _t('aiAssist.resultUpdated');
+              else if (runState === 'failed') statusLine = _t('aiAssist.statusFailed') + ': ' + escapeHtml((it.lastError || 'error').slice(0, 80));
+              else if (runState === 'undone') statusLine = _t('aiAssist.statusUndone');
+              html += '<div class="aiAssistCardStatus">' + statusLine + '</div>';
             }
             html += '<div class="aiAssistCardBtns">';
             html += '<button type="button" class="btn primary mini" data-act="aiRun" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-prompt="' + escapeHtml(it.promptText) + '">' + escapeHtml(_t('aiAssist.run')) + '</button>';
