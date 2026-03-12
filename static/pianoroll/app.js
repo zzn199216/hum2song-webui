@@ -501,7 +501,7 @@ async runCommand(command, payload){
         if (!clipId) throw new Error('clipId required');
         const optRes = await this.optimizeClip(clipId);
         if (optRes && !optRes.ok) throw new Error(optRes.reason || optRes.detail || optRes.message || 'Optimize failed');
-        result.data = { clipId };
+        result.data = { clipId, optimizeResult: optRes };
         break;
       }
       case 'rollback_clip': {
@@ -509,7 +509,7 @@ async runCommand(command, payload){
         if (!clipId) throw new Error('clipId required');
         const res = this.rollbackClipRevision(clipId);
         if (res && res.ok) { persist(); this.render(); }
-        result.data = { clipId };
+        result.data = { clipId, rollbackResult: res };
         break;
       }
       default:
@@ -1424,7 +1424,7 @@ ensureTrackButtons(){
         this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
       } else {
         const mapped = _mapAiAssistTextToTemplate(text);
-        const card = { type: 'card', clipId, promptText: text, createdAt: Date.now() };
+        const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
         if (mapped.templateId && mapped.intent) {
           card.templateId = mapped.templateId;
           card.templateLabel = mapped.templateLabel;
@@ -1438,21 +1438,66 @@ ensureTrackButtons(){
       if (!clipId) return;
       const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
       const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
-      const text = (promptText !== '' && promptText !== null) ? promptText : (card ? card.promptText : '');
+      if (!card) return;
+      const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
       const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
-      if (card && card.templateId && card.intent) {
+      if (card.templateId && card.intent) {
         opts.templateId = card.templateId;
         opts.intent = card.intent;
       }
       this.setOptimizeOptions(clipId, opts);
+      card.runState = 'running';
+      card.resultKind = null;
+      card.usedPresetId = null;
+      card.lastError = null;
       if (btnEl) btnEl.disabled = true;
-      await this.runCommand('optimize_clip', { clipId });
-      if (btnEl) btnEl.disabled = false;
+      this.render();
+      try {
+        const res = await this.runCommand('optimize_clip', { clipId });
+        if (btnEl) btnEl.disabled = false;
+        if (!res || !res.ok) {
+          card.runState = 'failed';
+          card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
+          this.render();
+          return;
+        }
+        const optRes = (res.data && res.data.optimizeResult) ? res.data.optimizeResult : null;
+        if (!optRes || !optRes.ok) {
+          card.runState = 'failed';
+          card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
+          this.render();
+          return;
+        }
+        let ps = (optRes && optRes.patchSummary) ? optRes.patchSummary : null;
+        if (!ps && optRes.ok && optRes.ops > 0) {
+          const p2 = this.getProjectV2();
+          const c = p2 && p2.clips && p2.clips[clipId];
+          ps = (c && c.meta && c.meta.agent && c.meta.agent.patchSummary) ? c.meta.agent.patchSummary : null;
+        }
+        card.usedPresetId = (ps && ps.executedPreset) ? String(ps.executedPreset) : 'llm_v0';
+        if (optRes.ops === 0 || (ps && ps.noChanges === true)) card.resultKind = 'no-op';
+        else if (ps && ps.isVelocityOnly === true) card.resultKind = 'velocity-only';
+        else if (ps && (ps.hasPitchChange === true || ps.hasTimingChange === true)) card.resultKind = 'pitch/timing';
+        else if (ps && ps.hasStructuralChange === true) card.resultKind = 'structure';
+        else card.resultKind = 'updated';
+        card.runState = 'done';
+      } catch (err) {
+        if (btnEl) btnEl.disabled = false;
+        card.runState = 'failed';
+        card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
+      }
       this.render();
     },
     async _aiAssistUndo(clipId){
       if (!clipId) return;
-      await this.runCommand('rollback_clip', { clipId });
+      const res = await this.runCommand('rollback_clip', { clipId });
+      const rb = (res && res.data && res.data.rollbackResult) ? res.data.rollbackResult : null;
+      if (rb && rb.ok && rb.changed) {
+        const items = this._aiAssistItems || [];
+        for (const it of items) {
+          if (it.type === 'card' && String(it.clipId) === String(clipId) && it.runState === 'done') it.runState = 'undone';
+        }
+      }
       this.render();
     },
 
@@ -1495,8 +1540,17 @@ ensureTrackButtons(){
             const p2 = this.getProjectV2();
             const c = p2 && p2.clips && p2.clips[it.clipId];
             const canUndo = !!(c && c.parentRevisionId != null && String(c.parentRevisionId).trim());
+            const runState = it.runState || 'idle';
             html += '<div class="aiAssistCard" data-clip-id="' + escapeHtml(String(it.clipId)) + '">';
             html += '<div class="aiAssistCardPrompt">' + escapeHtml(it.promptText) + '</div>';
+            if (runState !== 'idle'){
+              let statusLine = '';
+              if (runState === 'running') statusLine = 'Running…';
+              else if (runState === 'done') statusLine = (it.resultKind === 'no-op') ? 'No-op' : (it.resultKind === 'velocity-only') ? 'Velocity only' : (it.resultKind === 'pitch/timing') ? 'Pitch/timing updated' : (it.resultKind === 'structure') ? 'Structure updated' : 'Updated';
+              else if (runState === 'failed') statusLine = 'Failed: ' + escapeHtml((it.lastError || 'error').slice(0, 80));
+              else if (runState === 'undone') statusLine = 'Undone';
+              html += '<div class="aiAssistCardStatus" style="font-size:11px;opacity:0.8;margin-bottom:6px;">' + statusLine + '</div>';
+            }
             html += '<div class="aiAssistCardBtns">';
             html += '<button type="button" class="btn primary mini" data-act="aiRun" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-prompt="' + escapeHtml(it.promptText) + '">' + escapeHtml(_t('aiAssist.run')) + '</button>';
             html += '<button type="button" class="btn mini" data-act="aiOpenOptimize" data-clip-id="' + escapeHtml(String(it.clipId)) + '">' + escapeHtml(_t('aiAssist.openOptimize')) + '</button>';

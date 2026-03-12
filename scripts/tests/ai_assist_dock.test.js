@@ -93,6 +93,22 @@ function createFakeApp() {
     },
     runCommand(cmd, payload) {
       runCommandCalls.push({ command: cmd, payload: payload || {} });
+      const cid = payload && payload.clipId;
+      if (cmd === 'optimize_clip') {
+        return Promise.resolve({
+          ok: true,
+          data: {
+            clipId: cid,
+            optimizeResult: { ok: true, ops: 1, patchSummary: { executedPreset: 'llm_v0' } },
+          },
+        });
+      }
+      if (cmd === 'rollback_clip') {
+        return Promise.resolve({
+          ok: true,
+          data: { clipId: cid, rollbackResult: { ok: true, changed: true } },
+        });
+      }
       return Promise.resolve({ ok: true });
     },
     getProjectV2() {
@@ -111,7 +127,7 @@ function createFakeApp() {
       this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
     } else {
       const mapped = mapAiAssistTextToTemplate(text);
-      const card = { type: 'card', clipId, promptText: text, createdAt: Date.now() };
+      const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
       if (mapped.templateId && mapped.intent) {
         card.templateId = mapped.templateId;
         card.templateLabel = mapped.templateLabel;
@@ -125,16 +141,66 @@ function createFakeApp() {
     if (!clipId) return;
     const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
     const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
-    const text = (promptText !== '' && promptText !== null) ? promptText : (card ? card.promptText : '');
+    if (!card) return;
+    const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
     const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
-    if (card && card.templateId && card.intent) {
+    if (card.templateId && card.intent) {
       opts.templateId = card.templateId;
       opts.intent = card.intent;
     }
     this.setOptimizeOptions(clipId, opts);
+    card.runState = 'running';
+    card.resultKind = null;
+    card.usedPresetId = null;
+    card.lastError = null;
     if (btnEl) btnEl.disabled = true;
-    await this.runCommand('optimize_clip', { clipId });
-    if (btnEl) btnEl.disabled = false;
+    this.render();
+    try {
+      const res = await this.runCommand('optimize_clip', { clipId });
+      if (btnEl) btnEl.disabled = false;
+      if (!res || !res.ok) {
+        card.runState = 'failed';
+        card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
+        this.render();
+        return;
+      }
+      const optRes = (res.data && res.data.optimizeResult) ? res.data.optimizeResult : null;
+      if (!optRes || !optRes.ok) {
+        card.runState = 'failed';
+        card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
+        this.render();
+        return;
+      }
+      let ps = (optRes && optRes.patchSummary) ? optRes.patchSummary : null;
+      if (!ps && optRes.ok && optRes.ops > 0) {
+        const p2 = this.getProjectV2();
+        const c = p2 && p2.clips && p2.clips[clipId];
+        ps = (c && c.meta && c.meta.agent && c.meta.agent.patchSummary) ? c.meta.agent.patchSummary : null;
+      }
+      card.usedPresetId = (ps && ps.executedPreset) ? String(ps.executedPreset) : 'llm_v0';
+      if (optRes.ops === 0 || (ps && ps.noChanges === true)) card.resultKind = 'no-op';
+      else if (ps && ps.isVelocityOnly === true) card.resultKind = 'velocity-only';
+      else if (ps && (ps.hasPitchChange === true || ps.hasTimingChange === true)) card.resultKind = 'pitch/timing';
+      else if (ps && ps.hasStructuralChange === true) card.resultKind = 'structure';
+      else card.resultKind = 'updated';
+      card.runState = 'done';
+    } catch (err) {
+      if (btnEl) btnEl.disabled = false;
+      card.runState = 'failed';
+      card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
+    }
+    this.render();
+  };
+  app._aiAssistUndo = async function (clipId) {
+    if (!clipId) return;
+    const res = await this.runCommand('rollback_clip', { clipId });
+    const rb = (res && res.data && res.data.rollbackResult) ? res.data.rollbackResult : null;
+    if (rb && rb.ok && rb.changed) {
+      const items = this._aiAssistItems || [];
+      for (const it of items) {
+        if (it.type === 'card' && String(it.clipId) === String(clipId) && it.runState === 'done') it.runState = 'undone';
+      }
+    }
     this.render();
   };
   const fmtSec = (x) => (Number(x || 0).toFixed(2) + 's');
@@ -294,4 +360,51 @@ function createFakeApp() {
   app._aiAssistSend();
   assert(app._aiAssistItems.length === 0, 'empty should not add item');
   console.log('PASS empty/whitespace input not sent');
+})();
+
+(function testUx7cSuccessfulRunCardBecomesDone() {
+  const { app } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app._aiAssistItems.push({ type: 'card', clipId: 'clip-1', promptText: 'fix pitch', createdAt: 1, runState: 'idle' });
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'fix pitch' : null), disabled: false };
+  app.runCommand = (cmd, payload) => Promise.resolve({
+    ok: true,
+    data: {
+      clipId: payload.clipId,
+      optimizeResult: { ok: true, ops: 2, patchSummary: { executedPreset: 'llm_v0', hasPitchChange: true } },
+    },
+  });
+  return app._aiAssistRun('clip-1', btnEl).then(() => {
+    assert(app._aiAssistItems[0].runState === 'done', 'card should be done');
+    assert(app._aiAssistItems[0].resultKind === 'pitch/timing', 'resultKind should be pitch/timing');
+    assert(app._aiAssistItems[0].usedPresetId === 'llm_v0', 'usedPresetId should be set');
+    console.log('PASS UX7c successful run => card done + resultKind');
+  });
+})();
+
+(function testUx7cFailedRunCardBecomesFailed() {
+  const { app } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app._aiAssistItems.push({ type: 'card', clipId: 'clip-1', promptText: 'fix pitch', createdAt: 1, runState: 'idle' });
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'fix pitch' : null), disabled: false };
+  app.runCommand = () => Promise.resolve({ ok: false, message: 'Agent failed' });
+  return app._aiAssistRun('clip-1', btnEl).then(() => {
+    assert(app._aiAssistItems[0].runState === 'failed', 'card should be failed');
+    assert(app._aiAssistItems[0].lastError && app._aiAssistItems[0].lastError.indexOf('Agent failed') >= 0, 'lastError should contain message');
+    console.log('PASS UX7c failed run => card failed + lastError');
+  });
+})();
+
+(function testUx7cUndoMarksDoneCardUndone() {
+  const { app } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app._aiAssistItems.push({ type: 'card', clipId: 'clip-1', promptText: 'fix pitch', createdAt: 1, runState: 'done', resultKind: 'pitch/timing' });
+  app.runCommand = (cmd, payload) => Promise.resolve({
+    ok: true,
+    data: { clipId: payload.clipId, rollbackResult: { ok: true, changed: true } },
+  });
+  return app._aiAssistUndo('clip-1').then(() => {
+    assert(app._aiAssistItems[0].runState === 'undone', 'card should be undone');
+    console.log('PASS UX7c undo => done card becomes undone');
+  });
 })();
