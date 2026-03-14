@@ -2018,10 +2018,11 @@ renderTimeline(){
           `</div>` +
         `</details>`
       );
+      const clipDisplayName = clip.name || clipId || 'Untitled';
       box.removeAttribute('data-i18n');
       box.className = '';
       box.innerHTML = (
-        `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
+        `<div class="kv"><b>Clip</b><input type="text" data-act="inspClipName" data-id="${escapeHtml(clipId)}" data-initial-value="${escapeHtml(clipDisplayName)}" value="${escapeHtml(clipDisplayName)}" style="flex:1; min-width:0; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; box-sizing:border-box;" /></div>` +
         optimizeBlockHtml +
         (historyHtml ? (
           `<details class="clipAdvanced" data-insp-section="history" style="margin-top:6px;"${getInspectorSectionOpen('history') ? ' open' : ''}>` +
@@ -2123,6 +2124,17 @@ renderTimeline(){
             self.render();
             return;
           }
+          if (act === 'inspClipName'){
+            if (!cid || !self) return;
+            const newName = String(el.value || '').trim() || 'Untitled';
+            const p2 = self.getProjectV2();
+            const clip = p2 && p2.clips && p2.clips[cid];
+            if (!clip) return;
+            if (newName === (clip.name || '')) return;
+            clip.name = newName;
+            self.setProjectFromV2(p2);
+            return;
+          }
           if (act !== 'inspRevSelect') return;
           if (!cid || !P || !P.setClipActiveRevision) return;
           const revId = el.value;
@@ -2132,8 +2144,26 @@ renderTimeline(){
           if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
           self.render();
         };
+        box.__h2sKeydownHandler = function(ev){
+          const el = ev.target;
+          if (!el || el.getAttribute('data-act') !== 'inspClipName') return;
+          const self = box.__h2sApp;
+          if (ev.key === 'Enter'){
+            ev.preventDefault();
+            el.blur();
+            return;
+          }
+          if (ev.key === 'Escape'){
+            ev.preventDefault();
+            const initial = el.getAttribute('data-initial-value') || '';
+            el.value = initial;
+            el.blur();
+            return;
+          }
+        };
         box.addEventListener('click', box.__h2sClickHandler, true);
         box.addEventListener('change', box.__h2sChangeHandler);
+        box.addEventListener('keydown', box.__h2sKeydownHandler);
         box.__h2sToggleHandler = function(ev){
           const d = ev.target;
           if (!d || d.tagName !== 'DETAILS') return;
