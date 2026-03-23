@@ -270,10 +270,79 @@ async function testC_retryHintIntentSpecific() {
   console.log('PASS regression templates: Case C — retry hint intent-specific');
 }
 
+// Quality fix: fixPitch intent with velocityOnly:true (default) must allow pitch edits through
+async function testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeMinimalProject();
+  let project = proj;
+  const cid = clip.id;
+  const rev0 = String(project.clips[cid].revisionId || '');
+
+  const pitchChangePatch = {
+    version: 1,
+    clipId: cid,
+    ops: [{ op: 'setNote', noteId: 'n0', pitch: 61, velocity: 90 }],
+  };
+  const rawText = '```json\n' + JSON.stringify(pitchChangePatch) + '\n```';
+
+  const origClient = globalThis.H2S_LLM_CLIENT;
+  const origConfig = globalThis.H2S_LLM_CONFIG;
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      try {
+        const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+        return m ? JSON.parse(m[1]) : null;
+      } catch (_) { return null; }
+    },
+  };
+  // velocityOnly: true = default Safe mode; without fix would block pitch edits
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'test-model', velocityOnly: true }),
+  };
+
+  let beginCalls = 0;
+  const origBegin = globalThis.H2SProject.beginNewClipRevision;
+  globalThis.H2SProject.beginNewClipRevision = function (...args) {
+    beginCalls++;
+    return origBegin.apply(this, args);
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+    const res = await ctrl.optimizeClip(cid, {
+      requestedPresetId: 'llm_v0',
+      templateId: 'fix_pitch_v1',
+      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+    });
+
+    assert(res && res.ok === true, 'Case D: fixPitch with velocityOnly:true must succeed');
+    assert(res.ops === 1, 'Case D: ops must be 1');
+    assert(beginCalls === 1, 'Case D: revision must be created');
+    assert(String(project.clips[cid].revisionId || '') !== rev0, 'Case D: revisionId must change');
+    assert(project.clips[cid].score.tracks[0].notes[0].pitch === 61, 'Case D: pitch must be applied');
+  } finally {
+    globalThis.H2S_LLM_CLIENT = origClient;
+    globalThis.H2S_LLM_CONFIG = origConfig;
+    globalThis.H2SProject.beginNewClipRevision = origBegin;
+  }
+
+  console.log('PASS regression templates: Case D — fixPitch with velocityOnly:true allows pitch edits');
+}
+
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
   await testC_retryHintIntentSpecific();
+  await testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits();
 })().catch((e) => {
   console.error(e);
   process.exit(1);

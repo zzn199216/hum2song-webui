@@ -361,8 +361,15 @@
         return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }));
       }
 
+      // Intent for prompt/directives and safe-mode override (extract once)
+      const intent = (optsIn.intent && typeof optsIn.intent === 'object')
+        ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
+        : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+
       // PR-8D: Determine safe mode (velocity-only) - default ON if missing
-      const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+      // Quality fix: fixPitch/tightenRhythm require pitch/timing edits; override so those intents are not blocked
+      let safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+      if (intent.fixPitch || intent.tightenRhythm) safeMode = false;
 
       // PR-8B-1: Extract clip metadata and noteIds for structured hint
       const score = clip && clip.score;
@@ -503,9 +510,6 @@
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
       // PR-B2-min / PR-E3: Goals and Directives from intent + template
-      const intent = (optsIn.intent && typeof optsIn.intent === 'object')
-        ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
-        : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
       const hasGoals = intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers || !!template;
       const directivesBlock = hasGoals ? buildDirectivesBlock(template, intent) : '';
       const goalsPrefix = !directivesBlock && (intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers)
