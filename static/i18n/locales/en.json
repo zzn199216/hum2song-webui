@@ -110,6 +110,7 @@
 
   "cliplib.title": "Clip Library",
   "cliplib.useLastRecording": "Use last recording",
+  "cliplib.playLastRecording": "Play last recording",
   "cliplib.clear": "Clear",
   "cliplib.autoOpenAfterImport": "Auto-open editor after import",
   "cliplib.generatePill": "Generate: upload WAV -> backend -> clip auto-added",

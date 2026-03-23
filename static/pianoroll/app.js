@@ -929,6 +929,7 @@ if (typeof localStorage !== 'undefined') {
         else this.startRecording();
       });
       $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
+      $('#btnPlayLast').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.playLastRecording(); });
       const chkAutoOpen = $('#chkAutoOpenAfterImport');
       if (chkAutoOpen) {
         chkAutoOpen.checked = !!this.state.autoOpenAfterImport;
@@ -2479,6 +2480,11 @@ renderTimeline(){
         useLast.disabled = !this.state.lastRecordedFile;
         useLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
       }
+      const playLast = document.getElementById('btnPlayLast');
+      if (playLast) {
+        playLast.disabled = !this.state.lastRecordedFile;
+        playLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
+      }
       if (timerEl) timerEl.style.display = active ? '' : 'none';
       if (waveEl) waveEl.style.display = active ? '' : 'none';
     },
@@ -2653,6 +2659,19 @@ renderTimeline(){
     useLastRecording(){
       if (!this.state.lastRecordedFile) return;
       this.uploadFileAndGenerate(this.state.lastRecordedFile);
+    },
+
+    /** UX: Preview last recorded raw audio before generation. Safe no-op if no recording. */
+    playLastRecording(){
+      if (!this.state.lastRecordedFile) return;
+      try{
+        const url = URL.createObjectURL(this.state.lastRecordedFile);
+        const audio = new Audio(url);
+        const revoke = () => { try{ URL.revokeObjectURL(url); }catch(e){} };
+        audio.onended = revoke;
+        audio.onerror = revoke;
+        audio.play().catch(() => revoke());
+      }catch(e){ /* minimal safe failure: do not break recording or generation flow */ }
     },
 
     async pollTaskUntilDone(taskId){
