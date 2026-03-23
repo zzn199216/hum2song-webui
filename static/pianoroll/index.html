@@ -94,7 +94,9 @@
       display:flex;
       flex-direction:column;
     }
-    #aiAssistDock.open{ height:280px; width:340px; }
+    #aiAssistDock.open{ height:400px; width:340px; }
+    #aiAssistResizeHandle{ position:absolute; top:0; left:0; width:20px; height:20px; cursor:nwse-resize; z-index:10; user-select:none; background:linear-gradient(135deg, rgba(255,255,255,.15) 0%, transparent 50%); border-radius:var(--radius) 0 6px 0; }
+    #aiAssistResizeHandle:hover{ background:linear-gradient(135deg, rgba(255,255,255,.25) 0%, transparent 50%); }
     #aiAssistHeader{
       height:28px;
       min-height:28px;
@@ -116,7 +118,7 @@
     .aiAssistChevron{ margin-left:6px; color:var(--muted); font-size:10px; flex-shrink:0; }
     #aiAssistBody{ flex:1; min-height:0; display:flex; flex-direction:column; padding:8px; gap:8px; overflow:hidden; }
     #aiAssistDock:not(.open) #aiAssistBody{ display:none; }
-    #aiAssistMessages{ flex:1; overflow-y:auto; font-size:12px; min-height:80px; }
+    #aiAssistMessages{ flex:1; overflow-y:auto; font-size:12px; min-height:120px; }
     #aiAssistMessages .aiAssistSys{ color:var(--muted); padding:6px 0; }
     #aiAssistMessages .aiAssistCard{ border:1px solid var(--border); border-radius:10px; padding:8px; margin-bottom:8px; background:rgba(0,0,0,.2); }
     #aiAssistMessages .aiAssistCardPrompt{ margin-bottom:8px; font-size:11px; }
@@ -842,6 +844,7 @@
 
   <!-- PR-UX7a: AI Assistant dock -->
   <div id="aiAssistDock" class="" aria-label="AI Assistant">
+    <div id="aiAssistResizeHandle" title="Drag to resize" aria-hidden="true"></div>
     <div id="aiAssistHeader" title="">
       <span id="aiAssistHeaderTitle" data-i18n="aiAssist.title">AI Assistant</span>
       <span id="aiAssistHeaderTarget" class="muted" style="margin-left:6px;"></span>

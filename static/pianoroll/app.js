@@ -1412,6 +1412,36 @@ ensureTrackButtons(){
         else if (act === 'aiOpenOptimize') this.runCommand('open_inspector_optimize');
         else if (act === 'aiUndo') this._aiAssistUndo(clipId);
       });
+      const handle = document.getElementById('aiAssistResizeHandle');
+      if (handle) {
+        handle.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); ev.preventDefault(); this._aiAssistStartResize(ev); });
+      }
+    },
+    _aiAssistStartResize(ev){
+      const dock = document.getElementById('aiAssistDock');
+      if (!dock || !dock.classList.contains('open')) return;
+      ev.preventDefault();
+      const MIN_W = 260; const MIN_H = 220; const MAX_W = Math.min(600, (typeof window !== 'undefined' && window.innerWidth) ? Math.floor(window.innerWidth * 0.9) : 600);
+      const MAX_H = Math.min(700, (typeof window !== 'undefined' && window.innerHeight) ? Math.floor(window.innerHeight * 0.9) : 700);
+      let prevX = ev.clientX; let prevY = ev.clientY;
+      let w = dock.offsetWidth; let h = dock.offsetHeight;
+      const onMove = (e) => {
+        e.preventDefault();
+        const dx = e.clientX - prevX; const dy = e.clientY - prevY;
+        prevX = e.clientX; prevY = e.clientY;
+        w = Math.max(MIN_W, Math.min(MAX_W, w - dx));
+        h = Math.max(MIN_H, Math.min(MAX_H, h - dy));
+        dock.style.width = w + 'px'; dock.style.height = h + 'px';
+        this._aiAssistDockWidth = w; this._aiAssistDockHeight = h;
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove, true);
+        document.removeEventListener('pointerup', onUp, true);
+        document.removeEventListener('pointercancel', onUp, true);
+      };
+      document.addEventListener('pointermove', onMove, { capture: true });
+      document.addEventListener('pointerup', onUp, { capture: true });
+      document.addEventListener('pointercancel', onUp, { capture: true });
     },
     _aiAssistSend(){
       const inp = document.getElementById('aiAssistInput');
@@ -1528,6 +1558,11 @@ ensureTrackButtons(){
       const messagesEl = document.getElementById('aiAssistMessages');
       if (!dock) return;
       dock.classList.toggle('open', !!this.state.aiAssistOpen);
+      if (!this.state.aiAssistOpen) dock.style.height = '28px';
+      else if (this._aiAssistDockWidth != null || this._aiAssistDockHeight != null) {
+        if (this._aiAssistDockWidth != null) dock.style.width = this._aiAssistDockWidth + 'px';
+        if (this._aiAssistDockHeight != null) dock.style.height = this._aiAssistDockHeight + 'px';
+      } else { dock.style.width = ''; dock.style.height = ''; }
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       if (headerTarget) headerTarget.textContent = this._getAiAssistTargetSummary();
       if (headerChevron) headerChevron.textContent = this.state.aiAssistOpen ? '\u25BE' : '\u25B8';
