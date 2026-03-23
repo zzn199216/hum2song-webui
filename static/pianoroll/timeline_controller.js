@@ -729,13 +729,17 @@
       // Select without rebuilding whole timeline.
       config.onSelectInstance(instId, el);
 
+      const inst = (proj.instances||[]).find(x => x.id === instId);
+      const originTrackIndex = (inst && (typeof inst.trackIndex === 'number')) ? inst.trackIndex : 0;
       const rect = el.getBoundingClientRect();
       state.dragCandidate = {
         instId,
         el,
         pointerId: ev.pointerId,
         startClientX: ev.clientX,
+        startClientY: ev.clientY,
         offsetX: ev.clientX - rect.left,
+        originTrackIndex,
         started: false,
         _elConnectedAtDown: el.isConnected
       };
@@ -803,6 +807,34 @@
 
       // Update DOM in-place (NO full render!)
       cand.el.style.left = (ctrl._labelW + startSec * pxPerSec) + 'px';
+
+      // Cross-track: only after vertical threshold exceeded; use pickLaneIndexByY for hysteresis.
+      const VERTICAL_THRESHOLD_PX = 16;
+      const LANE_HEIGHT = 96;
+      const trackCount = (proj.tracks||[]).length;
+      const dy = Math.abs(ev.clientY - (cand.startClientY ?? ev.clientY));
+      if (dy >= VERTICAL_THRESHOLD_PX && trackCount > 0){
+        const Rt = (typeof globalThis !== 'undefined' && globalThis.H2STimelineRuntime) || (typeof window !== 'undefined' && window.H2STimelineRuntime);
+        if (Rt && typeof Rt.pickLaneIndexByY === 'function'){
+          const rectT = tracks.getBoundingClientRect();
+          const targetTrackIndex = Rt.pickLaneIndexByY({
+            clientY: ev.clientY,
+            rectTop: rectT.top,
+            scrollTop: (tracks.scrollTop || 0),
+            laneHeight: LANE_HEIGHT,
+            trackCount,
+            currentIndex: (typeof inst.trackIndex === 'number') ? inst.trackIndex : cand.originTrackIndex
+          });
+          if (targetTrackIndex !== (inst.trackIndex ?? cand.originTrackIndex)){
+            inst.trackIndex = targetTrackIndex;
+            const lanes = tracks.querySelectorAll('.trackLane');
+            const targetLane = lanes[targetTrackIndex];
+            if (targetLane && targetLane !== cand.el.parentElement){
+              targetLane.appendChild(cand.el);
+            }
+          }
+        }
+      }
 
       dbgMove(ctrl, 'drag move', cand.instId, startSec.toFixed(3));
     }
