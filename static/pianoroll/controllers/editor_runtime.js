@@ -1191,7 +1191,7 @@
       }
 
       // notes
-      // ghost overlay (stroke-only, non-interactive)
+      // ghost overlay (faint fill + subtle outline, non-interactive)
       if (this.state.modal.ghostScore){
         const gnotes = [];
         const gscore = this.state.modal.ghostScore;
@@ -1201,21 +1201,29 @@
           }
         }
         ctx.save();
-        ctx.globalAlpha = 0.25;
         ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(255,255,255,.55)';
         for (const n of gnotes){
           if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
           const x = padL + n.start * pxPerSec;
           const y = padT + (pitchMax - n.pitch) * rowH + 1;
           const w = Math.max(6, n.duration * pxPerSec);
           const h = rowH - 2;
-          ctx.strokeRect(Math.floor(x)+0.5, Math.floor(y)+0.5, Math.floor(w), Math.floor(h));
+          const gx = x - 1.5;
+          const gy = y - 1.5;
+          const gw = w + 3;
+          const gh = h + 3;
+          ctx.beginPath(); // isolate each ghost so fill/stroke apply once (no alpha stacking)
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.strokeStyle = 'rgba(255,255,255,0.70)';
+          roundRect(ctx, gx, gy, gw, gh, 7);
+          ctx.fill();
+          ctx.stroke();
         }
         ctx.restore();
       }
 
       const notes = this.modalAllNotes();
+      ctx.beginPath(); // reset path so blue fill/stroke don't repaint ghost rects
       for (const n of notes){
         if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
         const x = padL + n.start * pxPerSec;
