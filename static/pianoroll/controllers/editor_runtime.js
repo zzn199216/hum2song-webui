@@ -472,19 +472,21 @@
       this.state.modal.dirty = false;
 
       // T3-4: ghost + patch summary (revision UI bridge)
+      // Parent revision must be loaded from V2 clip (object map); V1 view has revisions:[].
       this.state.modal.ghostScore = null;
       try{
-        const parentId = clip && clip.parentRevisionId;
-        if (parentId && Array.isArray(clip.revisions)){
-          const parent = clip.revisions.find(r => r && r.revisionId === parentId);
-          if (parent && parent.score){
-            const ps = parent.score;
-            if (_isBeatScore(ps)){
-              try { this.state.modal.ghostScore = _scoreBeatToSec(ps, bpm); }
-              catch(e){ this.state.modal.ghostScore = H2SProject.deepClone(ps); }
-            } else {
-              this.state.modal.ghostScore = H2SProject.deepClone(ps);
-            }
+        const clipV2 = p2b && p2b.clips && p2b.clips[clipId] ? p2b.clips[clipId] : null;
+        const parentId = clipV2 && clipV2.parentRevisionId;
+        const revs = clipV2 && clipV2.revisions;
+        const revsIsMap = revs && typeof revs === 'object' && !Array.isArray(revs);
+        const parent = (parentId && revsIsMap && revs[parentId]) ? revs[parentId] : null;
+        if (parent && parent.score){
+          const ps = parent.score;
+          if (_isBeatScore(ps)){
+            try { this.state.modal.ghostScore = _scoreBeatToSec(ps, bpm); }
+            catch(e){ this.state.modal.ghostScore = H2SProject.deepClone(ps); }
+          } else {
+            this.state.modal.ghostScore = H2SProject.deepClone(ps);
           }
         }
       }catch(e){}

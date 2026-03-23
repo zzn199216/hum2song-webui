@@ -112,6 +112,13 @@ async function testPatchSummarySmoke(){
   assert(head.revisions[head.revisionId], 'clip.revisions[clip.revisionId] must exist');
   if (head.parentRevisionId != null && head.parentRevisionId !== '') assert(head.revisions[head.parentRevisionId], 'clip.revisions[parentRevisionId] must exist when parent set');
 
+  // Ghost overlay: parent revision must have score usable for before-vs-after comparison.
+  const parentRev = head.revisions[head.parentRevisionId];
+  assert(parentRev && parentRev.score, 'parent revision must have score for ghost overlay');
+  assert(parentRev.score.tracks && Array.isArray(parentRev.score.tracks), 'parent score must have tracks');
+  const parentNoteCount = (parentRev.score.tracks || []).reduce((n, t) => n + ((t.notes || []).length), 0);
+  assert(parentNoteCount >= 1, 'parent score must have at least one note for ghost overlay');
+
   const revInfo = globalThis.H2SProject.listClipRevisions(head);
   assert(revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 2, 'listClipRevisions should show 2+ versions');
 
