@@ -70,6 +70,61 @@
     return { templateId: null, templateLabel: '', intent: null };
   }
 
+  /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
+  function _buildAiAssistPlan(templateId, intent, promptText){
+    const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
+    const plans = {
+      fix_pitch_v1: {
+        planTitle: 'Fix Pitch',
+        planKind: 'fix-pitch',
+        planLines: [
+          'Goal: correct clearly out-of-tune notes.',
+          'Strategy: prioritize sustained notes; keep rhythm mostly stable.',
+          'Note: if the original humming is unstable, correction may be limited.',
+        ],
+      },
+      tighten_rhythm_v1: {
+        planTitle: 'Tighten Rhythm',
+        planKind: 'tighten-rhythm',
+        planLines: [
+          'Goal: align timing to a steadier groove.',
+          'Strategy: adjust note starts and durations; keep pitches unchanged.',
+          'Note: small timing tweaks preserve the feel.',
+        ],
+      },
+      clean_outliers_v1: {
+        planTitle: 'Clean Outliers',
+        planKind: 'clean-outliers',
+        planLines: [
+          'Goal: smooth extreme values and reduce stray notes.',
+          'Strategy: target velocity and short outliers without rewriting melody.',
+          'Note: preserves overall character while reducing noise.',
+        ],
+      },
+      bluesy_v1: {
+        planTitle: 'Bluesy',
+        planKind: 'bluesy',
+        planLines: [
+          'Goal: add subtle blues inflection to timing and dynamics.',
+          'Strategy: align to groove with blues feel; keep melody recognizable.',
+          'Note: small adjustments for a more expressive result.',
+        ],
+      },
+    };
+    if (tid && plans[tid]) {
+      return plans[tid];
+    }
+    return {
+      planTitle: 'Optimize',
+      planKind: 'generic',
+      planLines: [
+        'Goal: apply optimization based on your description.',
+        'Strategy: use your prompt to guide pitch, timing, or dynamics changes.',
+        'Note: results depend on the clarity of the source material.',
+      ],
+    };
+  }
+
   // --- debug gate (localStorage.h2s_debug === '1') ---
   function _dbgEnabled(){
     try{
@@ -1461,6 +1516,7 @@ ensureTrackButtons(){
           card.templateLabel = mapped.templateLabel;
           card.intent = mapped.intent;
         }
+        card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
         this._aiAssistItems.push(card);
       }
       this.render();
@@ -1582,6 +1638,13 @@ ensureTrackButtons(){
             const dataRunState = runState !== 'idle' ? (' data-run-state="' + escapeHtml(runState) + '"') : '';
             html += '<div class="aiAssistCard" data-clip-id="' + escapeHtml(String(it.clipId)) + '"' + dataRunState + '>';
             html += '<div class="aiAssistCardPrompt">' + escapeHtml(it.promptText) + '</div>';
+            const plan = it.plan && Array.isArray(it.plan.planLines) && it.plan.planLines.length > 0 ? it.plan : null;
+            if (plan) {
+              html += '<div class="aiAssistCardPlan" data-plan-kind="' + escapeHtml(plan.planKind || 'generic') + '" style="font-size:10px; color:var(--muted); margin-bottom:6px; line-height:1.35;">';
+              if (plan.planTitle) html += '<div class="aiAssistCardPlanTitle" style="font-weight:600; margin-bottom:2px;">' + escapeHtml(plan.planTitle) + '</div>';
+              for (let i = 0; i < plan.planLines.length; i++) html += '<div class="aiAssistCardPlanLine">' + escapeHtml(plan.planLines[i]) + '</div>';
+              html += '</div>';
+            }
             if (tl || up){
               const metaText = (tl && up) ? (escapeHtml(tl) + ' · ' + escapeHtml(up)) : (tl ? escapeHtml(tl) : escapeHtml(up));
               html += '<div class="aiAssistCardMeta">' + metaText + '</div>';

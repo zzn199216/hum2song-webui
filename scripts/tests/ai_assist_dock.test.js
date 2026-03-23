@@ -42,6 +42,19 @@ function mapAiAssistTextToTemplate(text) {
   }
   return { templateId: null, templateLabel: '', intent: null };
 }
+
+function _buildAiAssistPlan(templateId, intent, promptText) {
+  const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
+  const plans = {
+    fix_pitch_v1: { planTitle: 'Fix Pitch', planKind: 'fix-pitch', planLines: ['Goal: correct clearly out-of-tune notes.', 'Strategy: prioritize sustained notes; keep rhythm mostly stable.', 'Note: if the original humming is unstable, correction may be limited.'] },
+    tighten_rhythm_v1: { planTitle: 'Tighten Rhythm', planKind: 'tighten-rhythm', planLines: ['Goal: align timing to a steadier groove.', 'Strategy: adjust note starts and durations; keep pitches unchanged.', 'Note: small timing tweaks preserve the feel.'] },
+    clean_outliers_v1: { planTitle: 'Clean Outliers', planKind: 'clean-outliers', planLines: ['Goal: smooth extreme values and reduce stray notes.', 'Strategy: target velocity and short outliers without rewriting melody.', 'Note: preserves overall character while reducing noise.'] },
+    bluesy_v1: { planTitle: 'Bluesy', planKind: 'bluesy', planLines: ['Goal: add subtle blues inflection to timing and dynamics.', 'Strategy: align to groove with blues feel; keep melody recognizable.', 'Note: small adjustments for a more expressive result.'] },
+  };
+  if (tid && plans[tid]) return plans[tid];
+  return { planTitle: 'Optimize', planKind: 'generic', planLines: ['Goal: apply optimization based on your description.', 'Strategy: use your prompt to guide pitch, timing, or dynamics changes.', 'Note: results depend on the clarity of the source material.'] };
+}
+
 if (typeof globalThis.window === 'undefined') globalThis.window = {};
 globalThis.window.I18N = I18N;
 
@@ -133,6 +146,7 @@ function createFakeApp() {
         card.templateLabel = mapped.templateLabel;
         card.intent = mapped.intent;
       }
+      card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
       this._aiAssistItems.push(card);
     }
     this.render();
@@ -331,6 +345,34 @@ function createFakeApp() {
   app._aiAssistSend();
   assert(app._aiAssistItems[1].templateId === 'tighten_rhythm_v1', '节奏更稳 should map to tighten_rhythm_v1');
   console.log('PASS UX7b Chinese phrases 跑调, 节奏更稳 map correctly');
+})();
+
+(function testPlanMappedPromptProducesPlanOnCard() {
+  const { app, doc } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  app._aiAssistSend();
+  const card = app._aiAssistItems[0];
+  assert(card.type === 'card' && card.plan, 'mapped card should have plan');
+  assert(card.plan.planTitle === 'Fix Pitch', 'plan should have Fix Pitch title');
+  assert(card.plan.planKind === 'fix-pitch', 'plan kind should be fix-pitch');
+  assert(Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 2, 'plan should have planLines');
+  assert(card.plan.planLines.some(l => l.indexOf('out-of-tune') >= 0 || l.indexOf('pitch') >= 0), 'plan should mention pitch goal');
+  console.log('PASS mapped prompt produces plan on card');
+})();
+
+(function testPlanFallbackProducesGenericPlan() {
+  const { app, doc } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'add more dynamics';
+  app._aiAssistSend();
+  const card = app._aiAssistItems[0];
+  assert(card.type === 'card' && card.plan, 'fallback card should have plan');
+  assert(card.plan.planTitle === 'Optimize', 'fallback plan should have Optimize title');
+  assert(card.plan.planKind === 'generic', 'fallback plan kind should be generic');
+  assert(Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 2, 'fallback plan should have planLines');
+  assert(card.plan.planLines.some(l => l.indexOf('Goal:') >= 0 || l.indexOf('Strategy:') >= 0), 'fallback plan should have Goal/Strategy');
+  console.log('PASS fallback prompt produces reasonable generic plan');
 })();
 
 (function testTargetSummaryInstanceVsClip() {
