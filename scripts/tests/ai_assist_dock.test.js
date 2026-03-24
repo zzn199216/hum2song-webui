@@ -55,6 +55,26 @@ function _buildAiAssistPlan(templateId, intent, promptText) {
   return { planTitle: 'Optimize', planKind: 'generic', planLines: ['Goal: apply optimization based on your description.', 'Strategy: use your prompt to guide pitch, timing, or dynamics changes.', 'Note: results depend on the clarity of the source material.'] };
 }
 
+function _enrichReasoningLogFromRun(log, patchSummary, accepted, runState, resultKind, rejectionReason) {
+  if (!log || typeof log !== 'object') return;
+  log.runState = runState;
+  log.resultKind = resultKind != null ? resultKind : null;
+  log.accepted = !!accepted;
+  if (rejectionReason != null && String(rejectionReason).trim()) log.rejectionReason = String(rejectionReason).trim().slice(0, 120);
+  else log.rejectionReason = null;
+  if (patchSummary && typeof patchSummary === 'object') {
+    log.executedPreset = (patchSummary.executedPreset != null && String(patchSummary.executedPreset).trim()) ? String(patchSummary.executedPreset).trim() : null;
+    log.executedSource = (patchSummary.executedSource != null && String(patchSummary.executedSource).trim()) ? String(patchSummary.executedSource).trim() : null;
+    log.promptVersion = (patchSummary.promptMeta && patchSummary.promptMeta.promptVersion != null && String(patchSummary.promptMeta.promptVersion).trim()) ? String(patchSummary.promptMeta.promptVersion).trim() : null;
+    log.patchSummary = { ops: typeof patchSummary.ops === 'number' ? patchSummary.ops : null, status: (patchSummary.status != null && String(patchSummary.status).trim()) ? String(patchSummary.status).trim() : null, reason: (patchSummary.reason != null && String(patchSummary.reason).trim()) ? String(patchSummary.reason).trim().slice(0, 80) : null };
+  } else {
+    log.executedPreset = null;
+    log.executedSource = null;
+    log.promptVersion = null;
+    log.patchSummary = null;
+  }
+}
+
 if (typeof globalThis.window === 'undefined') globalThis.window = {};
 globalThis.window.I18N = I18N;
 
@@ -152,9 +172,24 @@ function createFakeApp(opts) {
       card.intent = mapped.intent;
     }
     card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+    card.reasoningLog = {
+      userPrompt: text.slice(0, 200),
+      templateId: card.templateId || null,
+      intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+      planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+      requestedPresetId: 'llm_v0',
+      planSource: 'rule',
+      createdAt: card.createdAt,
+    };
     this._aiAssistItems.push(card);
     const p = tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
-      if (plan) card.plan = plan;
+      if (plan) {
+        card.plan = plan;
+        if (card.reasoningLog) {
+          card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+          card.reasoningLog.planSource = 'ai';
+        }
+      }
       this.render();
     }).catch(() => {});
     this.render();
@@ -184,6 +219,7 @@ function createFakeApp(opts) {
       if (!res || !res.ok) {
         card.runState = 'failed';
         card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
+        if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
         this.render();
         return;
       }
@@ -191,6 +227,7 @@ function createFakeApp(opts) {
       if (!optRes || !optRes.ok) {
         card.runState = 'failed';
         card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
+        if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
         this.render();
         return;
       }
@@ -207,10 +244,12 @@ function createFakeApp(opts) {
       else if (ps && ps.hasStructuralChange === true) card.resultKind = 'structure';
       else card.resultKind = 'updated';
       card.runState = 'done';
+      if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
     } catch (err) {
       if (btnEl) btnEl.disabled = false;
       card.runState = 'failed';
       card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
+      if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
     }
     this.render();
   };
@@ -427,6 +466,82 @@ function createFakeApp(opts) {
     assert(setOptimizeOptionsCalls[0].opts.intent && setOptimizeOptionsCalls[0].opts.intent.fixPitch === true, 'intent unchanged');
     assert(!('plan' in setOptimizeOptionsCalls[0].opts), 'Run must NOT pass plan into options');
     console.log('PASS PR1 Run behavior unchanged, no plan in opts');
+  });
+})();
+
+(function testPR2CardGetsReasoningLogOnSend() {
+  const { app, doc } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'fix the pitch';
+  app._aiAssistSend();
+  const card = app._aiAssistItems[0];
+  assert(card.type === 'card' && card.reasoningLog, 'card should have reasoningLog');
+  assert(card.reasoningLog.userPrompt === 'fix the pitch', 'userPrompt in log');
+  assert(card.reasoningLog.templateId === 'fix_pitch_v1', 'templateId in log');
+  assert(card.reasoningLog.intent && card.reasoningLog.intent.fixPitch === true, 'intent in log');
+  assert(card.reasoningLog.planSummary === 'Fix Pitch', 'planSummary from rule-based');
+  assert(card.reasoningLog.requestedPresetId === 'llm_v0', 'requestedPresetId');
+  assert(card.reasoningLog.planSource === 'rule', 'planSource rule');
+  assert(typeof card.reasoningLog.createdAt === 'number', 'createdAt in log');
+  console.log('PASS PR2 card gets reasoningLog on Send');
+})();
+
+(function testPR2AiPlanSuccessUpdatesReasoningLog() {
+  const aiPlan = { planKind: 'fix-pitch', planTitle: 'Custom Pitch Fix (AI)', planLines: ['Goal: correct pitch.', 'Strategy: minimal edits.'] };
+  const { app, doc } = createFakeApp({ tryGenerateAiPlan: () => Promise.resolve(aiPlan) });
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.reasoningLog, 'card should have reasoningLog');
+    assert(card.reasoningLog.planSource === 'ai', 'planSource updated to ai');
+    assert(card.reasoningLog.planSummary === 'Custom Pitch Fix (AI)', 'planSummary updated from AI plan');
+    console.log('PASS PR2 AI plan success updates reasoningLog');
+  });
+})();
+
+(function testPR2RunEnrichesReasoningLog() {
+  const { app, doc } = createFakeApp();
+  app.runCommand = (cmd, payload) => {
+    if (cmd === 'optimize_clip') {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          clipId: payload.clipId,
+          optimizeResult: {
+            ok: true,
+            ops: 2,
+            patchSummary: {
+              executedPreset: 'llm_v0',
+              executedSource: 'llm_v0',
+              ops: 2,
+              status: 'ok',
+              hasPitchChange: true,
+              promptMeta: { promptVersion: 'tmpl_v1.fix_pitch.r1' },
+            },
+          },
+        },
+      });
+    }
+    return Promise.resolve({ ok: true });
+  };
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'the pitch is off' : null), disabled: false };
+    return app._aiAssistRun('clip-1', btnEl);
+  }).then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.reasoningLog, 'card should have reasoningLog');
+    assert(card.reasoningLog.accepted === true, 'accepted true');
+    assert(card.reasoningLog.runState === 'done', 'runState done');
+    assert(card.reasoningLog.resultKind === 'pitch/timing', 'resultKind pitch/timing');
+    assert(card.reasoningLog.executedPreset === 'llm_v0', 'executedPreset');
+    assert(card.reasoningLog.executedSource === 'llm_v0', 'executedSource');
+    assert(card.reasoningLog.promptVersion === 'tmpl_v1.fix_pitch.r1', 'promptVersion');
+    assert(card.reasoningLog.patchSummary && card.reasoningLog.patchSummary.ops === 2, 'patchSummary.ops');
+    assert(card.reasoningLog.patchSummary.status === 'ok', 'patchSummary.status');
+    console.log('PASS PR2 Run enriches reasoningLog with result info');
   });
 })();
 

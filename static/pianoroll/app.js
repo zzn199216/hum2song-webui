@@ -105,6 +105,27 @@
       .catch(function(){ return null; });
   }
 
+  /** PR2: Enrich reasoning log with execution/result metadata from Run. */
+  function _enrichReasoningLogFromRun(log, patchSummary, accepted, runState, resultKind, rejectionReason){
+    if (!log || typeof log !== 'object') return;
+    log.runState = runState;
+    log.resultKind = resultKind != null ? resultKind : null;
+    log.accepted = !!accepted;
+    if (rejectionReason != null && String(rejectionReason).trim()) log.rejectionReason = String(rejectionReason).trim().slice(0, 120);
+    else log.rejectionReason = null;
+    if (patchSummary && typeof patchSummary === 'object') {
+      log.executedPreset = (patchSummary.executedPreset != null && String(patchSummary.executedPreset).trim()) ? String(patchSummary.executedPreset).trim() : null;
+      log.executedSource = (patchSummary.executedSource != null && String(patchSummary.executedSource).trim()) ? String(patchSummary.executedSource).trim() : null;
+      log.promptVersion = (patchSummary.promptMeta && patchSummary.promptMeta.promptVersion != null && String(patchSummary.promptMeta.promptVersion).trim()) ? String(patchSummary.promptMeta.promptVersion).trim() : null;
+      log.patchSummary = { ops: typeof patchSummary.ops === 'number' ? patchSummary.ops : null, status: (patchSummary.status != null && String(patchSummary.status).trim()) ? String(patchSummary.status).trim() : null, reason: (patchSummary.reason != null && String(patchSummary.reason).trim()) ? String(patchSummary.reason).trim().slice(0, 80) : null };
+    } else {
+      log.executedPreset = null;
+      log.executedSource = null;
+      log.promptVersion = null;
+      log.patchSummary = null;
+    }
+  }
+
   /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
   function _buildAiAssistPlan(templateId, intent, promptText){
     const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
@@ -1552,10 +1573,23 @@ ensureTrackButtons(){
           card.intent = mapped.intent;
         }
         card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+        card.reasoningLog = {
+          userPrompt: text.slice(0, 200),
+          templateId: card.templateId || null,
+          intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+          planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+          requestedPresetId: 'llm_v0',
+          planSource: 'rule',
+          createdAt: card.createdAt,
+        };
         this._aiAssistItems.push(card);
         _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
           if (plan) {
             card.plan = plan;
+            if (card.reasoningLog) {
+              card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+              card.reasoningLog.planSource = 'ai';
+            }
             this.render();
           }
         }).catch(function(){ /* keep rule-based plan */ });
@@ -1586,6 +1620,7 @@ ensureTrackButtons(){
         if (!res || !res.ok) {
           card.runState = 'failed';
           card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
+          if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
           this.render();
           return;
         }
@@ -1593,6 +1628,7 @@ ensureTrackButtons(){
         if (!optRes || !optRes.ok) {
           card.runState = 'failed';
           card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
+          if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
           this.render();
           return;
         }
@@ -1609,10 +1645,12 @@ ensureTrackButtons(){
         else if (ps && ps.hasStructuralChange === true) card.resultKind = 'structure';
         else card.resultKind = 'updated';
         card.runState = 'done';
+        if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
       } catch (err) {
         if (btnEl) btnEl.disabled = false;
         card.runState = 'failed';
         card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
+        if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
       }
       this.render();
     },
