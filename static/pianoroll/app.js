@@ -70,6 +70,41 @@
     return { templateId: null, templateLabel: '', intent: null };
   }
 
+  /** PR1: Attempt AI-generated plan. Returns Promise<plan|null>. Falls back to rule-based on any failure. */
+  function _tryGenerateAiPlan(promptText, templateId, intent){
+    const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
+    const client = ROOT.H2S_LLM_CLIENT;
+    const configApi = ROOT.H2S_LLM_CONFIG;
+    if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function') return Promise.resolve(null);
+    if (!configApi || typeof configApi.loadLlmConfig !== 'function') return Promise.resolve(null);
+    let cfg;
+    try { cfg = configApi.loadLlmConfig(); } catch (_) { return Promise.resolve(null); }
+    if (!cfg || typeof cfg.baseUrl !== 'string' || !cfg.baseUrl.trim() || typeof cfg.model !== 'string' || !cfg.model.trim()) return Promise.resolve(null);
+
+    const systemMsg = 'You are a music optimization assistant. Reply with ONLY a JSON object, no other text. Schema: { "planKind": "fix-pitch"|"tighten-rhythm"|"clean-outliers"|"bluesy"|"generic", "planTitle": "short title", "planLines": ["Goal: ...", "Strategy: ...", "Note: ..."] }. planLines must have 2-4 strings. Output valid JSON only.';
+    const hint = templateId ? ' Detected template: ' + String(templateId) + '.' : '';
+    const userMsg = 'User request: ' + (typeof promptText === 'string' ? promptText.slice(0, 200) : '') + hint + '\n\nOutput the plan JSON object only.';
+
+    return client.callChatCompletions(cfg, [{ role: 'system', content: systemMsg }, { role: 'user', content: userMsg }], { temperature: 0.2, timeoutMs: 8000 })
+      .then(function(res){
+        const text = (res && typeof res.text === 'string') ? res.text : '';
+        const obj = client.extractJsonObject(text);
+        if (!obj || typeof obj !== 'object') return null;
+        const kind = (obj.planKind != null && String(obj.planKind).trim()) ? String(obj.planKind).trim() : null;
+        const title = (obj.planTitle != null && String(obj.planTitle).trim()) ? String(obj.planTitle).trim() : null;
+        const lines = Array.isArray(obj.planLines) ? obj.planLines.filter(function(l){ return typeof l === 'string' && l.trim(); }) : [];
+        if (!kind || !title || lines.length < 2) return null;
+        return {
+          planKind: kind,
+          planTitle: title,
+          planLines: lines.slice(0, 6),
+          templateId: templateId || null,
+          intent: intent && typeof intent === 'object' ? { fixPitch: !!intent.fixPitch, tightenRhythm: !!intent.tightenRhythm, reduceOutliers: !!intent.reduceOutliers } : null,
+        };
+      })
+      .catch(function(){ return null; });
+  }
+
   /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
   function _buildAiAssistPlan(templateId, intent, promptText){
     const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
@@ -1518,6 +1553,12 @@ ensureTrackButtons(){
         }
         card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
         this._aiAssistItems.push(card);
+        _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+          if (plan) {
+            card.plan = plan;
+            this.render();
+          }
+        }).catch(function(){ /* keep rule-based plan */ });
       }
       this.render();
     },

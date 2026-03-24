@@ -92,7 +92,10 @@ function createStubDocument() {
 }
 
 // Minimal APP implementing AI assist dock behavior
-function createFakeApp() {
+// opts.tryGenerateAiPlan: (text, templateId, intent) => Promise<plan|null> — PR1: injectable for tests
+function createFakeApp(opts) {
+  opts = opts || {};
+  const tryGenerateAiPlan = opts.tryGenerateAiPlan || (() => Promise.resolve(null));
   const doc = createStubDocument();
   const setOptimizeOptionsCalls = [];
   const runCommandCalls = [];
@@ -138,18 +141,24 @@ function createFakeApp() {
     const clipId = this.state.selectedClipId;
     if (!clipId) {
       this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
-    } else {
-      const mapped = mapAiAssistTextToTemplate(text);
-      const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-      if (mapped.templateId && mapped.intent) {
-        card.templateId = mapped.templateId;
-        card.templateLabel = mapped.templateLabel;
-        card.intent = mapped.intent;
-      }
-      card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
-      this._aiAssistItems.push(card);
+      this.render();
+      return Promise.resolve();
     }
+    const mapped = mapAiAssistTextToTemplate(text);
+    const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
+    if (mapped.templateId && mapped.intent) {
+      card.templateId = mapped.templateId;
+      card.templateLabel = mapped.templateLabel;
+      card.intent = mapped.intent;
+    }
+    card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+    this._aiAssistItems.push(card);
+    const p = tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+      if (plan) card.plan = plan;
+      this.render();
+    }).catch(() => {});
     this.render();
+    return p;
   };
   app._aiAssistRun = async function (clipId, btnEl) {
     if (!clipId) return;
@@ -373,6 +382,52 @@ function createFakeApp() {
   assert(Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 2, 'fallback plan should have planLines');
   assert(card.plan.planLines.some(l => l.indexOf('Goal:') >= 0 || l.indexOf('Strategy:') >= 0), 'fallback plan should have Goal/Strategy');
   console.log('PASS fallback prompt produces reasonable generic plan');
+})();
+
+(function testPR1AiPlanAttachedWhenAiReturnsPlan() {
+  const aiPlan = { planKind: 'fix-pitch', planTitle: 'Fix Pitch (AI)', planLines: ['Goal: correct out-of-tune notes.', 'Strategy: prioritize sustained notes.'] };
+  const { app, doc } = createFakeApp({ tryGenerateAiPlan: () => Promise.resolve(aiPlan) });
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.type === 'card' && card.plan, 'card should have plan');
+    assert(card.plan.planTitle === 'Fix Pitch (AI)', 'AI plan should replace rule-based');
+    assert(card.plan.planKind === 'fix-pitch', 'planKind should match');
+    assert(Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 2, 'planLines should exist');
+    console.log('PASS PR1 AI-generated plan attached to card');
+  });
+})();
+
+(function testPR1FallbackToRuleBasedWhenAiFails() {
+  const { app, doc } = createFakeApp({ tryGenerateAiPlan: () => Promise.resolve(null) });
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.type === 'card' && card.plan, 'card should have plan');
+    assert(card.plan.planTitle === 'Fix Pitch', 'rule-based plan used when AI returns null');
+    assert(card.plan.planKind === 'fix-pitch', 'planKind from rule-based');
+    console.log('PASS PR1 fallback to rule-based plan when AI returns null');
+  });
+})();
+
+(function testPR1RunBehaviorUnchangedWithAiPlan() {
+  const aiPlan = { planKind: 'fix-pitch', planTitle: 'Fix Pitch (AI)', planLines: ['Goal: correct pitch.'] };
+  const { app, doc, setOptimizeOptionsCalls } = createFakeApp({ tryGenerateAiPlan: () => Promise.resolve(aiPlan) });
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'the pitch is off' : null), disabled: false };
+    return app._aiAssistRun('clip-1', btnEl);
+  }).then(() => {
+    assert(setOptimizeOptionsCalls.length === 1, 'Run should call setOptimizeOptions once');
+    assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'the pitch is off', 'userPrompt unchanged');
+    assert(setOptimizeOptionsCalls[0].opts.templateId === 'fix_pitch_v1', 'templateId unchanged');
+    assert(setOptimizeOptionsCalls[0].opts.intent && setOptimizeOptionsCalls[0].opts.intent.fixPitch === true, 'intent unchanged');
+    assert(!('plan' in setOptimizeOptionsCalls[0].opts), 'Run must NOT pass plan into options');
+    console.log('PASS PR1 Run behavior unchanged, no plan in opts');
+  });
 })();
 
 (function testTargetSummaryInstanceVsClip() {
