@@ -37,6 +37,17 @@
   /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
   const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
 
+  /** PR3: Build compact PLAN block from structured plan for llm_v0 prompt. Returns '' if plan invalid. */
+  function buildPlanBlock(plan){
+    if (!plan || typeof plan !== 'object') return '';
+    const lines = Array.isArray(plan.planLines) ? plan.planLines.filter(function(l){ return typeof l === 'string' && l.trim(); }) : [];
+    if (lines.length < 1) return '';
+    const kind = (plan.planKind != null && String(plan.planKind).trim()) ? String(plan.planKind).trim() : '';
+    const title = (plan.planTitle != null && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : '';
+    const header = (kind || title) ? ('PLAN: ' + (title || kind)) : 'PLAN:';
+    return header + '\n' + lines.slice(0, 6).map(function(l){ return '- ' + String(l).trim().slice(0, 120); }).join('\n');
+  }
+
   /** PR-E3: Build structured Directives block from template + intent for llm_v0 prompt. */
   function buildDirectivesBlock(template, intent){
     const fixPitch = intent && !!intent.fixPitch;
@@ -515,7 +526,9 @@
       const goalsPrefix = !directivesBlock && (intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers)
         ? ('Goals: ' + [intent.fixPitch ? 'fix pitch (correct wrong notes)' : null, intent.tightenRhythm ? 'tighten rhythm (align timing)' : null, intent.reduceOutliers ? 'reduce outliers (smooth extreme values)' : null].filter(Boolean).join('; ') + '.\n\n')
         : '';
-      const promptBody = (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
+      // PR3: Optional PLAN block from structured plan (extra execution constraint)
+      const planBlock = buildPlanBlock(optsIn.plan);
+      const promptBody = (planBlock ? planBlock + '\n\n' : '') + (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
 
       let baseUserContent = promptBody + clipHint;
       if (!safeMode){

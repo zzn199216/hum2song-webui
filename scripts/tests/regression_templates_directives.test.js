@@ -338,11 +338,83 @@ async function testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits() {
   console.log('PASS regression templates: Case D — fixPitch with velocityOnly:true allows pitch edits');
 }
 
+// PR3: When plan is passed in options, user message must include PLAN block
+async function testE_planBlockIncludedWhenPlanProvided() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeMinimalProject();
+  let project = proj;
+  const cid = clip.id;
+
+  const pitchChangePatch = {
+    version: 1,
+    clipId: cid,
+    ops: [{ op: 'setNote', noteId: 'n0', pitch: 61, velocity: 90 }],
+  };
+  const rawText = '```json\n' + JSON.stringify(pitchChangePatch) + '\n```';
+
+  let capturedMessages = null;
+  const origClient = globalThis.H2S_LLM_CLIENT;
+  const origConfig = globalThis.H2S_LLM_CONFIG;
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async (_cfg, messages) => {
+      capturedMessages = messages;
+      return { text: rawText };
+    },
+    extractJsonObject: (text) => {
+      try {
+        const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+        return m ? JSON.parse(m[1]) : null;
+      } catch (_) { return null; }
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'test-model', velocityOnly: false }),
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+    const plan = {
+      planKind: 'fix-pitch',
+      planTitle: 'Fix Pitch (AI)',
+      planLines: ['Goal: correct out-of-tune notes.', 'Strategy: minimal edits.'],
+    };
+    const res = await ctrl.optimizeClip(cid, {
+      requestedPresetId: 'llm_v0',
+      templateId: 'fix_pitch_v1',
+      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+      userPrompt: 'the pitch is off',
+      plan,
+    });
+
+    assert(res && res.ok === true, 'Case E: must succeed');
+    assert(capturedMessages && Array.isArray(capturedMessages), 'Case E: must capture messages');
+    const userMsg = capturedMessages.find((m) => m.role === 'user');
+    assert(userMsg && userMsg.content, 'Case E: user message must exist');
+    assert(userMsg.content.includes('PLAN:'), 'Case E: user content must contain PLAN:');
+    assert(userMsg.content.includes('Fix Pitch (AI)'), 'Case E: planTitle must appear');
+    assert(userMsg.content.includes('correct out-of-tune notes'), 'Case E: planLines must appear');
+  } finally {
+    globalThis.H2S_LLM_CLIENT = origClient;
+    globalThis.H2S_LLM_CONFIG = origConfig;
+  }
+
+  console.log('PASS regression templates: Case E — plan block included when plan provided');
+}
+
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
   await testC_retryHintIntentSpecific();
   await testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits();
+  await testE_planBlockIncludedWhenPlanProvided();
 })().catch((e) => {
   console.error(e);
   process.exit(1);

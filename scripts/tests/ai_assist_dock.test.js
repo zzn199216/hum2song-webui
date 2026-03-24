@@ -206,6 +206,9 @@ function createFakeApp(opts) {
       opts.templateId = card.templateId;
       opts.intent = card.intent;
     }
+    if (card.plan && typeof card.plan === 'object' && Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 1 && (card.plan.planTitle || card.plan.planKind)) {
+      opts.plan = { planKind: card.plan.planKind || null, planTitle: (card.plan.planTitle && String(card.plan.planTitle).trim()) ? String(card.plan.planTitle).trim() : '', planLines: card.plan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) };
+    }
     this.setOptimizeOptions(clipId, opts);
     card.runState = 'running';
     card.resultKind = null;
@@ -464,8 +467,22 @@ function createFakeApp(opts) {
     assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'the pitch is off', 'userPrompt unchanged');
     assert(setOptimizeOptionsCalls[0].opts.templateId === 'fix_pitch_v1', 'templateId unchanged');
     assert(setOptimizeOptionsCalls[0].opts.intent && setOptimizeOptionsCalls[0].opts.intent.fixPitch === true, 'intent unchanged');
-    assert(!('plan' in setOptimizeOptionsCalls[0].opts), 'Run must NOT pass plan into options');
-    console.log('PASS PR1 Run behavior unchanged, no plan in opts');
+    assert(setOptimizeOptionsCalls[0].opts.plan && setOptimizeOptionsCalls[0].opts.plan.planTitle === 'Fix Pitch (AI)', 'PR3: Run passes plan when card has plan');
+    console.log('PASS PR1/PR3 Run passes plan when card has plan');
+  });
+})();
+
+(function testPR3RunWithoutPlanNoPlanInOpts() {
+  const { app, setOptimizeOptionsCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app._aiAssistItems.push({ type: 'card', clipId: 'clip-1', promptText: 'custom', createdAt: 1, runState: 'idle', plan: null });
+  const btnEl = { getAttribute: () => null, disabled: false };
+  app._aiAssistRun('clip-1', btnEl);
+  return new Promise((r) => setImmediate(r)).then(() => {
+    assert(setOptimizeOptionsCalls.length === 1, 'Run should call setOptimizeOptions once');
+    assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'custom', 'userPrompt passed');
+    assert(!('plan' in setOptimizeOptionsCalls[0].opts) || setOptimizeOptionsCalls[0].opts.plan == null, 'PR3: no plan when card has no plan');
+    console.log('PASS PR3 Run without plan does not pass plan');
   });
 })();
 

@@ -771,11 +771,16 @@ setOptimizeOptions(arg0, arg1){
   const templateId = rawTemplateId !== undefined
     ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
     : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
+  const rawPlan = opts && opts.plan;
+  const plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
+    ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
+    : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
   const normalizedOpts = opts ? {
     requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
     userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
     intent,
-    templateId: templateId || null
+    templateId: templateId || null,
+    plan: plan || null
   } : null;
   this._lastOptimizeOptions = normalizedOpts;
   if (cid) {
@@ -1015,16 +1020,9 @@ if (typeof localStorage !== 'undefined') {
         const txt = await f.text();
         try{
           const obj = JSON.parse(txt);
-          if (_isProjectV2(obj)){
-            _writeLS(LS_KEY_V2, obj);
-            try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-            this.project = _projectV2ToV1View(obj);
-          } else {
-            this.project = obj;
-          }
-          this.project = H2SProject.ensureProjectIds(this.project);
-          persist();
-          this.render();
+          const loaded = H2SProject.loadProjectDocV2(obj);
+          this.setProjectFromV2(loaded);
+          try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
           log('Imported project json.');
         }catch(e){
           alert('Invalid JSON.');
@@ -1606,6 +1604,9 @@ ensureTrackButtons(){
       if (card.templateId && card.intent) {
         opts.templateId = card.templateId;
         opts.intent = card.intent;
+      }
+      if (card.plan && typeof card.plan === 'object' && Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 1 && (card.plan.planTitle || card.plan.planKind)) {
+        opts.plan = { planKind: card.plan.planKind || null, planTitle: (card.plan.planTitle && String(card.plan.planTitle).trim()) ? String(card.plan.planTitle).trim() : '', planLines: card.plan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) };
       }
       this.setOptimizeOptions(clipId, opts);
       card.runState = 'running';
