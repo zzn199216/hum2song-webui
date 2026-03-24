@@ -126,6 +126,61 @@
     }
   }
 
+  /** Debug PR1: safe subset of llmDebug for Assistant card executionTrace (no raw model text, no secrets). */
+  function _sanitizeLlmDebugForAssistantTrace(llmDebug){
+    if (!llmDebug || typeof llmDebug !== 'object') return null;
+    const out = {};
+    if (llmDebug.attemptCount != null && isFinite(Number(llmDebug.attemptCount))) out.attemptCount = Number(llmDebug.attemptCount);
+    if (typeof llmDebug.safeModeResolved === 'boolean') out.safeModeResolved = llmDebug.safeModeResolved;
+    if (llmDebug.reason != null && typeof llmDebug.reason === 'string') out.reason = llmDebug.reason.slice(0, 120);
+    if (Array.isArray(llmDebug.errors) && llmDebug.errors.length){
+      const joined = llmDebug.errors.slice(0, 3).map(function(e){ return String(e).slice(0, 80); }).join(' | ');
+      out.errorSummary = joined.length > 200 ? joined.slice(0, 197) + '...' : joined;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  function _compactPatchSummaryForExecutionTrace(ps){
+    if (!ps || typeof ps !== 'object') return null;
+    const out = {};
+    if (typeof ps.ops === 'number' && isFinite(ps.ops)) out.ops = ps.ops;
+    if (ps.status != null && String(ps.status).trim()) out.status = String(ps.status).trim().slice(0, 40);
+    if (ps.reason != null && String(ps.reason).trim()) out.reason = String(ps.reason).trim().slice(0, 80);
+    if (ps.noChanges === true) out.noChanges = true;
+    return Object.keys(out).length ? out : null;
+  }
+
+  /** Debug PR1: structured trace for one Assistant Run (optimizeResult + card context). */
+  function _buildAiAssistExecutionTrace(card, optRes){
+    const trace = {};
+    const rl = card && card.reasoningLog && typeof card.reasoningLog === 'object' ? card.reasoningLog : null;
+    try {
+      if (optRes && typeof optRes === 'object' && optRes.executionPath != null && String(optRes.executionPath).trim() !== ''){
+        trace.executionPath = String(optRes.executionPath).trim();
+      }
+      if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
+      if (card && card.intent && typeof card.intent === 'object'){
+        trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+      }
+      if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+      if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
+      const ps = (optRes && optRes.patchSummary && typeof optRes.patchSummary === 'object') ? optRes.patchSummary : null;
+      if (ps){
+        if (ps.executedPreset != null) trace.executedPreset = String(ps.executedPreset).trim();
+        if (ps.executedSource != null) trace.executedSource = String(ps.executedSource).trim();
+        if (ps.promptMeta && ps.promptMeta.promptVersion != null) trace.promptVersion = String(ps.promptMeta.promptVersion).trim();
+      }
+      trace.patchSummary = _compactPatchSummaryForExecutionTrace(ps);
+      if (rl && typeof rl.accepted === 'boolean') trace.accepted = rl.accepted;
+      if (rl && rl.rejectionReason != null && String(rl.rejectionReason).trim()) trace.rejectionReason = String(rl.rejectionReason).trim().slice(0, 120);
+      if (optRes && optRes.llmDebug){
+        const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
+        if (s) trace.llmDebugSummary = s;
+      }
+    } catch (_e) { /* keep partial trace */ }
+    return trace;
+  }
+
   /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
   function _buildAiAssistPlan(templateId, intent, promptText){
     const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
@@ -1613,6 +1668,7 @@ ensureTrackButtons(){
       card.resultKind = null;
       card.usedPresetId = null;
       card.lastError = null;
+      card.executionTrace = null;
       if (btnEl) btnEl.disabled = true;
       this.render();
       try {
@@ -1622,6 +1678,7 @@ ensureTrackButtons(){
           card.runState = 'failed';
           card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
           if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
+          try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
           this.render();
           return;
         }
@@ -1630,6 +1687,7 @@ ensureTrackButtons(){
           card.runState = 'failed';
           card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
           if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
+          try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
           this.render();
           return;
         }
@@ -1647,11 +1705,13 @@ ensureTrackButtons(){
         else card.resultKind = 'updated';
         card.runState = 'done';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
       } catch (err) {
         if (btnEl) btnEl.disabled = false;
         card.runState = 'failed';
         card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
       }
       this.render();
     },

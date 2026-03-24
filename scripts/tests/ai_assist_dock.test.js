@@ -75,6 +75,59 @@ function _enrichReasoningLogFromRun(log, patchSummary, accepted, runState, resul
   }
 }
 
+function _sanitizeLlmDebugForAssistantTrace(llmDebug) {
+  if (!llmDebug || typeof llmDebug !== 'object') return null;
+  const out = {};
+  if (llmDebug.attemptCount != null && isFinite(Number(llmDebug.attemptCount))) out.attemptCount = Number(llmDebug.attemptCount);
+  if (typeof llmDebug.safeModeResolved === 'boolean') out.safeModeResolved = llmDebug.safeModeResolved;
+  if (llmDebug.reason != null && typeof llmDebug.reason === 'string') out.reason = llmDebug.reason.slice(0, 120);
+  if (Array.isArray(llmDebug.errors) && llmDebug.errors.length) {
+    const joined = llmDebug.errors.slice(0, 3).map(function (e) { return String(e).slice(0, 80); }).join(' | ');
+    out.errorSummary = joined.length > 200 ? joined.slice(0, 197) + '...' : joined;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function _compactPatchSummaryForExecutionTrace(ps) {
+  if (!ps || typeof ps !== 'object') return null;
+  const out = {};
+  if (typeof ps.ops === 'number' && isFinite(ps.ops)) out.ops = ps.ops;
+  if (ps.status != null && String(ps.status).trim()) out.status = String(ps.status).trim().slice(0, 40);
+  if (ps.reason != null && String(ps.reason).trim()) out.reason = String(ps.reason).trim().slice(0, 80);
+  if (ps.noChanges === true) out.noChanges = true;
+  return Object.keys(out).length ? out : null;
+}
+
+function _buildAiAssistExecutionTrace(card, optRes) {
+  const trace = {};
+  const rl = card && card.reasoningLog && typeof card.reasoningLog === 'object' ? card.reasoningLog : null;
+  try {
+    if (optRes && typeof optRes === 'object' && optRes.executionPath != null && String(optRes.executionPath).trim() !== '') {
+      trace.executionPath = String(optRes.executionPath).trim();
+    }
+    if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
+    if (card && card.intent && typeof card.intent === 'object') {
+      trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+    }
+    if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+    if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
+    const ps = (optRes && optRes.patchSummary && typeof optRes.patchSummary === 'object') ? optRes.patchSummary : null;
+    if (ps) {
+      if (ps.executedPreset != null) trace.executedPreset = String(ps.executedPreset).trim();
+      if (ps.executedSource != null) trace.executedSource = String(ps.executedSource).trim();
+      if (ps.promptMeta && ps.promptMeta.promptVersion != null) trace.promptVersion = String(ps.promptMeta.promptVersion).trim();
+    }
+    trace.patchSummary = _compactPatchSummaryForExecutionTrace(ps);
+    if (rl && typeof rl.accepted === 'boolean') trace.accepted = rl.accepted;
+    if (rl && rl.rejectionReason != null && String(rl.rejectionReason).trim()) trace.rejectionReason = String(rl.rejectionReason).trim().slice(0, 120);
+    if (optRes && optRes.llmDebug) {
+      const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
+      if (s) trace.llmDebugSummary = s;
+    }
+  } catch (_e) { /* keep partial trace */ }
+  return trace;
+}
+
 if (typeof globalThis.window === 'undefined') globalThis.window = {};
 globalThis.window.I18N = I18N;
 
@@ -135,7 +188,7 @@ function createFakeApp(opts) {
           ok: true,
           data: {
             clipId: cid,
-            optimizeResult: { ok: true, ops: 1, patchSummary: { executedPreset: 'llm_v0' } },
+            optimizeResult: { ok: true, ops: 1, executionPath: 'llm', patchSummary: { executedPreset: 'llm_v0', executedSource: 'llm_v0' } },
           },
         });
       }
@@ -214,6 +267,7 @@ function createFakeApp(opts) {
     card.resultKind = null;
     card.usedPresetId = null;
     card.lastError = null;
+    card.executionTrace = null;
     if (btnEl) btnEl.disabled = true;
     this.render();
     try {
@@ -223,6 +277,7 @@ function createFakeApp(opts) {
         card.runState = 'failed';
         card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
         this.render();
         return;
       }
@@ -231,6 +286,7 @@ function createFakeApp(opts) {
         card.runState = 'failed';
         card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
         this.render();
         return;
       }
@@ -248,11 +304,13 @@ function createFakeApp(opts) {
       else card.resultKind = 'updated';
       card.runState = 'done';
       if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
+      try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
     } catch (err) {
       if (btnEl) btnEl.disabled = false;
       card.runState = 'failed';
       card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
       if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
+      try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
     }
     this.render();
   };
@@ -528,6 +586,7 @@ function createFakeApp(opts) {
           optimizeResult: {
             ok: true,
             ops: 2,
+            executionPath: 'llm',
             patchSummary: {
               executedPreset: 'llm_v0',
               executedSource: 'llm_v0',
@@ -558,7 +617,83 @@ function createFakeApp(opts) {
     assert(card.reasoningLog.promptVersion === 'tmpl_v1.fix_pitch.r1', 'promptVersion');
     assert(card.reasoningLog.patchSummary && card.reasoningLog.patchSummary.ops === 2, 'patchSummary.ops');
     assert(card.reasoningLog.patchSummary.status === 'ok', 'patchSummary.status');
+    assert(card.executionTrace && card.executionTrace.executionPath === 'llm', 'executionTrace.executionPath');
+    assert(card.executionTrace.accepted === true, 'executionTrace.accepted');
+    assert(card.executionTrace.patchSummary && card.executionTrace.patchSummary.ops === 2, 'executionTrace.patchSummary.ops');
     console.log('PASS PR2 Run enriches reasoningLog with result info');
+  });
+})();
+
+(function testDebugPR1ExecutionTraceSanitizesLlmDebug() {
+  const { app, doc } = createFakeApp();
+  app.runCommand = (cmd, payload) => {
+    if (cmd === 'optimize_clip') {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          clipId: payload.clipId,
+          optimizeResult: {
+            ok: true,
+            ops: 1,
+            executionPath: 'llm',
+            patchSummary: { executedPreset: 'llm_v0', executedSource: 'llm_v0', ops: 1, status: 'ok' },
+            llmDebug: {
+              attemptCount: 2,
+              safeModeResolved: false,
+              reason: 'ok',
+              rawText: 'SECRET_MODEL_OUTPUT',
+              extractedJson: '{ "secret": true }',
+              authToken: 'sk-bad',
+              errors: ['patch_rejected', 'x'],
+            },
+          },
+        },
+      });
+    }
+    return Promise.resolve({ ok: true });
+  };
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'the pitch is off' : null), disabled: false };
+    return app._aiAssistRun('clip-1', btnEl);
+  }).then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.executionTrace, 'card should have executionTrace');
+    const s = JSON.stringify(card.executionTrace);
+    assert(s.indexOf('SECRET_MODEL_OUTPUT') < 0, 'must not leak rawText');
+    assert(s.indexOf('sk-bad') < 0, 'must not leak authToken');
+    assert(s.indexOf('extractedJson') < 0, 'must not include extractedJson key');
+    assert(card.executionTrace.llmDebugSummary && card.executionTrace.llmDebugSummary.attemptCount === 2, 'safe attemptCount');
+    assert(card.executionTrace.llmDebugSummary.safeModeResolved === false, 'safe safeModeResolved');
+    assert(card.executionTrace.llmDebugSummary.errorSummary && card.executionTrace.llmDebugSummary.errorSummary.indexOf('patch_rejected') >= 0, 'errorSummary');
+    console.log('PASS Debug PR1 executionTrace sanitizes llmDebug');
+  });
+})();
+
+(function testDebugPR1ExecutionTraceWithoutOptionalFields() {
+  const { app, doc } = createFakeApp();
+  app.runCommand = (cmd, payload) => {
+    if (cmd === 'optimize_clip') {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          clipId: payload.clipId,
+          optimizeResult: { ok: true, ops: 0, patchSummary: { executedPreset: 'llm_v0', noChanges: true, status: 'ok', ops: 0, reason: 'empty_ops' } },
+        },
+      });
+    }
+    return Promise.resolve({ ok: true });
+  };
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'hello';
+  app._aiAssistSend();
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'hello' : null), disabled: false };
+  return app._aiAssistRun('clip-1', btnEl).then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.executionTrace && typeof card.executionTrace === 'object', 'executionTrace object exists');
+    assert(card.runState === 'done', 'run still completes');
+    console.log('PASS Debug PR1 executionTrace without executionPath / llmDebug');
   });
 })();
 
@@ -600,7 +735,7 @@ function createFakeApp(opts) {
     ok: true,
     data: {
       clipId: payload.clipId,
-      optimizeResult: { ok: true, ops: 2, patchSummary: { executedPreset: 'llm_v0', hasPitchChange: true } },
+      optimizeResult: { ok: true, ops: 2, executionPath: 'llm', patchSummary: { executedPreset: 'llm_v0', hasPitchChange: true } },
     },
   });
   return app._aiAssistRun('clip-1', btnEl).then(() => {

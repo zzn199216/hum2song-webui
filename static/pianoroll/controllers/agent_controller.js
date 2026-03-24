@@ -355,6 +355,7 @@
         return {
           ok: false,
           reason: reason,
+          executionPath: 'llm',
           patchSummary: Object.assign({}, patchSummaryBase, {
             status: 'failed',
             reason: String(reason),
@@ -701,6 +702,7 @@
       return attemptOnce(1, null, debugCapture).then(function(res1){
         if (res1.ok){
           const out = Object.assign({}, res1);
+          out.executionPath = 'llm';
           out.llmDebug = {
             attemptCount: 1,
             reason: res1.reason || 'ok',
@@ -730,6 +732,7 @@
           debugCapture.validateErrors = [];
           return attemptOnce(2, fixDetail, debugCapture).then(function(res2){
             const out = Object.assign({}, res2);
+            out.executionPath = 'llm';
             out.llmDebug = {
               attemptCount: 2,
               reason: res2.reason || 'ok',
@@ -743,6 +746,7 @@
         }
         // No retry - return first attempt with debug
         const out = Object.assign({}, res1);
+        out.executionPath = 'llm';
         out.llmDebug = {
           attemptCount: 1,
           reason: res1.reason || 'unknown',
@@ -789,9 +793,11 @@
       let examples = [];
       let executedSource = 'pseudo_v0';
       let executedPreset = 'pseudo_v0';
+      let usedPseudoPath = false;
 
       if (pseudoPatch.ops && pseudoPatch.ops.length > 0){
         patch = pseudoPatch;
+        usedPseudoPath = true;
       } else {
         const inAllowlist = requestedPresetId && SAFE_PRESET_ALLOWLIST[requestedPresetId];
         const effectivePresetId = inAllowlist ? requestedPresetId : SAFE_STUB_PRESET;
@@ -826,6 +832,7 @@
         return {
           ok:true,
           ops:0,
+          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'ok',
             noChanges:true,
@@ -845,6 +852,7 @@
         return {
           ok:false,
           reason,
+          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:String(reason),
@@ -860,6 +868,7 @@
         return {
           ok:false,
           reason:'apply_failed',
+          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:'apply_failed',
@@ -875,6 +884,7 @@
         return {
           ok:false,
           reason:'beginNewClipRevision_failed',
+          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:'beginNewClipRevision_failed',
@@ -905,7 +915,7 @@
       opts.setProjectFromV2(project);
       opts.commitV2?.('agent_optimize');
 
-      return { ok:true, ops:opsN };
+      return { ok:true, ops:opsN, executionPath: usedPseudoPath ? 'pseudo' : 'preset' };
     }
     return { optimizeClip };
   }
