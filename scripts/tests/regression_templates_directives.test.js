@@ -409,12 +409,43 @@ async function testE_planBlockIncludedWhenPlanProvided() {
   console.log('PASS regression templates: Case E — plan block included when plan provided');
 }
 
+// Assistant PR: clean_outliers_v1 must resolve promptMeta (not manual_v0) when templateId is passed
+async function testF_cleanOutliersTemplateResolvesPromptMeta() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeMinimalProject();
+  let project = proj;
+  const cid = clip.id;
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+  const res = await ctrl.optimizeClip(cid, {
+    requestedPresetId: 'noop',
+    templateId: 'clean_outliers_v1',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+  });
+
+  assert(res && res.ok === true, 'Case F: noop must ok');
+  assert(res.patchSummary && res.patchSummary.promptMeta, 'Case F: patchSummary must have promptMeta');
+  assert(res.patchSummary.promptMeta.templateId === 'clean_outliers_v1', 'Case F: templateId clean_outliers_v1');
+  assert(res.patchSummary.promptMeta.promptVersion === 'tmpl_v1.clean_outliers', 'Case F: promptVersion must match registry (not manual_v0)');
+
+  console.log('PASS regression templates: Case F — clean_outliers_v1 resolves promptMeta');
+}
+
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
   await testC_retryHintIntentSpecific();
   await testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits();
   await testE_planBlockIncludedWhenPlanProvided();
+  await testF_cleanOutliersTemplateResolvesPromptMeta();
 })().catch((e) => {
   console.error(e);
   process.exit(1);

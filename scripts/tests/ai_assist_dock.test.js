@@ -43,6 +43,45 @@ function mapAiAssistTextToTemplate(text) {
   return { templateId: null, templateLabel: '', intent: null };
 }
 
+function templateExecutionFieldsFromPlanKind(planKind) {
+  if (planKind == null || typeof planKind !== 'string') return null;
+  const k = String(planKind).trim().toLowerCase();
+  if (k === 'generic' || k === '') return null;
+  const idByKind = {
+    'clean-outliers': 'clean_outliers_v1',
+    'fix-pitch': 'fix_pitch_v1',
+    'tighten-rhythm': 'tighten_rhythm_v1',
+    bluesy: 'bluesy_v1',
+  };
+  const templateId = idByKind[k];
+  if (!templateId) return null;
+  const tm = INSPECTOR_TEMPLATES[templateId];
+  if (!tm) return null;
+  const intent = tm.intent && typeof tm.intent === 'object'
+    ? { fixPitch: !!tm.intent.fixPitch, tightenRhythm: !!tm.intent.tightenRhythm, reduceOutliers: !!tm.intent.reduceOutliers }
+    : null;
+  if (!intent) return null;
+  return { templateId, templateLabel: (tm.label != null && String(tm.label).trim()) ? String(tm.label).trim() : templateId, intent };
+}
+
+function syncAssistantCardTemplateFromPlan(card) {
+  if (!card || typeof card !== 'object') return;
+  const plan = card.plan;
+  if (!plan || typeof plan !== 'object') return;
+  const pk = (plan.planKind != null && String(plan.planKind).trim()) ? String(plan.planKind).trim() : '';
+  if (!pk) return;
+  const fields = templateExecutionFieldsFromPlanKind(plan.planKind);
+  if (!fields || !fields.templateId || !fields.intent) return;
+  if (card.templateId != null && String(card.templateId).trim() !== '') return;
+  card.templateId = fields.templateId;
+  card.templateLabel = fields.templateLabel;
+  card.intent = fields.intent;
+  if (card.reasoningLog && typeof card.reasoningLog === 'object') {
+    card.reasoningLog.templateId = fields.templateId;
+    card.reasoningLog.intent = { fixPitch: !!fields.intent.fixPitch, tightenRhythm: !!fields.intent.tightenRhythm, reduceOutliers: !!fields.intent.reduceOutliers };
+  }
+}
+
 function _buildAiAssistPlan(templateId, intent, promptText) {
   const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
   const plans = {
@@ -73,6 +112,39 @@ function _enrichReasoningLogFromRun(log, patchSummary, accepted, runState, resul
     log.promptVersion = null;
     log.patchSummary = null;
   }
+}
+
+function _sanitizeLlmPromptTraceForAssistantTrace(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const MAX = 24000;
+  function trunc(s) {
+    if (typeof s !== 'string') return '';
+    return s.length > MAX ? s.slice(0, MAX) + '\n...[truncated]...' : s;
+  }
+  const out = {};
+  if (raw.attemptIndex != null && isFinite(Number(raw.attemptIndex))) out.attemptIndex = Number(raw.attemptIndex);
+  if (typeof raw.finalSystemPrompt === 'string') out.finalSystemPrompt = trunc(raw.finalSystemPrompt);
+  if (typeof raw.finalUserPrompt === 'string') out.finalUserPrompt = trunc(raw.finalUserPrompt);
+  if (raw.blocks && typeof raw.blocks === 'object') {
+    const b = raw.blocks;
+    const bo = {};
+    if (b.resolvedTemplateId != null && String(b.resolvedTemplateId).trim()) bo.resolvedTemplateId = String(b.resolvedTemplateId).trim().slice(0, 80);
+    else bo.resolvedTemplateId = null;
+    if (b.resolvedIntent && typeof b.resolvedIntent === 'object') {
+      bo.resolvedIntent = {
+        fixPitch: !!b.resolvedIntent.fixPitch,
+        tightenRhythm: !!b.resolvedIntent.tightenRhythm,
+        reduceOutliers: !!b.resolvedIntent.reduceOutliers,
+      };
+    }
+    if (b.promptVersion != null && String(b.promptVersion).trim()) bo.promptVersion = String(b.promptVersion).trim().slice(0, 80);
+    if (typeof b.planBlock === 'string') bo.planBlock = trunc(b.planBlock);
+    if (typeof b.directivesBlock === 'string') bo.directivesBlock = trunc(b.directivesBlock);
+    if (typeof b.userBody === 'string') bo.userBody = trunc(b.userBody);
+    out.blocks = bo;
+  }
+  if (!out.finalSystemPrompt && !out.finalUserPrompt && !out.blocks) return null;
+  return out;
 }
 
 function _sanitizeLlmDebugForAssistantTrace(llmDebug) {
@@ -128,6 +200,10 @@ function _buildAiAssistExecutionTrace(card, optRes) {
     if (optRes && optRes.llmDebug) {
       const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
       if (s) trace.llmDebugSummary = s;
+    }
+    if (optRes && optRes.executionPath === 'llm' && optRes.llmPromptTrace) {
+      const pt = _sanitizeLlmPromptTraceForAssistantTrace(optRes.llmPromptTrace);
+      if (pt) trace.llmPromptTrace = pt;
     }
   } catch (_e) { /* keep partial trace */ }
   return trace;
@@ -247,6 +323,7 @@ function createFakeApp(opts) {
           card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
           card.reasoningLog.planSource = 'ai';
         }
+        syncAssistantCardTemplateFromPlan(card);
       }
       this.render();
     }).catch(() => {});
@@ -258,6 +335,7 @@ function createFakeApp(opts) {
     const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
     const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
     if (!card) return;
+    syncAssistantCardTemplateFromPlan(card);
     const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
     const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
     if (card.templateId && card.intent) {
@@ -549,6 +627,33 @@ function createFakeApp(opts) {
   });
 })();
 
+(function testAiCleanOutliersPlanBackfillsTemplateWhenKeywordsMiss() {
+  const aiPlan = {
+    planKind: 'clean-outliers',
+    planTitle: '移除离群高音',
+    planLines: [
+      'Goal: remove isolated high outlier notes.',
+      'Strategy: target only obvious outliers; keep the main melody cluster.',
+    ],
+  };
+  const { app, doc, setOptimizeOptionsCalls } = createFakeApp({ tryGenerateAiPlan: () => Promise.resolve(aiPlan) });
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = '离群高音 note cluster xyz unmatched';
+  return app._aiAssistSend().then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.templateId === 'clean_outliers_v1', 'AI clean-outliers plan should backfill templateId');
+    assert(card.intent && card.intent.reduceOutliers === true, 'intent should be reduceOutliers');
+    assert(card.plan && card.plan.planKind === 'clean-outliers', 'planKind preserved');
+    const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? '离群高音 note cluster xyz unmatched' : null), disabled: false };
+    return app._aiAssistRun('clip-1', btnEl);
+  }).then(() => {
+    assert(setOptimizeOptionsCalls.length === 1, 'Run should call setOptimizeOptions once');
+    assert(setOptimizeOptionsCalls[0].opts.templateId === 'clean_outliers_v1', 'Run must pass clean_outliers_v1 for execution');
+    assert(setOptimizeOptionsCalls[0].opts.intent && setOptimizeOptionsCalls[0].opts.intent.reduceOutliers === true, 'Run must pass reduceOutliers intent');
+    console.log('PASS AI clean-outliers plan backfills template when keywords miss');
+  });
+})();
+
 (function testPR2CardGetsReasoningLogOnSend() {
   const { app, doc } = createFakeApp();
   app.state.selectedClipId = 'clip-1';
@@ -703,6 +808,122 @@ function createFakeApp(opts) {
     assert(card.runState === 'done', 'run still completes');
     console.log('PASS Debug PR1 executionTrace without executionPath / llmDebug');
   });
+})();
+
+(function testDebugPR3LlmPromptTraceAttachedForLlmPath() {
+  const rawTrace = {
+    attemptIndex: 1,
+    finalSystemPrompt: 'You are a music patch generator.',
+    finalUserPrompt: 'PLAN: x\n\nDIRECTIVES:\n---\n\nClip context',
+    blocks: {
+      resolvedTemplateId: 'fix_pitch_v1',
+      resolvedIntent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+      promptVersion: 'tmpl_v1.fix_pitch.r1',
+      planBlock: 'PLAN: test',
+      directivesBlock: 'DIRECTIVES:\n- Goals:',
+      userBody: 'fix the melody',
+    },
+    authToken: 'sk-should-not-appear',
+    headers: { Authorization: 'Bearer x' },
+  };
+  const { app, doc } = createFakeApp();
+  app.runCommand = (cmd, payload) => {
+    if (cmd === 'optimize_clip') {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          clipId: payload.clipId,
+          optimizeResult: {
+            ok: true,
+            ops: 1,
+            executionPath: 'llm',
+            llmPromptTrace: rawTrace,
+            patchSummary: { executedPreset: 'llm_v0', executedSource: 'llm_v0', ops: 1, status: 'ok' },
+          },
+        },
+      });
+    }
+    return Promise.resolve({ ok: true });
+  };
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'the pitch is off';
+  return app._aiAssistSend().then(() => {
+    const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'the pitch is off' : null), disabled: false };
+    return app._aiAssistRun('clip-1', btnEl);
+  }).then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.executionTrace && card.executionTrace.llmPromptTrace, 'executionTrace.llmPromptTrace');
+    const pt = card.executionTrace.llmPromptTrace;
+    const s = JSON.stringify(card.executionTrace);
+    assert(s.indexOf('sk-should-not-appear') < 0, 'must not leak authToken from llmPromptTrace');
+    assert(s.indexOf('Authorization') < 0, 'must not leak headers');
+    assert(pt.finalSystemPrompt && pt.finalSystemPrompt.indexOf('music patch') >= 0, 'finalSystemPrompt preserved');
+    assert(pt.finalUserPrompt && pt.finalUserPrompt.indexOf('DIRECTIVES') >= 0, 'finalUserPrompt preserved');
+    assert(pt.blocks && pt.blocks.resolvedTemplateId === 'fix_pitch_v1', 'blocks.resolvedTemplateId');
+    assert(pt.blocks && pt.blocks.promptVersion === 'tmpl_v1.fix_pitch.r1', 'blocks.promptVersion');
+    assert(pt.blocks && pt.blocks.directivesBlock && pt.blocks.directivesBlock.indexOf('DIRECTIVES') >= 0, 'blocks.directivesBlock');
+    assert(pt.blocks && pt.blocks.userBody === 'fix the melody', 'blocks.userBody');
+    console.log('PASS Debug PR3 llmPromptTrace attached and sanitized for llm path');
+  });
+})();
+
+(function testDebugPR3NoLlmPromptTraceWhenNotLlmPath() {
+  const { app, doc } = createFakeApp();
+  app.runCommand = (cmd, payload) => {
+    if (cmd === 'optimize_clip') {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          clipId: payload.clipId,
+          optimizeResult: {
+            ok: true,
+            ops: 1,
+            executionPath: 'preset',
+            llmPromptTrace: { finalUserPrompt: 'should not attach', blocks: { userBody: 'x' } },
+            patchSummary: { executedPreset: 'dynamics_accent', executedSource: 'safe_preset', ops: 1, status: 'ok' },
+          },
+        },
+      });
+    }
+    return Promise.resolve({ ok: true });
+  };
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'hello';
+  app._aiAssistSend();
+  const btnEl = { getAttribute: (a) => (a === 'data-prompt' ? 'hello' : null), disabled: false };
+  return app._aiAssistRun('clip-1', btnEl).then(() => {
+    const card = app._aiAssistItems[0];
+    assert(card.executionTrace && card.executionTrace.executionPath === 'preset', 'preset path');
+    assert(!card.executionTrace.llmPromptTrace, 'llmPromptTrace omitted when executionPath is not llm');
+    console.log('PASS Debug PR3 llmPromptTrace omitted for non-llm executionPath');
+  });
+})();
+
+(function testDebugPR2HtmlIncludesFinalPromptWhenTraceHasLlmPromptTrace() {
+  const card = {
+    reasoningLog: { planSummary: 'P', requestedPresetId: 'llm_v0' },
+    executionTrace: {
+      executionPath: 'llm',
+      llmPromptTrace: {
+        attemptIndex: 2,
+        finalSystemPrompt: 'SYS',
+        finalUserPrompt: 'USER with DIRECTIVES block',
+        blocks: {
+          resolvedTemplateId: 'clean_outliers_v1',
+          resolvedIntent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+          promptVersion: 'v9',
+          planBlock: '',
+          directivesBlock: 'DIRECTIVES:\n- Goals:',
+          userBody: 'clean',
+        },
+      },
+    },
+  };
+  const html = buildAiAssistDebugHtmlTest(card, escapeHtmlForDbg, mockLs(true));
+  assert(html.indexOf('Final LLM prompt') >= 0, 'summary for final prompt');
+  assert(html.indexOf('DIRECTIVES') >= 0, 'user payload visible');
+  assert(html.indexOf('clean_outliers_v1') >= 0, 'resolvedTemplateId in blocks JSON');
+  console.log('PASS Debug PR2 trace HTML includes Final LLM prompt subsection');
 })();
 
 (function testTargetSummaryInstanceVsClip() {
@@ -862,8 +1083,33 @@ function buildAiAssistDebugHtmlTest(it, escapeHtml, ls) {
     if (v.length > 400) v = v.slice(0, 397) + '...';
     rows.push('<div class="aiAssistDbgRow"><span class="aiAssistDbgK">' + escapeHtml(k) + '</span><span class="aiAssistDbgV">' + escapeHtml(v) + '</span></div>');
   }
-  if (!rows.length) return '';
-  return '<div class="aiAssistDbgBody">' + rows.join('') + '</div>';
+  if (!rows.length && !(et && et.llmPromptTrace && typeof et.llmPromptTrace === 'object')) return '';
+  let body = rows.length ? '<div class="aiAssistDbgBody">' + rows.join('') + '</div>' : '';
+  const pt = et && et.llmPromptTrace && typeof et.llmPromptTrace === 'object' ? et.llmPromptTrace : null;
+  if (pt) {
+    const blk = pt.blocks && typeof pt.blocks === 'object' ? pt.blocks : null;
+    const blkObj = blk ? {
+      resolvedTemplateId: blk.resolvedTemplateId,
+      resolvedIntent: blk.resolvedIntent,
+      promptVersion: blk.promptVersion,
+      planBlock: blk.planBlock,
+      directivesBlock: blk.directivesBlock,
+      userBody: blk.userBody,
+    } : {};
+    let blkJson = '';
+    try { blkJson = JSON.stringify(blkObj, null, 2); } catch (_e) { blkJson = '{}'; }
+    if (blkJson.length > 32000) blkJson = blkJson.slice(0, 32000) + '\n...[truncated]...';
+    const sys = typeof pt.finalSystemPrompt === 'string' ? pt.finalSystemPrompt : '';
+    const usr = typeof pt.finalUserPrompt === 'string' ? pt.finalUserPrompt : '';
+    const preStyle = 'white-space:pre-wrap;word-break:break-word;margin:4px 0;font-size:10px;line-height:1.35;max-height:200px;overflow:auto;';
+    body += '<details class="aiAssistDbgPrompt" style="margin-top:6px;font-size:10px;"><summary style="cursor:pointer;">Final LLM prompt</summary>';
+    if (pt.attemptIndex != null) body += '<div style="margin-top:4px;color:var(--muted);">attemptIndex: ' + escapeHtml(String(pt.attemptIndex)) + '</div>';
+    body += '<div style="margin-top:6px;font-weight:600;">Blocks</div><pre style="' + preStyle + '">' + escapeHtml(blkJson) + '</pre>';
+    body += '<div style="margin-top:6px;font-weight:600;">system</div><pre style="' + preStyle + '">' + escapeHtml(sys.length > 32000 ? sys.slice(0, 32000) + '\n...[truncated]...' : sys) + '</pre>';
+    body += '<div style="margin-top:6px;font-weight:600;">user</div><pre style="' + preStyle + '">' + escapeHtml(usr.length > 32000 ? usr.slice(0, 32000) + '\n...[truncated]...' : usr) + '</pre>';
+    body += '</details>';
+  }
+  return body;
 }
 
 function mockLs(debugOn) {

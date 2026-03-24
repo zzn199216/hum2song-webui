@@ -326,6 +326,8 @@
   function create(opts){
     /** PR-7b-2: Run optimize with llm_v0 preset (async). Returns Promise<result>. */
     function _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId){
+      /** Debug PR3: last messages sent to chat-completions (prompt text only; no cfg/headers/secrets). */
+      const promptTraceCapture = { lastAttempt: null };
       const templateId = (optsIn.templateId != null && String(optsIn.templateId).trim()) ? String(optsIn.templateId).trim() : null;
       const template = templateId && LLM_TEMPLATES_V1[templateId] ? LLM_TEMPLATES_V1[templateId] : null;
       const userPromptEmpty = !(optsIn.userPrompt != null && String(optsIn.userPrompt).trim());
@@ -352,7 +354,7 @@
       patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
       function fail(reason, summaryExtras){
-        return {
+        const o = {
           ok: false,
           reason: reason,
           executionPath: 'llm',
@@ -364,6 +366,8 @@
             examples: [],
           }, summaryExtras || {}),
         };
+        if (promptTraceCapture.lastAttempt) o.llmPromptTrace = promptTraceCapture.lastAttempt;
+        return o;
       }
 
       const cfg = (ROOT.H2S_LLM_CONFIG && typeof ROOT.H2S_LLM_CONFIG.loadLlmConfig === 'function')
@@ -554,6 +558,20 @@
         ];
 
         try {
+          const pm = patchSummaryBase.promptMeta && typeof patchSummaryBase.promptMeta === 'object' ? patchSummaryBase.promptMeta : null;
+          promptTraceCapture.lastAttempt = {
+            attemptIndex: attemptIndex,
+            finalSystemPrompt: systemMsg,
+            finalUserPrompt: userContent,
+            blocks: {
+              resolvedTemplateId: template ? template.id : null,
+              resolvedIntent: { fixPitch: !!intent.fixPitch, tightenRhythm: !!intent.tightenRhythm, reduceOutliers: !!intent.reduceOutliers },
+              promptVersion: (pm && pm.promptVersion != null && String(pm.promptVersion).trim()) ? String(pm.promptVersion).trim() : 'manual_v0',
+              planBlock: planBlock || '',
+              directivesBlock: directivesBlock || '',
+              userBody: (effectivePromptInfo && typeof effectivePromptInfo.prompt === 'string') ? effectivePromptInfo.prompt : '',
+            },
+          };
           const res = await client.callChatCompletions(cfg, messages, { temperature: 0.2, timeoutMs: 20000 });
           const text = (res && typeof res.text === 'string') ? res.text : '';
           if (debugCapture) debugCapture.rawText = text;
@@ -711,6 +729,7 @@
             errors: debugCapture.validateErrors || [],
             safeModeResolved: safeMode,
           };
+          if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
           return out;
         }
         if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
@@ -741,6 +760,7 @@
               errors: debugCapture.validateErrors || [],
               safeModeResolved: safeMode,
             };
+            if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
             return out;
           });
         }
@@ -755,6 +775,7 @@
           errors: debugCapture.validateErrors || [],
           safeModeResolved: safeMode,
         };
+        if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
         return out;
       });
     }

@@ -70,6 +70,47 @@
     return { templateId: null, templateLabel: '', intent: null };
   }
 
+  /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
+  function _templateExecutionFieldsFromPlanKind(planKind){
+    if (planKind == null || typeof planKind !== 'string') return null;
+    const k = String(planKind).trim().toLowerCase();
+    if (k === 'generic' || k === '') return null;
+    const idByKind = {
+      'clean-outliers': 'clean_outliers_v1',
+      'fix-pitch': 'fix_pitch_v1',
+      'tighten-rhythm': 'tighten_rhythm_v1',
+      'bluesy': 'bluesy_v1',
+    };
+    const templateId = idByKind[k];
+    if (!templateId) return null;
+    const tm = INSPECTOR_TEMPLATES[templateId];
+    if (!tm) return null;
+    const intent = tm.intent && typeof tm.intent === 'object'
+      ? { fixPitch: !!tm.intent.fixPitch, tightenRhythm: !!tm.intent.tightenRhythm, reduceOutliers: !!tm.intent.reduceOutliers }
+      : null;
+    if (!intent) return null;
+    return { templateId: templateId, templateLabel: (tm.label != null && String(tm.label).trim()) ? String(tm.label).trim() : templateId, intent: intent };
+  }
+
+  /** When keyword mapping missed but planKind is task-specific, backfill card template for optimize execution. */
+  function _syncAssistantCardTemplateFromPlan(card){
+    if (!card || typeof card !== 'object') return;
+    const plan = card.plan;
+    if (!plan || typeof plan !== 'object') return;
+    const pk = (plan.planKind != null && String(plan.planKind).trim()) ? String(plan.planKind).trim() : '';
+    if (!pk) return;
+    const fields = _templateExecutionFieldsFromPlanKind(plan.planKind);
+    if (!fields || !fields.templateId || !fields.intent) return;
+    if (card.templateId != null && String(card.templateId).trim() !== '') return;
+    card.templateId = fields.templateId;
+    card.templateLabel = fields.templateLabel;
+    card.intent = fields.intent;
+    if (card.reasoningLog && typeof card.reasoningLog === 'object'){
+      card.reasoningLog.templateId = fields.templateId;
+      card.reasoningLog.intent = { fixPitch: !!fields.intent.fixPitch, tightenRhythm: !!fields.intent.tightenRhythm, reduceOutliers: !!fields.intent.reduceOutliers };
+    }
+  }
+
   /** PR1: Attempt AI-generated plan. Returns Promise<plan|null>. Falls back to rule-based on any failure. */
   function _tryGenerateAiPlan(promptText, templateId, intent){
     const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
@@ -124,6 +165,40 @@
       log.promptVersion = null;
       log.patchSummary = null;
     }
+  }
+
+  /** Debug PR3: whitelist final LLM prompt trace (prompt text only; no headers/cfg/secrets). */
+  function _sanitizeLlmPromptTraceForAssistantTrace(raw){
+    if (!raw || typeof raw !== 'object') return null;
+    const MAX = 24000;
+    function trunc(s){
+      if (typeof s !== 'string') return '';
+      return s.length > MAX ? s.slice(0, MAX) + '\n...[truncated]...' : s;
+    }
+    const out = {};
+    if (raw.attemptIndex != null && isFinite(Number(raw.attemptIndex))) out.attemptIndex = Number(raw.attemptIndex);
+    if (typeof raw.finalSystemPrompt === 'string') out.finalSystemPrompt = trunc(raw.finalSystemPrompt);
+    if (typeof raw.finalUserPrompt === 'string') out.finalUserPrompt = trunc(raw.finalUserPrompt);
+    if (raw.blocks && typeof raw.blocks === 'object'){
+      const b = raw.blocks;
+      const bo = {};
+      if (b.resolvedTemplateId != null && String(b.resolvedTemplateId).trim()) bo.resolvedTemplateId = String(b.resolvedTemplateId).trim().slice(0, 80);
+      else bo.resolvedTemplateId = null;
+      if (b.resolvedIntent && typeof b.resolvedIntent === 'object'){
+        bo.resolvedIntent = {
+          fixPitch: !!b.resolvedIntent.fixPitch,
+          tightenRhythm: !!b.resolvedIntent.tightenRhythm,
+          reduceOutliers: !!b.resolvedIntent.reduceOutliers,
+        };
+      }
+      if (b.promptVersion != null && String(b.promptVersion).trim()) bo.promptVersion = String(b.promptVersion).trim().slice(0, 80);
+      if (typeof b.planBlock === 'string') bo.planBlock = trunc(b.planBlock);
+      if (typeof b.directivesBlock === 'string') bo.directivesBlock = trunc(b.directivesBlock);
+      if (typeof b.userBody === 'string') bo.userBody = trunc(b.userBody);
+      out.blocks = bo;
+    }
+    if (!out.finalSystemPrompt && !out.finalUserPrompt && !out.blocks) return null;
+    return out;
   }
 
   /** Debug PR1: safe subset of llmDebug for Assistant card executionTrace (no raw model text, no secrets). */
@@ -181,6 +256,10 @@
       if (optRes && optRes.llmDebug){
         const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
         if (s) trace.llmDebugSummary = s;
+      }
+      if (optRes && optRes.executionPath === 'llm' && optRes.llmPromptTrace){
+        const pt = _sanitizeLlmPromptTraceForAssistantTrace(optRes.llmPromptTrace);
+        if (pt) trace.llmPromptTrace = pt;
       }
     } catch (_e) { /* keep partial trace */ }
     return trace;
@@ -254,8 +333,33 @@
       if (v.length > 400) v = v.slice(0, 397) + '...';
       rows.push('<div class="aiAssistDbgRow"><span class="aiAssistDbgK">' + escapeHtml(k) + '</span><span class="aiAssistDbgV">' + escapeHtml(v) + '</span></div>');
     }
-    if (!rows.length) return '';
-    return '<div class="aiAssistDbgBody">' + rows.join('') + '</div>';
+    if (!rows.length && !(et && et.llmPromptTrace && typeof et.llmPromptTrace === 'object')) return '';
+    let body = rows.length ? '<div class="aiAssistDbgBody">' + rows.join('') + '</div>' : '';
+    const pt = et && et.llmPromptTrace && typeof et.llmPromptTrace === 'object' ? et.llmPromptTrace : null;
+    if (pt){
+      const blk = pt.blocks && typeof pt.blocks === 'object' ? pt.blocks : null;
+      const blkObj = blk ? {
+        resolvedTemplateId: blk.resolvedTemplateId,
+        resolvedIntent: blk.resolvedIntent,
+        promptVersion: blk.promptVersion,
+        planBlock: blk.planBlock,
+        directivesBlock: blk.directivesBlock,
+        userBody: blk.userBody,
+      } : {};
+      let blkJson = '';
+      try { blkJson = JSON.stringify(blkObj, null, 2); } catch (_e) { blkJson = '{}'; }
+      if (blkJson.length > 32000) blkJson = blkJson.slice(0, 32000) + '\n...[truncated]...';
+      const sys = typeof pt.finalSystemPrompt === 'string' ? pt.finalSystemPrompt : '';
+      const usr = typeof pt.finalUserPrompt === 'string' ? pt.finalUserPrompt : '';
+      const preStyle = 'white-space:pre-wrap;word-break:break-word;margin:4px 0;font-size:10px;line-height:1.35;max-height:200px;overflow:auto;';
+      body += '<details class="aiAssistDbgPrompt" style="margin-top:6px;font-size:10px;"><summary style="cursor:pointer;">Final LLM prompt</summary>';
+      if (pt.attemptIndex != null) body += '<div style="margin-top:4px;color:var(--muted);">attemptIndex: ' + escapeHtml(String(pt.attemptIndex)) + '</div>';
+      body += '<div style="margin-top:6px;font-weight:600;">Blocks</div><pre style="' + preStyle + '">' + escapeHtml(blkJson) + '</pre>';
+      body += '<div style="margin-top:6px;font-weight:600;">system</div><pre style="' + preStyle + '">' + escapeHtml(sys.length > 32000 ? sys.slice(0, 32000) + '\n...[truncated]...' : sys) + '</pre>';
+      body += '<div style="margin-top:6px;font-weight:600;">user</div><pre style="' + preStyle + '">' + escapeHtml(usr.length > 32000 ? usr.slice(0, 32000) + '\n...[truncated]...' : usr) + '</pre>';
+      body += '</details>';
+    }
+    return body;
   }
 
   /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
@@ -1731,6 +1835,7 @@ ensureTrackButtons(){
               card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
               card.reasoningLog.planSource = 'ai';
             }
+            _syncAssistantCardTemplateFromPlan(card);
             this.render();
           }
         }).catch(function(){ /* keep rule-based plan */ });
@@ -1742,6 +1847,7 @@ ensureTrackButtons(){
       const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
       const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
       if (!card) return;
+      _syncAssistantCardTemplateFromPlan(card);
       const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
       const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
       if (card.templateId && card.intent) {
