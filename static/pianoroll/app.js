@@ -170,8 +170,13 @@
         if (ps.executedSource != null) trace.executedSource = String(ps.executedSource).trim();
         if (ps.promptMeta && ps.promptMeta.promptVersion != null) trace.promptVersion = String(ps.promptMeta.promptVersion).trim();
       }
+      if (!trace.promptVersion && rl && rl.promptVersion != null && String(rl.promptVersion).trim() !== ''){
+        trace.promptVersion = String(rl.promptVersion).trim();
+      }
       trace.patchSummary = _compactPatchSummaryForExecutionTrace(ps);
       if (rl && typeof rl.accepted === 'boolean') trace.accepted = rl.accepted;
+      if (rl && rl.runState != null && String(rl.runState).trim() !== '') trace.runState = String(rl.runState).trim();
+      if (rl && rl.resultKind != null) trace.resultKind = rl.resultKind;
       if (rl && rl.rejectionReason != null && String(rl.rejectionReason).trim()) trace.rejectionReason = String(rl.rejectionReason).trim().slice(0, 120);
       if (optRes && optRes.llmDebug){
         const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
@@ -179,6 +184,78 @@
       }
     } catch (_e) { /* keep partial trace */ }
     return trace;
+  }
+
+  /** Debug PR2: compact safe HTML for Assistant card trace panel (whitelist only; no raw LLM / secrets). */
+  function _buildAiAssistDebugHtml(it, escapeHtml){
+    if (!_dbgEnabled()) return '';
+    const rl = it && it.reasoningLog && typeof it.reasoningLog === 'object' ? it.reasoningLog : null;
+    const et = it && it.executionTrace && typeof it.executionTrace === 'object' ? it.executionTrace : null;
+    if (!rl && !et) return '';
+    const merged = {};
+    function set(k, v){
+      if (v === undefined || v === null) return;
+      if (typeof v === 'boolean') merged[k] = v ? 'true' : 'false';
+      else if (typeof v === 'object') merged[k] = JSON.stringify(v);
+      else merged[k] = String(v);
+    }
+    if (rl){
+      if (rl.templateId != null) set('templateId', rl.templateId);
+      if (rl.intent && typeof rl.intent === 'object') set('intent', rl.intent);
+      if (rl.planSource != null) set('planSource', rl.planSource);
+      if (rl.planSummary != null) set('planSummary', rl.planSummary);
+      if (rl.requestedPresetId != null) set('requestedPresetId', rl.requestedPresetId);
+      if (rl.userPrompt != null) set('userPrompt', rl.userPrompt);
+      if (rl.promptVersion != null) set('promptVersion', rl.promptVersion);
+      if (rl.runState != null) set('runState', rl.runState);
+      if (rl.resultKind != null) set('resultKind', rl.resultKind);
+      if (typeof rl.accepted === 'boolean') set('accepted', rl.accepted);
+      if (rl.rejectionReason != null) set('rejectionReason', rl.rejectionReason);
+      if (rl.patchSummary && typeof rl.patchSummary === 'object'){
+        if (rl.patchSummary.ops != null) set('patchSummary.ops', rl.patchSummary.ops);
+        if (rl.patchSummary.status != null) set('patchSummary.status', rl.patchSummary.status);
+        if (rl.patchSummary.reason != null) set('patchSummary.reason', rl.patchSummary.reason);
+      }
+    }
+    if (et){
+      if (et.executionPath != null) set('executionPath', et.executionPath);
+      if (et.executedPreset != null) set('executedPreset', et.executedPreset);
+      if (et.executedSource != null) set('executedSource', et.executedSource);
+      if (et.promptVersion != null) set('promptVersion', et.promptVersion);
+      if (et.runState != null) set('runState', et.runState);
+      if (et.resultKind != null) set('resultKind', et.resultKind);
+      if (typeof et.accepted === 'boolean') set('accepted', et.accepted);
+      if (et.rejectionReason != null) set('rejectionReason', et.rejectionReason);
+      if (et.patchSummary && typeof et.patchSummary === 'object'){
+        if (et.patchSummary.ops != null) set('patchSummary.ops', et.patchSummary.ops);
+        if (et.patchSummary.status != null) set('patchSummary.status', et.patchSummary.status);
+        if (et.patchSummary.reason != null) set('patchSummary.reason', et.patchSummary.reason);
+      }
+      const lds = et.llmDebugSummary;
+      if (lds && typeof lds === 'object'){
+        if (lds.attemptCount != null) set('llmDebugSummary.attemptCount', lds.attemptCount);
+        if (typeof lds.safeModeResolved === 'boolean') set('llmDebugSummary.safeModeResolved', lds.safeModeResolved);
+        if (lds.reason != null) set('llmDebugSummary.reason', lds.reason);
+        if (lds.errorSummary != null) set('llmDebugSummary.errorSummary', lds.errorSummary);
+      }
+    }
+    const order = [
+      'templateId', 'intent', 'planSource', 'planSummary', 'requestedPresetId', 'userPrompt',
+      'executionPath', 'executedPreset', 'executedSource', 'promptVersion',
+      'runState', 'resultKind', 'accepted', 'rejectionReason',
+      'patchSummary.ops', 'patchSummary.status', 'patchSummary.reason',
+      'llmDebugSummary.attemptCount', 'llmDebugSummary.safeModeResolved', 'llmDebugSummary.reason', 'llmDebugSummary.errorSummary',
+    ];
+    const rows = [];
+    for (let i = 0; i < order.length; i++){
+      const k = order[i];
+      if (!Object.prototype.hasOwnProperty.call(merged, k)) continue;
+      let v = merged[k];
+      if (v.length > 400) v = v.slice(0, 397) + '...';
+      rows.push('<div class="aiAssistDbgRow"><span class="aiAssistDbgK">' + escapeHtml(k) + '</span><span class="aiAssistDbgV">' + escapeHtml(v) + '</span></div>');
+    }
+    if (!rows.length) return '';
+    return '<div class="aiAssistDbgBody">' + rows.join('') + '</div>';
   }
 
   /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
@@ -1555,6 +1632,7 @@ ensureTrackButtons(){
       if (this._aiAssistBound) return;
       this._aiAssistBound = true;
       this._aiAssistItems = this._aiAssistItems || [];
+      this._aiAssistDebugExpanded = this._aiAssistDebugExpanded || {};
       const header = document.getElementById('aiAssistHeader');
       const sendBtn = document.getElementById('aiAssistSend');
       const inp = document.getElementById('aiAssistInput');
@@ -1569,12 +1647,22 @@ ensureTrackButtons(){
       });
       if (sendBtn) sendBtn.addEventListener('click', () => this._aiAssistSend());
       if (body) body.addEventListener('click', (ev) => {
-        const act = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-act');
-        const clipId = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-clip-id');
+        const t = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+        const act = t && t.getAttribute && t.getAttribute('data-act');
+        const clipId = t && t.getAttribute && t.getAttribute('data-clip-id');
         if (!act || !clipId) return;
-        if (act === 'aiRun') this._aiAssistRun(clipId, ev.target);
+        if (act === 'aiRun') this._aiAssistRun(clipId, t);
         else if (act === 'aiOpenOptimize') this.runCommand('open_inspector_optimize');
         else if (act === 'aiUndo') this._aiAssistUndo(clipId);
+        else if (act === 'aiDebugToggle'){
+          ev.preventDefault();
+          const created = t.getAttribute('data-card-created');
+          if (created == null) return;
+          this._aiAssistDebugExpanded = this._aiAssistDebugExpanded || {};
+          const k = String(clipId) + '\0' + String(created);
+          this._aiAssistDebugExpanded[k] = !this._aiAssistDebugExpanded[k];
+          this.render();
+        }
       });
       const handle = document.getElementById('aiAssistResizeHandle');
       if (handle) {
@@ -1796,6 +1884,15 @@ ensureTrackButtons(){
               else if (runState === 'failed') statusLine = _t('aiAssist.statusFailed') + ': ' + escapeHtml((it.lastError || 'error').slice(0, 80));
               else if (runState === 'undone') statusLine = _t('aiAssist.statusUndone');
               html += '<div class="aiAssistCardStatus">' + statusLine + '</div>';
+            }
+            const dbgHtml = _buildAiAssistDebugHtml(it, escapeHtml);
+            if (dbgHtml){
+              const dbgKey = String(it.clipId) + '\0' + String(it.createdAt);
+              const dbgOpen = !!(this._aiAssistDebugExpanded && this._aiAssistDebugExpanded[dbgKey]);
+              html += '<div class="aiAssistDbg">';
+              html += '<button type="button" class="btn mini aiAssistDbgToggle" data-act="aiDebugToggle" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-card-created="' + escapeHtml(String(it.createdAt)) + '">' + escapeHtml(dbgOpen ? 'Trace \u25BE' : 'Trace \u25B8') + '</button>';
+              html += '<div class="aiAssistDbgPanel' + (dbgOpen ? ' open' : '') + '">' + dbgHtml + '</div>';
+              html += '</div>';
             }
             html += '<div class="aiAssistCardBtns">';
             html += '<button type="button" class="btn primary mini" data-act="aiRun" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-prompt="' + escapeHtml(it.promptText) + '">' + escapeHtml(_t('aiAssist.run')) + '</button>';

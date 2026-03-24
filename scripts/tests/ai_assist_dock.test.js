@@ -117,8 +117,13 @@ function _buildAiAssistExecutionTrace(card, optRes) {
       if (ps.executedSource != null) trace.executedSource = String(ps.executedSource).trim();
       if (ps.promptMeta && ps.promptMeta.promptVersion != null) trace.promptVersion = String(ps.promptMeta.promptVersion).trim();
     }
+    if (!trace.promptVersion && rl && rl.promptVersion != null && String(rl.promptVersion).trim() !== '') {
+      trace.promptVersion = String(rl.promptVersion).trim();
+    }
     trace.patchSummary = _compactPatchSummaryForExecutionTrace(ps);
     if (rl && typeof rl.accepted === 'boolean') trace.accepted = rl.accepted;
+    if (rl && rl.runState != null && String(rl.runState).trim() !== '') trace.runState = String(rl.runState).trim();
+    if (rl && rl.resultKind != null) trace.resultKind = rl.resultKind;
     if (rl && rl.rejectionReason != null && String(rl.rejectionReason).trim()) trace.rejectionReason = String(rl.rejectionReason).trim().slice(0, 120);
     if (optRes && optRes.llmDebug) {
       const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
@@ -618,7 +623,10 @@ function createFakeApp(opts) {
     assert(card.reasoningLog.patchSummary && card.reasoningLog.patchSummary.ops === 2, 'patchSummary.ops');
     assert(card.reasoningLog.patchSummary.status === 'ok', 'patchSummary.status');
     assert(card.executionTrace && card.executionTrace.executionPath === 'llm', 'executionTrace.executionPath');
+    assert(card.executionTrace.promptVersion === 'tmpl_v1.fix_pitch.r1', 'executionTrace.promptVersion');
     assert(card.executionTrace.accepted === true, 'executionTrace.accepted');
+    assert(card.executionTrace.runState === 'done', 'executionTrace.runState');
+    assert(card.executionTrace.resultKind === 'pitch/timing', 'executionTrace.resultKind');
     assert(card.executionTrace.patchSummary && card.executionTrace.patchSummary.ops === 2, 'executionTrace.patchSummary.ops');
     console.log('PASS PR2 Run enriches reasoningLog with result info');
   });
@@ -771,4 +779,155 @@ function createFakeApp(opts) {
     assert(app._aiAssistItems[0].runState === 'undone', 'card should be undone');
     console.log('PASS UX7c undo => done card becomes undone');
   });
+})();
+
+// --- Debug PR2: mirror app.js _buildAiAssistDebugHtml (whitelist only) for regression tests ---
+function escapeHtmlForDbg(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildAiAssistDebugHtmlTest(it, escapeHtml, ls) {
+  try {
+    if (!ls || ls.getItem('h2s_debug') !== '1') return '';
+  } catch (_e) {
+    return '';
+  }
+  const rl = it && it.reasoningLog && typeof it.reasoningLog === 'object' ? it.reasoningLog : null;
+  const et = it && it.executionTrace && typeof it.executionTrace === 'object' ? it.executionTrace : null;
+  if (!rl && !et) return '';
+  const merged = {};
+  function set(k, v) {
+    if (v === undefined || v === null) return;
+    if (typeof v === 'boolean') merged[k] = v ? 'true' : 'false';
+    else if (typeof v === 'object') merged[k] = JSON.stringify(v);
+    else merged[k] = String(v);
+  }
+  if (rl) {
+    if (rl.templateId != null) set('templateId', rl.templateId);
+    if (rl.intent && typeof rl.intent === 'object') set('intent', rl.intent);
+    if (rl.planSource != null) set('planSource', rl.planSource);
+    if (rl.planSummary != null) set('planSummary', rl.planSummary);
+    if (rl.requestedPresetId != null) set('requestedPresetId', rl.requestedPresetId);
+    if (rl.userPrompt != null) set('userPrompt', rl.userPrompt);
+    if (rl.promptVersion != null) set('promptVersion', rl.promptVersion);
+    if (rl.runState != null) set('runState', rl.runState);
+    if (rl.resultKind != null) set('resultKind', rl.resultKind);
+    if (typeof rl.accepted === 'boolean') set('accepted', rl.accepted);
+    if (rl.rejectionReason != null) set('rejectionReason', rl.rejectionReason);
+    if (rl.patchSummary && typeof rl.patchSummary === 'object') {
+      if (rl.patchSummary.ops != null) set('patchSummary.ops', rl.patchSummary.ops);
+      if (rl.patchSummary.status != null) set('patchSummary.status', rl.patchSummary.status);
+      if (rl.patchSummary.reason != null) set('patchSummary.reason', rl.patchSummary.reason);
+    }
+  }
+  if (et) {
+    if (et.executionPath != null) set('executionPath', et.executionPath);
+    if (et.executedPreset != null) set('executedPreset', et.executedPreset);
+    if (et.executedSource != null) set('executedSource', et.executedSource);
+    if (et.promptVersion != null) set('promptVersion', et.promptVersion);
+    if (et.runState != null) set('runState', et.runState);
+    if (et.resultKind != null) set('resultKind', et.resultKind);
+    if (typeof et.accepted === 'boolean') set('accepted', et.accepted);
+    if (et.rejectionReason != null) set('rejectionReason', et.rejectionReason);
+    if (et.patchSummary && typeof et.patchSummary === 'object') {
+      if (et.patchSummary.ops != null) set('patchSummary.ops', et.patchSummary.ops);
+      if (et.patchSummary.status != null) set('patchSummary.status', et.patchSummary.status);
+      if (et.patchSummary.reason != null) set('patchSummary.reason', et.patchSummary.reason);
+    }
+    const lds = et.llmDebugSummary;
+    if (lds && typeof lds === 'object') {
+      if (lds.attemptCount != null) set('llmDebugSummary.attemptCount', lds.attemptCount);
+      if (typeof lds.safeModeResolved === 'boolean') set('llmDebugSummary.safeModeResolved', lds.safeModeResolved);
+      if (lds.reason != null) set('llmDebugSummary.reason', lds.reason);
+      if (lds.errorSummary != null) set('llmDebugSummary.errorSummary', lds.errorSummary);
+    }
+  }
+  const order = [
+    'templateId', 'intent', 'planSource', 'planSummary', 'requestedPresetId', 'userPrompt',
+    'executionPath', 'executedPreset', 'executedSource', 'promptVersion',
+    'runState', 'resultKind', 'accepted', 'rejectionReason',
+    'patchSummary.ops', 'patchSummary.status', 'patchSummary.reason',
+    'llmDebugSummary.attemptCount', 'llmDebugSummary.safeModeResolved', 'llmDebugSummary.reason', 'llmDebugSummary.errorSummary',
+  ];
+  const rows = [];
+  for (let i = 0; i < order.length; i++) {
+    const k = order[i];
+    if (!Object.prototype.hasOwnProperty.call(merged, k)) continue;
+    let v = merged[k];
+    if (v.length > 400) v = v.slice(0, 397) + '...';
+    rows.push('<div class="aiAssistDbgRow"><span class="aiAssistDbgK">' + escapeHtml(k) + '</span><span class="aiAssistDbgV">' + escapeHtml(v) + '</span></div>');
+  }
+  if (!rows.length) return '';
+  return '<div class="aiAssistDbgBody">' + rows.join('') + '</div>';
+}
+
+function mockLs(debugOn) {
+  const map = { h2s_debug: debugOn ? '1' : '0' };
+  return {
+    getItem: (k) => (Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null),
+    setItem: () => {},
+    removeItem: () => {},
+  };
+}
+
+(function testDebugPR2TraceHtmlHiddenWhenDebugOff() {
+  const card = {
+    reasoningLog: { planSummary: 'X', requestedPresetId: 'llm_v0' },
+    executionTrace: { executionPath: 'llm', promptVersion: 'v1' },
+  };
+  const html = buildAiAssistDebugHtmlTest(card, escapeHtmlForDbg, mockLs(false));
+  assert(html === '', 'no debug HTML when h2s_debug is not 1');
+  console.log('PASS Debug PR2 trace HTML hidden when debug mode off');
+})();
+
+(function testDebugPR2TraceHtmlShowsSafeFieldsWhenDebugOn() {
+  const card = {
+    reasoningLog: {
+      templateId: 'fix_pitch_v1',
+      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+      planSource: 'rule',
+      planSummary: 'Fix Pitch',
+      requestedPresetId: 'llm_v0',
+    },
+    executionTrace: {
+      executionPath: 'llm',
+      promptVersion: 'tmpl_v1.fix_pitch.r1',
+      runState: 'done',
+      resultKind: 'pitch/timing',
+      accepted: true,
+      patchSummary: { ops: 2, status: 'ok', reason: 'ok' },
+      llmDebugSummary: { attemptCount: 1, safeModeResolved: false, reason: 'ok' },
+    },
+  };
+  const html = buildAiAssistDebugHtmlTest(card, escapeHtmlForDbg, mockLs(true));
+  assert(html.indexOf('executionPath') >= 0 && html.indexOf('llm') >= 0, 'executionPath visible');
+  assert(html.indexOf('promptVersion') >= 0 && html.indexOf('tmpl_v1') >= 0, 'promptVersion visible');
+  assert(html.indexOf('patchSummary.ops') >= 0, 'patchSummary.ops visible');
+  assert(html.indexOf('llmDebugSummary.attemptCount') >= 0, 'llmDebugSummary visible');
+  console.log('PASS Debug PR2 trace HTML shows safe fields when debug on');
+})();
+
+(function testDebugPR2TraceHtmlDoesNotLeakForbiddenFields() {
+  const card = {
+    reasoningLog: { planSummary: 'P', requestedPresetId: 'llm_v0' },
+    executionTrace: {
+      executionPath: 'llm',
+      rawText: 'MODEL_SECRET_OUTPUT',
+      extractedJson: '{ "secret": 1 }',
+      authToken: 'sk-evil-token',
+      llmDebugSummary: { attemptCount: 1, reason: 'ok' },
+    },
+  };
+  const html = buildAiAssistDebugHtmlTest(card, escapeHtmlForDbg, mockLs(true));
+  assert(html.indexOf('MODEL_SECRET_OUTPUT') < 0, 'no rawText');
+  assert(html.indexOf('sk-evil') < 0, 'no authToken');
+  assert(html.indexOf('extractedJson') < 0, 'no extractedJson key');
+  assert(html.indexOf('{ &quot;secret&quot;: 1 }') < 0 && html.indexOf('extractedJson') < 0, 'no raw JSON blob');
+  assert(html.indexOf('executionPath') >= 0, 'still has safe field');
+  console.log('PASS Debug PR2 trace HTML does not leak forbidden fields');
 })();

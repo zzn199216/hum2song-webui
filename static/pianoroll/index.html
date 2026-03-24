@@ -127,6 +127,15 @@
     #aiAssistMessages .aiAssistCard[data-run-state="done"] .aiAssistCardStatus{ color:var(--accent2,#60a5fa); }
     #aiAssistMessages .aiAssistCard[data-run-state="failed"] .aiAssistCardStatus{ color:var(--danger,#ef4444); }
     #aiAssistMessages .aiAssistCardBtns{ display:flex; gap:6px; flex-wrap:wrap; }
+    /* Debug PR2: Assistant card trace (h2s_debug=1 only; whitelist-rendered) */
+    #aiAssistMessages .aiAssistDbg{ margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.08); }
+    #aiAssistMessages .aiAssistDbgToggle{ font-size:10px !important; padding:2px 8px !important; opacity:0.88; }
+    #aiAssistMessages .aiAssistDbgPanel:not(.open){ display:none; }
+    #aiAssistMessages .aiAssistDbgPanel.open{ display:block; margin-top:6px; }
+    #aiAssistMessages .aiAssistDbgBody{ font-size:10px; color:var(--muted); line-height:1.35; }
+    #aiAssistMessages .aiAssistDbgRow{ display:flex; gap:6px; margin-bottom:3px; }
+    #aiAssistMessages .aiAssistDbgK{ flex:0 0 38%; opacity:0.88; word-break:break-all; }
+    #aiAssistMessages .aiAssistDbgV{ flex:1; min-width:0; word-break:break-word; }
     #aiAssistInput{ width:100%; min-height:52px; resize:vertical; padding:6px; font-size:12px; font-family:inherit; color:var(--text); background:rgba(0,0,0,.2); border:1px solid var(--border); border-radius:8px; box-sizing:border-box; }
     #aiAssistSend{ align-self:flex-end; }
 
