@@ -91,6 +91,51 @@
     return lines.join('\n');
   }
 
+  /**
+   * LLM Context PR1: deterministic per-note rows for optimize prompt (beats-only).
+   * Order: score track index, then startBeat ascending, then noteId string.
+   */
+  function collectClipNoteRowsForLlm(scoreTracks){
+    const rows = [];
+    if (!Array.isArray(scoreTracks)) return rows;
+    for (let ti = 0; ti < scoreTracks.length; ti++){
+      const tr = scoreTracks[ti];
+      const trackId = (tr && tr.id != null && String(tr.id).trim())
+        ? String(tr.id).trim()
+        : (tr && tr.trackId != null && String(tr.trackId).trim())
+          ? String(tr.trackId).trim()
+          : ('track_' + ti);
+      const notes = Array.isArray(tr.notes) ? tr.notes.slice() : [];
+      notes.sort(function(a, b){
+        const sa = Number(a && a.startBeat);
+        const sb = Number(b && b.startBeat);
+        const fa = isFinite(sa) ? sa : 0;
+        const fb = isFinite(sb) ? sb : 0;
+        if (fa !== fb) return fa - fb;
+        const ida = (a && a.id) ? String(a.id) : '';
+        const idb = (b && b.id) ? String(b.id) : '';
+        return ida < idb ? -1 : ida > idb ? 1 : 0;
+      });
+      for (let j = 0; j < notes.length; j++){
+        const n = notes[j];
+        if (!n || !n.id) continue;
+        const pitch = Number(n.pitch);
+        const sb = Number(n.startBeat);
+        const db = Number(n.durationBeat);
+        const vel = Number(n.velocity);
+        rows.push({
+          trackId: trackId,
+          noteId: String(n.id),
+          pitch: isFinite(pitch) ? pitch : 0,
+          startBeat: isFinite(sb) ? sb : 0,
+          durationBeat: (isFinite(db) && db > 0) ? db : 0,
+          velocity: (isFinite(vel) && vel >= 0 && vel <= 127) ? Math.round(vel) : 0,
+        });
+      }
+    }
+    return rows;
+  }
+
   /** PR-6a: resolve executed prompt and source for patchSummary trace. */
   function resolveOptimizeUserPrompt(opts){
     const raw = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? String(opts.userPrompt).trim() : '';
@@ -387,33 +432,27 @@
       let safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
       if (intent.fixPitch || intent.tightenRhythm) safeMode = false;
 
-      // PR-8B-1: Extract clip metadata and noteIds for structured hint
+      // PR-8B-1 / LLM Context PR1: clip metadata, noteIds, and full per-note table (beats-only)
       const score = clip && clip.score;
       const tracks = (score && Array.isArray(score.tracks)) ? score.tracks : [];
-      let noteCount = 0;
-      let noteIds = [];
+      const noteRows = collectClipNoteRowsForLlm(tracks);
+      let noteCount = noteRows.length;
+      const noteIds = [];
+      for (let ni = 0; ni < noteRows.length && noteIds.length < 80; ni++){
+        noteIds.push(noteRows[ni].noteId);
+      }
       let pitchMin = null;
       let pitchMax = null;
       let maxSpanBeat = 0;
-      for (const tr of tracks){
-        const notes = Array.isArray(tr.notes) ? tr.notes : [];
-        for (const n of notes){
-          if (n && n.id){
-            if (noteIds.length < 80) noteIds.push(String(n.id));
-            noteCount += 1;
-            const p = Number(n.pitch);
-            if (isFinite(p) && p >= 0 && p <= 127){
-              if (pitchMin == null || p < pitchMin) pitchMin = p;
-              if (pitchMax == null || p > pitchMax) pitchMax = p;
-            }
-            const sb = Number(n.startBeat);
-            const db = Number(n.durationBeat);
-            if (isFinite(sb) && isFinite(db) && db > 0){
-              const end = sb + db;
-              if (end > maxSpanBeat) maxSpanBeat = end;
-            }
-          }
+      for (let ri = 0; ri < noteRows.length; ri++){
+        const r = noteRows[ri];
+        const p = r.pitch;
+        if (isFinite(p) && p >= 0 && p <= 127){
+          if (pitchMin == null || p < pitchMin) pitchMin = p;
+          if (pitchMax == null || p > pitchMax) pitchMax = p;
         }
+        const end = r.startBeat + r.durationBeat;
+        if (isFinite(end) && end > maxSpanBeat) maxSpanBeat = end;
       }
       const meta = clip && clip.meta;
       const finalNoteCount = (meta && typeof meta.notes === 'number') ? meta.notes : noteCount;
@@ -512,11 +551,22 @@
         clipHint += '- span: unknown\n';
       }
       clipHint += '- bpm: ' + String(bpm) + '\n';
+      clipHint += '\nNOTE TABLE (beats-only, all editable notes):\n';
+      if (noteRows.length === 0){
+        clipHint += '(none)\n';
+      } else {
+        for (let ri = 0; ri < noteRows.length; ri++){
+          const r = noteRows[ri];
+          clipHint += '- trackId=' + r.trackId + ' noteId=' + r.noteId +
+            ' pitch=' + String(r.pitch) + ' startBeat=' + String(r.startBeat) +
+            ' durationBeat=' + String(r.durationBeat) + ' velocity=' + String(r.velocity) + '\n';
+        }
+      }
       if (noteIds.length > 0){
         clipHint += '\nAllowed noteIds (use ONLY these for setNote/moveNote/deleteNote):\n';
         clipHint += noteIds.slice(0, 80).join(', ') + '\n';
         if (finalNoteCount > 80){
-          clipHint += '\n(Clip has ' + String(finalNoteCount) + ' notes total; only modify noteIds from the allowed list above. Do not invent ids.)\n';
+          clipHint += '\n(Clip has ' + String(finalNoteCount) + ' notes total; NOTE TABLE above lists every note. Allowed noteIds line shows first 80 only; do not invent ids.)\n';
         } else {
           clipHint += '\nIf you use setNote/moveNote/deleteNote, noteId MUST be chosen from the Allowed noteIds list above.\n';
         }
@@ -532,7 +582,11 @@
         ? ('Goals: ' + [intent.fixPitch ? 'fix pitch (correct wrong notes)' : null, intent.tightenRhythm ? 'tighten rhythm (align timing)' : null, intent.reduceOutliers ? 'reduce outliers (smooth extreme values)' : null].filter(Boolean).join('; ') + '.\n\n')
         : '';
       // PR3: Optional PLAN block from structured plan (extra execution constraint)
-      const planBlock = buildPlanBlock(optsIn.plan);
+      // Assistant Run: _assistantExecutionPlanSnapshot is authoritative (avoids stale generic plan in opts.plan).
+      const planForLlmBlock = (optsIn._assistantExecutionPlanSnapshot != null && typeof optsIn._assistantExecutionPlanSnapshot === 'object')
+        ? optsIn._assistantExecutionPlanSnapshot
+        : optsIn.plan;
+      const planBlock = buildPlanBlock(planForLlmBlock);
       const promptBody = (planBlock ? planBlock + '\n\n' : '') + (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
 
       let baseUserContent = promptBody + clipHint;

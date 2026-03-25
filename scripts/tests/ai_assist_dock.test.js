@@ -170,19 +170,153 @@ function _compactPatchSummaryForExecutionTrace(ps) {
   return Object.keys(out).length ? out : null;
 }
 
-function _buildAiAssistExecutionTrace(card, optRes) {
+function _normalizeAssistantPlanForExecution(plan) {
+  if (!plan || typeof plan !== 'object') return null;
+  if (!Array.isArray(plan.planLines) || plan.planLines.length < 1) return null;
+  if (!plan.planTitle && !plan.planKind) return null;
+  const lines = plan.planLines.slice(0, 6).map(function (l) {
+    return (typeof l === 'string') ? l : (l != null ? String(l) : '');
+  }).filter(function (l) { return typeof l === 'string' && l.trim(); });
+  if (lines.length < 1) return null;
+  return {
+    planKind: plan.planKind || null,
+    planTitle: (plan.planTitle != null && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : '',
+    planLines: lines,
+  };
+}
+
+/** Mirrors agent_controller buildPlanBlock for PLAN string assertions. */
+function buildPlanBlockForTest(plan) {
+  if (!plan || typeof plan !== 'object') return '';
+  const lines = Array.isArray(plan.planLines) ? plan.planLines.filter(function (l) { return typeof l === 'string' && l.trim(); }) : [];
+  if (lines.length < 1) return '';
+  const kind = (plan.planKind != null && String(plan.planKind).trim()) ? String(plan.planKind).trim() : '';
+  const title = (plan.planTitle != null && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : '';
+  const header = (kind || title) ? ('PLAN: ' + (title || kind)) : 'PLAN:';
+  return header + '\n' + lines.slice(0, 6).map(function (l) { return '- ' + String(l).trim().slice(0, 120); }).join('\n');
+}
+
+/** Mirrors app setOptimizeOptions plan resolution (Assistant snapshot carry-forward + merge). */
+function mergePlanForSetOptimizeOptionsLikeApp(opts, existingOpts) {
+  const rawPlan = opts && opts.plan;
+  let assistantExecutionPlanSnapshot;
+  if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')) {
+    assistantExecutionPlanSnapshot = existingOpts && existingOpts._assistantExecutionPlanSnapshot;
+  } else {
+    assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
+  }
+  let plan = null;
+  if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object') {
+    plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
+  } else {
+    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
+      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function (l) { return typeof l === 'string'; }) }
+      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+  }
+  return plan || null;
+}
+
+/** Mirrors app optimizeClip merge of stored + optOverride (intent from override only). */
+function resolveOptimizeClipOptionsLikeApp(stored, optOverride) {
+  if (!optOverride || typeof optOverride !== 'object') return optOverride;
+  const merged = {};
+  if (stored && typeof stored === 'object') {
+    for (const k in stored) {
+      if (Object.prototype.hasOwnProperty.call(stored, k)) merged[k] = stored[k];
+    }
+  }
+  for (const k in optOverride) {
+    if (Object.prototype.hasOwnProperty.call(optOverride, k) && optOverride[k] !== undefined) {
+      merged[k] = optOverride[k];
+    }
+  }
+  const preset = merged.requestedPresetId != null ? merged.requestedPresetId : merged.presetId != null ? merged.presetId : merged.preset;
+  const intent = optOverride.intent && typeof optOverride.intent === 'object'
+    ? { fixPitch: !!optOverride.intent.fixPitch, tightenRhythm: !!optOverride.intent.tightenRhythm, reduceOutliers: !!optOverride.intent.reduceOutliers }
+    : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
+  const out = {
+    requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+    userPrompt: merged.userPrompt != null ? merged.userPrompt : null,
+    intent,
+  };
+  if (merged.templateId != null && String(merged.templateId).trim()) {
+    out.templateId = String(merged.templateId).trim();
+  }
+  if (merged.plan && typeof merged.plan === 'object') {
+    out.plan = merged.plan;
+  }
+  if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')) {
+    out._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
+  }
+  return out;
+}
+
+function _buildAssistantRunExecutionSnapshot(card) {
+  const usedRequestedPresetId = 'llm_v0';
+  const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+  let usedTemplateId = (card && card.templateId != null && String(card.templateId).trim()) ? String(card.templateId).trim() : null;
+  let usedIntent = null;
+  if (card && card.intent && typeof card.intent === 'object') {
+    usedIntent = {
+      fixPitch: !!card.intent.fixPitch,
+      tightenRhythm: !!card.intent.tightenRhythm,
+      reduceOutliers: !!card.intent.reduceOutliers,
+    };
+  }
+  if (!usedTemplateId || !usedIntent) {
+    usedTemplateId = null;
+    usedIntent = null;
+  }
+  return {
+    usedRequestedPresetId: usedRequestedPresetId,
+    usedPlan: usedPlan,
+    usedTemplateId: usedTemplateId,
+    usedIntent: usedIntent,
+  };
+}
+
+function _buildAiAssistExecutionTrace(card, optRes, runSnapshot) {
   const trace = {};
   const rl = card && card.reasoningLog && typeof card.reasoningLog === 'object' ? card.reasoningLog : null;
   try {
     if (optRes && typeof optRes === 'object' && optRes.executionPath != null && String(optRes.executionPath).trim() !== '') {
       trace.executionPath = String(optRes.executionPath).trim();
     }
-    if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
-    if (card && card.intent && typeof card.intent === 'object') {
-      trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+    if (runSnapshot && typeof runSnapshot === 'object') {
+      if (runSnapshot.usedTemplateId != null && String(runSnapshot.usedTemplateId).trim() !== '') {
+        trace.templateId = String(runSnapshot.usedTemplateId).trim();
+      }
+      if (runSnapshot.usedIntent && typeof runSnapshot.usedIntent === 'object') {
+        trace.intent = {
+          fixPitch: !!runSnapshot.usedIntent.fixPitch,
+          tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+          reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+        };
+      }
+      if (runSnapshot.usedRequestedPresetId != null) trace.requestedPresetId = runSnapshot.usedRequestedPresetId;
+      if (runSnapshot.usedPlan && runSnapshot.usedPlan.planTitle) {
+        trace.planSummary = String(runSnapshot.usedPlan.planTitle).slice(0, 200);
+      }
+      trace.executionSnapshot = {
+        usedPlan: runSnapshot.usedPlan,
+        usedTemplateId: runSnapshot.usedTemplateId,
+        usedIntent: runSnapshot.usedIntent ? {
+          fixPitch: !!runSnapshot.usedIntent.fixPitch,
+          tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+          reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+        } : null,
+        usedRequestedPresetId: runSnapshot.usedRequestedPresetId,
+      };
+    } else {
+      if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
+      if (card && card.intent && typeof card.intent === 'object') {
+        trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+      }
+      if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+      if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
     }
-    if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
-    if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
+    if (!trace.planSummary && rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+    if (!trace.requestedPresetId && rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
     const ps = (optRes && optRes.patchSummary && typeof optRes.patchSummary === 'object') ? optRes.patchSummary : null;
     if (ps) {
       if (ps.executedPreset != null) trace.executedPreset = String(ps.executedPreset).trim();
@@ -337,14 +471,28 @@ function createFakeApp(opts) {
     if (!card) return;
     syncAssistantCardTemplateFromPlan(card);
     const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
-    const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
-    if (card.templateId && card.intent) {
-      opts.templateId = card.templateId;
-      opts.intent = card.intent;
+    const runSnapshot = _buildAssistantRunExecutionSnapshot(card);
+    card._assistantRunSnapshot = runSnapshot;
+    if (card.reasoningLog && typeof card.reasoningLog === 'object') {
+      card.reasoningLog.templateId = runSnapshot.usedTemplateId;
+      card.reasoningLog.intent = runSnapshot.usedIntent ? {
+        fixPitch: !!runSnapshot.usedIntent.fixPitch,
+        tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+        reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+      } : null;
+      if (runSnapshot.usedPlan && runSnapshot.usedPlan.planTitle) {
+        card.reasoningLog.planSummary = String(runSnapshot.usedPlan.planTitle).slice(0, 200);
+      }
     }
-    if (card.plan && typeof card.plan === 'object' && Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 1 && (card.plan.planTitle || card.plan.planKind)) {
-      opts.plan = { planKind: card.plan.planKind || null, planTitle: (card.plan.planTitle && String(card.plan.planTitle).trim()) ? String(card.plan.planTitle).trim() : '', planLines: card.plan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) };
+    const opts = { userPrompt: text, requestedPresetId: runSnapshot.usedRequestedPresetId };
+    if (runSnapshot.usedTemplateId && runSnapshot.usedIntent) {
+      opts.templateId = runSnapshot.usedTemplateId;
+      opts.intent = runSnapshot.usedIntent;
     }
+    if (runSnapshot.usedPlan) {
+      opts.plan = runSnapshot.usedPlan;
+    }
+    opts._assistantExecutionPlanSnapshot = runSnapshot.usedPlan;
     this.setOptimizeOptions(clipId, opts);
     card.runState = 'running';
     card.resultKind = null;
@@ -360,7 +508,7 @@ function createFakeApp(opts) {
         card.runState = 'failed';
         card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
-        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null, runSnapshot); } catch (_e) {}
         this.render();
         return;
       }
@@ -369,7 +517,7 @@ function createFakeApp(opts) {
         card.runState = 'failed';
         card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
-        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes, runSnapshot); } catch (_e) {}
         this.render();
         return;
       }
@@ -387,13 +535,13 @@ function createFakeApp(opts) {
       else card.resultKind = 'updated';
       card.runState = 'done';
       if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
-      try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
+      try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes, runSnapshot); } catch (_e) {}
     } catch (err) {
       if (btnEl) btnEl.disabled = false;
       card.runState = 'failed';
       card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
       if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
-      try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
+      try { card.executionTrace = _buildAiAssistExecutionTrace(card, null, runSnapshot); } catch (_e) {}
     }
     this.render();
   };
@@ -622,6 +770,7 @@ function createFakeApp(opts) {
   return new Promise((r) => setImmediate(r)).then(() => {
     assert(setOptimizeOptionsCalls.length === 1, 'Run should call setOptimizeOptions once');
     assert(setOptimizeOptionsCalls[0].opts.userPrompt === 'custom', 'userPrompt passed');
+    assert(setOptimizeOptionsCalls[0].opts._assistantExecutionPlanSnapshot === null, 'PR3: explicit null snapshot when no plan');
     assert(!('plan' in setOptimizeOptionsCalls[0].opts) || setOptimizeOptionsCalls[0].opts.plan == null, 'PR3: no plan when card has no plan');
     console.log('PASS PR3 Run without plan does not pass plan');
   });
@@ -637,6 +786,41 @@ function createFakeApp(opts) {
     ],
   };
   const { app, doc, setOptimizeOptionsCalls } = createFakeApp({ tryGenerateAiPlan: () => Promise.resolve(aiPlan) });
+  const origRun = app.runCommand.bind(app);
+  app.runCommand = (cmd, payload) => {
+    if (cmd === 'optimize_clip') {
+      return Promise.resolve({
+        ok: true,
+        data: {
+          clipId: payload.clipId,
+          optimizeResult: {
+            ok: true,
+            ops: 1,
+            executionPath: 'llm',
+            patchSummary: {
+              executedPreset: 'llm_v0',
+              executedSource: 'llm_v0',
+              ops: 1,
+              status: 'ok',
+              promptMeta: { templateId: 'clean_outliers_v1', promptVersion: 'tmpl_v1.clean_outliers' },
+            },
+            llmPromptTrace: {
+              attemptIndex: 1,
+              blocks: {
+                resolvedTemplateId: 'clean_outliers_v1',
+                resolvedIntent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+                promptVersion: 'tmpl_v1.clean_outliers',
+                planBlock: 'PLAN: x',
+                directivesBlock: 'DIRECTIVES:',
+                userBody: 'user',
+              },
+            },
+          },
+        },
+      });
+    }
+    return origRun(cmd, payload);
+  };
   app.state.selectedClipId = 'clip-1';
   doc.getElementById('aiAssistInput').value = '离群高音 note cluster xyz unmatched';
   return app._aiAssistSend().then(() => {
@@ -650,8 +834,125 @@ function createFakeApp(opts) {
     assert(setOptimizeOptionsCalls.length === 1, 'Run should call setOptimizeOptions once');
     assert(setOptimizeOptionsCalls[0].opts.templateId === 'clean_outliers_v1', 'Run must pass clean_outliers_v1 for execution');
     assert(setOptimizeOptionsCalls[0].opts.intent && setOptimizeOptionsCalls[0].opts.intent.reduceOutliers === true, 'Run must pass reduceOutliers intent');
+    assert(setOptimizeOptionsCalls[0].opts.plan && setOptimizeOptionsCalls[0].opts.plan.planKind === 'clean-outliers', 'Run must pass AI plan snapshot');
+    assert(setOptimizeOptionsCalls[0].opts._assistantExecutionPlanSnapshot && setOptimizeOptionsCalls[0].opts._assistantExecutionPlanSnapshot.planTitle === '移除离群高音', 'Run must pass assistant execution plan snapshot');
+    const snap = setOptimizeOptionsCalls[0].opts._assistantExecutionPlanSnapshot;
+    const pb = buildPlanBlockForTest(snap);
+    assert(pb.indexOf('PLAN: 移除离群高音') >= 0, 'PLAN block must use AI plan title, not generic Optimize');
+    assert(pb.indexOf('PLAN: Optimize') < 0, 'must not emit generic Optimize PLAN header for AI plan');
+    const staleMerged = mergePlanForSetOptimizeOptionsLikeApp(setOptimizeOptionsCalls[0].opts, {
+      plan: { planKind: 'generic', planTitle: 'Optimize', planLines: ['Goal: stale generic.', 'Strategy: stale.', 'Note: stale.'] },
+    });
+    assert(staleMerged && staleMerged.planTitle === '移除离群高音', 'merge must prefer assistant snapshot over stale generic plan');
+    const card = app._aiAssistItems[0];
+    assert(card.executionTrace && card.executionTrace.templateId === 'clean_outliers_v1', 'executionTrace.templateId matches run snapshot');
+    assert(card.executionTrace.intent && card.executionTrace.intent.reduceOutliers === true, 'executionTrace.intent matches run snapshot');
+    assert(card.executionTrace.executionSnapshot && card.executionTrace.executionSnapshot.usedTemplateId === 'clean_outliers_v1', 'executionSnapshot.usedTemplateId');
+    assert(card.executionTrace.promptVersion === 'tmpl_v1.clean_outliers', 'executionTrace.promptVersion from agent result (not manual_v0)');
+    const pt = card.executionTrace.llmPromptTrace;
+    assert(pt && pt.blocks && pt.blocks.promptVersion === 'tmpl_v1.clean_outliers', 'llmPromptTrace.blocks.promptVersion aligned');
+    assert(pt.blocks.resolvedTemplateId === 'clean_outliers_v1', 'llmPromptTrace resolvedTemplateId aligned');
     console.log('PASS AI clean-outliers plan backfills template when keywords miss');
   });
+})();
+
+(function testAssistantSnapshotOverridesStaleGenericPlanMerge() {
+  const stale = { plan: { planKind: 'generic', planTitle: 'Optimize', planLines: ['Goal: apply optimization based on your description.', 'Strategy: x', 'Note: y'] } };
+  const aiSnap = {
+    planKind: 'clean-outliers',
+    planTitle: '移除离群高音',
+    planLines: ['Goal: remove outliers.', 'Strategy: conservative edits.'],
+  };
+  const opts = { userPrompt: 'x', requestedPresetId: 'llm_v0', _assistantExecutionPlanSnapshot: aiSnap };
+  const merged = mergePlanForSetOptimizeOptionsLikeApp(opts, stale);
+  assert(merged && merged.planTitle === '移除离群高音', 'snapshot must replace stale generic plan');
+  const pb = buildPlanBlockForTest(aiSnap);
+  assert(pb.indexOf('PLAN: 移除离群高音') >= 0, 'PLAN block uses AI title');
+  assert(pb.indexOf('PLAN: Optimize') < 0, 'no generic Optimize header');
+  console.log('PASS Assistant snapshot overrides stale generic plan in merge');
+})();
+
+(function testPartialSetOptimizeOptionsCarriesForwardSnapshot() {
+  const stale = {
+    plan: { planKind: 'generic', planTitle: 'Optimize', planLines: ['Goal: apply optimization based on your description.', 'Strategy: x', 'Note: y'] },
+    _assistantExecutionPlanSnapshot: {
+      planKind: 'clean-outliers',
+      planTitle: '移除离群高音',
+      planLines: ['Goal: remove outliers.', 'Strategy: conservative edits.'],
+    },
+  };
+  const partial = { userPrompt: 'y', requestedPresetId: 'llm_v0' };
+  const merged = mergePlanForSetOptimizeOptionsLikeApp(partial, stale);
+  assert(merged && merged.planTitle === '移除离群高音', 'partial update must not drop snapshot; plan follows snapshot');
+  assert(buildPlanBlockForTest(merged).indexOf('PLAN: Optimize') < 0, 'must not fall back to stale generic plan');
+  console.log('PASS partial setOptimizeOptions carries forward _assistantExecutionPlanSnapshot');
+})();
+
+(function testExplicitNullClearsSnapshotForPlanFallback() {
+  const stale = {
+    plan: { planKind: 'generic', planTitle: 'Optimize', planLines: ['Goal: apply optimization based on your description.', 'Strategy: x', 'Note: y'] },
+    _assistantExecutionPlanSnapshot: {
+      planKind: 'clean-outliers',
+      planTitle: '移除离群高音',
+      planLines: ['Goal: remove outliers.', 'Strategy: conservative edits.'],
+    },
+  };
+  const cleared = mergePlanForSetOptimizeOptionsLikeApp({ _assistantExecutionPlanSnapshot: null, userPrompt: 'z' }, stale);
+  assert(cleared && cleared.planTitle === 'Optimize', 'explicit null snapshot => plan from stale existingOpts.plan');
+  console.log('PASS explicit null clears assistant snapshot for plan fallback');
+})();
+
+(function testOptimizeClipMergePreservesPlanTemplateSnapshot() {
+  const snapPlan = {
+    planKind: 'clean-outliers',
+    planTitle: '移除离群高音',
+    planLines: ['Goal: remove outliers.', 'Strategy: conservative edits.'],
+  };
+  const stored = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'stored prompt',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    templateId: 'clean_outliers_v1',
+    plan: snapPlan,
+    _assistantExecutionPlanSnapshot: snapPlan,
+  };
+  const ui = { requestedPresetId: 'llm_v0', userPrompt: 'from ui', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true } };
+  const out = resolveOptimizeClipOptionsLikeApp(stored, ui);
+  assert(out.templateId === 'clean_outliers_v1', 'merge preserves templateId from stored');
+  assert(out.plan && out.plan.planTitle === '移除离群高音', 'merge preserves plan aligned with snapshot');
+  assert(out._assistantExecutionPlanSnapshot && out._assistantExecutionPlanSnapshot.planTitle === '移除离群高音', 'merge preserves _assistantExecutionPlanSnapshot');
+  assert(out.intent && out.intent.reduceOutliers === true && out.intent.fixPitch === false, 'intent from override only (not merged stored intent)');
+  console.log('PASS optimizeClip merge preserves planTemplateId snapshot');
+})();
+
+(function testGenericPlanBlockWhenRuleBasedPlanOnly() {
+  const card = {
+    plan: {
+      planTitle: 'Optimize',
+      planKind: 'generic',
+      planLines: [
+        'Goal: apply optimization based on your description.',
+        'Strategy: use your prompt to guide pitch, timing, or dynamics changes.',
+        'Note: results depend on the clarity of the source material.',
+      ],
+    },
+  };
+  const snap = _buildAssistantRunExecutionSnapshot(card);
+  assert(snap.usedPlan != null && snap.usedPlan.planTitle === 'Optimize', 'rule-based generic plan is valid snapshot');
+  const pb = buildPlanBlockForTest(snap.usedPlan);
+  assert(pb.indexOf('PLAN: Optimize') >= 0, 'generic PLAN header still valid');
+  console.log('PASS generic PLAN block when rule-based plan only');
+})();
+
+(function testNoValidPlanEmptyPlanBlock() {
+  const card = { plan: null };
+  const snap = _buildAssistantRunExecutionSnapshot(card);
+  assert(snap.usedPlan == null, 'no usedPlan');
+  const opts = { userPrompt: 'x', requestedPresetId: 'llm_v0', _assistantExecutionPlanSnapshot: snap.usedPlan };
+  const merged = mergePlanForSetOptimizeOptionsLikeApp(opts, null);
+  assert(merged == null, 'explicit null snapshot => no merged plan');
+  assert(buildPlanBlockForTest(merged) === '', 'empty PLAN block when no plan');
+  console.log('PASS no valid plan => empty buildPlanBlock');
 })();
 
 (function testPR2CardGetsReasoningLogOnSend() {

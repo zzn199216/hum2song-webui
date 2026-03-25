@@ -111,6 +111,50 @@
     }
   }
 
+  /** Normalize card.plan for optimize options (same shape as setOptimizeOptions / agent). */
+  function _normalizeAssistantPlanForExecution(plan){
+    if (!plan || typeof plan !== 'object') return null;
+    if (!Array.isArray(plan.planLines) || plan.planLines.length < 1) return null;
+    if (!plan.planTitle && !plan.planKind) return null;
+    const lines = plan.planLines.slice(0, 6).map(function(l){
+      return (typeof l === 'string') ? l : (l != null ? String(l) : '');
+    }).filter(function(l){ return typeof l === 'string' && l.trim(); });
+    if (lines.length < 1) return null;
+    return {
+      planKind: plan.planKind || null,
+      planTitle: (plan.planTitle != null && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : '',
+      planLines: lines,
+    };
+  }
+
+  /**
+   * Single authoritative snapshot for one Assistant Run (after _syncAssistantCardTemplateFromPlan).
+   * Used for setOptimizeOptions, reasoningLog at run start, and executionTrace (not later card mutations).
+   */
+  function _buildAssistantRunExecutionSnapshot(card){
+    const usedRequestedPresetId = 'llm_v0';
+    const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+    let usedTemplateId = (card && card.templateId != null && String(card.templateId).trim()) ? String(card.templateId).trim() : null;
+    let usedIntent = null;
+    if (card && card.intent && typeof card.intent === 'object'){
+      usedIntent = {
+        fixPitch: !!card.intent.fixPitch,
+        tightenRhythm: !!card.intent.tightenRhythm,
+        reduceOutliers: !!card.intent.reduceOutliers,
+      };
+    }
+    if (!usedTemplateId || !usedIntent){
+      usedTemplateId = null;
+      usedIntent = null;
+    }
+    return {
+      usedRequestedPresetId: usedRequestedPresetId,
+      usedPlan: usedPlan,
+      usedTemplateId: usedTemplateId,
+      usedIntent: usedIntent,
+    };
+  }
+
   /** PR1: Attempt AI-generated plan. Returns Promise<plan|null>. Falls back to rule-based on any failure. */
   function _tryGenerateAiPlan(promptText, templateId, intent){
     const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
@@ -225,20 +269,49 @@
     return Object.keys(out).length ? out : null;
   }
 
-  /** Debug PR1: structured trace for one Assistant Run (optimizeResult + card context). */
-  function _buildAiAssistExecutionTrace(card, optRes){
+  /** Debug PR1: structured trace for one Assistant Run (optimizeResult + run snapshot or card context). */
+  function _buildAiAssistExecutionTrace(card, optRes, runSnapshot){
     const trace = {};
     const rl = card && card.reasoningLog && typeof card.reasoningLog === 'object' ? card.reasoningLog : null;
     try {
       if (optRes && typeof optRes === 'object' && optRes.executionPath != null && String(optRes.executionPath).trim() !== ''){
         trace.executionPath = String(optRes.executionPath).trim();
       }
-      if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
-      if (card && card.intent && typeof card.intent === 'object'){
-        trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+      if (runSnapshot && typeof runSnapshot === 'object'){
+        if (runSnapshot.usedTemplateId != null && String(runSnapshot.usedTemplateId).trim() !== ''){
+          trace.templateId = String(runSnapshot.usedTemplateId).trim();
+        }
+        if (runSnapshot.usedIntent && typeof runSnapshot.usedIntent === 'object'){
+          trace.intent = {
+            fixPitch: !!runSnapshot.usedIntent.fixPitch,
+            tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+            reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+          };
+        }
+        if (runSnapshot.usedRequestedPresetId != null) trace.requestedPresetId = runSnapshot.usedRequestedPresetId;
+        if (runSnapshot.usedPlan && runSnapshot.usedPlan.planTitle){
+          trace.planSummary = String(runSnapshot.usedPlan.planTitle).slice(0, 200);
+        }
+        trace.executionSnapshot = {
+          usedPlan: runSnapshot.usedPlan,
+          usedTemplateId: runSnapshot.usedTemplateId,
+          usedIntent: runSnapshot.usedIntent ? {
+            fixPitch: !!runSnapshot.usedIntent.fixPitch,
+            tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+            reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+          } : null,
+          usedRequestedPresetId: runSnapshot.usedRequestedPresetId,
+        };
+      } else {
+        if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
+        if (card && card.intent && typeof card.intent === 'object'){
+          trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+        }
+        if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+        if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
       }
-      if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
-      if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
+      if (!trace.planSummary && rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+      if (!trace.requestedPresetId && rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
       const ps = (optRes && optRes.patchSummary && typeof optRes.patchSummary === 'object') ? optRes.patchSummary : null;
       if (ps){
         if (ps.executedPreset != null) trace.executedPreset = String(ps.executedPreset).trim();
@@ -1008,16 +1081,34 @@ setOptimizeOptions(arg0, arg1){
     ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
     : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
   const rawPlan = opts && opts.plan;
-  const plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
-    ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
-    : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
-  const normalizedOpts = opts ? {
-    requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
-    userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
-    intent,
-    templateId: templateId || null,
-    plan: plan || null
-  } : null;
+  /** Like templateId: carry forward snapshot unless incoming opts explicitly sets the key (null clears). */
+  let assistantExecutionPlanSnapshot;
+  if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')){
+    assistantExecutionPlanSnapshot = existingOpts && existingOpts._assistantExecutionPlanSnapshot;
+  } else {
+    assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
+  }
+  let plan = null;
+  if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object'){
+    plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
+  } else {
+    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
+      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
+      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+  }
+  const normalizedOpts = opts ? (function(){
+    const base = {
+      requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+      userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
+      intent,
+      templateId: templateId || null,
+      plan: plan || null,
+    };
+    if (assistantExecutionPlanSnapshot !== undefined){
+      base._assistantExecutionPlanSnapshot = assistantExecutionPlanSnapshot;
+    }
+    return base;
+  })() : null;
   this._lastOptimizeOptions = normalizedOpts;
   if (cid) {
     this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
@@ -1059,15 +1150,36 @@ async optimizeClip(clipId, optOverride){
   }
   let options = optOverride;
   if (options && typeof options === 'object') {
-    const preset = options.requestedPresetId != null ? options.requestedPresetId : options.presetId != null ? options.presetId : options.preset;
+    const stored = (clipId && this.getOptimizeOptions) ? this.getOptimizeOptions(clipId) : null;
+    const merged = {};
+    if (stored && typeof stored === 'object'){
+      for (const k in stored){
+        if (Object.prototype.hasOwnProperty.call(stored, k)) merged[k] = stored[k];
+      }
+    }
+    for (const k in options){
+      if (Object.prototype.hasOwnProperty.call(options, k) && options[k] !== undefined){
+        merged[k] = options[k];
+      }
+    }
+    const preset = merged.requestedPresetId != null ? merged.requestedPresetId : merged.presetId != null ? merged.presetId : merged.preset;
     const intent = options.intent && typeof options.intent === 'object'
       ? { fixPitch: !!options.intent.fixPitch, tightenRhythm: !!options.intent.tightenRhythm, reduceOutliers: !!options.intent.reduceOutliers }
       : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
     options = {
       requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
-      userPrompt: options.userPrompt != null ? options.userPrompt : null,
-      intent
+      userPrompt: merged.userPrompt != null ? merged.userPrompt : null,
+      intent,
     };
+    if (merged.templateId != null && String(merged.templateId).trim()){
+      options.templateId = String(merged.templateId).trim();
+    }
+    if (merged.plan && typeof merged.plan === 'object'){
+      options.plan = merged.plan;
+    }
+    if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')){
+      options._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
+    }
   }
   return await this.agentCtrl.optimizeClip(clipId, options);
 },
@@ -1849,14 +1961,28 @@ ensureTrackButtons(){
       if (!card) return;
       _syncAssistantCardTemplateFromPlan(card);
       const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
-      const opts = { userPrompt: text, requestedPresetId: 'llm_v0' };
-      if (card.templateId && card.intent) {
-        opts.templateId = card.templateId;
-        opts.intent = card.intent;
+      const runSnapshot = _buildAssistantRunExecutionSnapshot(card);
+      card._assistantRunSnapshot = runSnapshot;
+      if (card.reasoningLog && typeof card.reasoningLog === 'object'){
+        card.reasoningLog.templateId = runSnapshot.usedTemplateId;
+        card.reasoningLog.intent = runSnapshot.usedIntent ? {
+          fixPitch: !!runSnapshot.usedIntent.fixPitch,
+          tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+          reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+        } : null;
+        if (runSnapshot.usedPlan && runSnapshot.usedPlan.planTitle){
+          card.reasoningLog.planSummary = String(runSnapshot.usedPlan.planTitle).slice(0, 200);
+        }
       }
-      if (card.plan && typeof card.plan === 'object' && Array.isArray(card.plan.planLines) && card.plan.planLines.length >= 1 && (card.plan.planTitle || card.plan.planKind)) {
-        opts.plan = { planKind: card.plan.planKind || null, planTitle: (card.plan.planTitle && String(card.plan.planTitle).trim()) ? String(card.plan.planTitle).trim() : '', planLines: card.plan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) };
+      const opts = { userPrompt: text, requestedPresetId: runSnapshot.usedRequestedPresetId };
+      if (runSnapshot.usedTemplateId && runSnapshot.usedIntent) {
+        opts.templateId = runSnapshot.usedTemplateId;
+        opts.intent = runSnapshot.usedIntent;
       }
+      if (runSnapshot.usedPlan) {
+        opts.plan = runSnapshot.usedPlan;
+      }
+      opts._assistantExecutionPlanSnapshot = runSnapshot.usedPlan;
       this.setOptimizeOptions(clipId, opts);
       card.runState = 'running';
       card.resultKind = null;
@@ -1872,7 +1998,7 @@ ensureTrackButtons(){
           card.runState = 'failed';
           card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
           if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
-          try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
+          try { card.executionTrace = _buildAiAssistExecutionTrace(card, null, runSnapshot); } catch (_e) {}
           this.render();
           return;
         }
@@ -1881,7 +2007,7 @@ ensureTrackButtons(){
           card.runState = 'failed';
           card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
           if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
-          try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
+          try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes, runSnapshot); } catch (_e) {}
           this.render();
           return;
         }
@@ -1899,13 +2025,13 @@ ensureTrackButtons(){
         else card.resultKind = 'updated';
         card.runState = 'done';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
-        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes); } catch (_e) {}
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes, runSnapshot); } catch (_e) {}
       } catch (err) {
         if (btnEl) btnEl.disabled = false;
         card.runState = 'failed';
         card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
         if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
-        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null); } catch (_e) {}
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null, runSnapshot); } catch (_e) {}
       }
       this.render();
     },

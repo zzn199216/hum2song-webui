@@ -150,6 +150,8 @@ async function testA_templateVelocityOnlyRejectedWithPromptMeta() {
     assert(userMsg && userMsg.content, 'Case A: user message must exist');
     assert(userMsg.content.includes('DIRECTIVES:'), 'Case A: user content must contain DIRECTIVES:');
     assert(userMsg.content.includes('setNote with pitch'), 'Case A: user content must contain required ops hint');
+    assert(userMsg.content.includes('NOTE TABLE (beats-only, all editable notes):'), 'Case A: user content must include NOTE TABLE block');
+    assert(userMsg.content.indexOf('noteId=n0') >= 0 && userMsg.content.indexOf('pitch=60') >= 0 && userMsg.content.indexOf('startBeat=0') >= 0 && userMsg.content.indexOf('durationBeat=1') >= 0 && userMsg.content.indexOf('velocity=90') >= 0, 'Case A: note table must list id pitch startBeat durationBeat velocity');
 
     assert(String(project.clips[cid].revisionId || '') === rev0, 'Case A: no new revision on reject');
     assert(beginCalls === 0, 'Case A: beginNewClipRevision must not be called');
@@ -401,6 +403,8 @@ async function testE_planBlockIncludedWhenPlanProvided() {
     assert(userMsg.content.includes('PLAN:'), 'Case E: user content must contain PLAN:');
     assert(userMsg.content.includes('Fix Pitch (AI)'), 'Case E: planTitle must appear');
     assert(userMsg.content.includes('correct out-of-tune notes'), 'Case E: planLines must appear');
+    assert(userMsg.content.includes('DIRECTIVES:'), 'Case E: DIRECTIVES still present with plan');
+    assert(userMsg.content.includes('NOTE TABLE (beats-only, all editable notes):'), 'Case E: NOTE TABLE still present with plan');
   } finally {
     globalThis.H2S_LLM_CLIENT = origClient;
     globalThis.H2S_LLM_CONFIG = origConfig;
@@ -439,6 +443,72 @@ async function testF_cleanOutliersTemplateResolvesPromptMeta() {
   console.log('PASS regression templates: Case F — clean_outliers_v1 resolves promptMeta');
 }
 
+// LLM Context PR1: full per-note table in user prompt (additive; noop path unchanged)
+async function testG_llmPromptIncludesNoteTablePreservesBlocks() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeMinimalProject();
+  let project = proj;
+  const cid = clip.id;
+
+  const pitchChangePatch = {
+    version: 1,
+    clipId: cid,
+    ops: [{ op: 'setNote', noteId: 'n0', pitch: 61, velocity: 90 }],
+  };
+  const rawText = '```json\n' + JSON.stringify(pitchChangePatch) + '\n```';
+
+  let capturedUser = null;
+  const origClient = globalThis.H2S_LLM_CLIENT;
+  const origConfig = globalThis.H2S_LLM_CONFIG;
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async (_cfg, messages) => {
+      const userMsg = messages.find((m) => m.role === 'user');
+      capturedUser = userMsg ? userMsg.content : '';
+      return { text: rawText };
+    },
+    extractJsonObject: (text) => {
+      try {
+        const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+        return m ? JSON.parse(m[1]) : null;
+      } catch (_) { return null; }
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'test-model', velocityOnly: false }),
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+    const res = await ctrl.optimizeClip(cid, {
+      requestedPresetId: 'llm_v0',
+      templateId: 'clean_outliers_v1',
+      intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+      userPrompt: 'remove stray notes',
+    });
+
+    assert(res && res.ok === true, 'Case G: must succeed');
+    assert(capturedUser && typeof capturedUser === 'string', 'Case G: captured user prompt');
+    assert(capturedUser.includes('NOTE TABLE (beats-only, all editable notes):'), 'Case G: NOTE TABLE block');
+    assert(capturedUser.includes('trackId=t0') && capturedUser.includes('noteId=n0'), 'Case G: row has trackId and noteId');
+    assert(/pitch=60[\s\S]*startBeat=0[\s\S]*durationBeat=1[\s\S]*velocity=90/.test(capturedUser), 'Case G: row has pitch startBeat durationBeat velocity');
+    assert(capturedUser.includes('DIRECTIVES:'), 'Case G: DIRECTIVES preserved');
+    assert(capturedUser.includes('Clip context (beats-only):'), 'Case G: clip summary preserved');
+  } finally {
+    globalThis.H2S_LLM_CLIENT = origClient;
+    globalThis.H2S_LLM_CONFIG = origConfig;
+  }
+
+  console.log('PASS regression templates: Case G — NOTE TABLE + existing blocks');
+}
+
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
@@ -446,6 +516,7 @@ async function testF_cleanOutliersTemplateResolvesPromptMeta() {
   await testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits();
   await testE_planBlockIncludedWhenPlanProvided();
   await testF_cleanOutliersTemplateResolvesPromptMeta();
+  await testG_llmPromptIncludesNoteTablePreservesBlocks();
 })().catch((e) => {
   console.error(e);
   process.exit(1);
