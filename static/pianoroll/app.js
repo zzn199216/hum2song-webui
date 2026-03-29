@@ -1362,6 +1362,43 @@ if (typeof localStorage !== 'undefined') {
         downloadText(fname, JSON.stringify(payload, null, 2));
       });
 
+      $('#btnExportSelectedClip').addEventListener('click', () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        let clipId = this.state && this.state.selectedClipId;
+        if (!clipId && this.state && this.state.selectedInstanceId){
+          const inst = (this.project.instances || []).find((x) => x && x.id === this.state.selectedInstanceId);
+          if (inst && inst.clipId) clipId = inst.clipId;
+        }
+        if (!clipId){
+          alert(_t('inspector.exportSelectedClipNoSelection'));
+          return;
+        }
+        const p2 = _projectV1ToV2(this.project);
+        if (!p2 || !_isProjectV2(p2) || !p2.clips || typeof p2.clips !== 'object'){
+          alert(_t('inspector.exportSelectedClipNotFound'));
+          return;
+        }
+        const clip = p2.clips[clipId];
+        if (!clip){
+          alert(_t('inspector.exportSelectedClipNotFound'));
+          return;
+        }
+        const P = window.H2SProject;
+        const clipCopy = (P && typeof P.deepClone === 'function') ? P.deepClone(clip) : JSON.parse(JSON.stringify(clip));
+        const bpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+        const bundle = {
+          kind: 'hum2song_clip_bundle',
+          version: 1,
+          exportedAt: Date.now(),
+          schemaVersion: 2,
+          timebase: 'beat',
+          bpm,
+          clipId: String(clipId),
+          clip: clipCopy,
+        };
+        downloadText(`hum2song_clip_${Date.now()}.json`, JSON.stringify(bundle, null, 2));
+      });
+
       $('#btnImportProject').addEventListener('click', async () => {
         const f = await this.pickFile('.json');
         if (!f) return;
