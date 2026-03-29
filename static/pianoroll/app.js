@@ -567,6 +567,21 @@
     return !!(obj && obj.version === 2 && obj.timebase === 'beat');
   }
 
+  /** Minimal validation for `hum2song_clip_bundle` (Export Selected Clip JSON). */
+  function _validateHum2songClipBundle(obj){
+    if (!obj || typeof obj !== 'object') return false;
+    if (obj.kind !== 'hum2song_clip_bundle') return false;
+    if (Number(obj.version) !== 1) return false;
+    if (Number(obj.schemaVersion) !== 2) return false;
+    if (obj.timebase !== 'beat') return false;
+    if (typeof obj.bpm !== 'number' || !isFinite(obj.bpm)) return false;
+    const clip = obj.clip;
+    if (!clip || typeof clip !== 'object') return false;
+    const sc = clip.score;
+    if (!sc || typeof sc !== 'object' || !Array.isArray(sc.tracks)) return false;
+    return true;
+  }
+
   function _projectV2ToV1View(p2){
     const bpm = (p2 && typeof p2.bpm === 'number') ? p2.bpm : 120;
 
@@ -1411,6 +1426,59 @@ if (typeof localStorage !== 'undefined') {
           log('Imported project json.');
         }catch(e){
           alert('Invalid JSON.');
+        }
+      });
+
+      $('#btnImportClip').addEventListener('click', async () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        const f = await this.pickFile('.json');
+        if (!f) return;
+        let obj;
+        try {
+          obj = JSON.parse(await f.text());
+        } catch (_e) {
+          alert(_t('inspector.importClipInvalid'));
+          return;
+        }
+        if (!_validateHum2songClipBundle(obj)) {
+          alert(_t('inspector.importClipInvalid'));
+          return;
+        }
+        const P = window.H2SProject;
+        if (!P || typeof P.uid !== 'function' || typeof P.deepClone !== 'function') {
+          alert(_t('inspector.importClipInvalid'));
+          return;
+        }
+        let p2 = this.getProjectV2();
+        if (!p2) p2 = _projectV1ToV2(this.project);
+        if (!p2 || !_isProjectV2(p2)) {
+          alert(_t('inspector.importClipInvalid'));
+          return;
+        }
+        const newId = P.uid('clip_');
+        const clip = P.deepClone(obj.clip);
+        clip.id = newId;
+        if (typeof clip.name !== 'string' || !String(clip.name).trim()) clip.name = 'Imported clip';
+        if (typeof P.normalizeClipRevisionChain === 'function') P.normalizeClipRevisionChain(clip);
+        if (clip.score && typeof P.ensureScoreBeatIds === 'function') P.ensureScoreBeatIds(clip.score);
+        if (typeof P.recomputeClipMetaFromScoreBeat === 'function') P.recomputeClipMetaFromScoreBeat(clip);
+        const bundleBpm = (typeof obj.bpm === 'number' && isFinite(obj.bpm)) ? obj.bpm : null;
+        if (bundleBpm != null) {
+          if (!clip.meta || typeof clip.meta !== 'object') clip.meta = {};
+          clip.meta.importedBundleBpm = bundleBpm;
+        }
+        if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+        p2.clips[newId] = clip;
+        if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+        p2.clipOrder.unshift(newId);
+        if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+        const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+        this.setProjectFromV2(p2);
+        this.state.selectedClipId = newId;
+        this.state.selectedInstanceId = null;
+        log('Imported clip JSON: ' + newId);
+        if (bundleBpm != null && Math.round(bundleBpm) !== Math.round(projBpm)) {
+          alert(_t('inspector.importClipBpmNote', { exportBpm: String(Math.round(bundleBpm)), projectBpm: String(Math.round(projBpm)) }));
         }
       });
 
