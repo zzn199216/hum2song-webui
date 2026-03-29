@@ -24,6 +24,8 @@
       --shadow: 0 10px 30px rgba(0,0,0,.35);
       --radius:14px;
       --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      /* Synced from app.js from #aiAssistDock height + bottom offset + breathing room */
+      --studio-ai-dock-safe-bottom: 44px;
     }
     *{ box-sizing:border-box; }
     html,body{ height:100%; }
@@ -173,6 +175,11 @@
       flex:1;
     }
     .panelBody{ padding:12px; overflow:auto; min-height:0; }
+    /* Right inspector: scroll last items above fixed AI Assistant dock */
+    #inspectorPanelBody.panelBody{
+      padding-bottom: var(--studio-ai-dock-safe-bottom);
+      scroll-padding-bottom: var(--studio-ai-dock-safe-bottom);
+    }
     .btn{
       appearance:none;
       border:1px solid var(--border);
@@ -634,6 +641,8 @@
       overflow-y:auto;
       overflow-x:hidden;
       padding-right:6px;
+      padding-bottom: var(--studio-ai-dock-safe-bottom);
+      scroll-padding-bottom: var(--studio-ai-dock-safe-bottom);
       display:flex;
       flex-direction:column;
       gap:10px;

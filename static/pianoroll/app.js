@@ -1885,6 +1885,15 @@ ensureTrackButtons(){
         handle.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); ev.preventDefault(); this._aiAssistStartResize(ev); });
       }
     },
+    _syncStudioAiDockRightPanelSafeBottom(){
+      try {
+        const dock = document.getElementById('aiAssistDock');
+        if (!dock || typeof document === 'undefined' || !document.documentElement) return;
+        const breathing = 16;
+        const h = dock.offsetHeight || 28;
+        document.documentElement.style.setProperty('--studio-ai-dock-safe-bottom', (h + breathing) + 'px');
+      } catch (_e) {}
+    },
     _aiAssistStartResize(ev){
       const dock = document.getElementById('aiAssistDock');
       if (!dock || !dock.classList.contains('open')) return;
@@ -1901,11 +1910,13 @@ ensureTrackButtons(){
         h = Math.max(MIN_H, Math.min(MAX_H, h - dy));
         dock.style.width = w + 'px'; dock.style.height = h + 'px';
         this._aiAssistDockWidth = w; this._aiAssistDockHeight = h;
+        this._syncStudioAiDockRightPanelSafeBottom();
       };
       const onUp = () => {
         document.removeEventListener('pointermove', onMove, true);
         document.removeEventListener('pointerup', onUp, true);
         document.removeEventListener('pointercancel', onUp, true);
+        this._syncStudioAiDockRightPanelSafeBottom();
       };
       document.addEventListener('pointermove', onMove, { capture: true });
       document.addEventListener('pointerup', onUp, { capture: true });
@@ -2140,6 +2151,7 @@ ensureTrackButtons(){
         const ph = _t('aiAssist.promptPlaceholder');
         if (inp.getAttribute('data-i18n-placeholder')) inp.placeholder = ph;
       }
+      this._syncStudioAiDockRightPanelSafeBottom();
     },
 
     // PR-UX4c: AI Settings drawer — init bindings (guard against double bind)
