@@ -509,6 +509,83 @@ async function testG_llmPromptIncludesNoteTablePreservesBlocks() {
   console.log('PASS regression templates: Case G — NOTE TABLE + existing blocks');
 }
 
+// tighten_rhythm_v1: parity with fix_pitch / clean_outliers — NOTE TABLE, template directives, promptMeta (no manual_v0)
+async function testH_tightenRhythmV1LlmPromptNoteTableDirectivesAndPromptMeta() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeMinimalProject();
+  let project = proj;
+  const cid = clip.id;
+
+  const timingTweakPatch = {
+    version: 1,
+    clipId: cid,
+    ops: [{ op: 'setNote', noteId: 'n0', pitch: 60, startBeat: 0.25, durationBeat: 1, velocity: 90 }],
+  };
+  const rawText = '```json\n' + JSON.stringify(timingTweakPatch) + '\n```';
+
+  let capturedUser = null;
+  const origClient = globalThis.H2S_LLM_CLIENT;
+  const origConfig = globalThis.H2S_LLM_CONFIG;
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async (_cfg, messages) => {
+      const userMsg = messages.find((m) => m.role === 'user');
+      capturedUser = userMsg ? userMsg.content : '';
+      return { text: rawText };
+    },
+    extractJsonObject: (text) => {
+      try {
+        const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+        return m ? JSON.parse(m[1]) : null;
+      } catch (_) {
+        return null;
+      }
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'test-model', velocityOnly: false }),
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+    const res = await ctrl.optimizeClip(cid, {
+      requestedPresetId: 'llm_v0',
+      templateId: 'tighten_rhythm_v1',
+      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
+      userPrompt: 'steady the timing',
+    });
+
+    assert(res && res.ok === true, 'Case H: must succeed');
+    assert(capturedUser && typeof capturedUser === 'string', 'Case H: captured user prompt');
+    assert(capturedUser.includes('NOTE TABLE (beats-only, all editable notes):'), 'Case H: NOTE TABLE block');
+    assert(capturedUser.includes('DIRECTIVES:'), 'Case H: DIRECTIVES block');
+    assert(capturedUser.includes('rhythm alignment'), 'Case H: goals mention rhythm alignment');
+    assert(
+      capturedUser.includes('keep pitches the same') && capturedUser.includes('prefer small moves'),
+      'Case H: tighten_rhythm_v1 directive lines',
+    );
+
+    const head = project.clips[cid];
+    const ps = head && head.meta && head.meta.agent && head.meta.agent.patchSummary;
+    assert(ps && ps.promptMeta, 'Case H: clip.meta.agent.patchSummary.promptMeta (llm success stores summary on clip)');
+    assert(ps.promptMeta.templateId === 'tighten_rhythm_v1', 'Case H: promptMeta.templateId');
+    assert(ps.promptMeta.promptVersion === 'tmpl_v1.tighten_rhythm.r1', 'Case H: promptVersion registry (not manual_v0)');
+    assert(ps.promptMeta.promptVersion !== 'manual_v0', 'Case H: must not silently fall back to manual_v0');
+  } finally {
+    globalThis.H2S_LLM_CLIENT = origClient;
+    globalThis.H2S_LLM_CONFIG = origConfig;
+  }
+
+  console.log('PASS regression templates: Case H — tighten_rhythm_v1 NOTE TABLE + directives + promptMeta');
+}
+
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
@@ -517,6 +594,7 @@ async function testG_llmPromptIncludesNoteTablePreservesBlocks() {
   await testE_planBlockIncludedWhenPlanProvided();
   await testF_cleanOutliersTemplateResolvesPromptMeta();
   await testG_llmPromptIncludesNoteTablePreservesBlocks();
+  await testH_tightenRhythmV1LlmPromptNoteTableDirectivesAndPromptMeta();
 })().catch((e) => {
   console.error(e);
   process.exit(1);
