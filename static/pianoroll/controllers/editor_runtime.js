@@ -1239,9 +1239,10 @@
         ctx.fill();
         ctx.stroke();
 
-        // resize handle (right 10px)
+        // resize handles (left / right 10px; narrow notes split at center)
         ctx.fillStyle = 'rgba(255,255,255,.18)';
-        ctx.fillRect(x + w - 10, y, 10, h);
+        ctx.fillRect(x, y, Math.min(10, w / 2), h);
+        ctx.fillRect(x + w - Math.min(10, w / 2), y, Math.min(10, w / 2), h);
       }
 
       // playhead (cursor) — when playing, overlay div is used; avoid double playhead
@@ -2234,7 +2235,7 @@
     },
 
     modalHitTest(px, py){
-      // Return {type:'resize'|'note', noteId} or null
+      // Return {type:'resize'|'resize_left'|'note', noteId} or null
       const canvas = $('#canvas');
       const padL = this.state.modal.padL;
       const padT = this.state.modal.padT;
@@ -2270,8 +2271,13 @@
         const w = Math.max(6, n.duration * pxPerSec);
         const h = rowH - 2;
         if (px >= x && px <= x+w && py >= y && py <= y+h){
-          // resize area: last 10px
-          if (px >= x + w - 10) return { type:'resize', noteId:n.id };
+          const edge = 10;
+          if (w <= edge * 2){
+            if (px < x + w / 2) return { type:'resize_left', noteId:n.id };
+            return { type:'resize', noteId:n.id };
+          }
+          if (px < x + edge) return { type:'resize_left', noteId:n.id };
+          if (px >= x + w - edge) return { type:'resize', noteId:n.id };
           return { type:'note', noteId:n.id };
         }
       }
@@ -2479,9 +2485,10 @@ async modalPlay(){
         this.state.modal.drag.origStart = n.start;
         this.state.modal.drag.origPitch = n.pitch;
         this.state.modal.drag.origDur = n.duration;
+        this.state.modal.drag.resizeEdge = (hit.type === 'resize_left') ? 'left' : (hit.type === 'resize') ? 'right' : undefined;
 
-        this.state.modal.mode = (hit.type === 'resize') ? 'resize_note' : 'drag_note';
-        $('#editorStatus').textContent = (hit.type === 'resize') ? 'Resize note...' : 'Drag note...';
+        this.state.modal.mode = (hit.type === 'resize' || hit.type === 'resize_left') ? 'resize_note' : 'drag_note';
+        $('#editorStatus').textContent = (hit.type === 'resize' || hit.type === 'resize_left') ? 'Resize note...' : 'Drag note...';
         this.modalRequestDraw();
         return;
       }
@@ -2612,14 +2619,34 @@ async modalPlay(){
         m.dirty = true;
         $('#editorStatus').textContent = `Drag: start ${fmtSec(ns)} pitch ${H2SProject.midiToName(np)}`;
       } else {
-        let nd = m.drag.origDur + secDelta;
-        nd = Math.max(0.05, nd);
-        // quantize duration (optional) - hold Alt to bypass snap
-        const g = (ev && ev.altKey) ? 0 : this.modalSnapSec();
-        if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
-        found.note.duration = nd;
-        m.dirty = true;
-        $('#editorStatus').textContent = `Resize: duration ${fmtSec(nd)}`;
+        const edge = m.drag.resizeEdge || 'right';
+        if (edge === 'right'){
+          let nd = m.drag.origDur + secDelta;
+          nd = Math.max(0.05, nd);
+          const g = (ev && ev.altKey) ? 0 : this.modalSnapSec();
+          if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+          found.note.duration = nd;
+          m.dirty = true;
+          $('#editorStatus').textContent = `Resize: duration ${fmtSec(nd)}`;
+        } else {
+          const end = m.drag.origStart + m.drag.origDur;
+          let nd = m.drag.origDur - secDelta;
+          nd = Math.max(0.05, nd);
+          const g = (ev && ev.altKey) ? 0 : this.modalSnapSec();
+          if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+          let ns = end - nd;
+          if (ns < 0){
+            ns = 0;
+            nd = end - ns;
+            nd = Math.max(0.05, nd);
+            if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+            ns = end - nd;
+          }
+          found.note.start = ns;
+          found.note.duration = nd;
+          m.dirty = true;
+          $('#editorStatus').textContent = `Resize: start ${fmtSec(ns)} duration ${fmtSec(nd)}`;
+        }
       }
 
       this.modalRequestDraw();
