@@ -82,6 +82,10 @@
   "projectHome.continue": "Continue Current Project",
   "projectHome.newProject": "New Project",
   "projectHome.importJson": "Import Project JSON",
+  "projectHome.localProjects": "Local projects",
+  "projectHome.untitled": "Untitled",
+  "projectHome.emptyLocalList": "No saved local projects yet.",
+  "projectHome.missingBlob": "That project could not be loaded from storage.",
 
   "ai.saved": "AI settings saved.",
   "ai.saveFailed": "Save failed",

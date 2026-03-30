@@ -78,7 +78,14 @@
     }
     #projectHomeModal .projectHomeTitle{ margin:0 0 4px; font-size:18px; font-weight:800; letter-spacing:.2px; }
     #projectHomeModal .projectHomeSub{ margin:0 0 14px; font-size:13px; color:var(--muted); line-height:1.45; }
-    #projectHomeModal .projectHomeStats{ display:flex; flex-wrap:wrap; gap:10px 18px; margin-bottom:18px; font-size:13px; }
+    #projectHomeModal .projectHomeStats{ display:flex; flex-wrap:wrap; gap:10px 18px; margin-bottom:14px; font-size:13px; }
+    #projectHomeModal .projectHomeLocalHeading{ font-size:12px; color:var(--muted); margin:0 0 6px; }
+    #projectHomeModal .projectHomeLocalList{ list-style:none; margin:0 0 14px; padding:0; max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.12); }
+    #projectHomeModal .projectHomeLocalList li{ margin:0; border-bottom:1px solid var(--border); }
+    #projectHomeModal .projectHomeLocalList li:last-child{ border-bottom:none; }
+    #projectHomeModal .projectHomeLocalList .projectHomeLocalBtn{ width:100%; text-align:left; padding:8px 10px; border:none; border-radius:0; background:transparent; cursor:pointer; font:inherit; color:inherit; }
+    #projectHomeModal .projectHomeLocalList .projectHomeLocalBtn:hover{ background:rgba(255,255,255,.06); }
+    #projectHomeModal .projectHomeLocalList .projectHomeLocalBtn.current{ font-weight:700; background:rgba(255,255,255,.04); }
     #projectHomeModal .projectHomeActions{ display:flex; flex-wrap:wrap; gap:8px; }
     #projectHomeModal .projectHomeActions .btn{ flex:1 1 auto; min-width:min(140px, 100%); }
     #clipFromProjectModal{ z-index:10001; }
@@ -929,6 +936,8 @@
           <span><span data-i18n="projectHome.bpmLabel">BPM</span>: <strong id="projectHomeBpm">120</strong></span>
           <span><span data-i18n="projectHome.clipsLabel">Clips</span>: <strong id="projectHomeClips">0</strong></span>
         </div>
+        <p id="projectHomeLocalHeading" class="projectHomeLocalHeading" data-i18n="projectHome.localProjects">Local projects</p>
+        <ul id="projectHomeLocalList" class="projectHomeLocalList" aria-label="Local projects"></ul>
         <div class="projectHomeActions">
           <button type="button" id="btnProjectHomeContinue" class="btn primary" data-i18n="projectHome.continue">Continue Current Project</button>
           <button type="button" id="btnProjectHomeNew" class="btn" data-i18n="projectHome.newProject">New Project</button>

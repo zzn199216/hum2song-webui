@@ -852,6 +852,94 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     }
   }
 
+  function _readProjectsIndex(){
+    try{
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(LS_KEY_PROJECTS_INDEX);
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      if (!o || typeof o !== 'object') return null;
+      if (!Array.isArray(o.projects)) o.projects = [];
+      return o;
+    } catch (e){
+      return null;
+    }
+  }
+
+  function _writeProjectsIndex(idx){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(LS_KEY_PROJECTS_INDEX, JSON.stringify(idx));
+    } catch (e){
+      console.warn('[app] write projects index failed', e);
+    }
+  }
+
+  function _clipCountFromP2(p2){
+    if (!p2 || !p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) return 0;
+    return Object.keys(p2.clips).length;
+  }
+
+  function _labelHintFromP2(p2){
+    if (!p2 || !p2.clips || typeof p2.clips !== 'object') return '';
+    const order = (Array.isArray(p2.clipOrder) && p2.clipOrder.length) ? p2.clipOrder : Object.keys(p2.clips);
+    for (const cid of order){
+      const c = p2.clips[cid];
+      if (c && typeof c.name === 'string' && String(c.name).trim()) return String(c.name).trim().slice(0, 64);
+    }
+    return '';
+  }
+
+  /** Keep projects index row in sync with current blob (BPM, clip count, optional label from first clip). */
+  function _touchCurrentProjectIndexFromDoc(p2){
+    try{
+      if (!p2 || typeof localStorage === 'undefined') return;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const id = localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID);
+      if (!id) return;
+      const idx = _readProjectsIndex() || { version: 1, projects: [] };
+      if (!Array.isArray(idx.projects)) idx.projects = [];
+      const bpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      const clipCount = _clipCountFromP2(p2);
+      const labelHint = _labelHintFromP2(p2);
+      const now = Date.now();
+      let found = false;
+      for (let i = 0; i < idx.projects.length; i++){
+        const e = idx.projects[i];
+        if (e && String(e.id) === String(id)){
+          e.updatedAt = now;
+          e.bpm = bpm;
+          e.clipCount = clipCount;
+          if (labelHint) e.label = labelHint;
+          found = true;
+          break;
+        }
+      }
+      if (!found){
+        idx.projects.push({ id, createdAt: now, updatedAt: now, bpm, clipCount, label: labelHint || undefined });
+      }
+      _writeProjectsIndex(idx);
+    } catch (e){
+      console.warn('[app] touch project index failed', e);
+    }
+  }
+
+  function _formatLocalProjectRowLabel(entry, currentId){
+    const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+    const id = entry && entry.id;
+    const isCur = currentId && id && String(currentId) === String(id);
+    const bpm = (typeof entry.bpm === 'number' && isFinite(entry.bpm)) ? Math.round(entry.bpm) : '?';
+    const n = (typeof entry.clipCount === 'number') ? entry.clipCount : '?';
+    const hasLabel = entry && typeof entry.label === 'string' && String(entry.label).trim();
+    const title = hasLabel
+      ? String(entry.label).trim().slice(0, 48)
+      : (_t('projectHome.untitled') + ' · ' + (id ? String(id).slice(-8) : ''));
+    let line = title + ' — ' + bpm + ' ' + _t('projectHome.bpmLabel') + ' · ' + n + ' ' + _t('projectHome.clipsLabel');
+    if (entry.updatedAt) line += ' · ' + new Date(entry.updatedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    return (isCur ? '● ' : '') + line;
+  }
+
   function persist(){
     // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
     // IMPORTANT: persist() must NOT clobber v2-only fields (e.g., track.instrument) by migrating from v1.
@@ -925,6 +1013,8 @@ try{
     // IMPORTANT: sync in-memory v2 cache; otherwise later writes (e.g. setTrackInstrument)
     // may read a stale cached project and overwrite newer instances.
     app._projectV2 = p2;
+
+    _touchCurrentProjectIndexFromDoc(p2);
 
     // Ensure beats-only storage after migration.
     try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
@@ -1141,6 +1231,7 @@ setProjectFromV2(projectV2){
   const docKey = _getActiveProjectDocStorageKey();
   if (!docKey) return { ok: false, error: 'no_project_storage_key' };
   _writeLS(docKey, projectV2);
+  _touchCurrentProjectIndexFromDoc(projectV2);
   this.project = _projectV2ToV1View(projectV2);
   this.render();
   return {ok:true};
@@ -1923,12 +2014,12 @@ try{
         if (btnCont) btnCont.addEventListener('click', () => { this._dismissProjectHomeAuto(); });
         const btnNew = $('#btnProjectHomeNew');
         if (btnNew) btnNew.addEventListener('click', () => {
-          this.clearProject({ skipConfirm: true });
+          this.createNewLocalProject();
           this._dismissProjectHomeAuto();
         });
         const btnImp = $('#btnProjectHomeImport');
         if (btnImp) btnImp.addEventListener('click', async () => {
-          const ok = await this.importProjectJsonFromFile();
+          const ok = await this.importProjectJsonFromFile({ asNewLocalProject: true });
           if (ok) this._dismissProjectHomeAuto();
         });
         try{
@@ -2014,7 +2105,11 @@ try{
         p2.ui.playheadBeat = Math.max(0, curBeat);
         _ensureCurrentProjectIdForWrite();
         const bpmKey = _getActiveProjectDocStorageKey();
-        if (bpmKey) _writeLS(bpmKey, p2);
+        if (bpmKey){
+          _writeLS(bpmKey, p2);
+          this._projectV2 = p2;
+          _touchCurrentProjectIndexFromDoc(p2);
+        }
         try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
         this.project = _projectV2ToV1View(p2);
       } else {
@@ -3570,21 +3665,109 @@ renderTimeline(){
       log('Cleared project.');
     },
 
-    /** Same semantics as Inspector "Import Project JSON" — load v2 doc and replace project. Returns true if a file was loaded successfully. */
-    async importProjectJsonFromFile(){
+    /**
+     * Inspector: replace current local project blob.
+     * Project Home: pass { asNewLocalProject: true } to add a new local entry and switch to it.
+     */
+    async importProjectJsonFromFile(opts){
+      opts = opts || {};
       const f = await this.pickFile('.json');
       if (!f) return false;
       const txt = await f.text();
       try{
         const obj = JSON.parse(txt);
         const loaded = H2SProject.loadProjectDocV2(obj);
-        this.setProjectFromV2(loaded);
+        if (opts.asNewLocalProject){
+          const base = String(f.name || 'import').replace(/\.json$/i, '').trim() || 'import';
+          this._createLocalProjectEntryAndSwitch(loaded, { importLabel: base.slice(0, 64) });
+        } else {
+          this.setProjectFromV2(loaded);
+        }
         try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
         log('Imported project json.');
         return true;
       }catch(e){
         alert('Invalid JSON.');
         return false;
+      }
+    },
+
+    /** New blank local project entry; does not clear other stored projects. */
+    createNewLocalProject(){
+      const P = window.H2SProject;
+      if (!P || typeof P.defaultProjectV2 !== 'function' || typeof P.uid !== 'function'){
+        console.error('[App] createNewLocalProject: H2SProject missing');
+        return;
+      }
+      const p2 = P.defaultProjectV2();
+      this._createLocalProjectEntryAndSwitch(p2, {});
+      this.state.selectedClipId = null;
+      this.state.selectedInstanceId = null;
+      log('New local project.');
+    },
+
+    /**
+     * Append a new index row, set current id, persist v2 blob via setProjectFromV2.
+     * @param {object} p2 - ProjectDoc v2
+     * @param {{ importLabel?: string }} meta
+     */
+    _createLocalProjectEntryAndSwitch(p2, meta){
+      const P = window.H2SProject;
+      if (!P || typeof P.uid !== 'function' || !p2) return;
+      meta = meta || {};
+      const id = P.uid('prj_');
+      const idx = _readProjectsIndex() || { version: 1, projects: [] };
+      if (!Array.isArray(idx.projects)) idx.projects = [];
+      const now = Date.now();
+      const bpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      const clipCount = _clipCountFromP2(p2);
+      const label = (meta.importLabel && String(meta.importLabel).trim()) ? String(meta.importLabel).trim().slice(0, 64) : '';
+      idx.projects.push({
+        id,
+        createdAt: now,
+        updatedAt: now,
+        bpm,
+        clipCount,
+        ...(label ? { label } : {}),
+      });
+      _writeProjectsIndex(idx);
+      try{
+        if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, id);
+      }catch(e){}
+      this._projectV2 = null;
+      this.setProjectFromV2(p2);
+    },
+
+    _switchToLocalProjectId(projectId){
+      if (!projectId) return;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const cur = (typeof localStorage !== 'undefined') ? localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID) : null;
+      if (cur && String(cur) === String(projectId)){
+        this.closeProjectHome();
+        return;
+      }
+      const raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(_projectDataKey(projectId)) : null;
+      if (!raw){
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        alert(_t('projectHome.missingBlob'));
+        return;
+      }
+      try{
+        const obj = JSON.parse(raw);
+        const loaded = H2SProject.loadProjectDocV2(obj);
+        try{
+          if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, String(projectId));
+        }catch(e){}
+        this._projectV2 = null;
+        this.setProjectFromV2(loaded);
+        this.state.selectedClipId = null;
+        this.state.selectedInstanceId = null;
+        this.closeProjectHome();
+        log('Opened local project: ' + projectId);
+      }catch(e){
+        console.warn('[App] switch local project failed', e);
+        alert('Invalid project data.');
       }
     },
 
@@ -3678,11 +3861,49 @@ renderTimeline(){
       clEl.textContent = String(clips.length);
     },
 
+    _refreshProjectHomeLocalList(){
+      const ul = $('#projectHomeLocalList');
+      if (!ul) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const idx = _readProjectsIndex();
+      const cur = (typeof localStorage !== 'undefined') ? localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID) : null;
+      ul.innerHTML = '';
+      const projects = (idx && Array.isArray(idx.projects)) ? idx.projects : [];
+      if (!projects.length){
+        const li = document.createElement('li');
+        li.className = 'muted';
+        li.style.padding = '8px 10px';
+        li.style.fontSize = '12px';
+        li.textContent = _t('projectHome.emptyLocalList');
+        ul.appendChild(li);
+        return;
+      }
+      for (let i = 0; i < projects.length; i++){
+        const entry = projects[i];
+        if (!entry || !entry.id) continue;
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn projectHomeLocalBtn';
+        btn.setAttribute('data-project-id', String(entry.id));
+        if (cur && String(cur) === String(entry.id)) btn.classList.add('current');
+        btn.textContent = _formatLocalProjectRowLabel(entry, cur);
+        btn.title = String(entry.id);
+        const pid = entry.id;
+        btn.addEventListener('click', () => { this._switchToLocalProjectId(pid); });
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    },
+
     openProjectHome(){
       const el = $('#projectHomeModal');
       if (!el) return;
       if (typeof this._updateI18nLabels === 'function') this._updateI18nLabels();
       this._refreshProjectHomeSummary();
+      this._refreshProjectHomeLocalList();
       el.classList.remove('hidden');
       el.setAttribute('aria-hidden', 'false');
     },

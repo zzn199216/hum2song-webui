@@ -82,6 +82,10 @@
   "projectHome.continue": "继续当前工程",
   "projectHome.newProject": "新建工程",
   "projectHome.importJson": "导入工程 JSON",
+  "projectHome.localProjects": "本地工程",
+  "projectHome.untitled": "未命名",
+  "projectHome.emptyLocalList": "暂无已保存的本地工程。",
+  "projectHome.missingBlob": "无法从存储中加载该工程。",
 
   "ai.saved": "AI 设置已保存。",
   "ai.saveFailed": "保存失败",
