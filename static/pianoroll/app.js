@@ -17,6 +17,7 @@
   const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
   const LS_KEY_AI_DRAWER_OPEN = 'hum2song_studio_ai_drawer_open'; // PR-UX4c: persist AI Settings drawer open/closed
   const LS_KEY_AI_ASSIST_OPEN = 'hum2song_studio_ai_assist_open'; // PR-UX7a: persist AI Assistant dock open/closed
+  const LS_KEY_SKIP_PROJECT_HOME_AUTO = 'hum2song_studio_skip_project_home_auto'; // Project Home MVP: skip auto-open on load after first Continue
   const LS_KEYS_INSP = {
     project: 'hum2song_studio_insp_project_open',
     export: 'hum2song_studio_insp_export_open',
@@ -1415,18 +1416,7 @@ if (typeof localStorage !== 'undefined') {
       });
 
       $('#btnImportProject').addEventListener('click', async () => {
-        const f = await this.pickFile('.json');
-        if (!f) return;
-        const txt = await f.text();
-        try{
-          const obj = JSON.parse(txt);
-          const loaded = H2SProject.loadProjectDocV2(obj);
-          this.setProjectFromV2(loaded);
-          try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-          log('Imported project json.');
-        }catch(e){
-          alert('Invalid JSON.');
-        }
+        await this.importProjectJsonFromFile();
       });
 
       $('#btnImportClip').addEventListener('click', async () => {
@@ -1544,6 +1534,14 @@ $('#rngPitchCenter').addEventListener('input', () => {
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 
       window.addEventListener('keydown', (ev) => {
+        const ph = $('#projectHomeModal');
+        if (ph && !ph.classList.contains('hidden')){
+          if (ev.key === 'Escape'){
+            this._dismissProjectHomeAuto();
+            ev.preventDefault();
+            return;
+          }
+        }
         const path = (ev.composedPath && ev.composedPath()) || (ev.target ? [ev.target] : []);
         const inInput = path.some((el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
         if (inInput) return;
@@ -1757,6 +1755,32 @@ try{
 
       this.render();
       log('UI ready.');
+
+      // Project Home MVP: toolbar entry + optional first-load auto-open
+      const phModal = $('#projectHomeModal');
+      if (phModal){
+        const btnPh = $('#btnProjectHome');
+        if (btnPh) btnPh.addEventListener('click', () => { this.openProjectHome(); });
+        const bd = $('#projectHomeBackdrop');
+        if (bd) bd.addEventListener('click', () => { this._dismissProjectHomeAuto(); });
+        const btnCont = $('#btnProjectHomeContinue');
+        if (btnCont) btnCont.addEventListener('click', () => { this._dismissProjectHomeAuto(); });
+        const btnNew = $('#btnProjectHomeNew');
+        if (btnNew) btnNew.addEventListener('click', () => {
+          this.clearProject({ skipConfirm: true });
+          this._dismissProjectHomeAuto();
+        });
+        const btnImp = $('#btnProjectHomeImport');
+        if (btnImp) btnImp.addEventListener('click', async () => {
+          const ok = await this.importProjectJsonFromFile();
+          if (ok) this._dismissProjectHomeAuto();
+        });
+        try{
+          if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_SKIP_PROJECT_HOME_AUTO) !== '1'){
+            this.openProjectHome();
+          }
+        }catch(e){}
+      }
     },
 
     // Ensure the Timeline Snap dropdown exists in the DOM.
@@ -3379,12 +3403,64 @@ renderTimeline(){
       }
     },
 
-    clearProject(){
-      if (!confirm('Clear local project (clips + timeline)?')) return;
+    clearProject(opts){
+      const skipConfirm = opts && opts.skipConfirm;
+      if (!skipConfirm && !confirm('Clear local project (clips + timeline)?')) return;
       this.project = H2SProject.defaultProject();
       persist();
       this.render();
       log('Cleared project.');
+    },
+
+    /** Same semantics as Inspector "Import Project JSON" — load v2 doc and replace project. Returns true if a file was loaded successfully. */
+    async importProjectJsonFromFile(){
+      const f = await this.pickFile('.json');
+      if (!f) return false;
+      const txt = await f.text();
+      try{
+        const obj = JSON.parse(txt);
+        const loaded = H2SProject.loadProjectDocV2(obj);
+        this.setProjectFromV2(loaded);
+        try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+        log('Imported project json.');
+        return true;
+      }catch(e){
+        alert('Invalid JSON.');
+        return false;
+      }
+    },
+
+    _refreshProjectHomeSummary(){
+      const bpmEl = $('#projectHomeBpm');
+      const clEl = $('#projectHomeClips');
+      if (!bpmEl || !clEl) return;
+      const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? Math.round(this.project.bpm) : 120;
+      bpmEl.textContent = String(bpm);
+      const clips = (this.project && Array.isArray(this.project.clips)) ? this.project.clips : [];
+      clEl.textContent = String(clips.length);
+    },
+
+    openProjectHome(){
+      const el = $('#projectHomeModal');
+      if (!el) return;
+      if (typeof this._updateI18nLabels === 'function') this._updateI18nLabels();
+      this._refreshProjectHomeSummary();
+      el.classList.remove('hidden');
+      el.setAttribute('aria-hidden', 'false');
+    },
+
+    closeProjectHome(){
+      const el = $('#projectHomeModal');
+      if (!el) return;
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+    },
+
+    _dismissProjectHomeAuto(){
+      try{
+        if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_SKIP_PROJECT_HOME_AUTO, '1');
+      }catch(e){}
+      this.closeProjectHome();
     },
 
     pickFile(accept){

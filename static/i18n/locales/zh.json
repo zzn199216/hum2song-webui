@@ -72,6 +72,16 @@
   "top.uploadWav": "上传 WAV",
   "top.vol": "音量",
   "top.localClipsHint": "本地片段 + 时间轴。双击片段进行编辑。",
+  "top.projectHomeBtn": "工程",
+  "top.projectHomeBtnTitle": "工程首页 — 继续、新建或导入",
+
+  "projectHome.title": "工程",
+  "projectHome.subtitle": "继续编辑、新建空白工程，或打开工程 JSON 文件。",
+  "projectHome.bpmLabel": "BPM",
+  "projectHome.clipsLabel": "片段数",
+  "projectHome.continue": "继续当前工程",
+  "projectHome.newProject": "新建工程",
+  "projectHome.importJson": "导入工程 JSON",
 
   "ai.saved": "AI 设置已保存。",
   "ai.saveFailed": "保存失败",

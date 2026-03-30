@@ -72,6 +72,16 @@
   "top.uploadWav": "Upload WAV",
   "top.vol": "Vol",
   "top.localClipsHint": "Local clips + timeline. Double-click a clip to edit.",
+  "top.projectHomeBtn": "Project",
+  "top.projectHomeBtnTitle": "Project home — continue, new, or import",
+
+  "projectHome.title": "Project",
+  "projectHome.subtitle": "Continue working, start fresh, or open a project JSON file.",
+  "projectHome.bpmLabel": "BPM",
+  "projectHome.clipsLabel": "Clips",
+  "projectHome.continue": "Continue Current Project",
+  "projectHome.newProject": "New Project",
+  "projectHome.importJson": "Import Project JSON",
 
   "ai.saved": "AI settings saved.",
   "ai.saveFailed": "Save failed",
