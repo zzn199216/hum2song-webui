@@ -12,7 +12,11 @@
     score: (id) => `/tasks/${encodeURIComponent(id)}/score`,
   };
   const LS_KEY_V1 = 'hum2song_studio_project_v1';
-  const LS_KEY_V2 = 'hum2song_studio_project_v2';
+  /** Legacy flat slot; migrated once to per-project storage. */
+  const LS_KEY_LEGACY_V2 = 'hum2song_studio_project_v2';
+  const LS_KEY_CURRENT_PROJECT_ID = 'hum2song_studio_current_project_id';
+  const LS_KEY_PROJECTS_INDEX = 'hum2song_studio_projects_index';
+  const LS_KEY_PROJECT_DATA_PREFIX = 'hum2song_studio_project_data_';
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
   const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
   const LS_KEY_AI_DRAWER_OPEN = 'hum2song_studio_ai_drawer_open'; // PR-UX4c: persist AI Settings drawer open/closed
@@ -583,6 +587,27 @@
     return true;
   }
 
+  /** Clip entries suitable for "import one clip from full project JSON" (same structural bar as clip bundle). */
+  function _importableClipIdsFromProjectDoc(p2){
+    if (!p2 || !p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) return [];
+    const clips = p2.clips;
+    const order = (Array.isArray(p2.clipOrder) && p2.clipOrder.length) ? p2.clipOrder.slice() : Object.keys(clips);
+    const out = [];
+    const seen = Object.create(null);
+    function tryAdd(cid){
+      if (!cid || seen[cid]) return;
+      const c = clips[cid];
+      if (!c || typeof c !== 'object') return;
+      const sc = c.score;
+      if (!sc || typeof sc !== 'object' || !Array.isArray(sc.tracks)) return;
+      seen[cid] = true;
+      out.push(String(cid));
+    }
+    for (const cid of order) tryAdd(String(cid));
+    for (const cid of Object.keys(clips)) tryAdd(String(cid));
+    return out;
+  }
+
   function _projectV2ToV1View(p2){
     const bpm = (p2 && typeof p2.bpm === 'number') ? p2.bpm : 120;
 
@@ -747,10 +772,93 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     // some endpoints may return json without header
     try { return JSON.parse(txt); } catch(e){ return { raw: txt }; }
   }
+
+  function _projectDataKey(id){
+    return LS_KEY_PROJECT_DATA_PREFIX + String(id);
+  }
+
+  /** One-time: legacy flat hum2song_studio_project_v2 -> current id + index + per-project blob. */
+  function _migrateLegacyV2IfNeeded(){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      const legacyRaw = localStorage.getItem(LS_KEY_LEGACY_V2);
+      if (!legacyRaw) return;
+      const hasCurrent = localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID);
+      const hasIndex = localStorage.getItem(LS_KEY_PROJECTS_INDEX);
+      if (hasCurrent && hasIndex){
+        try{ localStorage.removeItem(LS_KEY_LEGACY_V2); }catch(e){}
+        return;
+      }
+      const P = window.H2SProject;
+      const id = (P && typeof P.uid === 'function') ? P.uid('prj_') : ('prj_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+      localStorage.setItem(_projectDataKey(id), legacyRaw);
+      localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, id);
+      localStorage.setItem(LS_KEY_PROJECTS_INDEX, JSON.stringify({
+        version: 1,
+        projects: [{ id, migratedFromLegacyV2: true, migratedAt: Date.now() }]
+      }));
+      localStorage.removeItem(LS_KEY_LEGACY_V2);
+    } catch (e){
+      console.warn('[app] legacy v2 migration failed', e);
+    }
+  }
+
+  function _repairLocalProjectIndex(){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      if (localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID)) return;
+      const ir = localStorage.getItem(LS_KEY_PROJECTS_INDEX);
+      if (!ir) return;
+      const idx = JSON.parse(ir);
+      const list = idx && idx.projects;
+      if (!Array.isArray(list) || !list.length) return;
+      const first = list[0] && list[0].id;
+      if (first) localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, String(first));
+    } catch (e){
+      console.warn('[app] repair project index failed', e);
+    }
+  }
+
+  function _ensureCurrentProjectIdForWrite(){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      if (localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID)) return;
+      const P = window.H2SProject;
+      const id = (P && typeof P.uid === 'function') ? P.uid('prj_') : ('prj_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+      localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, id);
+      localStorage.setItem(LS_KEY_PROJECTS_INDEX, JSON.stringify({
+        version: 1,
+        projects: [{ id, createdAt: Date.now() }]
+      }));
+    } catch (e){
+      console.warn('[app] ensure current project id failed', e);
+    }
+  }
+
+  /** Active ProjectDoc v2 localStorage key, or null if none yet (no auto-create). */
+  function _getActiveProjectDocStorageKey(){
+    try{
+      if (typeof localStorage === 'undefined') return null;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const id = localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID);
+      if (!id) return null;
+      return _projectDataKey(id);
+    } catch (e){
+      console.warn('[app] active project storage key failed', e);
+      return null;
+    }
+  }
+
   function persist(){
     // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
     // IMPORTANT: persist() must NOT clobber v2-only fields (e.g., track.instrument) by migrating from v1.
-    const prevV2 = app._projectV2 || _readLS(LS_KEY_V2);
+    _ensureCurrentProjectIdForWrite();
+    const docKey = _getActiveProjectDocStorageKey();
+    if (!docKey) return;
+    const prevV2 = app._projectV2 || _readLS(docKey);
 
     const p2 = _projectV1ToV2(app.project);
     if (!p2) return;
@@ -812,7 +920,7 @@ try{
       console.warn('[persist] v2 merge failed', e);
     }
 
-    _writeLS(LS_KEY_V2, p2);
+    _writeLS(docKey, p2);
 
     // IMPORTANT: sync in-memory v2 cache; otherwise later writes (e.g. setTrackInstrument)
     // may read a stale cached project and overwrite newer instances.
@@ -823,15 +931,24 @@ try{
   }
 
   function restore(){
-    const p2 = _readLS(LS_KEY_V2);
-    if (p2) return p2;
+    if (typeof localStorage === 'undefined') return null;
+    _migrateLegacyV2IfNeeded();
+    _repairLocalProjectIndex();
+
+    const docKey = _getActiveProjectDocStorageKey();
+    if (docKey){
+      const p2 = _readLS(docKey);
+      if (p2) return p2;
+    }
 
     const legacy = _readLS(LS_KEY_V1);
     if (!legacy) return null;
 
     const migrated = _projectV1ToV2(legacy);
     if (migrated){
-      _writeLS(LS_KEY_V2, migrated);
+      _ensureCurrentProjectIdForWrite();
+      const k = _getActiveProjectDocStorageKey();
+      if (k) _writeLS(k, migrated);
       try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
       return migrated;
     }
@@ -846,6 +963,7 @@ try{
     _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
     _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
     _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
+    _pendingClipFromProject: null, // full project doc v2 while "Import clip from project JSON" chooser is open
     // debug helper (gated by localStorage.h2s_debug === '1')
     dbg: function(){ return dbg.apply(null, arguments); },
 
@@ -968,7 +1086,9 @@ getProjectV2(){
   // v2 beats-only doc is the only source of truth.
   if (this._projectV2) return this._projectV2;
 
-  const raw = _readLS(LS_KEY_V2);
+  const docKey = _getActiveProjectDocStorageKey();
+  if (!docKey) return null;
+  const raw = _readLS(docKey);
   if (!raw) return null;
 
   // Normalize / migrate using project.js helpers if available.
@@ -996,6 +1116,11 @@ getProjectV2(){
   return raw;
 },
 
+/** For export fallbacks: active ProjectDoc v2 localStorage key (no side effects beyond migration/repair). */
+getActiveProjectDocumentLocalStorageKey(){
+  return _getActiveProjectDocStorageKey();
+},
+
 setProjectFromV2(projectV2){
   // Persist v2 beats-only doc, then refresh derived v1 view for UI/controllers.
   if (!projectV2) return {ok:false, error:'no_project_v2'};
@@ -1012,7 +1137,10 @@ setProjectFromV2(projectV2){
     }
   }
   this._projectV2 = projectV2;
-  _writeLS(LS_KEY_V2, projectV2);
+  _ensureCurrentProjectIdForWrite();
+  const docKey = _getActiveProjectDocStorageKey();
+  if (!docKey) return { ok: false, error: 'no_project_storage_key' };
+  _writeLS(docKey, projectV2);
   this.project = _projectV2ToV1View(projectV2);
   this.render();
   return {ok:true};
@@ -1439,37 +1567,57 @@ if (typeof localStorage !== 'undefined') {
           alert(_t('inspector.importClipInvalid'));
           return;
         }
-        let p2 = this.getProjectV2();
-        if (!p2) p2 = _projectV1ToV2(this.project);
-        if (!p2 || !_isProjectV2(p2)) {
-          alert(_t('inspector.importClipInvalid'));
+        this.importClipAsNewIntoCurrentProjectV2(obj.clip, obj.bpm);
+      });
+
+      $('#btnImportClipFromProject').addEventListener('click', async () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        const f = await this.pickFile('.json');
+        if (!f) return;
+        let obj;
+        try {
+          obj = JSON.parse(await f.text());
+        } catch (_e) {
+          alert(_t('inspector.importClipFromProjectInvalidJson'));
           return;
         }
-        const newId = P.uid('clip_');
-        const clip = P.deepClone(obj.clip);
-        clip.id = newId;
-        if (typeof clip.name !== 'string' || !String(clip.name).trim()) clip.name = 'Imported clip';
-        if (typeof P.normalizeClipRevisionChain === 'function') P.normalizeClipRevisionChain(clip);
-        if (clip.score && typeof P.ensureScoreBeatIds === 'function') P.ensureScoreBeatIds(clip.score);
-        if (typeof P.recomputeClipMetaFromScoreBeat === 'function') P.recomputeClipMetaFromScoreBeat(clip);
-        const bundleBpm = (typeof obj.bpm === 'number' && isFinite(obj.bpm)) ? obj.bpm : null;
-        if (bundleBpm != null) {
-          if (!clip.meta || typeof clip.meta !== 'object') clip.meta = {};
-          clip.meta.importedBundleBpm = bundleBpm;
+        let p2;
+        try {
+          p2 = H2SProject.loadProjectDocV2(obj);
+        } catch (_e) {
+          alert(_t('inspector.importClipFromProjectInvalidProject'));
+          return;
         }
-        if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
-        p2.clips[newId] = clip;
-        if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
-        p2.clipOrder.unshift(newId);
-        if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
-        const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
-        this.setProjectFromV2(p2);
-        this.state.selectedClipId = newId;
-        this.state.selectedInstanceId = null;
-        log('Imported clip JSON: ' + newId);
-        if (bundleBpm != null && Math.round(bundleBpm) !== Math.round(projBpm)) {
-          alert(_t('inspector.importClipBpmNote', { exportBpm: String(Math.round(bundleBpm)), projectBpm: String(Math.round(projBpm)) }));
+        if (!_isProjectV2(p2)) {
+          alert(_t('inspector.importClipFromProjectInvalidProject'));
+          return;
         }
+        const ids = _importableClipIdsFromProjectDoc(p2);
+        if (!ids.length) {
+          alert(_t('inspector.importClipFromProjectNoClips'));
+          return;
+        }
+        this._pendingClipFromProject = p2;
+        this._populateClipFromProjectChooser(ids);
+        this._openClipFromProjectModal();
+      });
+
+      const cfpBackdrop = $('#clipFromProjectBackdrop');
+      if (cfpBackdrop) cfpBackdrop.addEventListener('click', () => { this._closeClipFromProjectModal(); });
+      const btnCfpCancel = $('#btnClipFromProjectCancel');
+      if (btnCfpCancel) btnCfpCancel.addEventListener('click', () => { this._closeClipFromProjectModal(); });
+      const btnCfpImport = $('#btnClipFromProjectImport');
+      if (btnCfpImport) btnCfpImport.addEventListener('click', () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        const sel = $('#selClipFromProject');
+        const doc = this._pendingClipFromProject;
+        const cid = sel && sel.value;
+        if (!doc || !cid || !doc.clips || !doc.clips[cid]) {
+          alert(_t('inspector.importClipFromProjectInvalidProject'));
+          return;
+        }
+        this.importClipAsNewIntoCurrentProjectV2(doc.clips[cid], doc.bpm);
+        this._closeClipFromProjectModal();
       });
 
       // Transport buttons
@@ -1534,6 +1682,14 @@ $('#rngPitchCenter').addEventListener('input', () => {
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 
       window.addEventListener('keydown', (ev) => {
+        const cfp = $('#clipFromProjectModal');
+        if (cfp && !cfp.classList.contains('hidden')){
+          if (ev.key === 'Escape'){
+            this._closeClipFromProjectModal();
+            ev.preventDefault();
+            return;
+          }
+        }
         const ph = $('#projectHomeModal');
         if (ph && !ph.classList.contains('hidden')){
           if (ev.key === 'Escape'){
@@ -1856,7 +2012,9 @@ try{
         p2.ui = p2.ui || {};
         // Preserve beat position for playhead.
         p2.ui.playheadBeat = Math.max(0, curBeat);
-        _writeLS(LS_KEY_V2, p2);
+        _ensureCurrentProjectIdForWrite();
+        const bpmKey = _getActiveProjectDocStorageKey();
+        if (bpmKey) _writeLS(bpmKey, p2);
         try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
         this.project = _projectV2ToV1View(p2);
       } else {
@@ -3428,6 +3586,86 @@ renderTimeline(){
         alert('Invalid JSON.');
         return false;
       }
+    },
+
+    /**
+     * Add a deep-cloned clip as a NEW clip (new id) into the current project v2 doc.
+     * Shared by Import Clip JSON (bundle) and Import Clip from Project JSON.
+     * sourceBpmForMeta: BPM from the source file (bundle or project); stored on clip.meta.importedBundleBpm for mismatch UX.
+     */
+    importClipAsNewIntoCurrentProjectV2(sourceClip, sourceBpmForMeta){
+      const P = window.H2SProject;
+      if (!P || typeof P.uid !== 'function' || typeof P.deepClone !== 'function') return null;
+      let p2 = this.getProjectV2();
+      if (!p2) p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)) return null;
+      const newId = P.uid('clip_');
+      const clip = P.deepClone(sourceClip);
+      clip.id = newId;
+      if (typeof clip.name !== 'string' || !String(clip.name).trim()) clip.name = 'Imported clip';
+      if (typeof P.normalizeClipRevisionChain === 'function') P.normalizeClipRevisionChain(clip);
+      if (clip.score && typeof P.ensureScoreBeatIds === 'function') P.ensureScoreBeatIds(clip.score);
+      if (typeof P.recomputeClipMetaFromScoreBeat === 'function') P.recomputeClipMetaFromScoreBeat(clip);
+      const bundleBpm = (typeof sourceBpmForMeta === 'number' && isFinite(sourceBpmForMeta)) ? sourceBpmForMeta : null;
+      if (bundleBpm != null) {
+        if (!clip.meta || typeof clip.meta !== 'object') clip.meta = {};
+        clip.meta.importedBundleBpm = bundleBpm;
+      }
+      if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+      p2.clips[newId] = clip;
+      if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+      p2.clipOrder.unshift(newId);
+      if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+      const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      this.setProjectFromV2(p2);
+      this.state.selectedClipId = newId;
+      this.state.selectedInstanceId = null;
+      log('Imported clip JSON: ' + newId);
+      if (bundleBpm != null && Math.round(bundleBpm) !== Math.round(projBpm)) {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        alert(_t('inspector.importClipBpmNote', { exportBpm: String(Math.round(bundleBpm)), projectBpm: String(Math.round(projBpm)) }));
+      }
+      return newId;
+    },
+
+    _populateClipFromProjectChooser(ids){
+      const doc = this._pendingClipFromProject;
+      const sel = $('#selClipFromProject');
+      const lbl = $('#lblClipFromProjectBpm');
+      if (!sel || !doc) return;
+      const bpm = (typeof doc.bpm === 'number' && isFinite(doc.bpm)) ? doc.bpm : 120;
+      const cur = this.getProjectV2();
+      const curBpm = (cur && typeof cur.bpm === 'number' && isFinite(cur.bpm)) ? cur.bpm : 120;
+      if (lbl){
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        lbl.textContent = _t('inspector.importClipFromProjectBpmHint', { sourceBpm: String(Math.round(bpm)), projectBpm: String(Math.round(curBpm)) });
+      }
+      sel.innerHTML = '';
+      for (let i = 0; i < ids.length; i++){
+        const id = ids[i];
+        const c = doc.clips[id];
+        const name = (c && typeof c.name === 'string' && String(c.name).trim()) ? String(c.name).trim() : id;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = name + ' — ' + id;
+        sel.appendChild(opt);
+      }
+    },
+
+    _openClipFromProjectModal(){
+      const el = $('#clipFromProjectModal');
+      if (!el) return;
+      if (typeof this._updateI18nLabels === 'function') this._updateI18nLabels();
+      el.classList.remove('hidden');
+      el.setAttribute('aria-hidden', 'false');
+    },
+
+    _closeClipFromProjectModal(){
+      const el = $('#clipFromProjectModal');
+      if (!el) return;
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+      this._pendingClipFromProject = null;
     },
 
     _refreshProjectHomeSummary(){

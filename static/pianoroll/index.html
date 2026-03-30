@@ -81,6 +81,25 @@
     #projectHomeModal .projectHomeStats{ display:flex; flex-wrap:wrap; gap:10px 18px; margin-bottom:18px; font-size:13px; }
     #projectHomeModal .projectHomeActions{ display:flex; flex-wrap:wrap; gap:8px; }
     #projectHomeModal .projectHomeActions .btn{ flex:1 1 auto; min-width:min(140px, 100%); }
+    #clipFromProjectModal{ z-index:10001; }
+    #clipFromProjectModal .clipFromProjectCenter{
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; pointer-events:none;
+    }
+    #clipFromProjectModal .clipFromProjectCard{
+      pointer-events:auto;
+      width:min(440px, 100%);
+      max-width:440px;
+      padding:20px 20px 16px;
+      border-radius:var(--radius);
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(32,39,52,.98), rgba(18,22,28,.98));
+      box-shadow:var(--shadow);
+    }
+    #clipFromProjectModal .clipFromProjectTitle{ margin:0 0 8px; font-size:16px; font-weight:800; }
+    #clipFromProjectModal .clipFromProjectHint{ margin:0 0 10px; font-size:12px; color:var(--muted); line-height:1.45; }
+    #clipFromProjectModal #lblClipFromProjectBpm{ display:block; margin-bottom:10px; font-size:12px; color:var(--muted); }
+    #clipFromProjectModal #selClipFromProject{ width:100%; margin-bottom:14px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:rgba(0,0,0,.2); color:var(--text); font-size:13px; }
+    #clipFromProjectModal .clipFromProjectActions{ display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
     .h2sModalBackdrop{ position:absolute; inset:0; background:rgba(0,0,0,.45); pointer-events:auto; }
     .h2sDrawer{ position:absolute; top:0; right:0; width:min(420px, 92vw); height:100%; background:#0f141b; border-left:1px solid rgba(255,255,255,.08); box-shadow:-12px 0 32px rgba(0,0,0,.5); overflow:auto; pointer-events:auto; }
     .h2sDrawerHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:rgba(0,0,0,.2); }
@@ -849,6 +868,7 @@
             <button id="btnExportWav" class="btn" data-i18n="export.exportWAV">Export WAV</button>
             <button id="btnImportProject" class="btn" data-i18n="inspector.importProjectJson">Import Project JSON</button>
             <button id="btnImportClip" class="btn" data-i18n="inspector.importClipJson">Import Clip JSON</button>
+            <button id="btnImportClipFromProject" class="btn" data-i18n="inspector.importClipFromProject">Import Clip from Project JSON</button>
           </div>
         </details>
         <div class="hr"></div>
@@ -913,6 +933,24 @@
           <button type="button" id="btnProjectHomeContinue" class="btn primary" data-i18n="projectHome.continue">Continue Current Project</button>
           <button type="button" id="btnProjectHomeNew" class="btn" data-i18n="projectHome.newProject">New Project</button>
           <button type="button" id="btnProjectHomeImport" class="btn" data-i18n="projectHome.importJson">Import Project JSON</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import one clip from a full project JSON (chooser) -->
+  <div id="clipFromProjectModal" class="h2sModal hidden" aria-hidden="true">
+    <div id="clipFromProjectBackdrop" class="h2sModalBackdrop" aria-hidden="true"></div>
+    <div class="clipFromProjectCenter">
+      <div class="clipFromProjectCard" role="dialog" aria-modal="true" aria-labelledby="clipFromProjectTitle">
+        <h2 id="clipFromProjectTitle" class="clipFromProjectTitle" data-i18n="inspector.importClipFromProjectTitle">Import clip from project file</h2>
+        <p class="clipFromProjectHint" data-i18n="inspector.importClipFromProjectHint">Choose one clip from the selected project. It will be added as a new clip; your current project stays open.</p>
+        <span id="lblClipFromProjectBpm"></span>
+        <label for="selClipFromProject" class="muted" style="font-size:12px; display:block; margin-bottom:4px;" data-i18n="inspector.importClipFromProjectPickLabel">Clip</label>
+        <select id="selClipFromProject" aria-label="Clip"></select>
+        <div class="clipFromProjectActions">
+          <button type="button" id="btnClipFromProjectCancel" class="btn" data-i18n="common.cancel">Cancel</button>
+          <button type="button" id="btnClipFromProjectImport" class="btn primary" data-i18n="inspector.importClipFromProjectImport">Import selected clip</button>
         </div>
       </div>
     </div>

@@ -6,7 +6,7 @@
 (function(){
   'use strict';
 
-  var LS_V2 = 'hum2song_studio_project_v2';
+  var LS_LEGACY_V2 = 'hum2song_studio_project_v2';
   var LS_V1 = 'hum2song_studio_project_v1';
   var TAIL_SEC = 1.5;
 
@@ -15,7 +15,22 @@
   }
 
   function loadProjectAny(){
-    var rawV2 = localStorage.getItem(LS_V2);
+    var APP = window.H2SApp || window.APP || window.app;
+    if (APP && typeof APP.getProjectV2 === 'function'){
+      var mem = APP.getProjectV2();
+      if (mem) return mem;
+    }
+    if (APP && typeof APP.getActiveProjectDocumentLocalStorageKey === 'function'){
+      var key = APP.getActiveProjectDocumentLocalStorageKey();
+      if (key){
+        var rawA = localStorage.getItem(key);
+        if (rawA){
+          var o = safeParse(rawA);
+          if (o) return o;
+        }
+      }
+    }
+    var rawV2 = localStorage.getItem(LS_LEGACY_V2);
     if (rawV2){ var p2 = safeParse(rawV2); if (p2) return p2; }
     var rawV1 = localStorage.getItem(LS_V1);
     if (rawV1){ var p1 = safeParse(rawV1); if (p1) return p1; }
