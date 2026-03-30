@@ -6,7 +6,7 @@ const path = require('path');
 const assert = require('assert');
 
 const split = require(path.resolve(__dirname, '../../static/pianoroll/core/score_heuristic_split.js'));
-const { splitScoreDocByPitchBuckets } = split;
+const { splitScoreDocByPitchBuckets, applyTranscriptionPitchSplitIfEnabled } = split;
 
 function assertDeep(a, b, msg) {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), msg);
@@ -163,6 +163,19 @@ function assertDeep(a, b, msg) {
   const copy = JSON.parse(JSON.stringify(score));
   splitScoreDocByPitchBuckets(score);
   assertDeep(score, copy, 'input unchanged');
+})();
+
+// --- integration helper (flag simulation) ---
+(function () {
+  const score = { tracks: [{ notes: [{ pitch: 50, start: 0, duration: 1 }] }] };
+  const off = applyTranscriptionPitchSplitIfEnabled(score, false);
+  assert.strictEqual(off.applied, false);
+  assert.strictEqual(off.score, score, 'disabled: same reference');
+
+  const on = applyTranscriptionPitchSplitIfEnabled(score, true);
+  assert.strictEqual(on.applied, true);
+  assert.strictEqual(on.score.tracks.length, 3);
+  assert.ok(on.score !== score);
 })();
 
 console.log('PASS score_heuristic_split tests');

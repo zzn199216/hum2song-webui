@@ -22,6 +22,8 @@
   const LS_KEY_AI_DRAWER_OPEN = 'hum2song_studio_ai_drawer_open'; // PR-UX4c: persist AI Settings drawer open/closed
   const LS_KEY_AI_ASSIST_OPEN = 'hum2song_studio_ai_assist_open'; // PR-UX7a: persist AI Assistant dock open/closed
   const LS_KEY_SKIP_PROJECT_HOME_AUTO = 'hum2song_studio_skip_project_home_auto'; // Project Home MVP: skip auto-open on load after first Continue
+  /** Dev-only: set localStorage to '1' to run transcription scores through heuristic pitch-bucket multi-track split before clip creation. */
+  const LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT = 'hum2song_studio_dev_transcription_pitch_split';
   const LS_KEYS_INSP = {
     project: 'hum2song_studio_insp_project_open',
     export: 'hum2song_studio_insp_export_open',
@@ -3360,10 +3362,24 @@ renderTimeline(){
           this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           return;
         }
+        let splitRes = { score, applied: false };
+        try{
+          const flagOn = (typeof localStorage !== 'undefined') && String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT) || '') === '1';
+          const S = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
+          if (flagOn && S && typeof S.applyTranscriptionPitchSplitIfEnabled === 'function'){
+            splitRes = S.applyTranscriptionPitchSplitIfEnabled(score, true);
+            if (splitRes.applied) log('Transcription: heuristic pitch-bucket split applied (dev flag).');
+          }
+        }catch(e){
+          console.warn('[app] transcription pitch split skipped', e);
+          splitRes = { score, applied: false };
+        }
+        const scoreForClip = splitRes.score;
+
         this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creatingClip') : 'Creating clip...', true);
 
         if ((this.project.clips || []).length === 0){
-          const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
+          const srcBpm = (typeof scoreForClip.tempo_bpm === 'number') ? scoreForClip.tempo_bpm : ((typeof scoreForClip.bpm === 'number') ? scoreForClip.bpm : null);
           if (typeof srcBpm === 'number' && isFinite(srcBpm) && srcBpm >= 30 && srcBpm <= 300){
             this.project.bpm = srcBpm;
             const el = $('#bpm');
@@ -3371,10 +3387,11 @@ renderTimeline(){
           }
         }
 
-        const clip = H2SProject.createClipFromScore(score, { name: file.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
+        const clip = H2SProject.createClipFromScore(scoreForClip, { name: file.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
         if (!clip.meta) clip.meta = {};
-        if (typeof score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = score.tempo_bpm;
-        else if (typeof score.bpm === 'number') clip.meta.sourceTempoBpm = score.bpm;
+        if (typeof scoreForClip.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.tempo_bpm;
+        else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
+        if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
         this.project.clips.unshift(clip);
         this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
         persist();

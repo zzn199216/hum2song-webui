@@ -139,7 +139,23 @@
     return out;
   }
 
-  var API = { splitScoreDocByPitchBuckets: splitScoreDocByPitchBuckets };
+  /**
+   * Integration helper: when enabled is false, returns input unchanged (applied: false).
+   * When true, runs splitScoreDocByPitchBuckets. Safe for wiring from app (caller passes flag from localStorage).
+   */
+  function applyTranscriptionPitchSplitIfEnabled(scoreIn, enabled) {
+    if (!enabled) return { score: scoreIn, applied: false };
+    try {
+      return { score: splitScoreDocByPitchBuckets(scoreIn), applied: true };
+    } catch (e) {
+      return { score: scoreIn, applied: false };
+    }
+  }
+
+  var API = {
+    splitScoreDocByPitchBuckets: splitScoreDocByPitchBuckets,
+    applyTranscriptionPitchSplitIfEnabled: applyTranscriptionPitchSplitIfEnabled,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.H2SScoreHeuristicSplit = API;
 })(
