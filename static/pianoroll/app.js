@@ -2765,7 +2765,8 @@ ensureTrackButtons(){
       const hasSelection = !!(this.state.selectedClipId || this.state.selectedInstanceId);
       const hasInstance = !!this.state.selectedInstanceId;
       if (emptyEl) emptyEl.style.display = hasSelection ? 'none' : '';
-      if (contentEl) contentEl.style.display = hasSelection ? '' : 'none';
+      // Keep #inspectorContent visible without selection so Project summary + Export & Import stay usable.
+      if (contentEl) contentEl.style.display = '';
       if (timelineEl) timelineEl.style.display = hasInstance ? '' : 'none';
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
       const tracks = this.project.tracks.length;
