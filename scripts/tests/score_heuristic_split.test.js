@@ -6,7 +6,7 @@ const path = require('path');
 const assert = require('assert');
 
 const split = require(path.resolve(__dirname, '../../static/pianoroll/core/score_heuristic_split.js'));
-const { splitScoreDocByPitchBuckets, applyTranscriptionPitchSplitIfEnabled } = split;
+const { splitScoreDocByPitchBuckets, applyTranscriptionPitchSplitIfEnabled, explodeNonEmptyTracksToSingleTrackScores } = split;
 
 function assertDeep(a, b, msg) {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), msg);
@@ -176,6 +176,36 @@ function assertDeep(a, b, msg) {
   assert.strictEqual(on.applied, true);
   assert.strictEqual(on.score.tracks.length, 3);
   assert.ok(on.score !== score);
+})();
+
+// --- explode to single-track scores (non-empty tracks only) ---
+(function () {
+  const bucketed = splitScoreDocByPitchBuckets(
+    {
+      version: 1,
+      tempo_bpm: 120,
+      tracks: [
+        {
+          notes: [
+            { pitch: 40, start: 0, duration: 0.5, velocity: 80 },
+            { pitch: 60, start: 0.5, duration: 0.5, velocity: 80 },
+            { pitch: 90, start: 1, duration: 0.5, velocity: 80 },
+          ],
+        },
+      ],
+    },
+    { numTracks: 3, lowMax: 41, midMax: 83 }
+  );
+  const parts = explodeNonEmptyTracksToSingleTrackScores(bucketed);
+  assert.strictEqual(parts.length, 3);
+  assert.strictEqual(parts[0].score.tracks.length, 1);
+  assert.strictEqual(parts[0].score.tracks[0].notes.length, 1);
+  assert.strictEqual(parts[0].trackName, 'High');
+  assert.strictEqual(parts[1].trackName, 'Mid');
+  assert.strictEqual(parts[2].trackName, 'Low');
+  const emptyMid = { tracks: [{ name: 'A', notes: [{ pitch: 60, start: 0, duration: 0.1 }] }, { name: 'B', notes: [] }] };
+  const one = explodeNonEmptyTracksToSingleTrackScores(emptyMid);
+  assert.strictEqual(one.length, 1);
 })();
 
 console.log('PASS score_heuristic_split tests');

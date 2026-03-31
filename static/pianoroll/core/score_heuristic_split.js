@@ -140,6 +140,46 @@
   }
 
   /**
+   * Build one ScoreDoc-like object per non-empty input track (single internal track each).
+   * Order matches source `tracks` (e.g. High, Mid, Low). Skips tracks with no notes.
+   * Used after pitch-bucket split to place each bucket on its own clip / timeline track.
+   */
+  function explodeNonEmptyTracksToSingleTrackScores(scoreIn) {
+    var src = scoreIn && typeof scoreIn === 'object' ? scoreIn : {};
+    var tracks = Array.isArray(src.tracks) ? src.tracks : [];
+    var tempo =
+      typeof src.tempo_bpm === 'number' && isFinite(src.tempo_bpm)
+        ? src.tempo_bpm
+        : typeof src.bpm === 'number' && isFinite(src.bpm)
+          ? src.bpm
+          : 120;
+    var ts = typeof src.time_signature === 'string' ? src.time_signature : '4/4';
+    var ver = typeof src.version === 'number' ? src.version : 1;
+    var out = [];
+    for (var i = 0; i < tracks.length; i++) {
+      var tr = tracks[i];
+      var notes = tr && Array.isArray(tr.notes) ? tr.notes : [];
+      if (notes.length === 0) continue;
+      var singleNotes = [];
+      for (var j = 0; j < notes.length; j++) {
+        singleNotes.push(_cloneNote(notes[j]));
+      }
+      _sortNotes(singleNotes);
+      var trName = tr && typeof tr.name === 'string' ? tr.name : String(tr.name || '');
+      var trId = tr && tr.id != null ? String(tr.id) : 'trk_' + i;
+      var score = {
+        version: ver,
+        tempo_bpm: tempo,
+        time_signature: ts,
+        tracks: [{ id: trId, name: trName, notes: singleNotes }],
+      };
+      if (typeof src.bpm === 'number' && isFinite(src.bpm)) score.bpm = src.bpm;
+      out.push({ score: score, splitIndex: i, trackName: trName });
+    }
+    return out;
+  }
+
+  /**
    * Integration helper: when enabled is false, returns input unchanged (applied: false).
    * When true, runs splitScoreDocByPitchBuckets. Safe for wiring from app (caller passes flag from localStorage).
    */
@@ -154,6 +194,7 @@
 
   var API = {
     splitScoreDocByPitchBuckets: splitScoreDocByPitchBuckets,
+    explodeNonEmptyTracksToSingleTrackScores: explodeNonEmptyTracksToSingleTrackScores,
     applyTranscriptionPitchSplitIfEnabled: applyTranscriptionPitchSplitIfEnabled,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

@@ -3388,22 +3388,58 @@ renderTimeline(){
           }
         }
 
-        const clip = H2SProject.createClipFromScore(scoreForClip, { name: file.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
-        if (!clip.meta) clip.meta = {};
-        if (typeof scoreForClip.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.tempo_bpm;
-        else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
-        if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
-        this.project.clips.unshift(clip);
-        this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
-        persist();
-        this.render();
-        this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
-        log(`Clip added: ${clip.name}`);
-        const cidNew = clip.id;
-        if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
-          setTimeout(() => this.openClipEditor(cidNew), 0);
+        const importBaseName = file.name.replace(/\.[^/.]+$/, '');
+        const playheadSec = this.project.ui.playheadSec || 0;
+        const SplitApi = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
+        let explodeParts = null;
+        if (splitRes.applied && SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
+          explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
         }
-        setTimeout(() => this.setImportStatus('', false), 2000);
+        const useExplode = Array.isArray(explodeParts) && explodeParts.length >= 2;
+
+        if (useExplode){
+          if (!this.project.tracks) this.project.tracks = [];
+          while (this.project.tracks.length < explodeParts.length){
+            const n = this.project.tracks.length + 1;
+            this.project.tracks.push({ id: H2SProject.uid('trk_'), name: 'Track ' + n });
+          }
+          for (let k = explodeParts.length - 1; k >= 0; k--){
+            const part = explodeParts[k];
+            const clip = H2SProject.createClipFromScore(part.score, { name: importBaseName + ' — ' + part.trackName, sourceTaskId: tid });
+            if (!clip.meta) clip.meta = {};
+            if (typeof part.score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = part.score.tempo_bpm;
+            else if (typeof part.score.bpm === 'number') clip.meta.sourceTempoBpm = part.score.bpm;
+            clip.meta.heuristicPitchSplit = true;
+            clip.meta.splitExploded = true;
+            clip.meta.splitExplodeIndex = part.splitIndex;
+            clip.meta.splitTrackName = part.trackName;
+            this.project.clips.unshift(clip);
+            this.addClipToTimeline(clip.id, playheadSec, k);
+          }
+          persist();
+          this.render();
+          const doneMulti = 'Done: ' + explodeParts.length + ' clips on ' + explodeParts.length + ' tracks.';
+          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeParts.length + ' clips)') : doneMulti, false);
+          log('Clips added (split explode): ' + explodeParts.length);
+          setTimeout(() => this.setImportStatus('', false), 2500);
+        } else {
+          const clip = H2SProject.createClipFromScore(scoreForClip, { name: importBaseName, sourceTaskId: tid });
+          if (!clip.meta) clip.meta = {};
+          if (typeof scoreForClip.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.tempo_bpm;
+          else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
+          if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+          this.project.clips.unshift(clip);
+          this.addClipToTimeline(clip.id, playheadSec, 0);
+          persist();
+          this.render();
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
+          log(`Clip added: ${clip.name}`);
+          const cidNew = clip.id;
+          if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
+            setTimeout(() => this.openClipEditor(cidNew), 0);
+          }
+          setTimeout(() => this.setImportStatus('', false), 2000);
+        }
       }catch(e){
         if (this.state.importCancelled){
           this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
