@@ -27,6 +27,14 @@
         }catch(e){ return false; }
       }
 
+      /** Dev-only clip playback timing: prefer performance.now, else Date.now (never gate logging on performance API). */
+      function _perfClipNow(){
+        try{
+          if (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') return performance.now();
+        }catch(e){}
+        return Date.now();
+      }
+
       const persistFromV1 = (typeof opts.persistFromV1 === 'function') ? opts.persistFromV1 :
         (H2SApp && typeof H2SApp.persistFromV1 === 'function') ? ((reason)=>H2SApp.persistFromV1(reason)) :
         (root && typeof root.persistFromV1 === 'function') ? root.persistFromV1 :
@@ -2487,55 +2495,138 @@ modalTogglePlay(){
 
 async modalPlay(){
 
-  if (!this.state.modal.show) return;
-  if (this.state.modal.isPlaying){ this.modalStop(); return; }
+  const _mpLog = _h2sDevPerfTimingEnabled();
+
+  if (!this.state.modal.show){
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', { outcome: 'earlyExit', reason: 'modalHidden' });
+      }catch(e){}
+    }
+    return;
+  }
+  if (this.state.modal.isPlaying){
+    this.modalStop();
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', { outcome: 'earlyExit', reason: 'wasPlaying_stoppedFirst' });
+      }catch(e){}
+    }
+    return;
+  }
+
+  const _mpT0 = _mpLog ? _perfClipNow() : 0;
 
   const ok = await this.ensureTone();
-  if (!ok){ alert('Tone.js not available.'); return; }
-
-  // IMPORTANT: Tone.start() must be called from a user gesture (button click).
-  // modalPlay() is invoked by the Play button handler, so we can await safely here.
-  try { await Tone.start(); } catch(e){}
-
-  const score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
-  const startAt = this.state.modal.cursorSec || 0;
-
-  const synth = new Tone.PolySynth(Tone.Synth).toDestination();
-  this.state.modal.synth = synth;
-
-  Tone.Transport.stop();
-  Tone.Transport.cancel();
-  Tone.Transport.seconds = 0;
-  Tone.Transport.bpm.value = this.project.bpm || 120;
-
-  let maxT = 0;
-  for (const tr of (score.tracks || [])){
-    for (const n of (tr.notes || [])){
-      const end = (Number(n.start)||0) + (Number(n.duration)||0);
-      if (end < startAt) continue;
-      const rel = Math.max(0, (Number(n.start)||0) - startAt);
-      const dur = Math.max(0, Number(n.duration)||0);
-      maxT = Math.max(maxT, rel + dur);
-	      Tone.Transport.schedule((time) => {
-	        const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
-	        // Accept either MIDI velocity (1..127) or normalized (0..1)
-	        let vel = Number(n.velocity);
-	        if (!isFinite(vel)) vel = 0.8;
-	        if (vel > 1.01) vel = H2SProject.clamp(vel, 1, 127) / 127;
-	        else vel = H2SProject.clamp(vel, 0.05, 1.0);
-	        synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
-	      }, rel);
+  const _mpAfterEnsure = _mpLog ? _perfClipNow() : 0;
+  if (!ok){
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', {
+          outcome: 'ensureToneFailed',
+          totalMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+          ensureToneMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+        });
+      }catch(e){}
     }
+    alert('Tone.js not available.');
+    return;
+  }
+
+  let _mpAfterToneStart = 0;
+  let _mpAfterScore = 0;
+  let _mpAfterSynth = 0;
+  let _mpAfterTransportReset = 0;
+  let _mpAfterSchedule = 0;
+  let score;
+  let startAt;
+  let maxT = 0;
+
+  try{
+    // IMPORTANT: Tone.start() must be called from a user gesture (button click).
+    // modalPlay() is invoked by the Play button handler, so we can await safely here.
+    try { await Tone.start(); } catch(e){}
+    _mpAfterToneStart = _mpLog ? _perfClipNow() : 0;
+
+    score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+    startAt = this.state.modal.cursorSec || 0;
+    _mpAfterScore = _mpLog ? _perfClipNow() : 0;
+
+    const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+    this.state.modal.synth = synth;
+    _mpAfterSynth = _mpLog ? _perfClipNow() : 0;
+
+    Tone.Transport.stop();
+    Tone.Transport.cancel();
+    Tone.Transport.seconds = 0;
+    Tone.Transport.bpm.value = this.project.bpm || 120;
+    _mpAfterTransportReset = _mpLog ? _perfClipNow() : 0;
+
+    maxT = 0;
+    for (const tr of (score.tracks || [])){
+      for (const n of (tr.notes || [])){
+        const end = (Number(n.start)||0) + (Number(n.duration)||0);
+        if (end < startAt) continue;
+        const rel = Math.max(0, (Number(n.start)||0) - startAt);
+        const dur = Math.max(0, Number(n.duration)||0);
+        maxT = Math.max(maxT, rel + dur);
+	        Tone.Transport.schedule((time) => {
+	          const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
+	          // Accept either MIDI velocity (1..127) or normalized (0..1)
+	          let vel = Number(n.velocity);
+	          if (!isFinite(vel)) vel = 0.8;
+	          if (vel > 1.01) vel = H2SProject.clamp(vel, 1, 127) / 127;
+	          else vel = H2SProject.clamp(vel, 0.05, 1.0);
+	          synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
+	        }, rel);
+      }
+    }
+    _mpAfterSchedule = _mpLog ? _perfClipNow() : 0;
+  }catch(e){
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', {
+          outcome: 'throw',
+          message: String(e && e.message),
+          totalMs: Number((_perfClipNow() - _mpT0).toFixed(3)),
+        });
+      }catch(_){}
+    }
+    throw e;
   }
 
   // If no notes after cursor, treat as a no-op but still reset cursor to 0 for UX.
   if (!(maxT > 0)){
     this.state.modal.cursorSec = 0;
-    this.modalRequestDraw();
+    let _mpDrawErr = null;
+    try{
+      this.modalRequestDraw();
+    }catch(e){
+      _mpDrawErr = e;
+    }finally{
+      if (_mpLog){
+        const _mpEnd = _perfClipNow();
+        try{
+          console.log('[H2S perf] clipEditor modalPlay setup', {
+            outcome: _mpDrawErr ? 'modalRequestDrawThrew' : 'noNotesAfterCursor',
+            drawError: _mpDrawErr ? String(_mpDrawErr && _mpDrawErr.message) : undefined,
+            totalMs: Number((_mpEnd - _mpT0).toFixed(3)),
+            ensureToneMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+            toneStartMs: Number((_mpAfterToneStart - _mpAfterEnsure).toFixed(3)),
+            scorePrepMs: Number((_mpAfterScore - _mpAfterToneStart).toFixed(3)),
+            synthMs: Number((_mpAfterSynth - _mpAfterScore).toFixed(3)),
+            transportResetMs: Number((_mpAfterTransportReset - _mpAfterSynth).toFixed(3)),
+            scheduleMs: Number((_mpAfterSchedule - _mpAfterTransportReset).toFixed(3)),
+          });
+        }catch(e){}
+      }
+    }
+    if (_mpDrawErr) throw _mpDrawErr;
     return;
   }
 
   Tone.Transport.start("+0.05");
+  const _mpAfterTransportStart = _mpLog ? _perfClipNow() : 0;
   this.state.modal.isPlaying = true;
   this._playbackPerfTickSum = 0;
   this._playbackPerfTickCount = 0;
@@ -2553,7 +2644,32 @@ async modalPlay(){
   }
 
   // One-time redraw to clear stale canvas playhead (modalDraw skips playhead when isPlaying)
-  this.modalRequestDraw();
+  let _mpDrawErr2 = null;
+  try{
+    this.modalRequestDraw();
+  }catch(e){
+    _mpDrawErr2 = e;
+  }finally{
+    if (_mpLog){
+      const _mpEnd = _perfClipNow();
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', {
+          outcome: _mpDrawErr2 ? 'modalRequestDrawThrew' : 'playing',
+          drawError: _mpDrawErr2 ? String(_mpDrawErr2 && _mpDrawErr2.message) : undefined,
+          totalMs: Number((_mpEnd - _mpT0).toFixed(3)),
+          ensureToneMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+          toneStartMs: Number((_mpAfterToneStart - _mpAfterEnsure).toFixed(3)),
+          scorePrepMs: Number((_mpAfterScore - _mpAfterToneStart).toFixed(3)),
+          synthMs: Number((_mpAfterSynth - _mpAfterScore).toFixed(3)),
+          transportResetMs: Number((_mpAfterTransportReset - _mpAfterSynth).toFixed(3)),
+          scheduleMs: Number((_mpAfterSchedule - _mpAfterTransportReset).toFixed(3)),
+          transportStartMs: Number((_mpAfterTransportStart - _mpAfterSchedule).toFixed(3)),
+          startUiSyncMs: Number((_mpEnd - _mpAfterTransportStart).toFixed(3)),
+        });
+      }catch(e){}
+    }
+  }
+  if (_mpDrawErr2) throw _mpDrawErr2;
 
   // progress ticker (uses closure vars; do NOT reference them elsewhere)
   const tick = () => {
@@ -2842,32 +2958,78 @@ async modalPlay(){
     },
 
     modalStop(){
-  if (!this.state.modal.show) return;
-
-  this._logClipEditorPlaybackPerfSummary();
-
-  // Cancel UI tick
-  if (this._modalRAF){
-    try{ cancelAnimationFrame(this._modalRAF); }catch(_){}
-    this._modalRAF = null;
+  const _msLog = _h2sDevPerfTimingEnabled();
+  if (!this.state.modal.show){
+    if (_msLog){
+      try{
+        console.log('[H2S perf] clipEditor modalStop cleanup', { outcome: 'earlyExit', reason: 'modalHidden' });
+      }catch(e){}
+    }
+    return;
   }
 
-  // Stop scheduled notes
-  if (this._modalPart){
-    try{ this._modalPart.dispose(); }catch(_){}
-    this._modalPart = null;
-  }
+  const _msT0 = _msLog ? _perfClipNow() : 0;
+  let _msAfterRafSummary = _msT0;
+  let _msAfterCancelRaf = _msT0;
+  let _msAfterModalPart = _msT0;
+  let _msAfterTransport = _msT0;
+  let _msAfterOverlay = _msT0;
+  let _msDrawErr = null;
 
-  if (window.Tone){
-    try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(_){}
-  }
+  try{
+    this._logClipEditorPlaybackPerfSummary();
+    _msAfterRafSummary = _msLog ? _perfClipNow() : 0;
 
-  this.state.modal.isPlaying = false;
-  $('#editorStatus').textContent = 'Stopped.';
-  // Hide DOM overlay so canvas playhead is shown again
-  const phEl = $('#editorPlayhead');
-  if (phEl) phEl.style.display = 'none';
-  this.modalRequestDraw();
+    // Cancel UI tick
+    if (this._modalRAF){
+      try{ cancelAnimationFrame(this._modalRAF); }catch(_){}
+      this._modalRAF = null;
+    }
+    _msAfterCancelRaf = _msLog ? _perfClipNow() : 0;
+
+    // Stop scheduled notes
+    if (this._modalPart){
+      try{ this._modalPart.dispose(); }catch(_){}
+      this._modalPart = null;
+    }
+    _msAfterModalPart = _msLog ? _perfClipNow() : 0;
+
+    if (window.Tone){
+      try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(_){}
+    }
+    _msAfterTransport = _msLog ? _perfClipNow() : 0;
+
+    this.state.modal.isPlaying = false;
+    $('#editorStatus').textContent = 'Stopped.';
+    // Hide DOM overlay so canvas playhead is shown again
+    const phEl = $('#editorPlayhead');
+    if (phEl) phEl.style.display = 'none';
+    _msAfterOverlay = _msLog ? _perfClipNow() : 0;
+
+    try{
+      this.modalRequestDraw();
+    }catch(e){
+      _msDrawErr = e;
+    }
+  }finally{
+    if (_msLog){
+      const _msEndWall = _perfClipNow();
+      try{
+        console.log('[H2S perf] clipEditor modalStop cleanup', {
+          outcome: _msDrawErr ? 'modalRequestDrawThrew' : 'ok',
+          drawError: _msDrawErr ? String(_msDrawErr && _msDrawErr.message) : undefined,
+          totalMs: Number((_msEndWall - _msT0).toFixed(3)),
+          rafSessionLogMs: Number((_msAfterRafSummary - _msT0).toFixed(3)),
+          cancelRafMs: Number((_msAfterCancelRaf - _msAfterRafSummary).toFixed(3)),
+          modalPartDisposeMs: Number((_msAfterModalPart - _msAfterCancelRaf).toFixed(3)),
+          transportStopCancelMs: Number((_msAfterTransport - _msAfterModalPart).toFixed(3)),
+          stopUiOverlayMs: Number((_msAfterOverlay - _msAfterTransport).toFixed(3)),
+          modalRequestDrawScheduleMs: Number((_msEndWall - _msAfterOverlay).toFixed(3)),
+        });
+      }catch(e){}
+    }
+  }
+  if (_msDrawErr) throw _msDrawErr;
 },
 
       };
