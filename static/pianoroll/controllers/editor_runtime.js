@@ -455,6 +455,12 @@
       const clip = _findClip(this.project, clipId);
       if (!clip) return;
 
+      const _perfOpen = _h2sDevPerfTimingEnabled();
+      const _perfW = _perfOpen && typeof performance !== 'undefined';
+      if (_perfW){
+        this._h2sOpenPerf = { pendingFirstDraw: true, t0: performance.now(), clipId: String(clipId) };
+      }
+
       const p2b = getProjectV2 && getProjectV2();
       const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
       const projectWantsBeat = !!(
@@ -507,6 +513,8 @@
           else el.textContent = '(none)';
         }
       }catch(e){}
+
+      if (_perfW) this._h2sOpenPerf.tAfterScorePrep = performance.now();
 
       // PR-4/PR-6b: Editor Optimize UI — preset, prompt, status line
       try{
@@ -707,13 +715,58 @@
 
       $('#editorStatus').textContent = _t('editor.tipSnap');
 
-      this.modalUpdateRightPanel();
-      this.modalResizeCanvasToContent();
-      this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
-      this.modalSetupVelocityScrollSync();
-      this.modalRequestDraw();
-      this.modalBindControls();
-      this.modalUpdateEditorOptimizeUI();
+      if (_perfW) this._h2sOpenPerf.tBeforeRightPanel = performance.now();
+      if (_perfW){
+        const _t = performance.now();
+        this.modalUpdateRightPanel();
+        this._h2sOpenPerf.rightPanelFirstMs = performance.now() - _t;
+      } else {
+        this.modalUpdateRightPanel();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalResizeCanvasToContent();
+        this._h2sOpenPerf.resizeCanvasMs = performance.now() - _t;
+      } else {
+        this.modalResizeCanvasToContent();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+        this._h2sOpenPerf.autoScrollMs = performance.now() - _t;
+      } else {
+        this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalSetupVelocityScrollSync();
+        this._h2sOpenPerf.velocitySyncMs = performance.now() - _t;
+      } else {
+        this.modalSetupVelocityScrollSync();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalRequestDraw();
+        this._h2sOpenPerf.requestDrawScheduleMs = performance.now() - _t;
+        this._h2sOpenPerf.tAfterRequestDraw = performance.now();
+      } else {
+        this.modalRequestDraw();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalBindControls();
+        this._h2sOpenPerf.bindControlsMs = performance.now() - _t;
+      } else {
+        this.modalBindControls();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalUpdateEditorOptimizeUI();
+        this._h2sOpenPerf.optimizeUiMs = performance.now() - _t;
+        this._h2sOpenPerf.openSyncTotalMs = performance.now() - this._h2sOpenPerf.t0;
+      } else {
+        this.modalUpdateEditorOptimizeUI();
+      }
       log(`Open editor: ${clip.name}`);
     },
 
@@ -807,6 +860,8 @@
       this.state.modal.mode = 'none';
       this.state.modal._sourceClipWasBeat = false;
       this.state.modal._projectWantsBeat = false;
+
+      if (this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw) this._h2sOpenPerf = null;
 
       $('#modal').classList.remove('show');
       $('#modal').setAttribute('aria-hidden', 'true');
@@ -1100,7 +1155,18 @@
     },
 
     modalDraw(){
-      if (!this.state.modal.show) return;
+      if (!this.state.modal.show){
+        if (this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw) this._h2sOpenPerf = null;
+        return;
+      }
+      const _openPerfFirstDraw = !!(this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw);
+      let _drawEnter = 0;
+      if (_openPerfFirstDraw && typeof performance !== 'undefined'){
+        const op = this._h2sOpenPerf;
+        const tAfter = op.tAfterRequestDraw;
+        op.rafDelayMs = (typeof tAfter === 'number') ? (performance.now() - tAfter) : 0;
+        _drawEnter = performance.now();
+      }
       const _perf = _h2sDevPerfTimingEnabled();
       const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
       let _mark = _perfT0;
@@ -1286,10 +1352,43 @@
       this.modalDrawVelocityLane();
       const msVelocityLane = _split();
 
-      this.modalUpdateRightPanel();
+      if (_openPerfFirstDraw && typeof performance !== 'undefined'){
+        const _rp0 = performance.now();
+        this.modalUpdateRightPanel();
+        if (this._h2sOpenPerf) this._h2sOpenPerf.rightPanelInFirstDrawMs = performance.now() - _rp0;
+      } else {
+        this.modalUpdateRightPanel();
+      }
       const msRightPanel = _split();
 
-      if (_perf && typeof performance !== 'undefined'){
+      if (_openPerfFirstDraw && typeof performance !== 'undefined' && this._h2sOpenPerf){
+        const op = this._h2sOpenPerf;
+        op.firstDrawTotalMs = performance.now() - _drawEnter;
+        op.pendingFirstDraw = false;
+        const t0 = op.t0;
+        const tAsp = op.tAfterScorePrep;
+        const tBrp = op.tBeforeRightPanel;
+        console.log('[H2S perf] openClipEditor (one-time)', {
+          clipId: op.clipId,
+          scorePrepMs: (typeof tAsp === 'number' && typeof t0 === 'number') ? Number((tAsp - t0).toFixed(3)) : null,
+          uiPrepMs: (typeof tBrp === 'number' && typeof tAsp === 'number') ? Number((tBrp - tAsp).toFixed(3)) : null,
+          rightPanelFirstMs: Number((op.rightPanelFirstMs || 0).toFixed(3)),
+          resizeCanvasMs: Number((op.resizeCanvasMs || 0).toFixed(3)),
+          autoScrollMs: Number((op.autoScrollMs || 0).toFixed(3)),
+          velocitySyncMs: Number((op.velocitySyncMs || 0).toFixed(3)),
+          requestDrawScheduleMs: Number((op.requestDrawScheduleMs || 0).toFixed(3)),
+          rafDelayMs: Number((op.rafDelayMs || 0).toFixed(3)),
+          bindControlsMs: Number((op.bindControlsMs || 0).toFixed(3)),
+          optimizeUiMs: Number((op.optimizeUiMs || 0).toFixed(3)),
+          openSyncTotalMs: Number((op.openSyncTotalMs || 0).toFixed(3)),
+          firstDrawTotalMs: Number((op.firstDrawTotalMs || 0).toFixed(3)),
+          rightPanelInFirstDrawMs: Number((op.rightPanelInFirstDrawMs || 0).toFixed(3)),
+          endToEndMs: Number((performance.now() - t0).toFixed(3)),
+        });
+        this._h2sOpenPerf = null;
+      }
+
+      if (_perf && typeof performance !== 'undefined' && !_openPerfFirstDraw){
         const total = performance.now() - _perfT0;
         console.log('[H2S perf] modalDraw phases (ms)', {
           total: Number(total.toFixed(3)),
