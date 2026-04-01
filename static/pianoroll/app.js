@@ -3283,15 +3283,18 @@ renderTimeline(){
       return {ok:true, trackIndex: ti, trackId: this.state.activeTrackId};
     },
 
-    addClipToTimeline(clipId, startSec, trackIndex){
+    addClipToTimeline(clipId, startSec, trackIndex, opts){
+      const skipPersistRender = opts && opts.skipPersistRender === true;
       const ti = (trackIndex == null) ? (Number.isFinite(this.state.activeTrackIndex) ? this.state.activeTrackIndex : 0) : trackIndex;
       const inst = H2SProject.createInstance(clipId, startSec || (this.project.ui.playheadSec || 0), ti);
       this.project.instances.push(inst);
       this.state.selectedInstanceId = inst.id;
       if (inst.clipId) this.state.selectedClipId = inst.clipId;
-      persist();
-      log('Added clip to timeline.');
-      this.render();
+      if (!skipPersistRender){
+        persist();
+        log('Added clip to timeline.');
+        this.render();
+      }
     },
 
     instancePointerDown(ev, instId){
@@ -3446,7 +3449,7 @@ renderTimeline(){
             this.project.clips.unshift(clip);
             let _tAdd = 0;
             if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
-            this.addClipToTimeline(clip.id, playheadSec, k);
+            this.addClipToTimeline(clip.id, playheadSec, k, { skipPersistRender: true });
             if (_perfImp && typeof performance !== 'undefined'){
               console.log('[H2S perf] import explode addClipToTimeline k=' + k, (performance.now() - _tAdd).toFixed(2) + 'ms');
             }
@@ -3456,6 +3459,7 @@ renderTimeline(){
           }
           persist();
           this.render();
+          log('Added clip to timeline.');
           const doneMulti = 'Done: ' + explodeParts.length + ' clips on ' + explodeParts.length + ' tracks.';
           this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeParts.length + ' clips)') : doneMulti, false);
           log('Clips added (split explode): ' + explodeParts.length);
