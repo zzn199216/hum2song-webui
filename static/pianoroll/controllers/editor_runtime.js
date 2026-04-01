@@ -1159,6 +1159,9 @@
         if (this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw) this._h2sOpenPerf = null;
         return;
       }
+      if (_h2sDevPerfTimingEnabled() && this.state.modal.isPlaying){
+        this._playbackPerfModalDrawCount = (this._playbackPerfModalDrawCount || 0) + 1;
+      }
       const _openPerfFirstDraw = !!(this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw);
       let _drawEnter = 0;
       if (_openPerfFirstDraw && typeof performance !== 'undefined'){
@@ -2451,6 +2454,29 @@
       return null;
     },
 
+    /** Dev-only (hum2song_studio_dev_perf_timing): one summary per clip-editor playback session */
+    _logClipEditorPlaybackPerfSummary(){
+      if (!_h2sDevPerfTimingEnabled()) return;
+      if (typeof performance === 'undefined' || typeof performance.now !== 'function') return;
+      const n = this._playbackPerfTickCount || 0;
+      const sum = this._playbackPerfTickSum || 0;
+      const max = this._playbackPerfTickMax || 0;
+      const d = this._playbackPerfModalDrawCount || 0;
+      if (!n && !d) return;
+      try{
+        console.log('[H2S perf] clipEditor playback session', {
+          rafTicks: n,
+          tickAvgMs: n ? Number((sum / n).toFixed(4)) : 0,
+          tickMaxMs: Number(max.toFixed(4)),
+          tickTotalMs: Number(sum.toFixed(3)),
+          modalDrawCallsWhilePlaying: d,
+        });
+      }catch(e){}
+      this._playbackPerfTickSum = 0;
+      this._playbackPerfTickCount = 0;
+      this._playbackPerfTickMax = 0;
+      this._playbackPerfModalDrawCount = 0;
+    },
 
 // ---- Playback inside modal (Clip Editor) ----
 modalTogglePlay(){
@@ -2511,6 +2537,10 @@ async modalPlay(){
 
   Tone.Transport.start("+0.05");
   this.state.modal.isPlaying = true;
+  this._playbackPerfTickSum = 0;
+  this._playbackPerfTickCount = 0;
+  this._playbackPerfTickMax = 0;
+  this._playbackPerfModalDrawCount = 0;
   try{ $('#editorStatus').textContent = 'Playing...'; }catch(e){}
 
   // Show DOM playhead overlay (lightweight; avoids full modalDraw per frame)
@@ -2528,6 +2558,8 @@ async modalPlay(){
   // progress ticker (uses closure vars; do NOT reference them elsewhere)
   const tick = () => {
     if (!this.state.modal.isPlaying) return;
+    const _perfPb = _h2sDevPerfTimingEnabled() && typeof performance !== 'undefined' && typeof performance.now === 'function';
+    const t0 = _perfPb ? performance.now() : 0;
     const sec = startAt + (Tone.Transport.seconds || 0);
     this.state.modal.cursorSec = sec;
     try{ $('#pillCursor').textContent = `Cursor: ${fmtSec(sec)}`; }catch(e){}
@@ -2537,6 +2569,12 @@ async modalPlay(){
       const pad = this.state.modal.padL != null ? this.state.modal.padL : 60;
       const pps = this.state.modal.pxPerSec != null ? this.state.modal.pxPerSec : 180;
       ph.style.left = (pad + sec * pps) + 'px';
+    }
+    if (_perfPb){
+      const dt = performance.now() - t0;
+      this._playbackPerfTickSum = (this._playbackPerfTickSum || 0) + dt;
+      this._playbackPerfTickCount = (this._playbackPerfTickCount || 0) + 1;
+      if (dt > (this._playbackPerfTickMax || 0)) this._playbackPerfTickMax = dt;
     }
 
     // Auto-stop when finished, and reset to start.
@@ -2805,6 +2843,8 @@ async modalPlay(){
 
     modalStop(){
   if (!this.state.modal.show) return;
+
+  this._logClipEditorPlaybackPerfSummary();
 
   // Cancel UI tick
   if (this._modalRAF){

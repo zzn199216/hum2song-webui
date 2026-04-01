@@ -122,6 +122,37 @@
     let startAt = 0;
     let rafId = 0;
     let stopTimer = 0;
+    /** Dev-only (localStorage hum2song_studio_dev_perf_timing === '1'): RAF tick timing for project playback */
+    let _projPlayRafSum = 0;
+    let _projPlayRafCount = 0;
+    let _projPlayRafMax = 0;
+
+    function _perfPlaybackTimingEnabled(){
+      try{
+        return typeof localStorage !== 'undefined' && String(localStorage.getItem('hum2song_studio_dev_perf_timing') || '') === '1';
+      }catch(e){ return false; }
+    }
+
+    function _logProjectPlaybackPerfIfNeeded(){
+      if (!_perfPlaybackTimingEnabled()) return;
+      if (!_projPlayRafCount) return;
+      const n = _projPlayRafCount;
+      const sum = _projPlayRafSum;
+      const max = _projPlayRafMax;
+      try{
+        if (typeof G.performance !== 'undefined' && G.performance && typeof G.performance.now === 'function'){
+          console.log('[H2S perf] project playback RAF session', {
+            rafTicks: n,
+            tickAvgMs: Number((sum / n).toFixed(4)),
+            tickMaxMs: Number(max.toFixed(4)),
+            tickTotalMs: Number(sum.toFixed(3)),
+          });
+        }
+      }catch(e){}
+      _projPlayRafSum = 0;
+      _projPlayRafCount = 0;
+      _projPlayRafMax = 0;
+    }
     let _trackSynths = [];
     const synthByTrackId = new Map();
     const lastInstrumentKeyByTid = new Map();
@@ -295,6 +326,7 @@ function _disposeTrackSynths(){
 
     // Stop playback. If resetToStart=true, also reset playhead to 0.
     function stop(resetToStart){
+      _logProjectPlaybackPerfIfNeeded();
       _disposeTrackSynths();
       _cancelTimers();
       if (G.Tone){
@@ -317,9 +349,17 @@ function _disposeTrackSynths(){
     function _startRaf(){
       const tick = () => {
         if (!playing) return;
+        const perf = _perfPlaybackTimingEnabled() && typeof G.performance !== 'undefined' && G.performance && typeof G.performance.now === 'function';
+        const t0 = perf ? G.performance.now() : 0;
         let sec = startAt;
         try{ sec = startAt + (G.Tone.Transport.seconds || 0); }catch(e){}
         try{ onUpdatePlayhead(sec); }catch(e){}
+        if (perf){
+          const dt = G.performance.now() - t0;
+          _projPlayRafSum += dt;
+          _projPlayRafCount += 1;
+          if (dt > _projPlayRafMax) _projPlayRafMax = dt;
+        }
         rafId = requestAnimationFrame(tick);
       };
       rafId = requestAnimationFrame(tick);
@@ -465,6 +505,9 @@ vel = clamp(vel, 0.01, 1);
       playing = true;
       setTransportPlaying(true);
       onLog('Project play.');
+      _projPlayRafSum = 0;
+      _projPlayRafCount = 0;
+      _projPlayRafMax = 0;
       _startRaf();
 
       stopTimer = setTimeout(() => {
