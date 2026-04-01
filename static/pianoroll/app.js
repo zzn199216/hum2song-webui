@@ -24,13 +24,24 @@
   const LS_KEY_SKIP_PROJECT_HOME_AUTO = 'hum2song_studio_skip_project_home_auto'; // Project Home MVP: skip auto-open on load after first Continue
   /** Dev-only: set localStorage to '1' to run transcription scores through heuristic pitch-bucket multi-track split before clip creation. */
   const LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT = 'hum2song_studio_dev_transcription_pitch_split';
-  /** Dev-only: set localStorage to '1' to log [H2S perf] timings (import explode loop, persist, render, modalDraw). */
+  /** Dev-only: set localStorage to '1' to log [H2S perf] timings (import explode, persist, render; editor modalDraw phase object). */
   const LS_KEY_DEV_PERF_TIMING = 'hum2song_studio_dev_perf_timing';
   function _devPerfTimingEnabled(){
     try{
       return typeof localStorage !== 'undefined' && String(localStorage.getItem(LS_KEY_DEV_PERF_TIMING) || '') === '1';
     }catch(e){ return false; }
   }
+
+  /** Transcription import: skip auto-opening the editor when result exceeds these (notes or span in seconds). */
+  const IMPORT_AUTO_OPEN_MAX_NOTES = 2000;
+  const IMPORT_AUTO_OPEN_MAX_SPAN_SEC = 180;
+  function _importTooLargeForAutoOpen(clip){
+    if (!clip || !clip.meta) return false;
+    const n = typeof clip.meta.notes === 'number' ? clip.meta.notes : 0;
+    const span = (typeof clip.meta.spanSec === 'number' && isFinite(clip.meta.spanSec)) ? clip.meta.spanSec : 0;
+    return n > IMPORT_AUTO_OPEN_MAX_NOTES || span > IMPORT_AUTO_OPEN_MAX_SPAN_SEC;
+  }
+
   const LS_KEYS_INSP = {
     project: 'hum2song_studio_insp_project_open',
     export: 'hum2song_studio_insp_export_open',
@@ -3463,6 +3474,7 @@ renderTimeline(){
           const doneMulti = 'Done: ' + explodeParts.length + ' clips on ' + explodeParts.length + ' tracks.';
           this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeParts.length + ' clips)') : doneMulti, false);
           log('Clips added (split explode): ' + explodeParts.length);
+          log('Import: editor not auto-opened (multi-clip).');
           setTimeout(() => this.setImportStatus('', false), 2500);
         } else {
           const clip = H2SProject.createClipFromScore(scoreForClip, { name: importBaseName, sourceTaskId: tid });
@@ -3477,7 +3489,9 @@ renderTimeline(){
           this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
           log(`Clip added: ${clip.name}`);
           const cidNew = clip.id;
-          if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
+          const skipAutoOpenLarge = _importTooLargeForAutoOpen(clip);
+          if (skipAutoOpenLarge) log('Import: editor not auto-opened (large result).');
+          if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function' && !skipAutoOpenLarge){
             setTimeout(() => this.openClipEditor(cidNew), 0);
           }
           setTimeout(() => this.setImportStatus('', false), 2000);

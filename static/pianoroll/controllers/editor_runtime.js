@@ -1103,10 +1103,18 @@
       if (!this.state.modal.show) return;
       const _perf = _h2sDevPerfTimingEnabled();
       const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
-      try{
+      let _mark = _perfT0;
+      function _split(){
+        if (!_perf || typeof performance === 'undefined') return 0;
+        const t = performance.now();
+        const d = t - _mark;
+        _mark = t;
+        return d;
+      }
       const canvas = $('#canvas');
       const ctx = canvas.getContext('2d');
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const msScoreStats = _split();
 
       // Determine pitch window
       const useVScroll = !!this.state.modal.usePitchVScroll;
@@ -1199,6 +1207,7 @@
           ctx.strokeRect(x+0.5, y+0.5, gridPx-1, rowH-1);
         }
       }
+      const msGridBg = _split();
 
       // notes
       // ghost overlay (faint fill + subtle outline, non-interactive)
@@ -1231,8 +1240,10 @@
         }
         ctx.restore();
       }
+      const msGhost = _split();
 
       const notes = this.modalAllNotes();
+      const msModalAllNotes = _split();
       ctx.beginPath(); // reset path so blue fill/stroke don't repaint ghost rects
       for (const n of notes){
         if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
@@ -1254,6 +1265,7 @@
         ctx.fillRect(x, y, Math.min(10, w / 2), h);
         ctx.fillRect(x + w - Math.min(10, w / 2), y, Math.min(10, w / 2), h);
       }
+      const msNoteBodies = _split();
 
       // playhead (cursor) — when playing, overlay div is used; avoid double playhead
       if (!this.state.modal.isPlaying){
@@ -1269,13 +1281,28 @@
       ctx.fillStyle = 'rgba(255,255,255,.75)';
       ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
       ctx.fillText(`Cursor: ${fmtSec(this.state.modal.cursorSec)} (click empty grid to move; click note to select)`, 10, 14);
+      const msCanvasTail = _split();
 
       this.modalDrawVelocityLane();
+      const msVelocityLane = _split();
+
       this.modalUpdateRightPanel();
-      } finally {
-        if (_perf && typeof performance !== 'undefined'){
-          console.log('[H2S perf] modalDraw', (performance.now() - _perfT0).toFixed(2) + 'ms');
-        }
+      const msRightPanel = _split();
+
+      if (_perf && typeof performance !== 'undefined'){
+        const total = performance.now() - _perfT0;
+        console.log('[H2S perf] modalDraw phases (ms)', {
+          total: Number(total.toFixed(3)),
+          scoreStats: Number(msScoreStats.toFixed(3)),
+          gridBg: Number(msGridBg.toFixed(3)),
+          ghostNotes: Number(msGhost.toFixed(3)),
+          modalAllNotes: Number(msModalAllNotes.toFixed(3)),
+          noteBodies: Number(msNoteBodies.toFixed(3)),
+          canvasTail: Number(msCanvasTail.toFixed(3)),
+          velocityLane: Number(msVelocityLane.toFixed(3)),
+          rightPanel: Number(msRightPanel.toFixed(3)),
+          notesCount: notes.length,
+        });
       }
     },
 
