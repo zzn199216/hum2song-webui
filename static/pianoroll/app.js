@@ -24,6 +24,13 @@
   const LS_KEY_SKIP_PROJECT_HOME_AUTO = 'hum2song_studio_skip_project_home_auto'; // Project Home MVP: skip auto-open on load after first Continue
   /** Dev-only: set localStorage to '1' to run transcription scores through heuristic pitch-bucket multi-track split before clip creation. */
   const LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT = 'hum2song_studio_dev_transcription_pitch_split';
+  /** Dev-only: set localStorage to '1' to log [H2S perf] timings (import explode loop, persist, render, modalDraw). */
+  const LS_KEY_DEV_PERF_TIMING = 'hum2song_studio_dev_perf_timing';
+  function _devPerfTimingEnabled(){
+    try{
+      return typeof localStorage !== 'undefined' && String(localStorage.getItem(LS_KEY_DEV_PERF_TIMING) || '') === '1';
+    }catch(e){ return false; }
+  }
   const LS_KEYS_INSP = {
     project: 'hum2song_studio_insp_project_open',
     export: 'hum2song_studio_insp_export_open',
@@ -943,6 +950,9 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
   }
 
   function persist(){
+    const _perf = _devPerfTimingEnabled();
+    const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
+    try{
     // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
     // IMPORTANT: persist() must NOT clobber v2-only fields (e.g., track.instrument) by migrating from v1.
     _ensureCurrentProjectIdForWrite();
@@ -1020,6 +1030,11 @@ try{
 
     // Ensure beats-only storage after migration.
     try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+    } finally {
+      if (_perf && typeof performance !== 'undefined'){
+        console.log('[H2S perf] persist', (performance.now() - _perfT0).toFixed(2) + 'ms');
+      }
+    }
   }
 
   function restore(){
@@ -2778,6 +2793,9 @@ ensureTrackButtons(){
     },
 
     render(){
+      const _perf = _devPerfTimingEnabled();
+      const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
+      try{
       try{ this.ensureTrackButtons(); }catch(e){}
       // Inspector stats
       $('#kvTracks').textContent = String(this.project.tracks.length);
@@ -2816,6 +2834,11 @@ ensureTrackButtons(){
       this._renderAiAssistDock();
       try{ this.updateRecordButtonStates(); }catch(e){}
       try{ this._updateI18nLabels(); }catch(e){}
+      } finally {
+        if (_perf && typeof performance !== 'undefined'){
+          console.log('[H2S perf] render', (performance.now() - _perfT0).toFixed(2) + 'ms');
+        }
+      }
     },
 
     renderClipList(){
@@ -3403,9 +3426,16 @@ renderTimeline(){
             const n = this.project.tracks.length + 1;
             this.project.tracks.push({ id: H2SProject.uid('trk_'), name: 'Track ' + n });
           }
+          const _perfImp = _devPerfTimingEnabled();
+          const _perfLoopT0 = _perfImp && typeof performance !== 'undefined' ? performance.now() : 0;
           for (let k = explodeParts.length - 1; k >= 0; k--){
             const part = explodeParts[k];
+            let _tCreate = 0;
+            if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
             const clip = H2SProject.createClipFromScore(part.score, { name: importBaseName + ' — ' + part.trackName, sourceTaskId: tid });
+            if (_perfImp && typeof performance !== 'undefined'){
+              console.log('[H2S perf] import explode createClipFromScore k=' + k, (performance.now() - _tCreate).toFixed(2) + 'ms');
+            }
             if (!clip.meta) clip.meta = {};
             if (typeof part.score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = part.score.tempo_bpm;
             else if (typeof part.score.bpm === 'number') clip.meta.sourceTempoBpm = part.score.bpm;
@@ -3414,7 +3444,15 @@ renderTimeline(){
             clip.meta.splitExplodeIndex = part.splitIndex;
             clip.meta.splitTrackName = part.trackName;
             this.project.clips.unshift(clip);
+            let _tAdd = 0;
+            if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
             this.addClipToTimeline(clip.id, playheadSec, k);
+            if (_perfImp && typeof performance !== 'undefined'){
+              console.log('[H2S perf] import explode addClipToTimeline k=' + k, (performance.now() - _tAdd).toFixed(2) + 'ms');
+            }
+          }
+          if (_perfImp && typeof performance !== 'undefined'){
+            console.log('[H2S perf] import explode loop total', (performance.now() - _perfLoopT0).toFixed(2) + 'ms');
           }
           persist();
           this.render();

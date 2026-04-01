@@ -20,6 +20,13 @@
         (root && typeof root.commitV2 === 'function') ? root.commitV2 :
         null;
 
+      /** Dev-only: same key as app.js — localStorage 'hum2song_studio_dev_perf_timing' === '1' */
+      function _h2sDevPerfTimingEnabled(){
+        try{
+          return typeof localStorage !== 'undefined' && String(localStorage.getItem('hum2song_studio_dev_perf_timing') || '') === '1';
+        }catch(e){ return false; }
+      }
+
       const persistFromV1 = (typeof opts.persistFromV1 === 'function') ? opts.persistFromV1 :
         (H2SApp && typeof H2SApp.persistFromV1 === 'function') ? ((reason)=>H2SApp.persistFromV1(reason)) :
         (root && typeof root.persistFromV1 === 'function') ? root.persistFromV1 :
@@ -1094,6 +1101,9 @@
 
     modalDraw(){
       if (!this.state.modal.show) return;
+      const _perf = _h2sDevPerfTimingEnabled();
+      const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
+      try{
       const canvas = $('#canvas');
       const ctx = canvas.getContext('2d');
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
@@ -1262,6 +1272,11 @@
 
       this.modalDrawVelocityLane();
       this.modalUpdateRightPanel();
+      } finally {
+        if (_perf && typeof performance !== 'undefined'){
+          console.log('[H2S perf] modalDraw', (performance.now() - _perfT0).toFixed(2) + 'ms');
+        }
+      }
     },
 
     modalDrawVelocityLane(){
