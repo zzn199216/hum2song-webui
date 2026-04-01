@@ -708,6 +708,15 @@
       this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
       $('#rngPitchCenter').value = this.state.modal.pitchCenter;
 
+      // Large/dense clips: default velocity lane collapsed (modalDraw velocity phase is costly at high note counts).
+      // Prefer clip.meta when present; otherwise scoreStats.
+      const _meta = clip && clip.meta ? clip.meta : null;
+      const _noteSig = (_meta && typeof _meta.notes === 'number') ? _meta.notes : st.count;
+      const _spanSig = (_meta && typeof _meta.spanSec === 'number' && isFinite(_meta.spanSec)) ? _meta.spanSec : st.spanSec;
+      const _VEL_COLLAPSE_MIN_NOTES = 250;
+      const _VEL_COLLAPSE_MIN_SPAN_SEC = 30;
+      this.state.modal.velocityLaneCollapsed = (_noteSig >= _VEL_COLLAPSE_MIN_NOTES) || (_spanSig >= _VEL_COLLAPSE_MIN_SPAN_SEC);
+
       // Pitch zoom (visual size). Remember across sessions.
       // Levels: 1.0 -> normal, 1.25 -> bigger default, 1.5 -> extra big.
       try{
