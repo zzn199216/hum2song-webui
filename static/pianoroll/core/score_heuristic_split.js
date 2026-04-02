@@ -481,6 +481,33 @@
     return isFinite(best) ? best : 0;
   }
 
+  /** Count notes whose time interval intersects [c - halfW, c + halfW] (phrase "busyness" near c). */
+  function _boundaryBandActivityCount(c, halfW, items) {
+    var lo = c - halfW;
+    var hi = c + halfW;
+    var cnt = 0;
+    var i;
+    for (i = 0; i < items.length; i++) {
+      var n = items[i].n;
+      var s = _num(n.start);
+      var e = _noteEnd(n);
+      if (e < lo - 1e-12 || s > hi + 1e-12) continue;
+      cnt++;
+    }
+    return cnt;
+  }
+
+  /**
+   * Higher = more phrase-like (deterministic). Note-safe boundaries only; sustained-note cuts excluded before call.
+   * Combines large local gap with low note activity near the bar line.
+   */
+  function _boundaryPhraseScore(c, secPerBar, items) {
+    var halfW = Math.min(secPerBar * 0.5, 0.35);
+    var gap = _boundaryGapScore(c, items);
+    var act = _boundaryBandActivityCount(c, halfW, items);
+    return gap * 1000 - act * 40;
+  }
+
   /**
    * Split any note crossing B into two notes (same pitch/vel); replaces one item with two in-place.
    * Returns true if list mutated.
@@ -542,8 +569,10 @@
    *   smallest bar boundary ≥ (segmentStart + maxBars*secPerBar), and notes crossing that boundary are split
    *   into two notes (deterministic ids :L / :R when an id existed).
    * - Last segment ends at global max note end (not necessarily a bar line).
-   * - Among multiple valid bar cuts in the allowed window, prefer the boundary with the largest gap score
-   *   (_boundaryGapScore); tie-break: smallest cut time.
+   * - Among multiple valid bar cuts in the allowed window (pos, min(pos+maxBars*secPerBar, globalTMax)],
+   *   choose the best phrase-like boundary: higher _boundaryPhraseScore (larger gap, lower local band activity).
+   *   Boundaries that would cut through a sustained note are excluded here; those use the forced cut path.
+   *   Tie-break: higher score, then smaller cut time.
    *
    * Does not mutate scoreIn. Output segments preserve tempo_bpm / time_signature on each score slice.
    *
@@ -619,14 +648,14 @@
 
       var next;
       if (candidates.length > 0) {
-        var bestGap = -Infinity;
+        var bestScore = -Infinity;
         var bestC = null;
         var ci;
         for (ci = 0; ci < candidates.length; ci++) {
           var cand = candidates[ci];
-          var g = _boundaryGapScore(cand, items);
-          if (g > bestGap + 1e-15 || (Math.abs(g - bestGap) <= 1e-15 && (bestC == null || cand < bestC))) {
-            bestGap = g;
+          var ps = _boundaryPhraseScore(cand, secPerBar, items);
+          if (ps > bestScore + 1e-9 || (Math.abs(ps - bestScore) <= 1e-9 && (bestC == null || cand < bestC))) {
+            bestScore = ps;
             bestC = cand;
           }
         }
