@@ -3444,15 +3444,24 @@ renderTimeline(){
           const _perfLoopT0 = _perfImp && typeof performance !== 'undefined' ? performance.now() : 0;
           for (let k = explodeParts.length - 1; k >= 0; k--){
             const part = explodeParts[k];
+            let scoreForPart = part.score;
+            let tMinForPart = 0;
+            if (SplitApi && typeof SplitApi.trimScoreDocToNoteExtent === 'function'){
+              const trimmed = SplitApi.trimScoreDocToNoteExtent(part.score);
+              scoreForPart = trimmed.score;
+              tMinForPart = (typeof trimmed.tMin === 'number' && isFinite(trimmed.tMin)) ? trimmed.tMin : 0;
+            }
+            // Absolute time: (playheadSec + tMin) + rebasedNoteStart === playheadSec + originalNoteStart
+            const instanceStartSec = playheadSec + tMinForPart;
             let _tCreate = 0;
             if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
-            const clip = H2SProject.createClipFromScore(part.score, { name: importBaseName + ' — ' + part.trackName, sourceTaskId: tid });
+            const clip = H2SProject.createClipFromScore(scoreForPart, { name: importBaseName + ' — ' + part.trackName, sourceTaskId: tid });
             if (_perfImp && typeof performance !== 'undefined'){
               console.log('[H2S perf] import explode createClipFromScore k=' + k, (performance.now() - _tCreate).toFixed(2) + 'ms');
             }
             if (!clip.meta) clip.meta = {};
-            if (typeof part.score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = part.score.tempo_bpm;
-            else if (typeof part.score.bpm === 'number') clip.meta.sourceTempoBpm = part.score.bpm;
+            if (typeof scoreForPart.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForPart.tempo_bpm;
+            else if (typeof scoreForPart.bpm === 'number') clip.meta.sourceTempoBpm = scoreForPart.bpm;
             clip.meta.heuristicPitchSplit = true;
             clip.meta.splitExploded = true;
             clip.meta.splitExplodeIndex = part.splitIndex;
@@ -3460,7 +3469,7 @@ renderTimeline(){
             this.project.clips.unshift(clip);
             let _tAdd = 0;
             if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
-            this.addClipToTimeline(clip.id, playheadSec, k, { skipPersistRender: true });
+            this.addClipToTimeline(clip.id, instanceStartSec, k, { skipPersistRender: true });
             if (_perfImp && typeof performance !== 'undefined'){
               console.log('[H2S perf] import explode addClipToTimeline k=' + k, (performance.now() - _tAdd).toFixed(2) + 'ms');
             }
