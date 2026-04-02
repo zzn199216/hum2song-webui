@@ -26,6 +26,8 @@
   const LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT = 'hum2song_studio_dev_transcription_pitch_split';
   /** Dev-only: set localStorage to '1' to segment each exploded track (after trim) into shorter clips by gap + max duration. */
   const LS_KEY_DEV_TRANSCRIPTION_EXPLODE_SEGMENT = 'hum2song_studio_dev_transcription_explode_segment';
+  /** Dev-only: set localStorage to '1' to segment the full score on bar boundaries before explode (disables per-track gap/max segmentation for that import). */
+  const LS_KEY_DEV_TRANSCRIPTION_BAR_SEGMENT = 'hum2song_studio_dev_transcription_bar_segment';
   /** Dev-only: set localStorage to '1' to log [H2S perf] timings (import explode, persist, render; editor modalDraw phase object). */
   const LS_KEY_DEV_PERF_TIMING = 'hum2song_studio_dev_perf_timing';
   function _devPerfTimingEnabled(){
@@ -3433,13 +3435,138 @@ renderTimeline(){
         const explodeSegmentDev =
           (typeof localStorage !== 'undefined') &&
           String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_EXPLODE_SEGMENT) || '') === '1';
+        const barSegDev =
+          (typeof localStorage !== 'undefined') &&
+          String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_BAR_SEGMENT) || '') === '1';
+        const barSegActive =
+          barSegDev &&
+          SplitApi &&
+          typeof SplitApi.segmentScoreDocByBarBoundaries === 'function';
+        let barScoreSegments = null;
+        if (barSegActive){
+          try{
+            barScoreSegments = SplitApi.segmentScoreDocByBarBoundaries(scoreForClip, {});
+            log('Transcription: bar-aware full-score segmentation (dev flag).');
+          }catch(e){
+            console.warn('[app] bar-aware segmentation skipped', e);
+            barScoreSegments = null;
+          }
+        }
+        const useGapSeg = explodeSegmentDev && !barSegActive;
+
         let explodeParts = null;
         if (splitRes.applied && SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
           explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
         }
         const useExplode = Array.isArray(explodeParts) && explodeParts.length >= 2;
 
-        if (useExplode){
+        if (barSegActive && Array.isArray(barScoreSegments) && barScoreSegments.length > 0){
+          let maxExplodeParts = 0;
+          for (let bx = 0; bx < barScoreSegments.length; bx++){
+            const segSc = barScoreSegments[bx] && barScoreSegments[bx].score;
+            if (!SplitApi || typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores !== 'function') continue;
+            const ep = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segSc);
+            if (Array.isArray(ep) && ep.length > maxExplodeParts) maxExplodeParts = ep.length;
+          }
+          if (!this.project.tracks) this.project.tracks = [];
+          while (this.project.tracks.length < maxExplodeParts){
+            const n = this.project.tracks.length + 1;
+            this.project.tracks.push({ id: H2SProject.uid('trk_'), name: 'Track ' + n });
+          }
+          const _perfImp = _devPerfTimingEnabled();
+          const _perfLoopT0 = _perfImp && typeof performance !== 'undefined' ? performance.now() : 0;
+          let explodeClipCount = 0;
+          let lastClipIdForAutoOpen = null;
+          for (let bi = 0; bi < barScoreSegments.length; bi++){
+            const barSeg = barScoreSegments[bi];
+            const segScore = barSeg && barSeg.score;
+            const segTMinAbs = (typeof barSeg.tMin === 'number' && isFinite(barSeg.tMin)) ? barSeg.tMin : 0;
+            if (!segScore) continue;
+            let explodePartsSeg = null;
+            if (SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
+              explodePartsSeg = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segScore);
+            }
+            if (!Array.isArray(explodePartsSeg) || explodePartsSeg.length === 0) continue;
+            const barLabel = barScoreSegments.length > 1 ? (' · ' + (bi + 1)) : '';
+            for (let k = explodePartsSeg.length - 1; k >= 0; k--){
+              const part = explodePartsSeg[k];
+              let scoreForPart = part.score;
+              let tMinForPart = 0;
+              if (SplitApi && typeof SplitApi.trimScoreDocToNoteExtent === 'function'){
+                const trimmed = SplitApi.trimScoreDocToNoteExtent(part.score);
+                scoreForPart = trimmed.score;
+                tMinForPart = (typeof trimmed.tMin === 'number' && isFinite(trimmed.tMin)) ? trimmed.tMin : 0;
+              }
+              let segmentBlocks;
+              if (useGapSeg && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
+                segmentBlocks = SplitApi.segmentScoreDocByGapAndMaxDuration(scoreForPart, {
+                  minGapSec: 1.15,
+                  maxDurationSec: 24,
+                });
+              } else {
+                segmentBlocks = [{ score: scoreForPart, tMin: 0, tMax: 0 }];
+              }
+              explodeClipCount += segmentBlocks.length;
+              for (let si = segmentBlocks.length - 1; si >= 0; si--){
+                const seg = segmentBlocks[si];
+                const segTMin = (typeof seg.tMin === 'number' && isFinite(seg.tMin)) ? seg.tMin : 0;
+                const instanceStartSec = playheadSec + segTMinAbs + tMinForPart + segTMin;
+                const segLabel = segmentBlocks.length > 1 ? (' · ' + (si + 1)) : '';
+                let _tCreate = 0;
+                if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
+                const clip = H2SProject.createClipFromScore(seg.score, {
+                  name: importBaseName + barLabel + ' — ' + part.trackName + segLabel,
+                  sourceTaskId: tid,
+                });
+                lastClipIdForAutoOpen = clip.id;
+                if (_perfImp && typeof performance !== 'undefined'){
+                  console.log('[H2S perf] import bar-seg explode createClipFromScore bi=' + bi + ' k=' + k + ' si=' + si, (performance.now() - _tCreate).toFixed(2) + 'ms');
+                }
+                if (!clip.meta) clip.meta = {};
+                const srcMeta = seg.score;
+                if (typeof srcMeta.tempo_bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.tempo_bpm;
+                else if (typeof srcMeta.bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.bpm;
+                if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+                clip.meta.splitExploded = explodePartsSeg.length >= 2;
+                clip.meta.splitExplodeIndex = part.splitIndex;
+                clip.meta.splitTrackName = part.trackName;
+                if (barScoreSegments.length > 1){
+                  clip.meta.splitBarSegmentIndex = bi;
+                  clip.meta.splitBarSegmentCount = barScoreSegments.length;
+                }
+                if (segmentBlocks.length > 1){
+                  clip.meta.splitSegmentIndex = si;
+                  clip.meta.splitSegmentCount = segmentBlocks.length;
+                }
+                this.project.clips.unshift(clip);
+                let _tAdd = 0;
+                if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
+                this.addClipToTimeline(clip.id, instanceStartSec, k, { skipPersistRender: true });
+                if (_perfImp && typeof performance !== 'undefined'){
+                  console.log('[H2S perf] import bar-seg addClipToTimeline bi=' + bi + ' k=' + k + ' si=' + si, (performance.now() - _tAdd).toFixed(2) + 'ms');
+                }
+              }
+            }
+          }
+          if (_perfImp && typeof performance !== 'undefined'){
+            console.log('[H2S perf] import bar-segment explode loop total', (performance.now() - _perfLoopT0).toFixed(2) + 'ms');
+          }
+          persist();
+          this.render();
+          log('Added clip to timeline.');
+          const doneMulti = 'Done: ' + explodeClipCount + ' clips (bar segment + explode).';
+          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
+          log('Clips added (bar segment + explode): ' + explodeClipCount);
+          if (explodeClipCount === 1 && lastClipIdForAutoOpen && this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
+            const c = this.project.clips.find((x) => x && x.id === lastClipIdForAutoOpen);
+            if (c && !_importTooLargeForAutoOpen(c)){
+              setTimeout(() => this.openClipEditor(lastClipIdForAutoOpen), 0);
+            }
+          } else {
+            log('Import: editor not auto-opened (multi-clip).');
+          }
+          setTimeout(() => this.setImportStatus('', false), 2500);
+        } else if (useExplode){
           if (!this.project.tracks) this.project.tracks = [];
           while (this.project.tracks.length < explodeParts.length){
             const n = this.project.tracks.length + 1;
@@ -3459,7 +3586,7 @@ renderTimeline(){
               tMinForPart = (typeof trimmed.tMin === 'number' && isFinite(trimmed.tMin)) ? trimmed.tMin : 0;
             }
             let segmentBlocks;
-            if (explodeSegmentDev && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
+            if (useGapSeg && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
               segmentBlocks = SplitApi.segmentScoreDocByGapAndMaxDuration(scoreForPart, {
                 minGapSec: 1.15,
                 maxDurationSec: 24,
