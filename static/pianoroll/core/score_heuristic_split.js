@@ -246,6 +246,171 @@
     return { score: outScore, tMin: tMin, tMax: tMax };
   }
 
+  /**
+   * Collect all notes from a seconds-based ScoreDoc into a flat list with source track index.
+   * Sort key matches _sortNotes (start, pitch, id).
+   */
+  function _collectSortedNoteItems(scoreIn) {
+    var src = scoreIn && typeof scoreIn === 'object' ? scoreIn : {};
+    var tracksIn = Array.isArray(src.tracks) ? src.tracks : [];
+    var items = [];
+    var ti;
+    var ni;
+    for (ti = 0; ti < tracksIn.length; ti++) {
+      var tr = tracksIn[ti];
+      var notesIn = tr && Array.isArray(tr.notes) ? tr.notes : [];
+      for (ni = 0; ni < notesIn.length; ni++) {
+        var n = notesIn[ni];
+        if (!n || typeof n !== 'object') continue;
+        items.push({ ti: ti, n: _cloneNote(n) });
+      }
+    }
+    items.sort(function (a, b) {
+      var sa = _num(a.n.start);
+      var sb = _num(b.n.start);
+      if (sa !== sb) return sa - sb;
+      var pa = Math.round(_num(a.n.pitch));
+      var pb = Math.round(_num(b.n.pitch));
+      if (pa !== pb) return pa - pb;
+      var ia = a.n.id != null ? String(a.n.id) : '';
+      var ib = b.n.id != null ? String(b.n.id) : '';
+      if (ia !== ib) return ia < ib ? -1 : ia > ib ? 1 : 0;
+      return 0;
+    });
+    return items;
+  }
+
+  function _maxNoteEndInRange(items, segStart, iInclusive) {
+    var m = -Infinity;
+    var k;
+    for (k = segStart; k <= iInclusive; k++) {
+      var n = items[k].n;
+      m = Math.max(m, _num(n.start) + Math.max(1e-6, _num(n.duration)));
+    }
+    return m;
+  }
+
+  /**
+   * Build one ScoreDoc segment from grouped items; notes rebased so segment tMin maps to 0.
+   */
+  function _buildSegmentScoreDoc(src, segmentItems, tMin, tMax) {
+    var tracksIn = Array.isArray(src.tracks) ? src.tracks : [];
+    var byTi = {};
+    var ii;
+    for (ii = 0; ii < segmentItems.length; ii++) {
+      var it = segmentItems[ii];
+      var c = _cloneNote(it.n);
+      c.start = _num(it.n.start) - tMin;
+      if (!byTi[it.ti]) byTi[it.ti] = [];
+      byTi[it.ti].push(c);
+    }
+    var outTracks = [];
+    var ti;
+    for (ti = 0; ti < tracksIn.length; ti++) {
+      var tr = tracksIn[ti];
+      var trId = tr && tr.id != null ? String(tr.id) : 'trk_' + ti;
+      var trName = tr && typeof tr.name === 'string' ? tr.name : String(tr.name || '');
+      var arr = byTi[ti] ? _sortNotes(byTi[ti]) : [];
+      outTracks.push({ id: trId, name: trName, notes: arr });
+    }
+    var tempo =
+      typeof src.tempo_bpm === 'number' && isFinite(src.tempo_bpm)
+        ? src.tempo_bpm
+        : typeof src.bpm === 'number' && isFinite(src.bpm)
+          ? src.bpm
+          : 120;
+    var ts =
+      typeof src.time_signature === 'string' ? src.time_signature : '4/4';
+    var ver = typeof src.version === 'number' ? src.version : 1;
+    var outScore = {
+      version: ver,
+      tempo_bpm: tempo,
+      time_signature: ts,
+      tracks: outTracks,
+    };
+    if (typeof src.bpm === 'number' && isFinite(src.bpm)) outScore.bpm = src.bpm;
+    return { score: outScore, tMin: tMin, tMax: tMax };
+  }
+
+  /**
+   * Segment a seconds-based ScoreDoc into shorter clips using note-aware boundaries.
+   *
+   * Rules (conservative, deterministic):
+   * - Never cuts through a note: each note stays in exactly one segment.
+   * - Split before note i (i > 0) when either:
+   *   (a) Gap split: (items[i].start - items[i-1].end) >= minGapSec (items are globally sorted by time).
+   *   (b) Max span: including items[i] in the current segment would make
+   *       (maxEnd in [segStart..i] - segmentStart) > maxDurationSec.
+   * - If a single note is longer than maxDurationSec, it occupies one segment alone (segment may exceed the cap).
+   * - Overlapping notes: gap may be negative; gap split does not fire; max-span still applies.
+   *
+   * Each output segment has clip-local times rebased so the earliest note in that segment starts at 0.
+   * tMin / tMax are in the original score timebase (seconds): min start and max end of notes in the segment.
+   * Absolute playback: instanceStartSec + tMin + rebasedNoteStart === instanceStartSec + originalNoteStart.
+   *
+   * @param {object} scoreIn - ScoreDoc-like (does not mutate)
+   * @param {object} opts - { minGapSec: number, maxDurationSec: number } (use Infinity for maxDurationSec to only gap-split)
+   * @returns {Array<{ score: object, tMin: number, tMax: number }>}
+   */
+  function segmentScoreDocByGapAndMaxDuration(scoreIn, opts) {
+    opts = opts || {};
+    var minGapSec = opts.minGapSec != null ? _num(opts.minGapSec) : 1;
+    if (!isFinite(minGapSec) || minGapSec < 0) minGapSec = 0;
+    var maxDurationSec =
+      opts.maxDurationSec != null && isFinite(opts.maxDurationSec)
+        ? _num(opts.maxDurationSec)
+        : Number.POSITIVE_INFINITY;
+    if (maxDurationSec <= 0) maxDurationSec = Number.POSITIVE_INFINITY;
+
+    var src = scoreIn && typeof scoreIn === 'object' ? scoreIn : {};
+    var items = _collectSortedNoteItems(src);
+    if (items.length === 0) {
+      var empty = _trimEmptyScoreShell(src);
+      return [{ score: empty.score, tMin: 0, tMax: 0 }];
+    }
+
+    var segments = [];
+    var segStart = 0;
+    var i;
+    for (i = 1; i < items.length; i++) {
+      var prev = items[i - 1].n;
+      var cur = items[i].n;
+      var prevEnd = _num(prev.start) + Math.max(1e-6, _num(prev.duration));
+      var gap = _num(cur.start) - prevEnd;
+      var splitGap = gap >= minGapSec;
+      var segT0 = _num(items[segStart].n.start);
+      var maxEndThroughI = _maxNoteEndInRange(items, segStart, i);
+      var spanIfIncludeCur = maxEndThroughI - segT0;
+      var splitMax = spanIfIncludeCur > maxDurationSec;
+      if (splitGap || splitMax) {
+        segments.push(items.slice(segStart, i));
+        segStart = i;
+      }
+    }
+    segments.push(items.slice(segStart));
+
+    var out = [];
+    for (i = 0; i < segments.length; i++) {
+      var segItems = segments[i];
+      var tMin = Infinity;
+      var tMax = -Infinity;
+      var j;
+      for (j = 0; j < segItems.length; j++) {
+        var nn = segItems[j].n;
+        var s0 = _num(nn.start);
+        var e0 = s0 + Math.max(1e-6, _num(nn.duration));
+        tMin = Math.min(tMin, s0);
+        tMax = Math.max(tMax, e0);
+      }
+      if (!isFinite(tMin) || !isFinite(tMax)) {
+        tMin = 0;
+        tMax = 0;
+      }
+      out.push(_buildSegmentScoreDoc(src, segItems, tMin, tMax));
+    }
+    return out;
+  }
+
   /** No notes: deterministic shell with tMin/tMax 0. */
   function _trimEmptyScoreShell(src) {
     var tracksIn = Array.isArray(src.tracks) ? src.tracks : [];
@@ -293,6 +458,7 @@
     explodeNonEmptyTracksToSingleTrackScores: explodeNonEmptyTracksToSingleTrackScores,
     trimScoreDocToNoteExtent: trimScoreDocToNoteExtent,
     applyTranscriptionPitchSplitIfEnabled: applyTranscriptionPitchSplitIfEnabled,
+    segmentScoreDocByGapAndMaxDuration: segmentScoreDocByGapAndMaxDuration,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.H2SScoreHeuristicSplit = API;
