@@ -24,6 +24,8 @@
   const LS_KEY_SKIP_PROJECT_HOME_AUTO = 'hum2song_studio_skip_project_home_auto'; // Project Home MVP: skip auto-open on load after first Continue
   /** Dev-only: set localStorage to '1' to run transcription scores through heuristic pitch-bucket multi-track split before clip creation. */
   const LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT = 'hum2song_studio_dev_transcription_pitch_split';
+  /** Dev-only: set localStorage to '1' to segment each exploded track (after trim) into shorter clips by gap + max duration. */
+  const LS_KEY_DEV_TRANSCRIPTION_EXPLODE_SEGMENT = 'hum2song_studio_dev_transcription_explode_segment';
   /** Dev-only: set localStorage to '1' to log [H2S perf] timings (import explode, persist, render; editor modalDraw phase object). */
   const LS_KEY_DEV_PERF_TIMING = 'hum2song_studio_dev_perf_timing';
   function _devPerfTimingEnabled(){
@@ -3428,6 +3430,9 @@ renderTimeline(){
         const importBaseName = file.name.replace(/\.[^/.]+$/, '');
         const playheadSec = this.project.ui.playheadSec || 0;
         const SplitApi = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
+        const explodeSegmentDev =
+          (typeof localStorage !== 'undefined') &&
+          String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_EXPLODE_SEGMENT) || '') === '1';
         let explodeParts = null;
         if (splitRes.applied && SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
           explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
@@ -3442,6 +3447,8 @@ renderTimeline(){
           }
           const _perfImp = _devPerfTimingEnabled();
           const _perfLoopT0 = _perfImp && typeof performance !== 'undefined' ? performance.now() : 0;
+          if (explodeSegmentDev) log('Transcription: explode time segmentation (dev flag).');
+          let explodeClipCount = 0;
           for (let k = explodeParts.length - 1; k >= 0; k--){
             const part = explodeParts[k];
             let scoreForPart = part.score;
@@ -3451,27 +3458,51 @@ renderTimeline(){
               scoreForPart = trimmed.score;
               tMinForPart = (typeof trimmed.tMin === 'number' && isFinite(trimmed.tMin)) ? trimmed.tMin : 0;
             }
-            // Absolute time: (playheadSec + tMin) + rebasedNoteStart === playheadSec + originalNoteStart
-            const instanceStartSec = playheadSec + tMinForPart;
-            let _tCreate = 0;
-            if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
-            const clip = H2SProject.createClipFromScore(scoreForPart, { name: importBaseName + ' — ' + part.trackName, sourceTaskId: tid });
-            if (_perfImp && typeof performance !== 'undefined'){
-              console.log('[H2S perf] import explode createClipFromScore k=' + k, (performance.now() - _tCreate).toFixed(2) + 'ms');
+            let segmentBlocks;
+            if (explodeSegmentDev && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
+              segmentBlocks = SplitApi.segmentScoreDocByGapAndMaxDuration(scoreForPart, {
+                minGapSec: 1.25,
+                maxDurationSec: 45,
+              });
+            } else {
+              segmentBlocks = [{ score: scoreForPart, tMin: 0, tMax: 0 }];
             }
-            if (!clip.meta) clip.meta = {};
-            if (typeof scoreForPart.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForPart.tempo_bpm;
-            else if (typeof scoreForPart.bpm === 'number') clip.meta.sourceTempoBpm = scoreForPart.bpm;
-            clip.meta.heuristicPitchSplit = true;
-            clip.meta.splitExploded = true;
-            clip.meta.splitExplodeIndex = part.splitIndex;
-            clip.meta.splitTrackName = part.trackName;
-            this.project.clips.unshift(clip);
-            let _tAdd = 0;
-            if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
-            this.addClipToTimeline(clip.id, instanceStartSec, k, { skipPersistRender: true });
-            if (_perfImp && typeof performance !== 'undefined'){
-              console.log('[H2S perf] import explode addClipToTimeline k=' + k, (performance.now() - _tAdd).toFixed(2) + 'ms');
+            explodeClipCount += segmentBlocks.length;
+            // Unshift in reverse segment order so clips array keeps increasing time per track (seg si=0 first).
+            for (let si = segmentBlocks.length - 1; si >= 0; si--){
+              const seg = segmentBlocks[si];
+              const segTMin = (typeof seg.tMin === 'number' && isFinite(seg.tMin)) ? seg.tMin : 0;
+              // Absolute: playhead + trim offset (full score) + segment offset (trimmed score, rebased notes).
+              const instanceStartSec = playheadSec + tMinForPart + segTMin;
+              const segLabel = segmentBlocks.length > 1 ? (' · ' + (si + 1)) : '';
+              let _tCreate = 0;
+              if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
+              const clip = H2SProject.createClipFromScore(seg.score, {
+                name: importBaseName + ' — ' + part.trackName + segLabel,
+                sourceTaskId: tid,
+              });
+              if (_perfImp && typeof performance !== 'undefined'){
+                console.log('[H2S perf] import explode createClipFromScore k=' + k + ' si=' + si, (performance.now() - _tCreate).toFixed(2) + 'ms');
+              }
+              if (!clip.meta) clip.meta = {};
+              const srcMeta = seg.score;
+              if (typeof srcMeta.tempo_bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.tempo_bpm;
+              else if (typeof srcMeta.bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.bpm;
+              clip.meta.heuristicPitchSplit = true;
+              clip.meta.splitExploded = true;
+              clip.meta.splitExplodeIndex = part.splitIndex;
+              clip.meta.splitTrackName = part.trackName;
+              if (segmentBlocks.length > 1){
+                clip.meta.splitSegmentIndex = si;
+                clip.meta.splitSegmentCount = segmentBlocks.length;
+              }
+              this.project.clips.unshift(clip);
+              let _tAdd = 0;
+              if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
+              this.addClipToTimeline(clip.id, instanceStartSec, k, { skipPersistRender: true });
+              if (_perfImp && typeof performance !== 'undefined'){
+                console.log('[H2S perf] import explode addClipToTimeline k=' + k + ' si=' + si, (performance.now() - _tAdd).toFixed(2) + 'ms');
+              }
             }
           }
           if (_perfImp && typeof performance !== 'undefined'){
@@ -3480,9 +3511,9 @@ renderTimeline(){
           persist();
           this.render();
           log('Added clip to timeline.');
-          const doneMulti = 'Done: ' + explodeParts.length + ' clips on ' + explodeParts.length + ' tracks.';
-          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeParts.length + ' clips)') : doneMulti, false);
-          log('Clips added (split explode): ' + explodeParts.length);
+          const doneMulti = 'Done: ' + explodeClipCount + ' clips on ' + explodeParts.length + ' tracks.';
+          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
+          log('Clips added (split explode): ' + explodeClipCount);
           log('Import: editor not auto-opened (multi-clip).');
           setTimeout(() => this.setImportStatus('', false), 2500);
         } else {
