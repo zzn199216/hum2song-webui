@@ -35,6 +35,43 @@
         return Date.now();
       }
 
+      function _h2sDragPerfSessionBegin(inst, mode){
+        if (!_h2sDevPerfTimingEnabled()) return;
+        inst._h2sDragPerf = {
+          tDown: _perfClipNow(),
+          mode: String(mode),
+          moveCount: 0,
+          moveTotalMs: 0,
+          moveMaxMs: 0,
+          modalDrawCount: 0,
+        };
+      }
+
+      function _h2sDragPerfSessionEnd(inst){
+        const s = inst._h2sDragPerf;
+        if (!s) return;
+        if (!_h2sDevPerfTimingEnabled()){
+          inst._h2sDragPerf = null;
+          return;
+        }
+        const tUp = _perfClipNow();
+        const avg = s.moveCount ? (s.moveTotalMs / s.moveCount) : 0;
+        try{
+          console.log('[H2S perf] clipEditor drag session', {
+            mode: s.mode,
+            pointerMoves: s.moveCount,
+            modalPointerMoveMs: {
+              total: Number(s.moveTotalMs.toFixed(3)),
+              avg: Number(avg.toFixed(3)),
+              max: Number((s.moveCount ? s.moveMaxMs : 0).toFixed(3)),
+            },
+            modalDrawCalls: s.modalDrawCount,
+            dragDurationMs: Number((tUp - s.tDown).toFixed(3)),
+          });
+        }catch(e){}
+        inst._h2sDragPerf = null;
+      }
+
       const persistFromV1 = (typeof opts.persistFromV1 === 'function') ? opts.persistFromV1 :
         (H2SApp && typeof H2SApp.persistFromV1 === 'function') ? ((reason)=>H2SApp.persistFromV1(reason)) :
         (root && typeof root.persistFromV1 === 'function') ? root.persistFromV1 :
@@ -1175,6 +1212,12 @@
       if (!this.state.modal.show){
         if (this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw) this._h2sOpenPerf = null;
         return;
+      }
+      if (_h2sDevPerfTimingEnabled() && this._h2sDragPerf){
+        const _dm = this.state.modal.mode;
+        if (_dm === 'drag_note' || _dm === 'resize_note' || _dm === 'drag_velocity' || _dm === 'resize_velocity_lane'){
+          this._h2sDragPerf.modalDrawCount = (this._h2sDragPerf.modalDrawCount || 0) + 1;
+        }
       }
       if (_h2sDevPerfTimingEnabled() && this.state.modal.isPlaying){
         this._playbackPerfModalDrawCount = (this._playbackPerfModalDrawCount || 0) + 1;
@@ -2735,6 +2778,7 @@ async modalPlay(){
         this.state.modal.mode = 'resize_velocity_lane';
         this.state.modal.drag.startY = ev.clientY;
         this.state.modal.drag.origLaneHeight = this.state.modal.velocityLaneHeight;
+        _h2sDragPerfSessionBegin(this, 'resize_velocity_lane');
         return;
       }
 
@@ -2766,6 +2810,7 @@ async modalPlay(){
           this.state.modal.drag.startY = pyCss;
           this.state.modal.drag.origVelocity = v0;
           this.state.modal.mode = 'drag_velocity';
+          _h2sDragPerfSessionBegin(this, 'drag_velocity');
           $('#editorStatus').textContent = 'Drag to set velocity...';
           this.modalRequestDraw();
           return;
@@ -2799,6 +2844,7 @@ async modalPlay(){
         this.state.modal.drag.resizeEdge = (hit.type === 'resize_left') ? 'left' : (hit.type === 'resize') ? 'right' : undefined;
 
         this.state.modal.mode = (hit.type === 'resize' || hit.type === 'resize_left') ? 'resize_note' : 'drag_note';
+        _h2sDragPerfSessionBegin(this, this.state.modal.mode);
         $('#editorStatus').textContent = (hit.type === 'resize' || hit.type === 'resize_left') ? 'Resize note...' : 'Drag note...';
         this.modalRequestDraw();
         return;
@@ -2850,7 +2896,10 @@ async modalPlay(){
     modalPointerMove(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
-
+      const _sess = this._h2sDragPerf;
+      const _track = _h2sDevPerfTimingEnabled() && _sess && (m.mode === 'resize_velocity_lane' || m.mode === 'drag_velocity' || m.mode === 'drag_note' || m.mode === 'resize_note');
+      const _tMove0 = _track ? _perfClipNow() : 0;
+      try{
       if (m.mode === 'resize_velocity_lane'){
         const dy = ev.clientY - m.drag.startY;
         let h = Math.max(48, Math.min(200, (m.drag.origLaneHeight || 80) + dy));
@@ -2961,12 +3010,21 @@ async modalPlay(){
       }
 
       this.modalRequestDraw();
+      } finally {
+        if (_track && _tMove0){
+          const dt = _perfClipNow() - _tMove0;
+          _sess.moveCount++;
+          _sess.moveTotalMs += dt;
+          if (dt > _sess.moveMaxMs) _sess.moveMaxMs = dt;
+        }
+      }
     },
 
     modalPointerUp(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
       if (m.mode === 'drag_note' || m.mode === 'resize_note' || m.mode === 'drag_velocity' || m.mode === 'resize_velocity_lane'){
+        _h2sDragPerfSessionEnd(this);
         m.mode = 'none';
         try { $('#editorStatus').textContent = 'Ready.'; } catch(e){}
         this.modalRequestDraw();
