@@ -3461,8 +3461,8 @@ renderTimeline(){
             let segmentBlocks;
             if (explodeSegmentDev && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
               segmentBlocks = SplitApi.segmentScoreDocByGapAndMaxDuration(scoreForPart, {
-                minGapSec: 1.25,
-                maxDurationSec: 45,
+                minGapSec: 1.15,
+                maxDurationSec: 24,
               });
             } else {
               segmentBlocks = [{ score: scoreForPart, tMin: 0, tMax: 0 }];
