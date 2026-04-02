@@ -411,6 +411,277 @@
     return out;
   }
 
+  /** BPM for bar math: clamp to [30, 260]; fallback 120. */
+  function _resolveBpmForBarSegmentation(src) {
+    var t =
+      typeof src.tempo_bpm === 'number' && isFinite(src.tempo_bpm)
+        ? src.tempo_bpm
+        : typeof src.bpm === 'number' && isFinite(src.bpm)
+          ? src.bpm
+          : 120;
+    if (!isFinite(t) || t <= 0) t = 120;
+    if (t < 30) t = 30;
+    if (t > 260) t = 260;
+    return t;
+  }
+
+  /**
+   * Parse "N/M" time signature; numerator = beats per bar (quarter-note beats, matches project TIMEBASE).
+   * Invalid / missing → 4/4.
+   */
+  function _parseBeatsPerBar(timeSignature) {
+    if (typeof timeSignature !== 'string') return 4;
+    var m = timeSignature.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (!m) return 4;
+    var num = parseInt(m[1], 10);
+    var den = parseInt(m[2], 10);
+    if (!isFinite(num) || num <= 0 || num > 64) return 4;
+    if (!isFinite(den) || den <= 0) return 4;
+    return num;
+  }
+
+  function _noteEnd(n) {
+    return _num(n.start) + Math.max(1e-6, _num(n.duration));
+  }
+
+  /** True iff no note has start < T < end (strict interior). */
+  function _isNoteSafeCut(T, items) {
+    var i;
+    for (i = 0; i < items.length; i++) {
+      var n = items[i].n;
+      var s = _num(n.start);
+      var e = _noteEnd(n);
+      if (s < T && T < e) return false;
+    }
+    return true;
+  }
+
+  /** Smallest k * secPerBar >= t (bar grid anchored at 0). */
+  function _ceilBarBoundary(t, secPerBar) {
+    if (!isFinite(secPerBar) || secPerBar <= 0) return t;
+    var tt = _num(t);
+    var k = Math.ceil(tt / secPerBar - 1e-12);
+    return k * secPerBar;
+  }
+
+  /**
+   * Gap score at boundary c: min distance to nearest note start/end (higher = more rest-like).
+   * Deterministic tie-breaking uses smallest c elsewhere.
+   */
+  function _boundaryGapScore(c, items) {
+    var best = Infinity;
+    var i;
+    for (i = 0; i < items.length; i++) {
+      var n = items[i].n;
+      var s = _num(n.start);
+      var e = _noteEnd(n);
+      var d = Math.min(Math.abs(c - s), Math.abs(c - e));
+      if (d < best) best = d;
+    }
+    return isFinite(best) ? best : 0;
+  }
+
+  /**
+   * Split any note crossing B into two notes (same pitch/vel); replaces one item with two in-place.
+   * Returns true if list mutated.
+   */
+  function _splitItemsAtBoundary(items, B) {
+    var changed = false;
+    var out = [];
+    var ii;
+    for (ii = 0; ii < items.length; ii++) {
+      var it = items[ii];
+      var n = it.n;
+      var s = _num(n.start);
+      var e = _noteEnd(n);
+      if (s < B && B < e) {
+        changed = true;
+        var left = _cloneNote(n);
+        left.duration = Math.max(1e-6, B - s);
+        var right = _cloneNote(n);
+        right.start = B;
+        right.duration = Math.max(1e-6, e - B);
+        if (n.id != null) {
+          left.id = String(n.id) + ':L';
+          right.id = String(n.id) + ':R';
+        }
+        out.push({ ti: it.ti, n: left });
+        out.push({ ti: it.ti, n: right });
+      } else {
+        out.push(it);
+      }
+    }
+    if (!changed) return false;
+    out.sort(function (a, b) {
+      var sa = _num(a.n.start);
+      var sb = _num(b.n.start);
+      if (sa !== sb) return sa - sb;
+      var pa = Math.round(_num(a.n.pitch));
+      var pb = Math.round(_num(b.n.pitch));
+      if (pa !== pb) return pa - pb;
+      var ia = a.n.id != null ? String(a.n.id) : '';
+      var ib = b.n.id != null ? String(b.n.id) : '';
+      if (ia !== ib) return ia < ib ? -1 : ia > ib ? 1 : 0;
+      return 0;
+    });
+    items.length = 0;
+    for (ii = 0; ii < out.length; ii++) items.push(out[ii]);
+    return true;
+  }
+
+  /**
+   * Segment a full multi-track seconds-based ScoreDoc on shared bar boundaries (constant BPM).
+   *
+   * Rules (v1, conservative):
+   * - Bar grid anchored at t=0: boundaries at k * secPerBar for k = 1,2,...
+   * - secPerBar = (beatsPerBar * 60) / bpm; beatsPerBar from "N/M" (numerator only); invalid TS → 4/4.
+   * - BPM from tempo_bpm or bpm; invalid/missing → 120; clamped to [30,260].
+   * - If total span (max note end − min note start) ≤ maxBars * secPerBar, returns exactly one segment (no optional splits).
+   * - Otherwise greedily cuts from left to right: each internal cut is on a bar boundary that is note-safe
+   *   (no sustained note has start < T < end), except when max-bars cap forces a cut: then the cut is the
+   *   smallest bar boundary ≥ (segmentStart + maxBars*secPerBar), and notes crossing that boundary are split
+   *   into two notes (deterministic ids :L / :R when an id existed).
+   * - Last segment ends at global max note end (not necessarily a bar line).
+   * - Among multiple valid bar cuts in the allowed window, prefer the boundary with the largest gap score
+   *   (_boundaryGapScore); tie-break: smallest cut time.
+   *
+   * Does not mutate scoreIn. Output segments preserve tempo_bpm / time_signature on each score slice.
+   *
+   * @param {object} scoreIn - ScoreDoc-like
+   * @param {object} [opts]
+   * @param {number} [opts.maxBars=32]  max segment length in bars before a cut is required
+   * @returns {Array<{ score: object, tMin: number, tMax: number }>}
+   */
+  function segmentScoreDocByBarBoundaries(scoreIn, opts) {
+    opts = opts || {};
+    var maxBars =
+      opts.maxBars != null && isFinite(opts.maxBars) ? _num(opts.maxBars) : 32;
+    if (!isFinite(maxBars) || maxBars <= 0) maxBars = 32;
+
+    var src = scoreIn && typeof scoreIn === 'object' ? scoreIn : {};
+    var bpm = _resolveBpmForBarSegmentation(src);
+    var beatsPerBar = _parseBeatsPerBar(
+      typeof src.time_signature === 'string' ? src.time_signature : ''
+    );
+    var secPerBar = (beatsPerBar * 60) / bpm;
+
+    var items = _collectSortedNoteItems(src);
+    if (items.length === 0) {
+      var empty = _trimEmptyScoreShell(src);
+      return [{ score: empty.score, tMin: 0, tMax: 0 }];
+    }
+
+    function globalExtent() {
+      var tMin = Infinity;
+      var tMax = -Infinity;
+      var i;
+      for (i = 0; i < items.length; i++) {
+        var n = items[i].n;
+        var s = _num(n.start);
+        var e = _noteEnd(n);
+        tMin = Math.min(tMin, s);
+        tMax = Math.max(tMax, e);
+      }
+      return { tMin: tMin, tMax: tMax };
+    }
+
+    var ext = globalExtent();
+    var globalTMin = ext.tMin;
+    var globalTMax = ext.tMax;
+    if (!isFinite(globalTMin) || !isFinite(globalTMax)) {
+      var empty2 = _trimEmptyScoreShell(src);
+      return [{ score: empty2.score, tMin: 0, tMax: 0 }];
+    }
+
+    var maxSpanSec = maxBars * secPerBar;
+    if (globalTMax - globalTMin <= maxSpanSec) {
+      return [_buildSegmentScoreDoc(src, items, globalTMin, globalTMax)];
+    }
+
+    var cuts = [];
+    var pos = globalTMin;
+    cuts.push(pos);
+
+    var guard = 0;
+    while (pos < globalTMax - 1e-15) {
+      guard++;
+      if (guard > 100000) break;
+      var maxEnd = pos + maxSpanSec;
+      if (maxEnd > globalTMax) maxEnd = globalTMax;
+
+      var candidates = [];
+      var c = Math.ceil((pos + 1e-12) / secPerBar) * secPerBar;
+      if (c <= pos + 1e-12) c += secPerBar;
+      while (c <= maxEnd + 1e-12 && c <= globalTMax + 1e-12) {
+        if (c > pos + 1e-12 && _isNoteSafeCut(c, items)) candidates.push(c);
+        c += secPerBar;
+      }
+
+      var next;
+      if (candidates.length > 0) {
+        var bestGap = -Infinity;
+        var bestC = null;
+        var ci;
+        for (ci = 0; ci < candidates.length; ci++) {
+          var cand = candidates[ci];
+          var g = _boundaryGapScore(cand, items);
+          if (g > bestGap + 1e-15 || (Math.abs(g - bestGap) <= 1e-15 && (bestC == null || cand < bestC))) {
+            bestGap = g;
+            bestC = cand;
+          }
+        }
+        next = bestC;
+      } else if (maxEnd >= globalTMax - 1e-15) {
+        next = globalTMax;
+      } else {
+        var forced = _ceilBarBoundary(maxEnd, secPerBar);
+        if (forced <= pos + 1e-12) forced += secPerBar;
+        if (forced > globalTMax) forced = globalTMax;
+        if (!_isNoteSafeCut(forced, items)) {
+          _splitItemsAtBoundary(items, forced);
+        }
+        next = forced;
+      }
+
+      if (next == null || next <= pos + 1e-15) {
+        next = globalTMax;
+      }
+
+      cuts.push(next);
+      pos = next;
+    }
+
+    var out = [];
+    var ci2;
+    for (ci2 = 0; ci2 < cuts.length - 1; ci2++) {
+      var a = cuts[ci2];
+      var b = cuts[ci2 + 1];
+      var segItems = [];
+      var j;
+      for (j = 0; j < items.length; j++) {
+        var it = items[j];
+        var n = it.n;
+        var s = _num(n.start);
+        var e = _noteEnd(n);
+        if (s + 1e-12 >= a && e <= b + 1e-12) segItems.push(it);
+      }
+      if (segItems.length === 0) continue;
+      var tMinS = Infinity;
+      var tMaxS = -Infinity;
+      for (j = 0; j < segItems.length; j++) {
+        var nn = segItems[j].n;
+        tMinS = Math.min(tMinS, _num(nn.start));
+        tMaxS = Math.max(tMaxS, _noteEnd(nn));
+      }
+      out.push(_buildSegmentScoreDoc(src, segItems, tMinS, tMaxS));
+    }
+
+    if (out.length === 0) {
+      return [_buildSegmentScoreDoc(src, items, globalTMin, globalTMax)];
+    }
+    return out;
+  }
+
   /** No notes: deterministic shell with tMin/tMax 0. */
   function _trimEmptyScoreShell(src) {
     var tracksIn = Array.isArray(src.tracks) ? src.tracks : [];
@@ -459,6 +730,7 @@
     trimScoreDocToNoteExtent: trimScoreDocToNoteExtent,
     applyTranscriptionPitchSplitIfEnabled: applyTranscriptionPitchSplitIfEnabled,
     segmentScoreDocByGapAndMaxDuration: segmentScoreDocByGapAndMaxDuration,
+    segmentScoreDocByBarBoundaries: segmentScoreDocByBarBoundaries,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (typeof root !== 'undefined') root.H2SScoreHeuristicSplit = API;
