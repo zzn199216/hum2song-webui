@@ -1372,12 +1372,19 @@
       this.modalDrawVelocityLane();
       const msVelocityLane = _split();
 
-      if (_openPerfFirstDraw && typeof performance !== 'undefined'){
-        const _rp0 = performance.now();
-        this.modalUpdateRightPanel();
-        if (this._h2sOpenPerf) this._h2sOpenPerf.rightPanelInFirstDrawMs = performance.now() - _rp0;
-      } else {
-        this.modalUpdateRightPanel();
+      // Skip right-panel stats during active drag/resize/velocity interactions (hot path).
+      // Next draw after pointerup runs with mode 'none' and refreshes the panel.
+      const _m = this.state.modal.mode;
+      const _skipRightPanel =
+        _m === 'drag_note' || _m === 'resize_note' || _m === 'drag_velocity' || _m === 'resize_velocity_lane';
+      if (!_skipRightPanel){
+        if (_openPerfFirstDraw && typeof performance !== 'undefined'){
+          const _rp0 = performance.now();
+          this.modalUpdateRightPanel();
+          if (this._h2sOpenPerf) this._h2sOpenPerf.rightPanelInFirstDrawMs = performance.now() - _rp0;
+        } else {
+          this.modalUpdateRightPanel();
+        }
       }
       const msRightPanel = _split();
 
