@@ -180,6 +180,102 @@
   }
 
   /**
+   * Trim a seconds-based ScoreDoc to the union of all note extents and rebase starts so the earliest note begins at 0.
+   * Does not mutate scoreIn. Deterministic.
+   *
+   * @param {object} scoreIn - ScoreDoc-like: { version?, tempo_bpm?, bpm?, time_signature?, tracks?: [{ id?, name?, notes? }] }
+   * @returns {{ score: object, tMin: number, tMax: number }}
+   *   tMin / tMax are in the original timebase (seconds): min start and max (start+duration) across all notes.
+   *   If there are no notes, tMin and tMax are both 0 and score preserves top-level metadata with empty note lists.
+   */
+  function trimScoreDocToNoteExtent(scoreIn) {
+    var src = scoreIn && typeof scoreIn === 'object' ? scoreIn : {};
+    var tracksIn = Array.isArray(src.tracks) ? src.tracks : [];
+    var tMin = Infinity;
+    var tMax = -Infinity;
+    var ti;
+    var ni;
+    for (ti = 0; ti < tracksIn.length; ti++) {
+      var tr0 = tracksIn[ti];
+      var notes0 = tr0 && Array.isArray(tr0.notes) ? tr0.notes : [];
+      for (ni = 0; ni < notes0.length; ni++) {
+        var n0 = notes0[ni];
+        if (!n0 || typeof n0 !== 'object') continue;
+        var s0 = _num(n0.start);
+        var d0 = Math.max(1e-6, _num(n0.duration));
+        tMin = Math.min(tMin, s0);
+        tMax = Math.max(tMax, s0 + d0);
+      }
+    }
+    if (!isFinite(tMin) || !isFinite(tMax)) {
+      return _trimEmptyScoreShell(src);
+    }
+    var tempo =
+      typeof src.tempo_bpm === 'number' && isFinite(src.tempo_bpm)
+        ? src.tempo_bpm
+        : typeof src.bpm === 'number' && isFinite(src.bpm)
+          ? src.bpm
+          : 120;
+    var ts =
+      typeof src.time_signature === 'string' ? src.time_signature : '4/4';
+    var ver = typeof src.version === 'number' ? src.version : 1;
+    var outTracks = [];
+    for (ti = 0; ti < tracksIn.length; ti++) {
+      var tr = tracksIn[ti];
+      var notesIn = tr && Array.isArray(tr.notes) ? tr.notes : [];
+      var outNotes = [];
+      for (ni = 0; ni < notesIn.length; ni++) {
+        var n = notesIn[ni];
+        if (!n || typeof n !== 'object') continue;
+        var c = _cloneNote(n);
+        c.start = _num(n.start) - tMin;
+        outNotes.push(c);
+      }
+      _sortNotes(outNotes);
+      var trId = tr && tr.id != null ? String(tr.id) : 'trk_' + ti;
+      var trName = tr && typeof tr.name === 'string' ? tr.name : String(tr.name || '');
+      outTracks.push({ id: trId, name: trName, notes: outNotes });
+    }
+    var outScore = {
+      version: ver,
+      tempo_bpm: tempo,
+      time_signature: ts,
+      tracks: outTracks,
+    };
+    if (typeof src.bpm === 'number' && isFinite(src.bpm)) outScore.bpm = src.bpm;
+    return { score: outScore, tMin: tMin, tMax: tMax };
+  }
+
+  /** No notes: deterministic shell with tMin/tMax 0. */
+  function _trimEmptyScoreShell(src) {
+    var tracksIn = Array.isArray(src.tracks) ? src.tracks : [];
+    var outTracks = [];
+    for (var ti = 0; ti < tracksIn.length; ti++) {
+      var tr = tracksIn[ti];
+      var trId = tr && tr.id != null ? String(tr.id) : 'trk_' + ti;
+      var trName = tr && typeof tr.name === 'string' ? tr.name : String(tr.name || '');
+      outTracks.push({ id: trId, name: trName, notes: [] });
+    }
+    var tempo =
+      typeof src.tempo_bpm === 'number' && isFinite(src.tempo_bpm)
+        ? src.tempo_bpm
+        : typeof src.bpm === 'number' && isFinite(src.bpm)
+          ? src.bpm
+          : 120;
+    var ts =
+      typeof src.time_signature === 'string' ? src.time_signature : '4/4';
+    var ver = typeof src.version === 'number' ? src.version : 1;
+    var outScore = {
+      version: ver,
+      tempo_bpm: tempo,
+      time_signature: ts,
+      tracks: outTracks,
+    };
+    if (typeof src.bpm === 'number' && isFinite(src.bpm)) outScore.bpm = src.bpm;
+    return { score: outScore, tMin: 0, tMax: 0 };
+  }
+
+  /**
    * Integration helper: when enabled is false, returns input unchanged (applied: false).
    * When true, runs splitScoreDocByPitchBuckets. Safe for wiring from app (caller passes flag from localStorage).
    */
@@ -195,6 +291,7 @@
   var API = {
     splitScoreDocByPitchBuckets: splitScoreDocByPitchBuckets,
     explodeNonEmptyTracksToSingleTrackScores: explodeNonEmptyTracksToSingleTrackScores,
+    trimScoreDocToNoteExtent: trimScoreDocToNoteExtent,
     applyTranscriptionPitchSplitIfEnabled: applyTranscriptionPitchSplitIfEnabled,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

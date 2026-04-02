@@ -24,5 +24,6 @@ runOne('scripts/tests/commands.test.js');
 runOne('scripts/tests/ai_assist_dock.test.js');
 runOne('scripts/tests/selection_sync.test.js');
 runOne('scripts/tests/score_heuristic_split.test.js');
+runOne('scripts/tests/score_trim_note_extent.test.js');
 
 console.log('\nAll frontend tests (contracts + editor + numeric invariants + timeline) passed.');
