@@ -3445,7 +3445,7 @@ renderTimeline(){
         let barScoreSegments = null;
         if (barSegActive){
           try{
-            barScoreSegments = SplitApi.segmentScoreDocByBarBoundaries(scoreForClip, {});
+            barScoreSegments = SplitApi.segmentScoreDocByBarBoundaries(scoreForClip, { maxBars: 8 });
             log('Transcription: bar-aware full-score segmentation (dev flag).');
           }catch(e){
             console.warn('[app] bar-aware segmentation skipped', e);
