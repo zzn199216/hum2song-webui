@@ -6,6 +6,8 @@ aiofiles==23.2.1
 
 # --- 核心 AI 与音频处理 ---
 basic-pitch==0.3.0
+# Optional-heavy: 2-stem separation when H2S_STEM_SEPARATION_BACKEND=demucs (pulls PyTorch).
+demucs>=4.0.0
 librosa==0.10.1
 numpy==1.26.3
 scipy==1.11.4
