@@ -87,11 +87,33 @@ def run_pipeline_for_task(
         out_clean = preprocess_audio(raw_path, output_dir=settings.upload_dir)
         clean_wav_path = Path(out_clean)
 
+        transcription_wav_path = clean_wav_path
+        if getattr(settings, "experimental_two_stem_separation", False):
+            from core.stem_separation import separate_two_stems_for_transcription
+
+            logger.info(
+                "H2S [stem] experimental_two_stem_separation=ON (task=%s): "
+                "running separation seam; transcription will use vocal stem only.",
+                task_id,
+            )
+            vocal_path, _acc_path = separate_two_stems_for_transcription(
+                clean_wav_path,
+                task_id,
+                settings.output_dir,
+            )
+            transcription_wav_path = vocal_path
+        else:
+            logger.debug(
+                "H2S [stem] experimental_two_stem_separation=OFF (task=%s): "
+                "transcription uses clean wav as today.",
+                task_id,
+            )
+
         TaskManager.update_task(task_id, status="processing", progress=45, message="AI 正在听音记谱...")
 
         from core.ai_converter import audio_to_midi
 
-        midi_path = audio_to_midi(clean_wav_path, output_dir=settings.output_dir)
+        midi_path = audio_to_midi(transcription_wav_path, output_dir=settings.output_dir)
 
         # ✅ 强制 MIDI 产物命名/落盘一致性：outputs/{task_id}.mid
         midi_path = _ensure_taskid_midi(task_id, midi_path, settings.output_dir)

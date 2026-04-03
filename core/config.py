@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     # ---- Converter switch ----
     use_stub_converter: bool = Field(default=False, validation_alias="USE_STUB_CONVERTER")
 
+    # ---- Experimental: 2-stem path before transcription (backend only) ----
+    # When true: after preprocess, write vocal + accompaniment WAVs under output_dir
+    # and run audio_to_midi on the vocal stem only. See core/stem_separation.py.
+    experimental_two_stem_separation: bool = Field(
+        default=False,
+        validation_alias="H2S_EXPERIMENTAL_TWO_STEM_SEPARATION",
+    )
+
 
     def model_post_init(self, __context) -> None:
         # 1) Normalize paths to absolute, relative to BASE_DIR
