@@ -766,7 +766,13 @@
       <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
       <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
-      <button id="btnUpload" class="btn" data-i18n="top.uploadWav">Upload WAV</button>
+      <span style="display:inline-flex; align-items:center; gap:8px;">
+        <button id="btnUpload" class="btn" data-i18n="top.uploadWav">Import audio</button>
+        <label class="smallmuted" style="display:inline-flex; align-items:center; gap:5px; white-space:nowrap; font-size:11px; cursor:pointer; user-select:none;">
+          <input type="checkbox" id="chkUploadVocalSep" />
+          <span data-i18n="top.vocalSepExperimental">Vocal Separation (Experimental)</span>
+        </label>
+      </span>
     </div>
     <div class="spacer"></div>
     <button id="btnAiSettings" class="topbarBtn aiSettingsBtn" data-i18n-title="top.aiSettingsTitle">

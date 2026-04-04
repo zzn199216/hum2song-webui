@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal, Union
 
 from core.config import get_settings
+from core.task_manager import task_manager as contract_task_manager
 from core.utils import TaskManager, build_paths, safe_unlink
 
 logger = logging.getLogger(__name__)
@@ -88,13 +89,14 @@ def run_pipeline_for_task(
         clean_wav_path = Path(out_clean)
 
         transcription_wav_path = clean_wav_path
-        if getattr(settings, "experimental_two_stem_separation", False):
+        if contract_task_manager.get_request_two_stem_separation(task_id):
             from core.stem_separation import separate_two_stems_for_transcription
 
             logger.info(
-                "H2S [stem] experimental_two_stem_separation=ON (task=%s): "
-                "running separation seam; transcription will use vocal stem only.",
+                "H2S [stem] task requested vocal separation (task=%s): "
+                "running seam (backend=%s); transcription uses vocal stem only.",
                 task_id,
+                getattr(settings, "stem_separation_backend", "stub"),
             )
             vocal_path, _acc_path = separate_two_stems_for_transcription(
                 clean_wav_path,
@@ -104,8 +106,7 @@ def run_pipeline_for_task(
             transcription_wav_path = vocal_path
         else:
             logger.debug(
-                "H2S [stem] experimental_two_stem_separation=OFF (task=%s): "
-                "transcription uses clean wav as today.",
+                "H2S [stem] no vocal separation for task=%s (transcription uses clean wav).",
                 task_id,
             )
 

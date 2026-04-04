@@ -72,9 +72,9 @@ class Settings(BaseSettings):
     # ---- Converter switch ----
     use_stub_converter: bool = Field(default=False, validation_alias="USE_STUB_CONVERTER")
 
-    # ---- Experimental: 2-stem path before transcription (backend only) ----
-    # When true: after preprocess, write vocal + accompaniment WAVs under output_dir
-    # and run audio_to_midi on the vocal stem only. See core/stem_separation.py.
+    # ---- Experimental: 2-stem path (backend only) ----
+    # Per-upload control is via POST /generate?vocal_separation=true (Studio checkbox).
+    # Pipeline gates on task flags, not this env var (kept for compatibility / tooling only).
     experimental_two_stem_separation: bool = Field(
         default=False,
         validation_alias="H2S_EXPERIMENTAL_TWO_STEM_SEPARATION",

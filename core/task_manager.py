@@ -65,6 +65,9 @@ class _TaskRecord:
     # Internal only: mapping FileType -> Local Absolute Path
     artifact_paths: Dict[FileType, str] = field(default_factory=dict)
 
+    # Per-upload: run 2-stem vocal separation before transcription (Studio checkbox).
+    request_two_stem_separation: bool = False
+
 
 class TaskManager:
     """
@@ -98,6 +101,20 @@ class TaskManager:
             return False
         with self._lock:
             return tid in self._tasks
+
+    def get_request_two_stem_separation(self, task_id: Union[str, UUID]) -> bool:
+        """
+        Whether this upload requested the experimental vocal-separation path (Studio checkbox).
+        """
+        try:
+            tid = _ensure_uuid(task_id)
+        except Exception:
+            return False
+        with self._lock:
+            rec = self._tasks.get(tid)
+            if rec is None:
+                return False
+            return bool(rec.request_two_stem_separation)
 
     def get_task_info(self, task_id: Union[str, UUID]) -> TaskInfoResponse:
         """
@@ -149,7 +166,12 @@ class TaskManager:
     # ----------------------------
     # Write Methods (Mutations)
     # ----------------------------
-    def create_task(self, *, stage: Stage = Stage.preprocessing) -> UUID:
+    def create_task(
+        self,
+        *,
+        stage: Stage = Stage.preprocessing,
+        request_two_stem_separation: bool = False,
+    ) -> UUID:
         now = _utcnow()
         tid = uuid4()
 
@@ -162,6 +184,7 @@ class TaskManager:
             updated_at=now,
             result=None,
             error=None,
+            request_two_stem_separation=bool(request_two_stem_separation),
         )
 
         with self._lock:

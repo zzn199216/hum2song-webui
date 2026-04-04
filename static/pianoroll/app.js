@@ -7,7 +7,13 @@
   'use strict';
 
   const API = {
-    generate: (fmt) => `/generate?output_format=${encodeURIComponent(fmt || 'mp3')}`,
+    /** @param {string} fmt @param {{ vocalSeparation?: boolean }} [opts] */
+    generate: (fmt, opts) => {
+      const q = new URLSearchParams();
+      q.set('output_format', fmt || 'mp3');
+      if (opts && opts.vocalSeparation === true) q.set('vocal_separation', 'true');
+      return `/generate?${q.toString()}`;
+    },
     task: (id) => `/tasks/${encodeURIComponent(id)}`,
     score: (id) => `/tasks/${encodeURIComponent(id)}/score`,
   };
@@ -2868,7 +2874,7 @@ ensureTrackButtons(){
       if (this.project.clips.length === 0){
         const d = document.createElement('div');
         d.className = 'muted';
-        d.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('cliplib.noClips') : 'No clips yet. Upload WAV to generate one.';
+        d.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('cliplib.noClips') : 'No clips yet. Import audio to generate one.';
         root.appendChild(d);
         return;
       }
@@ -3381,7 +3387,9 @@ renderTimeline(){
       try{
         const fd = new FormData();
         fd.append('file', file, file.name);
-        const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
+        const vocalSepEl = (typeof document !== 'undefined') ? document.getElementById('chkUploadVocalSep') : null;
+        const vocalSeparation = !!(vocalSepEl && vocalSepEl.checked);
+        const res = await fetchJson(API.generate('mp3', { vocalSeparation }), { method:'POST', body:fd });
         const tid = res.task_id || res.id || res.taskId || res.task || null;
         if (!tid){
           this.setImportStatus('Failed: Server did not return task ID.', false);
