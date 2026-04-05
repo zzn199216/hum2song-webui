@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     use_stub_converter: bool = Field(default=False, validation_alias="USE_STUB_CONVERTER")
 
     # ---- Experimental: 2-stem path (backend only) ----
-    # Per-upload control is via POST /generate?vocal_separation=true (Studio checkbox).
+    # Per-upload control is via POST /generate?vocal_separation=true (API; Studio UI does not expose this).
     # Pipeline gates on task flags, not this env var (kept for compatibility / tooling only).
     experimental_two_stem_separation: bool = Field(
         default=False,

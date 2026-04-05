@@ -2,6 +2,10 @@
 
 Concise baseline snapshot for Hum2Song Studio (experimental import path). **Not** final product behavior.
 
+## 0. Studio-facing vocal separation (paused)
+
+User-facing **experimental vocal separation** on import was **removed from the Studio UI** because current separation quality was not good enough (e.g. accompaniment nearly silent, empty Music track). Backend stem-separation code remains for **internal/research** use via API and config.
+
 ## 1. Current accepted baseline
 
 Practical baseline is **“good enough for now”** to keep editing usable.
