@@ -5,7 +5,7 @@ import soundfile as sf
 import librosa
 import pytest
 from pathlib import Path
-from core.audio_preprocess import preprocess_audio
+from core.audio_preprocess import preprocess_audio, prepare_separation_input_audio
 from core.config import get_settings
 
 # 临时目录 fixture：测试完自动清理垃圾
@@ -86,3 +86,39 @@ def test_normalization(temp_workspace):
     
     # 应该被拉大到接近 0.99
     assert max_vol > 0.9
+
+
+def test_prepare_separation_input_stereo_44100(temp_workspace):
+    """Separation WAV: stereo preserved, 44.1 kHz, task-named output."""
+    upload_dir, _ = temp_workspace
+    path = upload_dir / "raw_stereo.wav"
+    sr = 44100
+    t = np.linspace(0, 1.0, sr, endpoint=False)
+    L = np.sin(2 * np.pi * 440 * t) * 0.3
+    R = np.sin(2 * np.pi * 440 * t) * 0.2
+    stereo = np.column_stack([L, R]).astype(np.float32)
+    sf.write(str(path), stereo, sr)
+
+    tid = "sep_job_1"
+    out = prepare_separation_input_audio(path, upload_dir, tid)
+
+    assert out.name == f"{tid}_separation.wav"
+    assert out.parent == upload_dir
+    d, sr_out = sf.read(str(out))
+    assert sr_out == 44100
+    assert d.ndim == 2 and d.shape[1] == 2
+
+
+def test_prepare_separation_input_mono_duplicated_to_stereo(temp_workspace):
+    """Mono source becomes 2-channel separation input for Demucs."""
+    upload_dir, _ = temp_workspace
+    path = upload_dir / "raw_mono.wav"
+    sr = 48000
+    t = np.linspace(0, 0.5, int(sr * 0.5), endpoint=False)
+    mono = (np.sin(2 * np.pi * 330 * t) * 0.2).astype(np.float32)
+    sf.write(str(path), mono, sr)
+
+    out = prepare_separation_input_audio(path, upload_dir, "m1")
+    d, sr_out = sf.read(str(out))
+    assert sr_out == 44100
+    assert d.ndim == 2 and d.shape[1] == 2

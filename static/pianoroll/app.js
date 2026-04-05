@@ -3413,16 +3413,20 @@ renderTimeline(){
           return;
         }
         let splitRes = { score, applied: false };
-        try{
-          const flagOn = (typeof localStorage !== 'undefined') && String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT) || '') === '1';
-          const S = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
-          if (flagOn && S && typeof S.applyTranscriptionPitchSplitIfEnabled === 'function'){
-            splitRes = S.applyTranscriptionPitchSplitIfEnabled(score, true);
-            if (splitRes.applied) log('Transcription: heuristic pitch-bucket split applied (dev flag).');
+        if (vocalSeparation){
+          log('Transcription: vocal-separation import — skipping High/Mid/Low pitch-bucket split; using Vocal + Music stems.');
+        } else {
+          try{
+            const flagOn = (typeof localStorage !== 'undefined') && String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT) || '') === '1';
+            const S = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
+            if (flagOn && S && typeof S.applyTranscriptionPitchSplitIfEnabled === 'function'){
+              splitRes = S.applyTranscriptionPitchSplitIfEnabled(score, true);
+              if (splitRes.applied) log('Transcription: heuristic pitch-bucket split applied (dev flag).');
+            }
+          }catch(e){
+            console.warn('[app] transcription pitch split skipped', e);
+            splitRes = { score, applied: false };
           }
-        }catch(e){
-          console.warn('[app] transcription pitch split skipped', e);
-          splitRes = { score, applied: false };
         }
         const scoreForClip = splitRes.score;
 
@@ -3463,8 +3467,12 @@ renderTimeline(){
         const useGapSeg = explodeSegmentDev && !barSegActive;
 
         let explodeParts = null;
-        if (splitRes.applied && SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
-          explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
+        if (SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
+          if (vocalSeparation){
+            explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
+          } else if (splitRes.applied){
+            explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
+          }
         }
         const useExplode = Array.isArray(explodeParts) && explodeParts.length >= 2;
 
@@ -3534,7 +3542,8 @@ renderTimeline(){
                 const srcMeta = seg.score;
                 if (typeof srcMeta.tempo_bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.tempo_bpm;
                 else if (typeof srcMeta.bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.bpm;
-                if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+                if (splitRes.applied && !vocalSeparation) clip.meta.heuristicPitchSplit = true;
+                if (vocalSeparation) clip.meta.stemImport = true;
                 clip.meta.splitExploded = explodePartsSeg.length >= 2;
                 clip.meta.splitExplodeIndex = part.splitIndex;
                 clip.meta.splitTrackName = part.trackName;
@@ -3623,7 +3632,8 @@ renderTimeline(){
               const srcMeta = seg.score;
               if (typeof srcMeta.tempo_bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.tempo_bpm;
               else if (typeof srcMeta.bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.bpm;
-              clip.meta.heuristicPitchSplit = true;
+              if (splitRes.applied && !vocalSeparation) clip.meta.heuristicPitchSplit = true;
+              if (vocalSeparation) clip.meta.stemImport = true;
               clip.meta.splitExploded = true;
               clip.meta.splitExplodeIndex = part.splitIndex;
               clip.meta.splitTrackName = part.trackName;
@@ -3656,7 +3666,8 @@ renderTimeline(){
           if (!clip.meta) clip.meta = {};
           if (typeof scoreForClip.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.tempo_bpm;
           else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
-          if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+          if (splitRes.applied && !vocalSeparation) clip.meta.heuristicPitchSplit = true;
+          if (vocalSeparation) clip.meta.stemImport = true;
           this.project.clips.unshift(clip);
           this.addClipToTimeline(clip.id, playheadSec, 0);
           persist();

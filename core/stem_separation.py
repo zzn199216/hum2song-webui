@@ -126,9 +126,10 @@ def _separate_two_stems_demucs(
             str(in_wav),
         ]
         logger.info(
-            "H2S [stem] backend=demucs (task=%s model=%s): running %s",
+            "H2S [stem] backend=demucs (task=%s model=%s): input_wav=%s subprocess=%s",
             task_id,
             model_name,
+            str(clean_wav_path.resolve()),
             " ".join(cmd),
         )
 
@@ -175,6 +176,9 @@ def separate_two_stems_for_transcription(
 ) -> tuple[Path, Path]:
     """
     Produce vocal + accompaniment WAV paths under ``output_dir``.
+
+    ``clean_wav_path`` is the WAV passed to the separator (stub: transcription ``*_clean.wav``;
+    Demucs: separation-prepared ``*_separation.wav`` from ``prepare_separation_input_audio``).
 
     ``backend`` overrides ``Settings.stem_separation_backend`` when set (tests).
 

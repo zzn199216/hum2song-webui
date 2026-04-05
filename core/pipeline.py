@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 from core.config import get_settings
 from core.task_manager import task_manager as contract_task_manager
@@ -78,46 +78,95 @@ def run_pipeline_for_task(
 
     raw_path: Path = paths["raw_audio"]
     clean_wav_path: Path = paths["clean_wav"]
+    separation_input_path: Optional[Path] = None
 
     try:
         TaskManager.update_task(task_id, status="processing", progress=10, message="正在清洗音频...")
 
         # lazy import
-        from core.audio_preprocess import preprocess_audio
+        from core.audio_preprocess import preprocess_audio, prepare_separation_input_audio
 
         out_clean = preprocess_audio(raw_path, output_dir=settings.upload_dir)
         clean_wav_path = Path(out_clean)
 
-        transcription_wav_path = clean_wav_path
-        if contract_task_manager.get_request_two_stem_separation(task_id):
+        stem_requested = contract_task_manager.get_request_two_stem_separation(task_id)
+
+        if stem_requested:
+            from core.ai_converter import audio_to_midi
+            from core.score_convert import midi_to_score, score_to_midi
+            from core.score_models import normalize_score
+            from core.stem_score_merge import merge_vocal_and_music_scores
             from core.stem_separation import separate_two_stems_for_transcription
+
+            stem_backend = getattr(settings, "stem_separation_backend", "stub")
+            if stem_backend == "demucs":
+                separation_input_path = prepare_separation_input_audio(
+                    raw_path, settings.upload_dir, task_id
+                )
+                stem_input_wav = separation_input_path
+                logger.info(
+                    "H2S [stem] backend=demucs (task=%s): Demucs input is separation-prepared wav "
+                    "(stereo 44.1kHz, not transcription *_clean.wav): %s",
+                    task_id,
+                    stem_input_wav.resolve(),
+                )
+            else:
+                stem_input_wav = clean_wav_path
+                logger.info(
+                    "H2S [stem] backend=stub (task=%s): stem seam uses transcription clean wav: %s",
+                    task_id,
+                    stem_input_wav.resolve(),
+                )
 
             logger.info(
                 "H2S [stem] task requested vocal separation (task=%s): "
-                "running seam (backend=%s); transcription uses vocal stem only.",
+                "seam backend=%s; transcribing vocal + accompaniment, merging to dual-track score.",
                 task_id,
-                getattr(settings, "stem_separation_backend", "stub"),
+                stem_backend,
             )
-            vocal_path, _acc_path = separate_two_stems_for_transcription(
-                clean_wav_path,
+            vocal_path, acc_path = separate_two_stems_for_transcription(
+                stem_input_wav,
                 task_id,
                 settings.output_dir,
             )
-            transcription_wav_path = vocal_path
+
+            TaskManager.update_task(task_id, status="processing", progress=40, message="AI 正在听音记谱 (vocal)...")
+            midi_v = audio_to_midi(vocal_path, output_dir=settings.output_dir)
+            TaskManager.update_task(task_id, status="processing", progress=50, message="AI 正在听音记谱 (music)...")
+            midi_m = audio_to_midi(acc_path, output_dir=settings.output_dir)
+
+            sv = normalize_score(midi_to_score(Path(midi_v)))
+            sm = normalize_score(midi_to_score(Path(midi_m)))
+            merged = merge_vocal_and_music_scores(sv, sm)
+
+            out_dir = Path(settings.output_dir)
+            score_json_path = (out_dir / f"{task_id}.score.json").resolve()
+            try:
+                score_json_path.write_text(merged.model_dump_json(indent=2), encoding="utf-8")
+            except Exception as e:
+                logger.warning("H2S [stem] failed to cache score json: %s", e)
+
+            merged_midi = (out_dir / f"{task_id}.mid").resolve()
+            score_to_midi(merged, merged_midi)
+            midi_path = _ensure_taskid_midi(task_id, merged_midi, settings.output_dir)
+            logger.info(
+                "H2S [stem] dual transcription merged: tracks=%s",
+                [t.name for t in merged.tracks],
+            )
         else:
             logger.debug(
                 "H2S [stem] no vocal separation for task=%s (transcription uses clean wav).",
                 task_id,
             )
 
-        TaskManager.update_task(task_id, status="processing", progress=45, message="AI 正在听音记谱...")
+            TaskManager.update_task(task_id, status="processing", progress=45, message="AI 正在听音记谱...")
 
-        from core.ai_converter import audio_to_midi
+            from core.ai_converter import audio_to_midi
 
-        midi_path = audio_to_midi(transcription_wav_path, output_dir=settings.output_dir)
+            midi_path = audio_to_midi(clean_wav_path, output_dir=settings.output_dir)
 
-        # ✅ 强制 MIDI 产物命名/落盘一致性：outputs/{task_id}.mid
-        midi_path = _ensure_taskid_midi(task_id, midi_path, settings.output_dir)
+            # ✅ 强制 MIDI 产物命名/落盘一致性：outputs/{task_id}.mid
+            midi_path = _ensure_taskid_midi(task_id, midi_path, settings.output_dir)
 
         TaskManager.update_task(task_id, status="processing", progress=80, message="正在合成乐器音频...")
 
@@ -153,6 +202,8 @@ def run_pipeline_for_task(
             safe_unlink(raw_path)
             if not keep_wav:
                 safe_unlink(clean_wav_path)
+                if separation_input_path is not None:
+                    safe_unlink(separation_input_path)
 
 
 # --- Adapter for GenerationService (expects Path-returning runner) ---
