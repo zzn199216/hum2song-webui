@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     )
 
     # Demucs pretrained model name (e.g. htdemucs, htdemucs_ft).
-    demucs_model: str = Field(default="htdemucs", validation_alias="H2S_DEMUCS_MODEL")
+    demucs_model: str = Field(default="htdemucs_ft", validation_alias="H2S_DEMUCS_MODEL")
 
 
     def model_post_init(self, __context) -> None:
@@ -130,9 +130,9 @@ class Settings(BaseSettings):
             )
         self.stem_separation_backend = _b  # type: ignore[assignment]
 
-        _dm = str(self.demucs_model or "htdemucs").strip()
+        _dm = str(self.demucs_model or "htdemucs_ft").strip()
         if not _dm:
-            _dm = "htdemucs"
+            _dm = "htdemucs_ft"
         self.demucs_model = _dm
 
     @staticmethod

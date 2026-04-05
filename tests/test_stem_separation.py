@@ -72,7 +72,7 @@ def test_separate_two_stems_demucs_invokes_cli_and_writes_canonical_names(tmp_pa
         demucs_root = Path(cmd[oi + 1])
         ni = cmd.index("-n")
         model = cmd[ni + 1]
-        assert model == "htdemucs"
+        assert model == "htdemucs_ft"
         track_dir = demucs_root / model / "h2s_in"
         track_dir.mkdir(parents=True, exist_ok=True)
         sf.write(str(track_dir / "vocals.wav"), np.ones(120, dtype=np.float32) * 0.1, 22050)
@@ -85,7 +85,7 @@ def test_separate_two_stems_demucs_invokes_cli_and_writes_canonical_names(tmp_pa
             with patch("core.config.get_settings") as gs:
                 gs.return_value = SimpleNamespace(
                     stem_separation_backend="stub",
-                    demucs_model="htdemucs",
+                    demucs_model="htdemucs_ft",
                 )
                 vocal, acc = separate_two_stems_for_transcription(
                     clean,
@@ -113,7 +113,7 @@ def test_separate_two_stems_demucs_nonzero_exit_raises(tmp_path: Path) -> None:
     with patch.dict(sys.modules, {"demucs": fake_demucs}):
         with patch("core.stem_separation.subprocess.run", side_effect=boom):
             with patch("core.config.get_settings") as gs:
-                gs.return_value = SimpleNamespace(stem_separation_backend="stub", demucs_model="htdemucs")
+                gs.return_value = SimpleNamespace(stem_separation_backend="stub", demucs_model="htdemucs_ft")
                 with pytest.raises(RuntimeError, match="Demucs separation failed"):
                     separate_two_stems_for_transcription(
                         clean, "t2", tmp_path / "o", backend="demucs"

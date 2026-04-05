@@ -26,6 +26,30 @@ logger = logging.getLogger(__name__)
 _DEMUCS_TIMEOUT_SEC = 900
 
 
+def _wav_rms_peak(path: Path) -> tuple[float, float]:
+    """RMS and max absolute sample over all channels/samples (float WAV)."""
+    path = Path(path)
+    data, _sr = sf.read(str(path), always_2d=True)
+    if data.size == 0:
+        return 0.0, 0.0
+    x = np.asarray(data, dtype=np.float64).reshape(-1)
+    rms = float(np.sqrt(np.mean(np.square(x))))
+    peak = float(np.max(np.abs(x)))
+    return rms, peak
+
+
+def _log_stem_energy(task_id: str, role: str, path: Path) -> None:
+    rms, peak = _wav_rms_peak(path)
+    logger.info(
+        "H2S [stem] energy task=%s role=%s rms=%.6f peak=%.6f file=%s",
+        task_id,
+        role,
+        rms,
+        peak,
+        path.name,
+    )
+
+
 def _stem_output_paths(output_dir: Path, task_id: str) -> tuple[Path, Path]:
     output_dir = Path(output_dir)
     vocal_out = (output_dir / f"{task_id}.stem.vocal.wav").resolve()
@@ -66,6 +90,9 @@ def _separate_two_stems_stub(
         vocal_out.name,
         acc_out.name,
     )
+    _log_stem_energy(task_id, "input", clean_wav_path)
+    _log_stem_energy(task_id, "vocal", vocal_out)
+    _log_stem_energy(task_id, "acc", acc_out)
     return vocal_out, acc_out
 
 
@@ -162,6 +189,9 @@ def _separate_two_stems_demucs(
             vocal_out.name,
             acc_out.name,
         )
+        _log_stem_energy(task_id, "input", clean_wav_path)
+        _log_stem_energy(task_id, "vocal", vocal_out)
+        _log_stem_energy(task_id, "acc", acc_out)
         return vocal_out, acc_out
     finally:
         shutil.rmtree(work, ignore_errors=True)
