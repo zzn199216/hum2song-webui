@@ -68,6 +68,16 @@ Implementation: `static/pianoroll/core/phase1_assistant_narrow.js` (`H2SPhase1As
 - Assistant fallback / inline: `scripts/tests/phase1_assistant_fallback.test.js`
 - Per-slice: `scripts/tests/velocity_shape.test.js`, `local_transpose.test.js`, `rhythm_tighten_loosen.test.js`
 
+## Freeze-readiness (Phase-1 baseline)
+
+**What “freeze-ready” means here:** the three deterministic presets behave consistently under tests, expose interpretable `patchSummary.phase1Deterministic` + `executionPath`, respect revision rules (`ops===0` → no new revision), and the Assistant-style narrowing → `optimizeClip` path can be exercised without the full browser shell.
+
+**End-to-end smoke (higher-level):** `scripts/tests/phase1_freeze_e2e_smoke.test.js` — phrase → `H2SPhase1AssistantNarrow` → options shaped like an Assistant run → `optimizeClip`; one success path per slice, a no-op case, and a prompt-only velocity case (`narrowed_from_prompt`). This **does not** replace contract or per-slice tests; it adds a thin whole-pipeline check.
+
+**Intentionally out of scope for this baseline:** LLM optimize (`llm_v0`), import/transcription, UI/DOM Assistant dock, broad phrase coverage, Phase-2+ capabilities (density, harmony, etc.).
+
+**Known small risks (unchanged):** slice scripts must load before narrow/optimize; `app.js` `_resolvePhase1AssistantIntentAppFallback` must stay aligned with `resolvePhase1AssistantIntentFromTextInline`; cache or script-order mistakes can still break routing in production until caught by CI.
+
 ## Invariants (unchanged)
 
 - ProjectDoc v2, **beats** as timeline truth for score; BPM single source of truth for tempo.
