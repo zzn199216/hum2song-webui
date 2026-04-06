@@ -1,5 +1,7 @@
 # DAW agent — Phase-1 deterministic baseline
 
+**Freeze handoff (short):** `docs/DAW_AGENT_PHASE1_FREEZE_SNAPSHOT.md` — what is in/out of the Phase-1 baseline, test entry points, and next-step hints.
+
 This document describes the **current** deterministic optimize path (no LLM in these slices). It is a **narrow** contract for debugging and regression tests, not a full product spec.
 
 ## Scope

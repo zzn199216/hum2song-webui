@@ -1,5 +1,7 @@
 # Hum2Song DAW AI Agent Phase-1 Audit
 
+**Update:** The three whitelist capabilities below are **implemented** deterministically in-tree. For a concise freeze / handoff view (included vs not, tests, risks), see **`docs/DAW_AGENT_PHASE1_FREEZE_SNAPSHOT.md`**. This audit remains useful for integration history and contracts; where it disagrees with the snapshot on **current** behavior, prefer the snapshot + `docs/DAW_AGENT_PHASE1_BASELINE.md`.
+
 This document is a **read-only audit** of the current `hum2song-mvp` Studio codebase (browser `static/pianoroll/`, tests under `scripts/tests/`) as of the audit date. It proposes **small, controlled** Phase-1 agent capabilities aligned with existing **ProjectDoc v2 (beats-only)** truth, **BPM as single timebase**, and the **patch → clip revision → persist** pipeline already used by Optimize.
 
 ---
@@ -124,7 +126,7 @@ Below, **target_scope** is always resolved to **concrete `noteId`s** inside **on
 | Field | Definition |
 |-------|------------|
 | **target_scope** | `{ clipId, noteIds, mode: 'tighten'|'loosen', strength: 0–1 }` mapped to **max `abs(deltaBeat)`** per note or grid snap strength. |
-| **allowed_ops** | `moveNote` and/or `setNote` with **`startBeat` and/or `durationBeat`** only. |
+| **allowed_ops** | **`setNote` with `startBeat` and/or `durationBeat` only** in the shipped deterministic implementation (`moveNote` not used there). |
 | **forbidden_ops** | `setNote.pitch`; `addNote`/`deleteNote` (Phase-1 strict mode). |
 | **required_constraints** | `startBeat ≥ 0`, `durationBeat > 0` after edit; per-op delta caps; optional **grid** in beats (e.g. 1/16) from `project.bpm`-derived snap in **processor**, not LLM-invented seconds. |
 | **expected invariants** | Pitches unchanged (verify by comparing before/after for targeted notes); span growth within **`SEMANTIC_LIMITS`** or stricter product cap. |
@@ -198,6 +200,8 @@ Goal: **small, explicit structured intent** before any patch JSON is produced—
 ---
 
 ## 7. Recommended first vertical slice
+
+**Historical note (pre-implementation):** The original recommendation was to ship **`velocity_shape` → `local_transpose` → `rhythm_tighten_loosen`** in that order. **As implemented**, all three deterministic slices exist; use **`docs/DAW_AGENT_PHASE1_FREEZE_SNAPSHOT.md`** for current handoff truth.
 
 **First (end-to-end): `velocity_shape`**
 
