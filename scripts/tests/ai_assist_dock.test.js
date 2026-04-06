@@ -153,6 +153,7 @@ function _sanitizeLlmDebugForAssistantTrace(llmDebug) {
   if (llmDebug.attemptCount != null && isFinite(Number(llmDebug.attemptCount))) out.attemptCount = Number(llmDebug.attemptCount);
   if (llmDebug.totalAttempts != null && isFinite(Number(llmDebug.totalAttempts))) out.totalAttempts = Number(llmDebug.totalAttempts);
   if (llmDebug.finalAttemptIndex != null && isFinite(Number(llmDebug.finalAttemptIndex))) out.finalAttemptIndex = Number(llmDebug.finalAttemptIndex);
+  if (llmDebug.preRequestExit === true) out.preRequestExit = true;
   if (typeof llmDebug.safeModeResolved === 'boolean') out.safeModeResolved = llmDebug.safeModeResolved;
   if (llmDebug.reason != null && typeof llmDebug.reason === 'string') out.reason = llmDebug.reason.slice(0, 120);
   if (Array.isArray(llmDebug.errors) && llmDebug.errors.length) {

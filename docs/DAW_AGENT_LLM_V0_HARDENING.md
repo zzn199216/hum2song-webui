@@ -27,21 +27,34 @@ This doc describes **small** observability additions for the existing **`llm_v0`
 
 **Guaranteed today (contract tests):** on `llm_v0` results that carry **`patchSummary.llm`**, **`llmOutcome` === `patchSummary.llm.outcome`**, **`executionPath` === `'llm'`**, and **`patchSummary.phase1Deterministic` is absent** — deterministic Phase-1 metadata is **not** merged into LLM runs.
 
-### Retry / attempt observability (`llm_v0` only, after at least one LLM attempt)
+### Pre-request / zero-attempt exits (`llm_v0`)
 
-When the optimize run reaches the async **`attemptOnce`** path (config + client OK), the final result includes bounded retry metadata on **`llmDebug`** and duplicated on **`patchSummary.llm`**:
+If the run fails **before** any **`callChatCompletions`** (invalid/missing config, or LLM client not loaded), the result still includes **`llmOutcome`**, **`patchSummary.llm.outcome`**, **`executionPath: 'llm'`**, and bounded **`llmDebug`** / **`patchSummary.llm`** retry-shaped fields with **zero attempts**:
+
+| Field | Value |
+|-------|--------|
+| **`totalAttempts`** | `0` (same as **`attemptCount`** on **`llmDebug`**) |
+| **`finalAttemptIndex`** | `0` (no attempt index used) |
+| **`attemptSummaries`** | `[]` |
+| **`preRequestExit`** | `true` on **`llmDebug`** and **`patchSummary.llm`** |
+
+There is **no** raw model text in these cases (no request was made). Failures **after** at least one request (e.g. **`failed_request`** from the attempt `catch`) use **`totalAttempts` ≥ 1** and do **not** set **`preRequestExit`**.
+
+### Retry / attempt observability (`llm_v0` after config + client OK)
+
+When the optimize run reaches the async **`attemptOnce`** path, the final result includes bounded retry metadata on **`llmDebug`** and duplicated on **`patchSummary.llm`**:
 
 | Field | Meaning |
 |-------|---------|
-| **`totalAttempts`** | Number of LLM calls made (1 or 2 today). Same as **`attemptCount`** (kept for compatibility). |
+| **`totalAttempts`** | Number of LLM calls made (1 or 2 today). Same as **`attemptCount`** on **`llmDebug`** (kept for compatibility). |
 | **`finalAttemptIndex`** | Which attempt produced the **returned** `patchSummary` / outcome (`1` or `2`). |
 | **`attemptSummaries`** | Up to **8** rows: `{ attemptIndex, reason, outcome }` per attempt (`outcome` = `patchSummary.llm.outcome` for that attempt when present). No raw prompts. |
 
 **How to read it:** The **last** row in **`attemptSummaries`** matches the **final** `llmOutcome` / `patchSummary.llm.outcome`. Earlier rows describe failed or superseded attempts when a retry ran (JSON/validation retry only).
 
-**Not guaranteed on these fields:** Early synchronous failures (**`failed_config`**, **`llm_client_not_loaded`**, etc.) return **before** any LLM attempt — they typically have **no** `llmDebug` / no retry block. **`llmDebug.rawText` / `extractedJson`** still reflect the **final** attempt only (existing behavior).
+**Still intentionally limited:** **`llmDebug.rawText` / `extractedJson` / `errors`** describe the **last** attempt only when attempts ran (not a full multi-attempt transcript).
 
-**Assistant / debug UI:** `_sanitizeLlmDebugForAssistantTrace` passes through **`totalAttempts`**, **`finalAttemptIndex`**, and a capped **`attemptSummaries`** (no prompt bodies).
+**Assistant / debug UI:** `_sanitizeLlmDebugForAssistantTrace` passes through **`totalAttempts`**, **`finalAttemptIndex`**, **`preRequestExit`**, and a capped **`attemptSummaries`** (no prompt bodies).
 
 **Not guaranteed:** stability of raw error strings beyond the **`outcome`** bucket; prompt quality; model behavior.
 

@@ -107,6 +107,26 @@
     }
   }
 
+  /** Config / client fail-fast before any chat-completions attempt: zero attempts, explicit flag. */
+  function _attachLlmPreRequestFields(o){
+    if (!o || !o.patchSummary || !o.patchSummary.llm) return;
+    const block = {
+      totalAttempts: 0,
+      finalAttemptIndex: 0,
+      attemptSummaries: [],
+      preRequestExit: true,
+    };
+    Object.assign(o.patchSummary.llm, block);
+    o.llmDebug = {
+      totalAttempts: 0,
+      attemptCount: 0,
+      finalAttemptIndex: 0,
+      attemptSummaries: [],
+      preRequestExit: true,
+      reason: (o.reason != null) ? String(o.reason) : '',
+    };
+  }
+
   /** PR3: Build compact PLAN block from structured plan for llm_v0 prompt. Returns '' if plan invalid. */
   function buildPlanBlock(plan){
     if (!plan || typeof plan !== 'object') return '';
@@ -589,7 +609,7 @@
       }
       patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
-      function fail(reason, summaryExtras, llmOutcomeOverride){
+      function fail(reason, summaryExtras, llmOutcomeOverride, failOpts){
         const oc = llmOutcomeOverride || _mapFailReasonToLlmOutcome(reason);
         const o = {
           ok: false,
@@ -605,6 +625,9 @@
         };
         if (o.patchSummary && o.patchSummary.llm) o.llmOutcome = String(o.patchSummary.llm.outcome);
         if (promptTraceCapture.lastAttempt) o.llmPromptTrace = promptTraceCapture.lastAttempt;
+        if (failOpts && failOpts.preRequest){
+          _attachLlmPreRequestFields(o);
+        }
         return o;
       }
 
@@ -612,7 +635,7 @@
         ? ROOT.H2S_LLM_CONFIG.loadLlmConfig()
         : null;
       if (!cfg || typeof cfg.baseUrl !== 'string' || !cfg.baseUrl.trim() || typeof cfg.model !== 'string' || !cfg.model.trim()){
-        return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }));
+        return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }, undefined, { preRequest: true }));
       }
 
       // Intent for prompt/directives and safe-mode override (extract once)
@@ -788,7 +811,7 @@
       }
       const client = ROOT.H2S_LLM_CLIENT;
       if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
-        return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }));
+        return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }, undefined, { preRequest: true }));
       }
 
       // PR-8B-2: Inner async function for one attempt (with optional fix hint for retry)

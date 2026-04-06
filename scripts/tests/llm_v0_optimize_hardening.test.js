@@ -38,6 +38,18 @@ function assertLlmRetryMeta(res, expected){
   assert(Array.isArray(res.patchSummary.llm.attemptSummaries), 'patchSummary.llm.attemptSummaries');
 }
 
+/** Pre-request fail (no chat-completions): zero attempts, preRequestExit flag. */
+function assertLlmPreRequestMeta(res, expectedOutcome){
+  assertLlmOutcomeContract(res, expectedOutcome);
+  assert(res.llmDebug && typeof res.llmDebug === 'object', 'llmDebug');
+  assert(res.llmDebug.preRequestExit === true, 'preRequestExit');
+  assert(res.llmDebug.totalAttempts === 0 && res.llmDebug.attemptCount === 0, 'llmDebug zero counts');
+  assert(res.llmDebug.finalAttemptIndex === 0, 'llmDebug finalAttemptIndex 0');
+  assert(Array.isArray(res.llmDebug.attemptSummaries) && res.llmDebug.attemptSummaries.length === 0, 'empty attemptSummaries');
+  assert(res.patchSummary.llm.preRequestExit === true, 'patchSummary.llm.preRequestExit');
+  assert(res.patchSummary.llm.totalAttempts === 0 && res.patchSummary.llm.finalAttemptIndex === 0, 'patchSummary.llm zero attempts');
+}
+
 function ensureWindowShim(){
   if (typeof globalThis.window === 'undefined') globalThis.window = {};
 }
@@ -252,7 +264,36 @@ async function testFailedConfig(){
 
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === false && res.reason === 'llm_config_missing', 'config');
-  assertLlmOutcomeContract(res, 'failed_config');
+  assertLlmPreRequestMeta(res, 'failed_config');
+}
+
+async function testFailedClientNotLoaded(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const savedClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CLIENT = null;
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+
+    const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+    assert(res && res.ok === false && res.reason === 'llm_client_not_loaded', 'client');
+    assertLlmPreRequestMeta(res, 'failed_client');
+  } finally {
+    globalThis.H2S_LLM_CLIENT = savedClient;
+  }
 }
 
 async function testRejectedSafeMode(){
@@ -549,6 +590,7 @@ async function testFailedRequest(){
   assert(res && res.ok === false, 'request fail');
   assertLlmOutcomeContract(res, 'failed_request');
   assertLlmRetryMeta(res, { totalAttempts: 1, finalAttemptIndex: 1 });
+  assert(res.patchSummary.llm.preRequestExit !== true, 'post-request failure not preRequest');
 }
 
 async function testFailedRevision(){
@@ -598,6 +640,7 @@ async function main(){
   await testFailedExtract();
   await testRetryRecoverFromFailedExtract();
   await testFailedConfig();
+  await testFailedClientNotLoaded();
   await testRejectedSafeMode();
   await testRejectedValidation();
   await testRejectedQuality();
