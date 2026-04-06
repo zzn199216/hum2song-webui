@@ -1167,22 +1167,23 @@
       H2SProject.recomputeClipMetaFromScoreBeat?.(head);
 
       head.meta = head.meta || {};
+      const appliedPatchSummary = Object.assign({}, patchSummaryBase, {
+        status:'ok',
+        ops:opsN,
+        byOp:_opsByOp(patch.ops),
+        examples
+      }, _computePatchTypeSummary(patch.ops));
       head.meta.agent = {
         optimizedFromRevisionId: beforeRevisionId,
         appliedAt: _now(),
         patchOps: opsN,
-        patchSummary: Object.assign({}, patchSummaryBase, {
-          status:'ok',
-          ops:opsN,
-          byOp:_opsByOp(patch.ops),
-          examples
-        }, _computePatchTypeSummary(patch.ops))
+        patchSummary: appliedPatchSummary,
       };
 
       opts.setProjectFromV2(project);
       opts.commitV2?.('agent_optimize');
 
-      return { ok:true, ops:opsN, executionPath: execPathOut };
+      return { ok:true, ops:opsN, executionPath: execPathOut, patchSummary: appliedPatchSummary };
     }
     return { optimizeClip };
   }

@@ -2475,21 +2475,15 @@ ensureTrackButtons(){
         this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
       } else {
         const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-        const rhythShape = (typeof window !== 'undefined' && window.H2SRhythmTightenLoosen && typeof window.H2SRhythmTightenLoosen.narrowRhythmIntentFromText === 'function')
-          ? window.H2SRhythmTightenLoosen.narrowRhythmIntentFromText(text)
+        const narrow = (typeof window !== 'undefined' && window.H2SPhase1AssistantNarrow && typeof window.H2SPhase1AssistantNarrow.resolvePhase1AssistantIntentFromText === 'function')
+          ? window.H2SPhase1AssistantNarrow.resolvePhase1AssistantIntentFromText(text)
           : null;
-        const ltShape = (!rhythShape && typeof window !== 'undefined' && window.H2SLocalTranspose && typeof window.H2SLocalTranspose.narrowLocalTransposeIntentFromText === 'function')
-          ? window.H2SLocalTranspose.narrowLocalTransposeIntentFromText(text)
-          : null;
-        const velShape = (!rhythShape && !ltShape && typeof window !== 'undefined' && window.H2SVelocityShape && typeof window.H2SVelocityShape.narrowVelocityShapeIntentFromText === 'function')
-          ? window.H2SVelocityShape.narrowVelocityShapeIntentFromText(text)
-          : null;
-        if (rhythShape && rhythShape.mode) {
-          card.rhythmIntent = rhythShape;
-        } else if (ltShape && isFinite(Number(ltShape.semitone_delta))) {
-          card.localTransposeIntent = ltShape;
-        } else if (velShape && velShape.mode) {
-          card.velocityShapeIntent = velShape;
+        if (narrow && narrow.branch === 'rhythm_tighten_loosen') {
+          card.rhythmIntent = narrow.intent;
+        } else if (narrow && narrow.branch === 'local_transpose') {
+          card.localTransposeIntent = narrow.intent;
+        } else if (narrow && narrow.branch === 'velocity_shape') {
+          card.velocityShapeIntent = narrow.intent;
         } else {
           const mapped = _mapAiAssistTextToTemplate(text);
           if (mapped.templateId && mapped.intent) {
