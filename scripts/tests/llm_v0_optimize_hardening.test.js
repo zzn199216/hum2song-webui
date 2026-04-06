@@ -373,6 +373,94 @@ async function testFailedApplyStub(){
   }
 }
 
+/** Error text contains "semantic" but is not a semantic-gate code → must stay failed_apply (not substring-misclassified). */
+async function testFailedApplyMisleadingSubstring(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SAgentPatch = globalThis.H2SAgentPatch;
+  const origApply = H2SAgentPatch.applyPatchToClip;
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  H2SAgentPatch.applyPatchToClip = function(){
+    return { ok: false, errors: ['non_semantic_apply_error'] };
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+
+    const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+    assert(res && res.ok === false && res.reason === 'apply_failed', 'apply_failed');
+    assertLlmOutcomeContract(res, 'failed_apply');
+  } finally {
+    H2SAgentPatch.applyPatchToClip = origApply;
+  }
+}
+
+/** Legacy path: first error uses semantic_* code prefix without semanticReject flag → still rejected_semantic. */
+async function testSemanticCodePrefixFallback(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SAgentPatch = globalThis.H2SAgentPatch;
+  const origApply = H2SAgentPatch.applyPatchToClip;
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  H2SAgentPatch.applyPatchToClip = function(){
+    return { ok: false, errors: ['semantic_span_growth_excess:99>24'] };
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+
+    const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+    assert(res && res.ok === false && res.reason === 'apply_failed', 'apply_failed');
+    assertLlmOutcomeContract(res, 'rejected_semantic');
+  } finally {
+    H2SAgentPatch.applyPatchToClip = origApply;
+  }
+}
+
 async function testFailedRequest(){
   loadAgentController();
   const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
@@ -451,6 +539,8 @@ async function main(){
   await testRejectedQuality();
   await testRejectedSemantic();
   await testFailedApplyStub();
+  await testFailedApplyMisleadingSubstring();
+  await testSemanticCodePrefixFallback();
   await testFailedRequest();
   await testFailedRevision();
   console.log('llm_v0_optimize_hardening.test.js: OK');

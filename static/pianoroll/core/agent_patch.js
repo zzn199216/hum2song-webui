@@ -449,6 +449,7 @@
     if (!sem.ok){
       return {
         ok: false,
+        semanticReject: true,
         errors: sem.errors || ['semantic_reject'],
         warnings: (v.warnings || []).concat(sem.warnings || [])
       };

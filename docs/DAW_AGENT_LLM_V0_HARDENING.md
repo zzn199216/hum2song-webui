@@ -17,8 +17,8 @@ This doc describes **small** observability additions for the existing **`llm_v0`
 | `rejected_safe_mode` | Velocity-only mode: disallowed op types or pitch/start/duration fields on `setNote`. |
 | `rejected_validation` | `validatePatch` failed (schema / clip constraints). |
 | `rejected_quality` | Full mode + pitch/rhythm intent: patch is **velocity-only** when pitch/timing edits are required. |
-| `rejected_semantic` | Patch applied to a scratch score but **semantic sanity gate** rejected the result (error text contains `semantic`). |
-| `failed_apply` | Apply failed for a **non-semantic** reason (first apply error string does **not** contain `semantic`). |
+| `rejected_semantic` | Patch applied to a scratch score but **semantic sanity gate** rejected the result: `applyPatchToClip` sets **`semanticReject: true`**, or the first error string uses the established **`semantic_*` code prefix** (same codes the gate emits). |
+| `failed_apply` | Apply failed for any other reason (e.g. missing project API, or a non-semantic error that does **not** match the rule above). |
 | `failed_revision` | Apply succeeded but `beginNewClipRevision` failed. |
 | `failed_extract` | No JSON object extracted from the model response (after retry when applicable). |
 | `failed_config` | LLM config missing/invalid (e.g. no base URL / model). |
@@ -27,7 +27,11 @@ This doc describes **small** observability additions for the existing **`llm_v0`
 
 **Guaranteed today (contract tests):** on `llm_v0` results that carry **`patchSummary.llm`**, **`llmOutcome` === `patchSummary.llm.outcome`**, **`executionPath` === `'llm'`**, and **`patchSummary.phase1Deterministic` is absent** — deterministic Phase-1 metadata is **not** merged into LLM runs.
 
-**Not guaranteed:** stability of raw error strings beyond the **`outcome`** bucket; prompt quality; model behavior. **`failed_apply` vs `rejected_semantic`** is determined by a substring check on the first apply error (see `failed_apply` / `rejected_semantic` rows).
+**Not guaranteed:** stability of raw error strings beyond the **`outcome`** bucket; prompt quality; model behavior.
+
+**`rejected_semantic` vs `failed_apply`:** Primary signal is **`applied.semanticReject === true`** from `applyPatchToClip`. Secondary (compat): first error string **starts with** `semantic_` (matches semantic gate codes). Arbitrary messages that mention “semantic” elsewhere are **not** treated as semantic rejection.
+
+**Remaining limitation:** A non-semantic failure whose first error string incorrectly starts with `semantic_` would still map to `rejected_semantic` — avoid that prefix outside the semantic gate.
 
 ## What this does NOT cover
 

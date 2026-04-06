@@ -64,6 +64,13 @@
     return out;
   }
 
+  /** Semantic sanity gate failures from applyPatchToClip set semanticReject; error codes use the semantic_* prefix. */
+  function _isSemanticApplyFailure(applied, firstError){
+    if (applied && applied.semanticReject === true) return true;
+    const e = firstError != null ? String(firstError) : '';
+    return e.length > 0 && e.indexOf('semantic_') === 0;
+  }
+
   /** PR3: Build compact PLAN block from structured plan for llm_v0 prompt. Returns '' if plan invalid. */
   function buildPlanBlock(plan){
     if (!plan || typeof plan !== 'object') return '';
@@ -909,7 +916,7 @@
           if (!applied || !applied.ok || !applied.clip){
             const errs = (applied && applied.errors && Array.isArray(applied.errors)) ? applied.errors : [];
             const err0 = errs[0] ? String(errs[0]) : '';
-            const applyOc = (err0.indexOf('semantic') >= 0) ? 'rejected_semantic' : 'failed_apply';
+            const applyOc = _isSemanticApplyFailure(applied, err0) ? 'rejected_semantic' : 'failed_apply';
             return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops), detail: err0 }, applyOc);
           }
 
