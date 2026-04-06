@@ -161,6 +161,8 @@
     VELOCITY_SHAPE: 'velocity_shape',
     /** Phase-1: deterministic pitch-only local transpose (no LLM). */
     LOCAL_TRANSPOSE: 'local_transpose',
+    /** Phase-1: deterministic timing-only rhythm tighten/loosen/even (no LLM). */
+    RHYTHM_TIGHTEN_LOOSEN: 'rhythm_tighten_loosen',
   };
   /** Allowlist: only these preset IDs may run; unknown → fallback to safe_stub_v0. */
   const SAFE_PRESET_ALLOWLIST = {
@@ -171,6 +173,7 @@
     [PRESET_IDS.LLM_V0]: true,
     [PRESET_IDS.VELOCITY_SHAPE]: true,
     [PRESET_IDS.LOCAL_TRANSPOSE]: true,
+    [PRESET_IDS.RHYTHM_TIGHTEN_LOOSEN]: true,
   };
 
   /** @returns {{ intent: object, intentSource: string }} — intentSource aligns with H2SPhase1DeterministicMeta.PHASE1_INTENT_SOURCE */
@@ -224,6 +227,40 @@
     };
   }
 
+  /** @returns {{ intent: object, intentSource: string }} */
+  function _resolveRhythmIntent(optsIn){
+    const R = ROOT.H2SRhythmTightenLoosen;
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const SRC = (P1 && P1.PHASE1_INTENT_SOURCE) ? P1.PHASE1_INTENT_SOURCE : { EXPLICIT_OPTIONS: 'explicit_options', NARROWED_FROM_PROMPT: 'narrowed_from_prompt', PRESET_DEFAULT: 'preset_default' };
+    const validMode = function(m){
+      const s = String(m || '');
+      return (s === 'tighten' || s === 'loosen' || s === 'even') ? s : 'tighten';
+    };
+    if (optsIn && optsIn.rhythmIntent && typeof optsIn.rhythmIntent === 'object' && optsIn.rhythmIntent.mode){
+      return {
+        intent: {
+          capability_id: 'rhythm_tighten_loosen',
+          mode: validMode(optsIn.rhythmIntent.mode),
+          strength: optsIn.rhythmIntent.strength ? String(optsIn.rhythmIntent.strength) : 'medium',
+        },
+        intentSource: SRC.EXPLICIT_OPTIONS,
+      };
+    }
+    if (R && typeof R.narrowRhythmIntentFromText === 'function' && optsIn && optsIn.userPrompt){
+      const n = R.narrowRhythmIntentFromText(optsIn.userPrompt);
+      if (n && n.mode){
+        return {
+          intent: { capability_id: 'rhythm_tighten_loosen', mode: validMode(n.mode), strength: n.strength ? String(n.strength) : 'medium' },
+          intentSource: SRC.NARROWED_FROM_PROMPT,
+        };
+      }
+    }
+    return {
+      intent: { capability_id: 'rhythm_tighten_loosen', mode: 'tighten', strength: 'medium' },
+      intentSource: SRC.PRESET_DEFAULT,
+    };
+  }
+
   function _mergePhase1ResolvedSlot(optsIn, capabilityId, intent, intentSource, noteFilter, built, legacySlotName){
     const P1 = ROOT.H2SPhase1DeterministicMeta;
     const metaBase = (P1 && typeof P1.buildPhase1DeterministicResolvedMeta === 'function')
@@ -247,6 +284,7 @@
     const legacy = Object.assign({}, metaBase, { intent: intent });
     if (legacySlotName === 'velocity') optsIn._velocityShapeResolved = legacy;
     else if (legacySlotName === 'transpose') optsIn._localTransposeResolved = legacy;
+    else if (legacySlotName === 'rhythm') optsIn._rhythmResolved = legacy;
     optsIn._phase1DeterministicResolved = metaBase;
   }
 
@@ -986,6 +1024,23 @@
         executedSource = 'local_transpose';
         executedPreset = 'local_transpose';
         usedPseudoPath = false;
+      } else if (requestedPresetId === PRESET_IDS.RHYTHM_TIGHTEN_LOOSEN && SAFE_PRESET_ALLOWLIST[requestedPresetId]){
+        const R = ROOT.H2SRhythmTightenLoosen;
+        if (!R || typeof R.buildRhythmPatch !== 'function'){
+          return { ok: false, reason: 'rhythm_tighten_loosen_unavailable', executionPath: 'rhythm_tighten_loosen' };
+        }
+        const rRes = _resolveRhythmIntent(optsIn);
+        const rIntent = rRes.intent;
+        const noteFilterR = (Array.isArray(optsIn.rhythmNoteIds) && optsIn.rhythmNoteIds.length > 0)
+          ? optsIn.rhythmNoteIds.map(function(x){ return String(x); })
+          : null;
+        const builtR = R.buildRhythmPatch(clip, rIntent, noteFilterR);
+        _mergePhase1ResolvedSlot(optsIn, 'rhythm_tighten_loosen', rIntent, rRes.intentSource, noteFilterR, builtR, 'rhythm');
+        patch = builtR.patch;
+        examples = builtR.examples || [];
+        executedSource = 'rhythm_tighten_loosen';
+        executedPreset = 'rhythm_tighten_loosen';
+        usedPseudoPath = false;
       } else {
         // ALWAYS run pseudo agent first (semantic priority)
         const pseudoPatch = buildPseudoAgentPatch(clip);
@@ -1010,6 +1065,7 @@
       const opsN = patch.ops.length;
       const execPathOut = (executedPreset === PRESET_IDS.VELOCITY_SHAPE) ? 'velocity_shape'
         : (executedPreset === PRESET_IDS.LOCAL_TRANSPOSE) ? 'local_transpose'
+        : (executedPreset === PRESET_IDS.RHYTHM_TIGHTEN_LOOSEN) ? 'rhythm_tighten_loosen'
         : (usedPseudoPath ? 'pseudo' : 'preset');
       const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
       const patchSummaryBase = {
@@ -1031,6 +1087,9 @@
       }
       if (optsIn._localTransposeResolved && typeof optsIn._localTransposeResolved === 'object'){
         patchSummaryBase.localTranspose = optsIn._localTransposeResolved;
+      }
+      if (optsIn._rhythmResolved && typeof optsIn._rhythmResolved === 'object'){
+        patchSummaryBase.rhythm = optsIn._rhythmResolved;
       }
       if (optsIn._phase1DeterministicResolved && typeof optsIn._phase1DeterministicResolved === 'object'){
         patchSummaryBase.phase1Deterministic = optsIn._phase1DeterministicResolved;

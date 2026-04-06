@@ -1,4 +1,4 @@
-/* Hum2Song Studio — shared metadata for Phase-1 deterministic optimize slices (velocity_shape, local_transpose).
+/* Hum2Song Studio — shared metadata for Phase-1 deterministic optimize slices (velocity_shape, local_transpose, rhythm_tighten_loosen).
    Plain script: root.H2SPhase1DeterministicMeta. Node tests: module.exports.
 
    Not a capability framework — only small, testable contract helpers.
@@ -20,6 +20,9 @@
     }
     if (id === 'local_transpose'){
       return 'Preset-only default: no explicit localTransposeIntent and no matching userPrompt phrase → semitone_delta=+1 (delta clamped to ±12; pitch clamped 0–127).';
+    }
+    if (id === 'rhythm_tighten_loosen'){
+      return 'Preset-only default: no explicit rhythmIntent and no matching userPrompt phrase → mode=tighten, strength=medium.';
     }
     return '';
   }

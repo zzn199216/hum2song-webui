@@ -1632,7 +1632,7 @@
             velocityShapeNoteIds = [String(modal.selectedNoteId)];
           }
         }
-        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null, velocityShapeNoteIds, localTransposeNoteIds: velocityShapeNoteIds };
+        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null, velocityShapeNoteIds, localTransposeNoteIds: velocityShapeNoteIds, rhythmNoteIds: velocityShapeNoteIds };
       };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;

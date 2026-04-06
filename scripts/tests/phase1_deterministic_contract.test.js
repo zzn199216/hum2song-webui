@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * Shared regression: Phase-1 deterministic slices (velocity_shape, local_transpose)
+ * Shared regression: Phase-1 deterministic slices (velocity_shape, local_transpose, rhythm_tighten_loosen)
  * contract — allowed fields, scope, revision, patchSummary.phase1Deterministic.
  */
 const path = require('path');
@@ -37,6 +37,13 @@ function loadLocalTranspose(){
   if (globalThis.window && globalThis.window.H2SLocalTranspose) globalThis.H2SLocalTranspose = globalThis.window.H2SLocalTranspose;
 }
 
+function loadRhythm(){
+  ensureWindowShim();
+  if (globalThis.H2SRhythmTightenLoosen) return;
+  require(path.resolve(__dirname, '../../static/pianoroll/core/rhythm_tighten_loosen.js'));
+  if (globalThis.window && globalThis.window.H2SRhythmTightenLoosen) globalThis.H2SRhythmTightenLoosen = globalThis.window.H2SRhythmTightenLoosen;
+}
+
 function loadAgentPatch(){
   ensureWindowShim();
   if (globalThis.H2SAgentPatch) return;
@@ -54,6 +61,7 @@ function loadProject(){
 function loadAgentController(){
   loadVelocityShape();
   loadLocalTranspose();
+  loadRhythm();
   loadPhase1Meta();
   ensureWindowShim();
   if (globalThis.H2SAgentController) return;
@@ -87,6 +95,8 @@ function testMetaBuilder(){
   assert(m.targetScope === 'note_ids', 'note scope');
   assert(m.intentSource === SRC.PRESET_DEFAULT, 'intentSource');
   assert(m.presetDefaultDescription && m.presetDefaultDescription.indexOf('more_even') >= 0, 'preset description');
+  const dR = P1.describePhase1PresetDefault('rhythm_tighten_loosen');
+  assert(dR && dR.indexOf('tighten') >= 0 && dR.indexOf('medium') >= 0, 'rhythm preset description');
 }
 
 function testVelocityPhase1SummaryAndOps(){

@@ -18,6 +18,7 @@ runOne('scripts/run_frontend_timeline_unit_tests.js');
 runOne('scripts/tests/agent_patchsummary_smoke.test.js');
 runOne('scripts/tests/velocity_shape.test.js');
 runOne('scripts/tests/local_transpose.test.js');
+runOne('scripts/tests/rhythm_tighten_loosen.test.js');
 runOne('scripts/tests/phase1_deterministic_contract.test.js');
 runOne('scripts/tests/regression_phaseB_invariants.test.js');
 runOne('scripts/tests/regression_templates_directives.test.js');
