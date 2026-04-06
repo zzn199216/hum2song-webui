@@ -11,21 +11,27 @@ Hum2Song 是一个“哼歌成曲”的 MVP 服务：
 
 This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip editing, piano roll, LLM Optimize).
 
+**首次本地运行：** 请按精简清单 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) 操作（依赖、SoundFont、健康检查）。
+
 ### Quick Start (TL;DR)
 
-1. Create venv and install dependencies:
+1. **前置条件：** Python 3.11+，**FFmpeg** 与 **FluidSynth** 已在 PATH 中，并准备 **SoundFont** 文件 **`assets/piano.sf2`**（仓库不包含；见 [`assets/README.txt`](assets/README.txt)）。可选：复制 `.env.example` 为 `.env` 并调整路径。
+2. 创建 venv 并安装依赖（首次 `pip install` 可能较久，因含较大 ML/音频依赖）：
    ```powershell
    python -m venv venv
    .\venv\Scripts\activate
    pip install -r requirements.txt
    ```
-2. Start the server:
+3. 启动服务（请在**项目根目录**执行，保证导入正确）：
    ```powershell
    uvicorn app:app
    ```
-   (Optional: add `--reload` for local development.)
-3. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-4. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+   （开发时可加 `--reload`。）
+4. **自检：** 打开 [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)，查看 `checks`（完整音频链路需关注 `soundfont_exists`、`fluidsynth`、`ffmpeg`）。
+5. 打开 **API 文档**：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+6. 打开 **Studio UI**：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+
+**说明：** 运行服务与 Studio **不需要** Node.js；Node 仅用于 [测试](#测试)（`scripts/run_frontend_all_tests.js`）。
 
 **Studio（Hum2Song Studio）— 首次运行：**
 - 打开 [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) 开始使用。
@@ -40,14 +46,21 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 ## 环境要求
 
-- Windows + Python 3.11+
-- 系统 PATH 中可用的 FFmpeg（用于 mp3 转码）
-- FluidSynth（用于 midi → 音频合成）
+- **系统：** 文档以 Windows 为主；macOS/Linux 也可用相同 Python/venv 流程（注意路径与激活命令）。
+- **Python 3.11+**
+- **FFmpeg** 在 PATH 中（mp3 转码等）
+- **FluidSynth** 在 PATH 中（MIDI → 音频）；也可在 `.env` 设置 `FLUIDSYNTH_PATH`
+- **SoundFont（必需）：** 默认 **`assets/piano.sf2`**（仓库不附带；见 [`assets/README.txt`](assets/README.txt)，或通过 `SOUND_FONT_PATH` / `SF2_PATH` 指定其他 `.sf2`）
 - 建议使用 `venv` 虚拟环境
+
+**可选（次要）：** 若使用容器，根目录 [`Dockerfile`](Dockerfile) 会安装 FFmpeg、FluidSynth 与 Python 依赖 —— 仍需自行提供 SoundFont（例如挂载到 `assets/`）。镜像为 **Python 3.10**，本地开发推荐 **3.11+**。本仓库无 `docker-compose`。
 
 ---
 
 ## 安装与启动（Windows）
+
+1. 安装 FFmpeg、FluidSynth，并准备好 **`assets/piano.sf2`**（见上文与 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md)）。
+2. 创建环境并安装依赖：
 
 ```powershell
 python -m venv venv
@@ -55,13 +68,15 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-启动服务：
+3. 启动服务（**项目根目录**）：
 
 ```powershell
 uvicorn app:app
 ```
 
 （开发时可加 `--reload`。）
+
+4. 自检：[http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) 查看 `checks`。
 
 - API 文档（Swagger）：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - Studio UI：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
