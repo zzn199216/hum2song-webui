@@ -79,7 +79,7 @@ def _try_health(port: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def main() -> int:
+def main(suppress_next_step_hint: bool = False) -> int:
     _load_env_file(ROOT / ".env")
 
     print("Hum2Song beginner preflight")
@@ -169,7 +169,8 @@ def main() -> int:
         print(f"Help: {CHECKLIST}")
         return 1
     print("Result: OK for core audio prerequisites (see any [WARN] lines).")
-    print(f"Next: venv + pip install -r requirements.txt - see {CHECKLIST}")
+    if not suppress_next_step_hint:
+        print(f"Next: venv + pip install -r requirements.txt - see {CHECKLIST}")
     return 0
 
 

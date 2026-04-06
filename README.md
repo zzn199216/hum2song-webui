@@ -15,6 +15,8 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 **Quick machine check (optional):** from the project root, `python scripts/beginner_preflight.py` (read-only; does not install anything). See the checklist section *0. Quick preflight*.
 
+**Start the server (after venv + `pip install`):** from the project root, `python scripts/beginner_launch.py` (runs preflight, then `uvicorn`; prints Studio / health / docs URLs). Options: `--reload`, `--skip-preflight`. Same flow as `uvicorn app:app` — see [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4.
+
 ### Quick Start (TL;DR)
 
 1. **Prerequisites:** Python 3.11+, **FFmpeg** and **FluidSynth** on your PATH, and a **SoundFont** file at **`assets/piano.sf2`** (not bundled in git — see [`assets/README.txt`](assets/README.txt)). Optional: copy `.env.example` to `.env` and adjust paths.
@@ -26,9 +28,9 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
    ```
 3. Start the server (from project root; required for correct app import):
    ```powershell
-   uvicorn app:app
+   python scripts/beginner_launch.py
    ```
-   (Optional: add `--reload` for local development.)
+   Or manually: `uvicorn app:app` (optional: `--reload` for local development.)
    - **Export MIDI 404?** Run `python scripts/check_export_routes.py` to verify routes; restart uvicorn to pick up changes.
 4. **Verify environment:** open [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) and check `checks` — for full audio output you want `soundfont_exists`, `fluidsynth`, and `ffmpeg` to reflect a usable setup (see checklist for details).
 5. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
@@ -75,10 +77,10 @@ pip install -r requirements.txt
 3. 启动服务（请在**项目根目录**执行）：
 
 ```powershell
-uvicorn app:app
+python scripts/beginner_launch.py
 ```
 
-（开发时可加 `--reload`。）
+或：`uvicorn app:app`（开发时可加 `--reload`；若用启动脚本则加 `python scripts/beginner_launch.py --reload`。）
 
 4. 自检：打开 [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) 查看 `checks`。
 

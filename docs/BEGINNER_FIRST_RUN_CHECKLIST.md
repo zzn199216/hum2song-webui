@@ -2,6 +2,13 @@
 
 Short path to a **working local** Hum2Song MVP + Studio. For API details see the root `README.md`.
 
+**Recommended order**
+
+1. **`python scripts/beginner_preflight.py`** — quick read-only check (Python, SoundFont, FluidSynth, FFmpeg; optional live health if a server is already up).
+2. **Create a venv and install deps** (once): `pip install -r requirements.txt` (see §3).
+3. **`python scripts/beginner_launch.py`** — starts the same stack as `uvicorn app:app` from the repo root, prints **Studio**, **health**, and **API docs** URLs.
+4. Open the URLs in your browser (or use **health** to confirm `checks`).
+
 ## 0. Quick preflight (optional)
 
 From the **repository root**, you can run a **read-only** check before or after creating a venv (uses only Python’s standard library):
@@ -47,7 +54,18 @@ First install may take **several minutes** and significant disk space (large ML/
 
 ## 4. Start the server
 
-Still from **project root**:
+Still from **project root**.
+
+**Beginner launch helper (recommended):** runs preflight first, then `uvicorn app:app` (uses `./venv`’s Python if that folder exists).
+
+```powershell
+python scripts/beginner_launch.py
+```
+
+- **`--reload`** — pass `--reload` to uvicorn for local code changes.
+- **`--skip-preflight`** — skip the doctor step (not recommended the first time).
+
+**Manual (equivalent):**
 
 ```powershell
 uvicorn app:app

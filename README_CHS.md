@@ -15,6 +15,8 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 **可选快速自检：** 在项目根目录执行 `python scripts/beginner_preflight.py`（只读检查，不安装任何内容）。详见清单 **0. Quick preflight**。
 
+**启动服务（完成 venv + `pip install` 后）：** 在项目根目录执行 `python scripts/beginner_launch.py`（先跑 preflight，再启动 `uvicorn`，并打印 Studio / health / 文档链接）。可选 `--reload`、`--skip-preflight`。与 `uvicorn app:app` 等价 —— 见 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4。
+
 ### Quick Start (TL;DR)
 
 1. **前置条件：** Python 3.11+，**FFmpeg** 与 **FluidSynth** 已在 PATH 中，并准备 **SoundFont** 文件 **`assets/piano.sf2`**（仓库不包含；见 [`assets/README.txt`](assets/README.txt)）。可选：复制 `.env.example` 为 `.env` 并调整路径。
@@ -26,9 +28,9 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
    ```
 3. 启动服务（请在**项目根目录**执行，保证导入正确）：
    ```powershell
-   uvicorn app:app
+   python scripts/beginner_launch.py
    ```
-   （开发时可加 `--reload`。）
+   或手动：`uvicorn app:app`（开发时可加 `--reload`。）
 4. **自检：** 打开 [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)，查看 `checks`（完整音频链路需关注 `soundfont_exists`、`fluidsynth`、`ffmpeg`）。
 5. 打开 **API 文档**：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 6. 打开 **Studio UI**：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
@@ -73,10 +75,10 @@ pip install -r requirements.txt
 3. 启动服务（**项目根目录**）：
 
 ```powershell
-uvicorn app:app
+python scripts/beginner_launch.py
 ```
 
-（开发时可加 `--reload`。）
+或：`uvicorn app:app`（开发可加 `--reload`；使用启动脚本时：`python scripts/beginner_launch.py --reload`。）
 
 4. 自检：[http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) 查看 `checks`。
 
