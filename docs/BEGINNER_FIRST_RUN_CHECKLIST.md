@@ -2,6 +2,18 @@
 
 Short path to a **working local** Hum2Song MVP + Studio. For API details see the root `README.md`.
 
+## 0. Quick preflight (optional)
+
+From the **repository root**, you can run a **read-only** check before or after creating a venv (uses only Python’s standard library):
+
+```powershell
+python scripts/beginner_preflight.py
+```
+
+**What it does:** prints `[PASS]` / `[WARN]` / `[MISSING]` / `[SKIP]` for Python version, SoundFont (`SOUND_FONT_PATH` / `SF2_PATH` or default `assets/piano.sf2`), FluidSynth (`PATH` or `FLUIDSYNTH_PATH`), FFmpeg, and optionally `GET /api/v1/health` if the server is already running on `PORT` (default `8000`). It does **not** install packages or download files.
+
+**Success:** exit code `0` and no `[MISSING]` lines for items you need for MIDI-to-audio. **If something fails:** read the lines above and fix prerequisites in the sections below; exit code `1` means a required item is missing.
+
 ## 1. Install prerequisites
 
 | Item | Why | Notes |

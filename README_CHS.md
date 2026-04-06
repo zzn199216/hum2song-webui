@@ -13,6 +13,8 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 **首次本地运行：** 请按精简清单 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) 操作（依赖、SoundFont、健康检查）。
 
+**可选快速自检：** 在项目根目录执行 `python scripts/beginner_preflight.py`（只读检查，不安装任何内容）。详见清单 **0. Quick preflight**。
+
 ### Quick Start (TL;DR)
 
 1. **前置条件：** Python 3.11+，**FFmpeg** 与 **FluidSynth** 已在 PATH 中，并准备 **SoundFont** 文件 **`assets/piano.sf2`**（仓库不包含；见 [`assets/README.txt`](assets/README.txt)）。可选：复制 `.env.example` 为 `.env` 并调整路径。

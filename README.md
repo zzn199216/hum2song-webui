@@ -13,6 +13,8 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 **First-time local setup:** use the compact checklist [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) (prerequisites, SoundFont, health check).
 
+**Quick machine check (optional):** from the project root, `python scripts/beginner_preflight.py` (read-only; does not install anything). See the checklist section *0. Quick preflight*.
+
 ### Quick Start (TL;DR)
 
 1. **Prerequisites:** Python 3.11+, **FFmpeg** and **FluidSynth** on your PATH, and a **SoundFont** file at **`assets/piano.sf2`** (not bundled in git — see [`assets/README.txt`](assets/README.txt)). Optional: copy `.env.example` to `.env` and adjust paths.
