@@ -366,11 +366,23 @@
     if (!llmDebug || typeof llmDebug !== 'object') return null;
     const out = {};
     if (llmDebug.attemptCount != null && isFinite(Number(llmDebug.attemptCount))) out.attemptCount = Number(llmDebug.attemptCount);
+    if (llmDebug.totalAttempts != null && isFinite(Number(llmDebug.totalAttempts))) out.totalAttempts = Number(llmDebug.totalAttempts);
+    if (llmDebug.finalAttemptIndex != null && isFinite(Number(llmDebug.finalAttemptIndex))) out.finalAttemptIndex = Number(llmDebug.finalAttemptIndex);
     if (typeof llmDebug.safeModeResolved === 'boolean') out.safeModeResolved = llmDebug.safeModeResolved;
     if (llmDebug.reason != null && typeof llmDebug.reason === 'string') out.reason = llmDebug.reason.slice(0, 120);
     if (Array.isArray(llmDebug.errors) && llmDebug.errors.length){
       const joined = llmDebug.errors.slice(0, 3).map(function(e){ return String(e).slice(0, 80); }).join(' | ');
       out.errorSummary = joined.length > 200 ? joined.slice(0, 197) + '...' : joined;
+    }
+    if (Array.isArray(llmDebug.attemptSummaries) && llmDebug.attemptSummaries.length){
+      out.attemptSummaries = llmDebug.attemptSummaries.slice(0, 4).map(function(row){
+        if (!row || typeof row !== 'object') return { attemptIndex: null, reason: '', outcome: null };
+        return {
+          attemptIndex: (row.attemptIndex != null && isFinite(Number(row.attemptIndex))) ? Number(row.attemptIndex) : null,
+          reason: (row.reason != null && typeof row.reason === 'string') ? row.reason.slice(0, 120) : '',
+          outcome: (row.outcome != null && typeof row.outcome === 'string') ? row.outcome.slice(0, 48) : null,
+        };
+      });
     }
     return Object.keys(out).length ? out : null;
   }

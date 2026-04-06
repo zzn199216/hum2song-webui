@@ -71,6 +71,42 @@
     return e.length > 0 && e.indexOf('semantic_') === 0;
   }
 
+  /** Bounded snapshot for one llm_v0 attempt (no raw prompts). */
+  function _llmAttemptSnapshot(attemptIndex, res){
+    if (!res || typeof res !== 'object'){
+      return { attemptIndex: attemptIndex, reason: '', outcome: null };
+    }
+    let outcome = null;
+    if (res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome){
+      outcome = String(res.patchSummary.llm.outcome);
+    } else if (res.llmOutcome){
+      outcome = String(res.llmOutcome);
+    }
+    const reason = (res.reason != null) ? String(res.reason) : '';
+    return { attemptIndex: attemptIndex, reason: reason, outcome: outcome };
+  }
+
+  /** Merge retry/attempt observability into llmDebug and patchSummary.llm (bounded; max 8 rows). */
+  function _attachLlmRetryFields(out, attemptLog){
+    if (!out || !Array.isArray(attemptLog) || attemptLog.length < 1) return;
+    const total = attemptLog.length;
+    const last = attemptLog[total - 1];
+    const summaries = attemptLog.slice(0, 8);
+    const block = {
+      totalAttempts: total,
+      finalAttemptIndex: last.attemptIndex,
+      attemptSummaries: summaries,
+    };
+    if (!out.llmDebug) out.llmDebug = {};
+    out.llmDebug.attemptCount = total;
+    out.llmDebug.totalAttempts = total;
+    out.llmDebug.finalAttemptIndex = last.attemptIndex;
+    out.llmDebug.attemptSummaries = summaries;
+    if (out.patchSummary && out.patchSummary.llm){
+      Object.assign(out.patchSummary.llm, block);
+    }
+  }
+
   /** PR3: Build compact PLAN block from structured plan for llm_v0 prompt. Returns '' if plan invalid. */
   function buildPlanBlock(plan){
     if (!plan || typeof plan !== 'object') return '';
@@ -961,18 +997,20 @@
       // PR-8B-2: Retry logic - only retry for JSON extraction or validation failures
       // PR-8C: Capture debug data for final attempt (incl. safeModeResolved for console-friendly verification)
       const debugCapture = { rawText: '', extractedJson: null, validateErrors: [] };
+      const attemptLog = [];
       return attemptOnce(1, null, debugCapture).then(function(res1){
         if (res1.ok){
+          attemptLog.push(_llmAttemptSnapshot(1, res1));
           const out = Object.assign({}, res1);
           out.executionPath = 'llm';
           out.llmDebug = {
-            attemptCount: 1,
             reason: res1.reason || 'ok',
             rawText: debugCapture.rawText || '',
             extractedJson: debugCapture.extractedJson || null,
             errors: debugCapture.validateErrors || [],
             safeModeResolved: safeMode,
           };
+          _attachLlmRetryFields(out, attemptLog);
           if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
           return _attachLlmOutcomeToReturn(out);
         }
@@ -993,32 +1031,35 @@
           debugCapture.rawText = '';
           debugCapture.extractedJson = null;
           debugCapture.validateErrors = [];
+          attemptLog.push(_llmAttemptSnapshot(1, res1));
           return attemptOnce(2, fixDetail, debugCapture).then(function(res2){
+            attemptLog.push(_llmAttemptSnapshot(2, res2));
             const out = Object.assign({}, res2);
             out.executionPath = 'llm';
             out.llmDebug = {
-              attemptCount: 2,
               reason: res2.reason || 'ok',
               rawText: debugCapture.rawText || '',
               extractedJson: debugCapture.extractedJson || null,
               errors: debugCapture.validateErrors || [],
               safeModeResolved: safeMode,
             };
+            _attachLlmRetryFields(out, attemptLog);
             if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
             return _attachLlmOutcomeToReturn(out);
           });
         }
         // No retry - return first attempt with debug
+        attemptLog.push(_llmAttemptSnapshot(1, res1));
         const out = Object.assign({}, res1);
         out.executionPath = 'llm';
         out.llmDebug = {
-          attemptCount: 1,
           reason: res1.reason || 'unknown',
           rawText: debugCapture.rawText || '',
           extractedJson: debugCapture.extractedJson || null,
           errors: debugCapture.validateErrors || [],
           safeModeResolved: safeMode,
         };
+        _attachLlmRetryFields(out, attemptLog);
         if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
         return _attachLlmOutcomeToReturn(out);
       });

@@ -27,6 +27,22 @@ This doc describes **small** observability additions for the existing **`llm_v0`
 
 **Guaranteed today (contract tests):** on `llm_v0` results that carry **`patchSummary.llm`**, **`llmOutcome` === `patchSummary.llm.outcome`**, **`executionPath` === `'llm'`**, and **`patchSummary.phase1Deterministic` is absent** — deterministic Phase-1 metadata is **not** merged into LLM runs.
 
+### Retry / attempt observability (`llm_v0` only, after at least one LLM attempt)
+
+When the optimize run reaches the async **`attemptOnce`** path (config + client OK), the final result includes bounded retry metadata on **`llmDebug`** and duplicated on **`patchSummary.llm`**:
+
+| Field | Meaning |
+|-------|---------|
+| **`totalAttempts`** | Number of LLM calls made (1 or 2 today). Same as **`attemptCount`** (kept for compatibility). |
+| **`finalAttemptIndex`** | Which attempt produced the **returned** `patchSummary` / outcome (`1` or `2`). |
+| **`attemptSummaries`** | Up to **8** rows: `{ attemptIndex, reason, outcome }` per attempt (`outcome` = `patchSummary.llm.outcome` for that attempt when present). No raw prompts. |
+
+**How to read it:** The **last** row in **`attemptSummaries`** matches the **final** `llmOutcome` / `patchSummary.llm.outcome`. Earlier rows describe failed or superseded attempts when a retry ran (JSON/validation retry only).
+
+**Not guaranteed on these fields:** Early synchronous failures (**`failed_config`**, **`llm_client_not_loaded`**, etc.) return **before** any LLM attempt — they typically have **no** `llmDebug` / no retry block. **`llmDebug.rawText` / `extractedJson`** still reflect the **final** attempt only (existing behavior).
+
+**Assistant / debug UI:** `_sanitizeLlmDebugForAssistantTrace` passes through **`totalAttempts`**, **`finalAttemptIndex`**, and a capped **`attemptSummaries`** (no prompt bodies).
+
 **Not guaranteed:** stability of raw error strings beyond the **`outcome`** bucket; prompt quality; model behavior.
 
 **`rejected_semantic` vs `failed_apply`:** Primary signal is **`applied.semanticReject === true`** from `applyPatchToClip`. Secondary (compat): first error string **starts with** `semantic_` (matches semantic gate codes). Arbitrary messages that mention “semantic” elsewhere are **not** treated as semantic rejection.

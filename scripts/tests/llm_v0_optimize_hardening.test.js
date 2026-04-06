@@ -24,6 +24,20 @@ function assertLlmOutcomeContract(res, expectedOutcome, opts){
   }
 }
 
+/** llm_v0 retry observability: llmDebug + patchSummary.llm share bounded attempt fields. */
+function assertLlmRetryMeta(res, expected){
+  const d = res.llmDebug;
+  assert(d && typeof d === 'object', 'llmDebug');
+  assert(d.totalAttempts === expected.totalAttempts, 'llmDebug.totalAttempts');
+  assert(d.finalAttemptIndex === expected.finalAttemptIndex, 'llmDebug.finalAttemptIndex');
+  assert(d.attemptCount === expected.totalAttempts, 'attemptCount matches totalAttempts');
+  assert(Array.isArray(d.attemptSummaries), 'attemptSummaries');
+  assert(d.attemptSummaries.length === expected.totalAttempts, 'summaries length');
+  assert(res.patchSummary.llm.totalAttempts === expected.totalAttempts, 'patchSummary.llm.totalAttempts');
+  assert(res.patchSummary.llm.finalAttemptIndex === expected.finalAttemptIndex, 'patchSummary.llm.finalAttemptIndex');
+  assert(Array.isArray(res.patchSummary.llm.attemptSummaries), 'patchSummary.llm.attemptSummaries');
+}
+
 function ensureWindowShim(){
   if (typeof globalThis.window === 'undefined') globalThis.window = {};
 }
@@ -107,6 +121,8 @@ async function testAppliedOutcome(){
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'test' });
   assert(res && res.ok === true && res.ops === 1, 'applied');
   assertLlmOutcomeContract(res, 'applied');
+  assertLlmRetryMeta(res, { totalAttempts: 1, finalAttemptIndex: 1 });
+  assert(res.llmDebug.attemptSummaries[0].outcome === 'applied', 'single attempt outcome');
 }
 
 async function testNoOpOutcome(){
@@ -141,6 +157,8 @@ async function testNoOpOutcome(){
   assert(res && res.ok === true && res.ops === 0, 'no op');
   assertLlmOutcomeContract(res, 'no_op');
   assert(res.patchSummary.noChanges === true, 'noChanges');
+  assertLlmRetryMeta(res, { totalAttempts: 1, finalAttemptIndex: 1 });
+  assert(res.llmDebug.attemptSummaries[0].outcome === 'no_op', 'no_op snapshot');
 }
 
 async function testFailedExtract(){
@@ -168,6 +186,50 @@ async function testFailedExtract(){
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === false && res.reason === 'llm_no_valid_json', 'extract fail');
   assertLlmOutcomeContract(res, 'failed_extract');
+  assertLlmRetryMeta(res, { totalAttempts: 2, finalAttemptIndex: 2 });
+  assert(res.llmDebug.attemptSummaries[0].outcome === 'failed_extract' && res.llmDebug.attemptSummaries[1].outcome === 'failed_extract', 'both attempts failed_extract');
+}
+
+/** Second attempt succeeds after first JSON extract failure. */
+async function testRetryRecoverFromFailedExtract(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  let callN = 0;
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => {
+      callN++;
+      if (callN === 1) return { text: 'no fenced json' };
+      return { text: rawText };
+    },
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+  assert(res && res.ok === true && res.ops === 1, 'applied on retry');
+  assertLlmOutcomeContract(res, 'applied');
+  assertLlmRetryMeta(res, { totalAttempts: 2, finalAttemptIndex: 2 });
+  assert(res.llmDebug.attemptSummaries[0].outcome === 'failed_extract', 'first failed_extract');
+  assert(res.llmDebug.attemptSummaries[1].outcome === 'applied', 'second applied');
 }
 
 async function testFailedConfig(){
@@ -486,6 +548,7 @@ async function testFailedRequest(){
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === false, 'request fail');
   assertLlmOutcomeContract(res, 'failed_request');
+  assertLlmRetryMeta(res, { totalAttempts: 1, finalAttemptIndex: 1 });
 }
 
 async function testFailedRevision(){
@@ -533,6 +596,7 @@ async function main(){
   await testAppliedOutcome();
   await testNoOpOutcome();
   await testFailedExtract();
+  await testRetryRecoverFromFailedExtract();
   await testFailedConfig();
   await testRejectedSafeMode();
   await testRejectedValidation();
