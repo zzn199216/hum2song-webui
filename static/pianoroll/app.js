@@ -166,6 +166,33 @@
    * Used for setOptimizeOptions, reasoningLog at run start, and executionTrace (not later card mutations).
    */
   function _buildAssistantRunExecutionSnapshot(card){
+    if (card && card.localTransposeIntent && typeof card.localTransposeIntent === 'object' && isFinite(Number(card.localTransposeIntent.semitone_delta))){
+      const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+      return {
+        usedRequestedPresetId: 'local_transpose',
+        usedPlan: usedPlan,
+        usedTemplateId: null,
+        usedIntent: null,
+        localTransposeIntent: {
+          capability_id: String(card.localTransposeIntent.capability_id || 'local_transpose'),
+          semitone_delta: Math.round(Number(card.localTransposeIntent.semitone_delta)),
+        },
+      };
+    }
+    if (card && card.velocityShapeIntent && typeof card.velocityShapeIntent === 'object' && card.velocityShapeIntent.mode){
+      const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+      return {
+        usedRequestedPresetId: 'velocity_shape',
+        usedPlan: usedPlan,
+        usedTemplateId: null,
+        usedIntent: null,
+        velocityShapeIntent: {
+          capability_id: String(card.velocityShapeIntent.capability_id || 'velocity_shape'),
+          mode: String(card.velocityShapeIntent.mode),
+          strength: card.velocityShapeIntent.strength ? String(card.velocityShapeIntent.strength) : 'medium',
+        },
+      };
+    }
     const usedRequestedPresetId = 'llm_v0';
     const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
     let usedTemplateId = (card && card.templateId != null && String(card.templateId).trim()) ? String(card.templateId).trim() : null;
@@ -1368,6 +1395,29 @@ setOptimizeOptions(arg0, arg1){
       ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
       : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
   }
+  let nextVelocityShapeIntent;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'velocityShapeIntent')){
+    nextVelocityShapeIntent = (opts.velocityShapeIntent && typeof opts.velocityShapeIntent === 'object' && opts.velocityShapeIntent.mode)
+      ? {
+        capability_id: String(opts.velocityShapeIntent.capability_id || 'velocity_shape'),
+        mode: String(opts.velocityShapeIntent.mode),
+        strength: opts.velocityShapeIntent.strength ? String(opts.velocityShapeIntent.strength) : 'medium',
+      }
+      : null;
+  } else if (existingOpts && existingOpts.velocityShapeIntent){
+    nextVelocityShapeIntent = existingOpts.velocityShapeIntent;
+  }
+  let nextLocalTransposeIntent;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'localTransposeIntent')){
+    nextLocalTransposeIntent = (opts.localTransposeIntent && typeof opts.localTransposeIntent === 'object' && isFinite(Number(opts.localTransposeIntent.semitone_delta)))
+      ? {
+        capability_id: String(opts.localTransposeIntent.capability_id || 'local_transpose'),
+        semitone_delta: Math.round(Number(opts.localTransposeIntent.semitone_delta)),
+      }
+      : null;
+  } else if (existingOpts && existingOpts.localTransposeIntent){
+    nextLocalTransposeIntent = existingOpts.localTransposeIntent;
+  }
   const normalizedOpts = opts ? (function(){
     const base = {
       requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
@@ -1379,6 +1429,18 @@ setOptimizeOptions(arg0, arg1){
     if (assistantExecutionPlanSnapshot !== undefined){
       base._assistantExecutionPlanSnapshot = assistantExecutionPlanSnapshot;
     }
+    if (nextVelocityShapeIntent !== undefined){
+      base.velocityShapeIntent = nextVelocityShapeIntent;
+    }
+    if (nextLocalTransposeIntent !== undefined){
+      base.localTransposeIntent = nextLocalTransposeIntent;
+    }
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'velocityShapeNoteIds')){
+      base.velocityShapeNoteIds = Array.isArray(opts.velocityShapeNoteIds) ? opts.velocityShapeNoteIds.slice() : null;
+    }
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'localTransposeNoteIds')){
+      base.localTransposeNoteIds = Array.isArray(opts.localTransposeNoteIds) ? opts.localTransposeNoteIds.slice() : null;
+    }
     return base;
   })() : null;
   this._lastOptimizeOptions = normalizedOpts;
@@ -1388,7 +1450,14 @@ setOptimizeOptions(arg0, arg1){
     if (typeof localStorage !== 'undefined') {
       try {
         const map = _readLS(LS_KEY_OPT_OPTIONS) || {};
-        map[cid] = normalizedOpts;
+        const persisted = normalizedOpts ? Object.assign({}, normalizedOpts) : null;
+        if (persisted && Object.prototype.hasOwnProperty.call(persisted, 'velocityShapeNoteIds')){
+          delete persisted.velocityShapeNoteIds;
+        }
+        if (persisted && Object.prototype.hasOwnProperty.call(persisted, 'localTransposeNoteIds')){
+          delete persisted.localTransposeNoteIds;
+        }
+        map[cid] = persisted;
         _writeLS(LS_KEY_OPT_OPTIONS, map);
       } catch (e) { console.warn('[App] persist opt options failed', e); }
     }
@@ -1451,6 +1520,18 @@ async optimizeClip(clipId, optOverride){
     }
     if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')){
       options._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
+    }
+    if (merged.velocityShapeIntent && typeof merged.velocityShapeIntent === 'object' && merged.velocityShapeIntent.mode){
+      options.velocityShapeIntent = merged.velocityShapeIntent;
+    }
+    if (merged.localTransposeIntent && typeof merged.localTransposeIntent === 'object' && isFinite(Number(merged.localTransposeIntent.semitone_delta))){
+      options.localTransposeIntent = merged.localTransposeIntent;
+    }
+    if (Array.isArray(merged.velocityShapeNoteIds) && merged.velocityShapeNoteIds.length > 0){
+      options.velocityShapeNoteIds = merged.velocityShapeNoteIds.slice();
+    }
+    if (Array.isArray(merged.localTransposeNoteIds) && merged.localTransposeNoteIds.length > 0){
+      options.localTransposeNoteIds = merged.localTransposeNoteIds.slice();
     }
   }
   return await this.agentCtrl.optimizeClip(clipId, options);
@@ -2352,12 +2433,24 @@ ensureTrackButtons(){
       if (!clipId) {
         this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
       } else {
-        const mapped = _mapAiAssistTextToTemplate(text);
         const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-        if (mapped.templateId && mapped.intent) {
-          card.templateId = mapped.templateId;
-          card.templateLabel = mapped.templateLabel;
-          card.intent = mapped.intent;
+        const ltShape = (typeof window !== 'undefined' && window.H2SLocalTranspose && typeof window.H2SLocalTranspose.narrowLocalTransposeIntentFromText === 'function')
+          ? window.H2SLocalTranspose.narrowLocalTransposeIntentFromText(text)
+          : null;
+        const velShape = (!ltShape && typeof window !== 'undefined' && window.H2SVelocityShape && typeof window.H2SVelocityShape.narrowVelocityShapeIntentFromText === 'function')
+          ? window.H2SVelocityShape.narrowVelocityShapeIntentFromText(text)
+          : null;
+        if (ltShape && isFinite(Number(ltShape.semitone_delta))) {
+          card.localTransposeIntent = ltShape;
+        } else if (velShape && velShape.mode) {
+          card.velocityShapeIntent = velShape;
+        } else {
+          const mapped = _mapAiAssistTextToTemplate(text);
+          if (mapped.templateId && mapped.intent) {
+            card.templateId = mapped.templateId;
+            card.templateLabel = mapped.templateLabel;
+            card.intent = mapped.intent;
+          }
         }
         card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
         card.reasoningLog = {
@@ -2365,7 +2458,7 @@ ensureTrackButtons(){
           templateId: card.templateId || null,
           intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
           planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
-          requestedPresetId: 'llm_v0',
+          requestedPresetId: card.localTransposeIntent ? 'local_transpose' : (card.velocityShapeIntent ? 'velocity_shape' : 'llm_v0'),
           planSource: 'rule',
           createdAt: card.createdAt,
         };
@@ -2405,6 +2498,12 @@ ensureTrackButtons(){
         }
       }
       const opts = { userPrompt: text, requestedPresetId: runSnapshot.usedRequestedPresetId };
+      if (runSnapshot.localTransposeIntent && typeof runSnapshot.localTransposeIntent === 'object'){
+        opts.localTransposeIntent = runSnapshot.localTransposeIntent;
+      }
+      if (runSnapshot.velocityShapeIntent && typeof runSnapshot.velocityShapeIntent === 'object'){
+        opts.velocityShapeIntent = runSnapshot.velocityShapeIntent;
+      }
       if (runSnapshot.usedTemplateId && runSnapshot.usedIntent) {
         opts.templateId = runSnapshot.usedTemplateId;
         opts.intent = runSnapshot.usedIntent;
@@ -3016,6 +3115,8 @@ renderTimeline(){
                   `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
                   `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
                   `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
+                  `<option value="velocity_shape"${presetSelVal === 'velocity_shape' ? ' selected' : ''}>Velocity shape</option>` +
+                  `<option value="local_transpose"${presetSelVal === 'local_transpose' ? ' selected' : ''}>Local transpose</option>` +
                 `</select>` +
               `</div>` +
             `</details>` +

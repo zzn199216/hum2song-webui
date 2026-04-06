@@ -157,6 +157,10 @@
     NOOP: 'noop',
     /** PR-7b-2: LLM gateway; returns patch from OpenAI-compatible chat completions. */
     LLM_V0: 'llm_v0',
+    /** Phase-1: deterministic velocity-only shaping (no LLM). */
+    VELOCITY_SHAPE: 'velocity_shape',
+    /** Phase-1: deterministic pitch-only local transpose (no LLM). */
+    LOCAL_TRANSPOSE: 'local_transpose',
   };
   /** Allowlist: only these preset IDs may run; unknown → fallback to safe_stub_v0. */
   const SAFE_PRESET_ALLOWLIST = {
@@ -165,7 +169,42 @@
     [PRESET_IDS.DURATION_GENTLE]: true,
     [PRESET_IDS.NOOP]: true,
     [PRESET_IDS.LLM_V0]: true,
+    [PRESET_IDS.VELOCITY_SHAPE]: true,
+    [PRESET_IDS.LOCAL_TRANSPOSE]: true,
   };
+
+  function _resolveVelocityShapeIntent(optsIn){
+    if (optsIn && optsIn.velocityShapeIntent && typeof optsIn.velocityShapeIntent === 'object' && optsIn.velocityShapeIntent.mode){
+      return {
+        capability_id: 'velocity_shape',
+        mode: String(optsIn.velocityShapeIntent.mode),
+        strength: optsIn.velocityShapeIntent.strength ? String(optsIn.velocityShapeIntent.strength) : 'medium',
+      };
+    }
+    const VS = ROOT.H2SVelocityShape;
+    if (VS && typeof VS.narrowVelocityShapeIntentFromText === 'function' && optsIn && optsIn.userPrompt){
+      const n = VS.narrowVelocityShapeIntentFromText(optsIn.userPrompt);
+      if (n) return n;
+    }
+    return { capability_id: 'velocity_shape', mode: 'more_even', strength: 'medium' };
+  }
+
+  function _resolveLocalTransposeIntent(optsIn){
+    const LT = ROOT.H2SLocalTranspose;
+    const clampD = (LT && typeof LT.clampDelta === 'function')
+      ? LT.clampDelta.bind(LT)
+      : function(d){ const n = Math.round(Number(d)); return isFinite(n) ? Math.max(-12, Math.min(12, n)) : 0; };
+    if (optsIn && optsIn.localTransposeIntent && typeof optsIn.localTransposeIntent === 'object' && isFinite(Number(optsIn.localTransposeIntent.semitone_delta))){
+      return { capability_id: 'local_transpose', semitone_delta: clampD(optsIn.localTransposeIntent.semitone_delta) };
+    }
+    if (LT && typeof LT.narrowLocalTransposeIntentFromText === 'function' && optsIn && optsIn.userPrompt){
+      const n = LT.narrowLocalTransposeIntentFromText(optsIn.userPrompt);
+      if (n && isFinite(Number(n.semitone_delta))){
+        return { capability_id: 'local_transpose', semitone_delta: clampD(n.semitone_delta) };
+      }
+    }
+    return { capability_id: 'local_transpose', semitone_delta: clampD(1) };
+  }
 
   function _opsByOp(ops){
     const out = {};
@@ -862,31 +901,78 @@
 
       const beforeRevisionId = clip.revisionId || null;
 
-      // ALWAYS run pseudo agent first (semantic priority)
-      const pseudoPatch = buildPseudoAgentPatch(clip);
       let patch = null;
       let examples = [];
       let executedSource = 'pseudo_v0';
       let executedPreset = 'pseudo_v0';
       let usedPseudoPath = false;
 
-      if (pseudoPatch.ops && pseudoPatch.ops.length > 0){
-        patch = pseudoPatch;
-        usedPseudoPath = true;
-      } else {
-        const inAllowlist = requestedPresetId && SAFE_PRESET_ALLOWLIST[requestedPresetId];
-        const effectivePresetId = inAllowlist ? requestedPresetId : SAFE_STUB_PRESET;
-        if (effectivePresetId === PRESET_IDS.LLM_V0){
-          return _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId);
+      // Phase-1 velocity_shape: deterministic, beats-only, velocity-only — takes priority over pseudo/presets.
+      if (requestedPresetId === PRESET_IDS.VELOCITY_SHAPE && SAFE_PRESET_ALLOWLIST[requestedPresetId]){
+        const VS = ROOT.H2SVelocityShape;
+        if (!VS || typeof VS.buildVelocityShapePatch !== 'function'){
+          return { ok: false, reason: 'velocity_shape_unavailable', executionPath: 'velocity_shape' };
         }
-        const res = _buildPatchFromPreset(clip, effectivePresetId);
-        patch = res.patch;
-        examples = res.examples || [];
-        executedSource = inAllowlist ? 'safe_preset' : DEFAULT_OPT_SOURCE;
-        executedPreset = effectivePresetId;
+        const vsIntent = _resolveVelocityShapeIntent(optsIn);
+        const noteFilter = (Array.isArray(optsIn.velocityShapeNoteIds) && optsIn.velocityShapeNoteIds.length > 0)
+          ? optsIn.velocityShapeNoteIds.map(function(x){ return String(x); })
+          : null;
+        const built = VS.buildVelocityShapePatch(clip, vsIntent, noteFilter);
+        optsIn._velocityShapeResolved = {
+          intent: vsIntent,
+          targetNoteCount: built.targetNoteCount,
+          effectiveNoteCount: built.effectiveNoteCount,
+        };
+        patch = built.patch;
+        examples = built.examples || [];
+        executedSource = 'velocity_shape';
+        executedPreset = 'velocity_shape';
+        usedPseudoPath = false;
+      } else if (requestedPresetId === PRESET_IDS.LOCAL_TRANSPOSE && SAFE_PRESET_ALLOWLIST[requestedPresetId]){
+        const LT = ROOT.H2SLocalTranspose;
+        if (!LT || typeof LT.buildLocalTransposePatch !== 'function'){
+          return { ok: false, reason: 'local_transpose_unavailable', executionPath: 'local_transpose' };
+        }
+        const ltIntent = _resolveLocalTransposeIntent(optsIn);
+        const noteFilterLt = (Array.isArray(optsIn.localTransposeNoteIds) && optsIn.localTransposeNoteIds.length > 0)
+          ? optsIn.localTransposeNoteIds.map(function(x){ return String(x); })
+          : null;
+        const builtLt = LT.buildLocalTransposePatch(clip, ltIntent, noteFilterLt);
+        optsIn._localTransposeResolved = {
+          intent: ltIntent,
+          targetNoteCount: builtLt.targetNoteCount,
+          effectiveNoteCount: builtLt.effectiveNoteCount,
+        };
+        patch = builtLt.patch;
+        examples = builtLt.examples || [];
+        executedSource = 'local_transpose';
+        executedPreset = 'local_transpose';
+        usedPseudoPath = false;
+      } else {
+        // ALWAYS run pseudo agent first (semantic priority)
+        const pseudoPatch = buildPseudoAgentPatch(clip);
+
+        if (pseudoPatch.ops && pseudoPatch.ops.length > 0){
+          patch = pseudoPatch;
+          usedPseudoPath = true;
+        } else {
+          const inAllowlist = requestedPresetId && SAFE_PRESET_ALLOWLIST[requestedPresetId];
+          const effectivePresetId = inAllowlist ? requestedPresetId : SAFE_STUB_PRESET;
+          if (effectivePresetId === PRESET_IDS.LLM_V0){
+            return _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId);
+          }
+          const res = _buildPatchFromPreset(clip, effectivePresetId);
+          patch = res.patch;
+          examples = res.examples || [];
+          executedSource = inAllowlist ? 'safe_preset' : DEFAULT_OPT_SOURCE;
+          executedPreset = effectivePresetId;
+        }
       }
 
       const opsN = patch.ops.length;
+      const execPathOut = (executedPreset === PRESET_IDS.VELOCITY_SHAPE) ? 'velocity_shape'
+        : (executedPreset === PRESET_IDS.LOCAL_TRANSPOSE) ? 'local_transpose'
+        : (usedPseudoPath ? 'pseudo' : 'preset');
       const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
       const patchSummaryBase = {
         requestedSource: requestedPresetId,
@@ -902,12 +988,18 @@
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
       if (requestedPresetId && !SAFE_PRESET_ALLOWLIST[requestedPresetId]) patchSummaryBase.reason = 'unknown_preset_fallback';
       patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
+      if (optsIn._velocityShapeResolved && typeof optsIn._velocityShapeResolved === 'object'){
+        patchSummaryBase.velocityShape = optsIn._velocityShapeResolved;
+      }
+      if (optsIn._localTransposeResolved && typeof optsIn._localTransposeResolved === 'object'){
+        patchSummaryBase.localTranspose = optsIn._localTransposeResolved;
+      }
 
       if (opsN === 0){
         return {
           ok:true,
           ops:0,
-          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'ok',
             noChanges:true,
@@ -927,7 +1019,7 @@
         return {
           ok:false,
           reason,
-          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:String(reason),
@@ -943,7 +1035,7 @@
         return {
           ok:false,
           reason:'apply_failed',
-          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:'apply_failed',
@@ -959,7 +1051,7 @@
         return {
           ok:false,
           reason:'beginNewClipRevision_failed',
-          executionPath: usedPseudoPath ? 'pseudo' : 'preset',
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:'beginNewClipRevision_failed',
@@ -990,7 +1082,7 @@
       opts.setProjectFromV2(project);
       opts.commitV2?.('agent_optimize');
 
-      return { ok:true, ops:opsN, executionPath: usedPseudoPath ? 'pseudo' : 'preset' };
+      return { ok:true, ops:opsN, executionPath: execPathOut };
     }
     return { optimizeClip };
   }

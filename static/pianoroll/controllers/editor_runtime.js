@@ -1623,7 +1623,16 @@
           const stored = app.getOptimizeOptions(clipId);
           templateId = (stored && stored.templateId != null && String(stored.templateId).trim()) ? String(stored.templateId).trim() : null;
         }
-        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null };
+        let velocityShapeNoteIds = null;
+        const modal = rt && rt.state && rt.state.modal;
+        if (modal){
+          if (modal.selectedNoteIds && modal.selectedNoteIds.length >= 2){
+            velocityShapeNoteIds = modal.selectedNoteIds.slice().map(function(id){ return String(id); });
+          } else if (modal.selectedNoteId){
+            velocityShapeNoteIds = [String(modal.selectedNoteId)];
+          }
+        }
+        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null, velocityShapeNoteIds, localTransposeNoteIds: velocityShapeNoteIds };
       };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;
