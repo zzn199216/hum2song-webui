@@ -10,6 +10,20 @@ function assert(cond, msg){
   if (!cond) throw new Error(msg || 'assertion failed');
 }
 
+/** Contract: llm_v0 optimize results mirror outcome, stay on executionPath llm, and never carry Phase-1 metadata. */
+function assertLlmOutcomeContract(res, expectedOutcome, opts){
+  const o = opts || {};
+  assert(res && typeof res === 'object', 'result object');
+  assert(res.executionPath === 'llm', 'executionPath must be llm for llm_v0');
+  assert(res.patchSummary && typeof res.patchSummary === 'object', 'patchSummary');
+  assert(res.patchSummary.llm && typeof res.patchSummary.llm === 'object', 'patchSummary.llm must exist');
+  assert(res.patchSummary.llm.outcome === expectedOutcome, 'patchSummary.llm.outcome');
+  assert(res.llmOutcome === res.patchSummary.llm.outcome, 'llmOutcome mirrors patchSummary.llm.outcome');
+  if (!o.allowPhase1){
+    assert(!res.patchSummary.phase1Deterministic, 'phase1Deterministic must be absent on llm path');
+  }
+}
+
 function ensureWindowShim(){
   if (typeof globalThis.window === 'undefined') globalThis.window = {};
 }
@@ -92,9 +106,7 @@ async function testAppliedOutcome(){
 
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'test' });
   assert(res && res.ok === true && res.ops === 1, 'applied');
-  assert(res.llmOutcome === 'applied', 'top-level llmOutcome');
-  assert(res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome === 'applied', 'patchSummary.llm');
-  assert(!res.patchSummary.phase1Deterministic, 'no phase1Deterministic on llm');
+  assertLlmOutcomeContract(res, 'applied');
 }
 
 async function testNoOpOutcome(){
@@ -127,8 +139,7 @@ async function testNoOpOutcome(){
 
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === true && res.ops === 0, 'no op');
-  assert(res.llmOutcome === 'no_op', 'llmOutcome no_op');
-  assert(res.patchSummary.llm.outcome === 'no_op', 'summary llm');
+  assertLlmOutcomeContract(res, 'no_op');
   assert(res.patchSummary.noChanges === true, 'noChanges');
 }
 
@@ -156,8 +167,7 @@ async function testFailedExtract(){
 
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === false && res.reason === 'llm_no_valid_json', 'extract fail');
-  assert(res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome === 'failed_extract', 'failed_extract');
-  assert(res.llmOutcome === 'failed_extract', 'top failed_extract');
+  assertLlmOutcomeContract(res, 'failed_extract');
 }
 
 async function testFailedConfig(){
@@ -180,7 +190,7 @@ async function testFailedConfig(){
 
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === false && res.reason === 'llm_config_missing', 'config');
-  assert(res.patchSummary.llm.outcome === 'failed_config', 'failed_config');
+  assertLlmOutcomeContract(res, 'failed_config');
 }
 
 async function testRejectedSafeMode(){
@@ -213,7 +223,222 @@ async function testRejectedSafeMode(){
 
   const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
   assert(res && res.ok === false, 'reject');
-  assert(res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome === 'rejected_safe_mode', 'safe mode');
+  assertLlmOutcomeContract(res, 'rejected_safe_mode');
+}
+
+async function testRejectedValidation(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', pitch: 500, velocity: 90 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: false }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false } });
+  assert(res && res.ok === false && res.reason === 'patch_rejected', 'validation reject');
+  assertLlmOutcomeContract(res, 'rejected_validation');
+}
+
+async function testRejectedQuality(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'x',
+    templateId: 'fix_pitch_v1',
+    intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+  });
+  assert(res && res.ok === false && res.reason === 'patch_rejected', 'quality reject');
+  assertLlmOutcomeContract(res, 'rejected_quality');
+}
+
+async function testRejectedSemantic(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', startBeat: 50, durationBeat: 1, velocity: 90 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: false }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+  assert(res && res.ok === false && res.reason === 'apply_failed', 'semantic apply fail');
+  assertLlmOutcomeContract(res, 'rejected_semantic');
+}
+
+async function testFailedApplyStub(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SAgentPatch = globalThis.H2SAgentPatch;
+  const origApply = H2SAgentPatch.applyPatchToClip;
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  H2SAgentPatch.applyPatchToClip = function(){
+    return { ok: false, errors: ['apply_engine_error'] };
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+
+    const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+    assert(res && res.ok === false && res.reason === 'apply_failed', 'apply_failed');
+    assertLlmOutcomeContract(res, 'failed_apply');
+  } finally {
+    H2SAgentPatch.applyPatchToClip = origApply;
+  }
+}
+
+async function testFailedRequest(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => { throw new Error('network_unreachable'); },
+    extractJsonObject: () => null,
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+  assert(res && res.ok === false, 'request fail');
+  assertLlmOutcomeContract(res, 'failed_request');
+}
+
+async function testFailedRevision(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SProject = globalThis.H2SProject;
+  const origBegin = H2SProject.beginNewClipRevision;
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: true }),
+  };
+
+  H2SProject.beginNewClipRevision = function(){ return { ok: false }; };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+
+    const res = await ctrl.optimizeClip(cid, { requestedPresetId: 'llm_v0', userPrompt: 'x' });
+    assert(res && res.ok === false && res.reason === 'beginNewClipRevision_failed', 'revision fail');
+    assertLlmOutcomeContract(res, 'failed_revision');
+  } finally {
+    H2SProject.beginNewClipRevision = origBegin;
+  }
 }
 
 async function main(){
@@ -222,6 +447,12 @@ async function main(){
   await testFailedExtract();
   await testFailedConfig();
   await testRejectedSafeMode();
+  await testRejectedValidation();
+  await testRejectedQuality();
+  await testRejectedSemantic();
+  await testFailedApplyStub();
+  await testFailedRequest();
+  await testFailedRevision();
   console.log('llm_v0_optimize_hardening.test.js: OK');
 }
 
