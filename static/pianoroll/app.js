@@ -162,6 +162,47 @@
   }
 
   /**
+   * Phase-1 Assistant deterministic NL routing. Tries H2SPhase1AssistantNarrow first; if the
+   * bundle is missing, incomplete, or throws, falls back to inline on the API object or a minimal
+   * duplicate (keep in sync with phase1_assistant_narrow.resolvePhase1AssistantIntentFromTextInline).
+   */
+  function _resolvePhase1AssistantIntentForSend(text){
+    const root = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
+    if (!root || text == null || typeof text !== 'string') return null;
+    const api = root.H2SPhase1AssistantNarrow;
+    if (api && typeof api.resolvePhase1AssistantIntentFromText === 'function'){
+      try {
+        return api.resolvePhase1AssistantIntentFromText(text);
+      } catch (_e) { /* fall through */ }
+    }
+    if (api && typeof api.resolvePhase1AssistantIntentFromTextInline === 'function'){
+      try {
+        return api.resolvePhase1AssistantIntentFromTextInline(root, text);
+      } catch (_e) { /* fall through */ }
+    }
+    return _resolvePhase1AssistantIntentAppFallback(root, text);
+  }
+
+  function _resolvePhase1AssistantIntentAppFallback(root, text){
+    const R = root.H2SRhythmTightenLoosen;
+    if (R && typeof R.narrowRhythmIntentFromText === 'function'){
+      const n = R.narrowRhythmIntentFromText(text);
+      if (n && n.mode) return { branch: 'rhythm_tighten_loosen', intent: n };
+    }
+    const LT = root.H2SLocalTranspose;
+    if (LT && typeof LT.narrowLocalTransposeIntentFromText === 'function'){
+      const n = LT.narrowLocalTransposeIntentFromText(text);
+      if (n && isFinite(Number(n.semitone_delta))) return { branch: 'local_transpose', intent: n };
+    }
+    const VS = root.H2SVelocityShape;
+    if (VS && typeof VS.narrowVelocityShapeIntentFromText === 'function'){
+      const n = VS.narrowVelocityShapeIntentFromText(text);
+      if (n && n.mode) return { branch: 'velocity_shape', intent: n };
+    }
+    return null;
+  }
+
+  /**
    * Single authoritative snapshot for one Assistant Run (after _syncAssistantCardTemplateFromPlan).
    * Used for setOptimizeOptions, reasoningLog at run start, and executionTrace (not later card mutations).
    */
@@ -2475,9 +2516,7 @@ ensureTrackButtons(){
         this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
       } else {
         const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-        const narrow = (typeof window !== 'undefined' && window.H2SPhase1AssistantNarrow && typeof window.H2SPhase1AssistantNarrow.resolvePhase1AssistantIntentFromText === 'function')
-          ? window.H2SPhase1AssistantNarrow.resolvePhase1AssistantIntentFromText(text)
-          : null;
+        const narrow = _resolvePhase1AssistantIntentForSend(text);
         if (narrow && narrow.branch === 'rhythm_tighten_loosen') {
           card.rhythmIntent = narrow.intent;
         } else if (narrow && narrow.branch === 'local_transpose') {

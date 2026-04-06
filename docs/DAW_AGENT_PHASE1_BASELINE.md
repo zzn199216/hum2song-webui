@@ -44,7 +44,9 @@ Free-text in the Assistant uses **one** deterministic branch per message, in thi
 2. `local_transpose` — `H2SLocalTranspose.narrowLocalTransposeIntentFromText`
 3. `velocity_shape` — `H2SVelocityShape.narrowVelocityShapeIntentFromText`
 
-Implementation: `static/pianoroll/core/phase1_assistant_narrow.js` (`H2SPhase1AssistantNarrow`), used by `app.js` `_aiAssistSend`.
+Implementation: `static/pianoroll/core/phase1_assistant_narrow.js` (`H2SPhase1AssistantNarrow`), used by `app.js` `_aiAssistSend` via `_resolvePhase1AssistantIntentForSend`.
+
+**Availability / fallback:** `_aiAssistSend` tries `resolvePhase1AssistantIntentFromText` first; if it throws or the entry point is missing, it uses `resolvePhase1AssistantIntentFromTextInline` on the API object when present; if the whole narrow bundle is absent, a **minimal duplicate** in `app.js` (`_resolvePhase1AssistantIntentAppFallback`) runs the same rhythm → transpose → velocity order. Keep that duplicate aligned with `resolvePhase1AssistantIntentFromTextInline`.
 
 **Why order matters:** e.g. “make this more even rhythmically” must resolve to **rhythm** (`even`), not velocity dynamics (“more even”). “Make this tighter” is intentionally classified as **rhythm** (not transpose/velocity).
 
@@ -63,6 +65,7 @@ Implementation: `static/pianoroll/core/phase1_assistant_narrow.js` (`H2SPhase1As
 
 - Shared contract: `scripts/tests/phase1_deterministic_contract.test.js`
 - Assistant precedence: `scripts/tests/phase1_assistant_precedence.test.js`
+- Assistant fallback / inline: `scripts/tests/phase1_assistant_fallback.test.js`
 - Per-slice: `scripts/tests/velocity_shape.test.js`, `local_transpose.test.js`, `rhythm_tighten_loosen.test.js`
 
 ## Invariants (unchanged)
