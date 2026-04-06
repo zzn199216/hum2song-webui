@@ -93,4 +93,6 @@ If these are met, the next step can hand off to **Option C** (browser smoke) or 
 
 ---
 
+**Follow-up (implemented as a first slice):** bounded `llm_v0` observability — see `docs/DAW_AGENT_LLM_V0_HARDENING.md` and `scripts/tests/llm_v0_optimize_hardening.test.js`.
+
 *End of post-freeze next-step audit.*

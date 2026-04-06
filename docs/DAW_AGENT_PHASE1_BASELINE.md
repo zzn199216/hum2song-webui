@@ -2,6 +2,8 @@
 
 **Freeze handoff (short):** `docs/DAW_AGENT_PHASE1_FREEZE_SNAPSHOT.md` — what is in/out of the Phase-1 baseline, test entry points, and next-step hints.
 
+**LLM optimize (`llm_v0`) is separate:** bounded observability for the LLM path is documented in `docs/DAW_AGENT_LLM_V0_HARDENING.md` (does not use `phase1Deterministic`).
+
 This document describes the **current** deterministic optimize path (no LLM in these slices). It is a **narrow** contract for debugging and regression tests, not a full product spec.
 
 ## Scope

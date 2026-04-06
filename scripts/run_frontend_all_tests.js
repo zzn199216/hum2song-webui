@@ -23,6 +23,7 @@ runOne('scripts/tests/phase1_assistant_precedence.test.js');
 runOne('scripts/tests/phase1_assistant_fallback.test.js');
 runOne('scripts/tests/phase1_deterministic_contract.test.js');
 runOne('scripts/tests/phase1_freeze_e2e_smoke.test.js');
+runOne('scripts/tests/llm_v0_optimize_hardening.test.js');
 runOne('scripts/tests/regression_phaseB_invariants.test.js');
 runOne('scripts/tests/regression_templates_directives.test.js');
 runOne('scripts/tests/instrument_library_store.test.js');

@@ -37,6 +37,33 @@
   /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
   const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
 
+  /** llm_v0: bounded outcome marker for patchSummary (never merged into phase1Deterministic). */
+  function _llmOutcomeExtra(outcome, extra){
+    const o = { outcome: String(outcome || 'unknown') };
+    if (extra && typeof extra === 'object'){
+      for (const k in extra){
+        if (Object.prototype.hasOwnProperty.call(extra, k)) o[k] = extra[k];
+      }
+    }
+    return { llm: o };
+  }
+
+  function _mapFailReasonToLlmOutcome(reason){
+    const r = String(reason || '');
+    if (r === 'llm_config_missing') return 'failed_config';
+    if (r === 'llm_client_not_loaded') return 'failed_client';
+    if (r === 'apply_failed') return 'failed_apply';
+    if (r === 'beginNewClipRevision_failed') return 'failed_revision';
+    return 'failed_request';
+  }
+
+  function _attachLlmOutcomeToReturn(out){
+    if (out && out.patchSummary && out.patchSummary.llm && out.patchSummary.llm.outcome){
+      out.llmOutcome = String(out.patchSummary.llm.outcome);
+    }
+    return out;
+  }
+
   /** PR3: Build compact PLAN block from structured plan for llm_v0 prompt. Returns '' if plan invalid. */
   function buildPlanBlock(plan){
     if (!plan || typeof plan !== 'object') return '';
@@ -519,7 +546,8 @@
       }
       patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
-      function fail(reason, summaryExtras){
+      function fail(reason, summaryExtras, llmOutcomeOverride){
+        const oc = llmOutcomeOverride || _mapFailReasonToLlmOutcome(reason);
         const o = {
           ok: false,
           reason: reason,
@@ -530,8 +558,9 @@
             ops: 0,
             byOp: {},
             examples: [],
-          }, summaryExtras || {}),
+          }, _llmOutcomeExtra(oc, { reasonCode: String(reason) }), summaryExtras || {}),
         };
+        if (o.patchSummary && o.patchSummary.llm) o.llmOutcome = String(o.patchSummary.llm.outcome);
         if (promptTraceCapture.lastAttempt) o.llmPromptTrace = promptTraceCapture.lastAttempt;
         return o;
       }
@@ -753,7 +782,19 @@
           const patchObj = client.extractJsonObject(text);
           if (!patchObj || typeof patchObj !== 'object'){
             if (debugCapture) debugCapture.extractedJson = null;
-            return { ok: false, reason: 'llm_no_valid_json', detail: 'no_json' };
+            return {
+              ok: false,
+              reason: 'llm_no_valid_json',
+              detail: 'no_json',
+              patchSummary: Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: 'llm_no_valid_json',
+                ops: 0,
+                byOp: {},
+                examples: [],
+                detail: 'no_json',
+              }, _llmOutcomeExtra('failed_extract', { detail: 'no_json' })),
+            };
           }
           if (debugCapture) debugCapture.extractedJson = JSON.stringify(patchObj, null, 2);
           if (!Array.isArray(patchObj.ops)) patchObj.ops = [];
@@ -766,6 +807,7 @@
             return {
               ok: true,
               ops: 0,
+              llmOutcome: 'no_op',
               patchSummary: Object.assign({}, patchSummaryBase, {
                 status: 'ok',
                 noChanges: true,
@@ -773,7 +815,7 @@
                 ops: 0,
                 byOp: {},
                 examples: [],
-              }, _computePatchTypeSummary([])),
+              }, _llmOutcomeExtra('no_op', { reason: 'empty_ops' }), _computePatchTypeSummary([])),
             };
           }
 
@@ -807,6 +849,14 @@
                 detail: errorCodes,
                 patchObj: patchObj,
                 opsN: opsN,
+                patchSummary: Object.assign({}, patchSummaryBase, {
+                  status: 'failed',
+                  reason: 'patch_rejected',
+                  ops: opsN,
+                  byOp: _opsByOp(patchObj.ops),
+                  examples: [],
+                  detail: errorCodes,
+                }, _llmOutcomeExtra('rejected_safe_mode', { detail: errorCodes })),
               };
             }
           }
@@ -822,6 +872,14 @@
               detail: errorCodes,
               patchObj: patchObj,
               opsN: opsN,
+              patchSummary: Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: 'patch_rejected',
+                ops: opsN,
+                byOp: _opsByOp(patchObj.ops),
+                examples: [],
+                detail: errorCodes,
+              }, _llmOutcomeExtra('rejected_validation', { detail: errorCodes })),
             };
           }
           if (debugCapture) debugCapture.validateErrors = [];
@@ -837,7 +895,7 @@
                 ops: opsN,
                 byOp: _opsByOp(patchObj.ops),
                 examples: [],
-              }, ps);
+              }, ps, _llmOutcomeExtra('rejected_quality', { detail: 'quality_velocity_only' }));
               return {
                 ok: false,
                 reason: 'patch_rejected',
@@ -848,8 +906,11 @@
           }
 
           const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
-          if (!applied || !applied.clip){
-            return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops) });
+          if (!applied || !applied.ok || !applied.clip){
+            const errs = (applied && applied.errors && Array.isArray(applied.errors)) ? applied.errors : [];
+            const err0 = errs[0] ? String(errs[0]) : '';
+            const applyOc = (err0.indexOf('semantic') >= 0) ? 'rejected_semantic' : 'failed_apply';
+            return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops), detail: err0 }, applyOc);
           }
 
           const resNew = H2SProject.beginNewClipRevision(project, cid, { name: clip.name });
@@ -862,21 +923,22 @@
           if (typeof H2SProject.recomputeClipMetaFromScoreBeat === 'function') H2SProject.recomputeClipMetaFromScoreBeat(head);
 
           head.meta = head.meta || {};
+          const appliedLlmSummary = Object.assign({}, patchSummaryBase, {
+            status: 'ok',
+            ops: opsN,
+            byOp: _opsByOp(patchObj.ops),
+            examples: [],
+          }, _computePatchTypeSummary(patchObj.ops), _llmOutcomeExtra('applied'));
           head.meta.agent = {
             optimizedFromRevisionId: beforeRevisionId,
             appliedAt: _now(),
             patchOps: opsN,
-            patchSummary: Object.assign({}, patchSummaryBase, {
-              status: 'ok',
-              ops: opsN,
-              byOp: _opsByOp(patchObj.ops),
-              examples: [],
-            }, _computePatchTypeSummary(patchObj.ops)),
+            patchSummary: appliedLlmSummary,
           };
 
           opts.setProjectFromV2(project);
           if (typeof opts.commitV2 === 'function') opts.commitV2('agent_optimize');
-          return { ok: true, ops: opsN };
+          return { ok: true, ops: opsN, executionPath: 'llm', patchSummary: appliedLlmSummary, llmOutcome: 'applied' };
         } catch(err){
           const msg = (err && err.message) ? String(err.message) : 'llm_request_failed';
           // PR-8C: Capture error in debug if available
@@ -905,7 +967,7 @@
             safeModeResolved: safeMode,
           };
           if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
-          return out;
+          return _attachLlmOutcomeToReturn(out);
         }
         if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
           let fixDetail = '';
@@ -936,7 +998,7 @@
               safeModeResolved: safeMode,
             };
             if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
-            return out;
+            return _attachLlmOutcomeToReturn(out);
           });
         }
         // No retry - return first attempt with debug
@@ -951,7 +1013,7 @@
           safeModeResolved: safeMode,
         };
         if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
-        return out;
+        return _attachLlmOutcomeToReturn(out);
       });
     }
 
