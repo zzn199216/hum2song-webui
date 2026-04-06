@@ -173,37 +173,81 @@
     [PRESET_IDS.LOCAL_TRANSPOSE]: true,
   };
 
+  /** @returns {{ intent: object, intentSource: string }} — intentSource aligns with H2SPhase1DeterministicMeta.PHASE1_INTENT_SOURCE */
   function _resolveVelocityShapeIntent(optsIn){
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const SRC = (P1 && P1.PHASE1_INTENT_SOURCE) ? P1.PHASE1_INTENT_SOURCE : { EXPLICIT_OPTIONS: 'explicit_options', NARROWED_FROM_PROMPT: 'narrowed_from_prompt', PRESET_DEFAULT: 'preset_default' };
     if (optsIn && optsIn.velocityShapeIntent && typeof optsIn.velocityShapeIntent === 'object' && optsIn.velocityShapeIntent.mode){
       return {
-        capability_id: 'velocity_shape',
-        mode: String(optsIn.velocityShapeIntent.mode),
-        strength: optsIn.velocityShapeIntent.strength ? String(optsIn.velocityShapeIntent.strength) : 'medium',
+        intent: {
+          capability_id: 'velocity_shape',
+          mode: String(optsIn.velocityShapeIntent.mode),
+          strength: optsIn.velocityShapeIntent.strength ? String(optsIn.velocityShapeIntent.strength) : 'medium',
+        },
+        intentSource: SRC.EXPLICIT_OPTIONS,
       };
     }
     const VS = ROOT.H2SVelocityShape;
     if (VS && typeof VS.narrowVelocityShapeIntentFromText === 'function' && optsIn && optsIn.userPrompt){
       const n = VS.narrowVelocityShapeIntentFromText(optsIn.userPrompt);
-      if (n) return n;
+      if (n) return { intent: n, intentSource: SRC.NARROWED_FROM_PROMPT };
     }
-    return { capability_id: 'velocity_shape', mode: 'more_even', strength: 'medium' };
+    return {
+      intent: { capability_id: 'velocity_shape', mode: 'more_even', strength: 'medium' },
+      intentSource: SRC.PRESET_DEFAULT,
+    };
   }
 
+  /** @returns {{ intent: object, intentSource: string }} */
   function _resolveLocalTransposeIntent(optsIn){
     const LT = ROOT.H2SLocalTranspose;
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const SRC = (P1 && P1.PHASE1_INTENT_SOURCE) ? P1.PHASE1_INTENT_SOURCE : { EXPLICIT_OPTIONS: 'explicit_options', NARROWED_FROM_PROMPT: 'narrowed_from_prompt', PRESET_DEFAULT: 'preset_default' };
     const clampD = (LT && typeof LT.clampDelta === 'function')
       ? LT.clampDelta.bind(LT)
       : function(d){ const n = Math.round(Number(d)); return isFinite(n) ? Math.max(-12, Math.min(12, n)) : 0; };
     if (optsIn && optsIn.localTransposeIntent && typeof optsIn.localTransposeIntent === 'object' && isFinite(Number(optsIn.localTransposeIntent.semitone_delta))){
-      return { capability_id: 'local_transpose', semitone_delta: clampD(optsIn.localTransposeIntent.semitone_delta) };
+      return {
+        intent: { capability_id: 'local_transpose', semitone_delta: clampD(optsIn.localTransposeIntent.semitone_delta) },
+        intentSource: SRC.EXPLICIT_OPTIONS,
+      };
     }
     if (LT && typeof LT.narrowLocalTransposeIntentFromText === 'function' && optsIn && optsIn.userPrompt){
       const n = LT.narrowLocalTransposeIntentFromText(optsIn.userPrompt);
       if (n && isFinite(Number(n.semitone_delta))){
-        return { capability_id: 'local_transpose', semitone_delta: clampD(n.semitone_delta) };
+        return { intent: { capability_id: 'local_transpose', semitone_delta: clampD(n.semitone_delta) }, intentSource: SRC.NARROWED_FROM_PROMPT };
       }
     }
-    return { capability_id: 'local_transpose', semitone_delta: clampD(1) };
+    return {
+      intent: { capability_id: 'local_transpose', semitone_delta: clampD(1) },
+      intentSource: SRC.PRESET_DEFAULT,
+    };
+  }
+
+  function _mergePhase1ResolvedSlot(optsIn, capabilityId, intent, intentSource, noteFilter, built, legacySlotName){
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const metaBase = (P1 && typeof P1.buildPhase1DeterministicResolvedMeta === 'function')
+      ? P1.buildPhase1DeterministicResolvedMeta({
+        capabilityId: capabilityId,
+        intentResolved: intent,
+        noteIdsFilter: noteFilter,
+        targetNoteCount: built.targetNoteCount,
+        effectiveNoteCount: built.effectiveNoteCount,
+        intentSource: intentSource,
+      })
+      : {
+        capabilityId: capabilityId,
+        intentResolved: intent,
+        targetScope: (Array.isArray(noteFilter) && noteFilter.length > 0) ? 'note_ids' : 'whole_clip',
+        targetNoteCount: built.targetNoteCount,
+        effectiveNoteCount: built.effectiveNoteCount,
+        intentSource: intentSource,
+        executionPath: capabilityId,
+      };
+    const legacy = Object.assign({}, metaBase, { intent: intent });
+    if (legacySlotName === 'velocity') optsIn._velocityShapeResolved = legacy;
+    else if (legacySlotName === 'transpose') optsIn._localTransposeResolved = legacy;
+    optsIn._phase1DeterministicResolved = metaBase;
   }
 
   function _opsByOp(ops){
@@ -913,16 +957,13 @@
         if (!VS || typeof VS.buildVelocityShapePatch !== 'function'){
           return { ok: false, reason: 'velocity_shape_unavailable', executionPath: 'velocity_shape' };
         }
-        const vsIntent = _resolveVelocityShapeIntent(optsIn);
+        const vsRes = _resolveVelocityShapeIntent(optsIn);
+        const vsIntent = vsRes.intent;
         const noteFilter = (Array.isArray(optsIn.velocityShapeNoteIds) && optsIn.velocityShapeNoteIds.length > 0)
           ? optsIn.velocityShapeNoteIds.map(function(x){ return String(x); })
           : null;
         const built = VS.buildVelocityShapePatch(clip, vsIntent, noteFilter);
-        optsIn._velocityShapeResolved = {
-          intent: vsIntent,
-          targetNoteCount: built.targetNoteCount,
-          effectiveNoteCount: built.effectiveNoteCount,
-        };
+        _mergePhase1ResolvedSlot(optsIn, 'velocity_shape', vsIntent, vsRes.intentSource, noteFilter, built, 'velocity');
         patch = built.patch;
         examples = built.examples || [];
         executedSource = 'velocity_shape';
@@ -933,16 +974,13 @@
         if (!LT || typeof LT.buildLocalTransposePatch !== 'function'){
           return { ok: false, reason: 'local_transpose_unavailable', executionPath: 'local_transpose' };
         }
-        const ltIntent = _resolveLocalTransposeIntent(optsIn);
+        const ltRes = _resolveLocalTransposeIntent(optsIn);
+        const ltIntent = ltRes.intent;
         const noteFilterLt = (Array.isArray(optsIn.localTransposeNoteIds) && optsIn.localTransposeNoteIds.length > 0)
           ? optsIn.localTransposeNoteIds.map(function(x){ return String(x); })
           : null;
         const builtLt = LT.buildLocalTransposePatch(clip, ltIntent, noteFilterLt);
-        optsIn._localTransposeResolved = {
-          intent: ltIntent,
-          targetNoteCount: builtLt.targetNoteCount,
-          effectiveNoteCount: builtLt.effectiveNoteCount,
-        };
+        _mergePhase1ResolvedSlot(optsIn, 'local_transpose', ltIntent, ltRes.intentSource, noteFilterLt, builtLt, 'transpose');
         patch = builtLt.patch;
         examples = builtLt.examples || [];
         executedSource = 'local_transpose';
@@ -993,6 +1031,9 @@
       }
       if (optsIn._localTransposeResolved && typeof optsIn._localTransposeResolved === 'object'){
         patchSummaryBase.localTranspose = optsIn._localTransposeResolved;
+      }
+      if (optsIn._phase1DeterministicResolved && typeof optsIn._phase1DeterministicResolved === 'object'){
+        patchSummaryBase.phase1Deterministic = optsIn._phase1DeterministicResolved;
       }
 
       if (opsN === 0){

@@ -38,10 +38,19 @@ function loadProject(){
   assert(globalThis.H2SProject, 'H2SProject missing');
 }
 
+function loadPhase1Meta(){
+  ensureWindowShim();
+  if (globalThis.H2SPhase1DeterministicMeta) return;
+  require(path.resolve(__dirname, '../../static/pianoroll/core/phase1_deterministic_meta.js'));
+  if (globalThis.window && globalThis.window.H2SPhase1DeterministicMeta) globalThis.H2SPhase1DeterministicMeta = globalThis.window.H2SPhase1DeterministicMeta;
+  assert(globalThis.H2SPhase1DeterministicMeta, 'H2SPhase1DeterministicMeta missing');
+}
+
 function loadAgentController(){
   ensureWindowShim();
   if (globalThis.H2SAgentController) return;
   loadVelocityShape();
+  loadPhase1Meta();
   require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
   if (globalThis.window && globalThis.window.H2SAgentController) globalThis.H2SAgentController = globalThis.window.H2SAgentController;
   assert(globalThis.H2SAgentController && typeof globalThis.H2SAgentController.create === 'function', 'H2SAgentController missing');
