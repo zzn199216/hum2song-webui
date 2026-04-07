@@ -97,6 +97,8 @@ Inspect `checks`:
 - **Swagger:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - **Studio:** [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
 
+The Studio page shows a **dismissible “Getting started” bar** (first visit per browser) with the same high-level steps and a link to **`/api/v1/health`**. It points to this checklist file by path in the repo (`docs/BEGINNER_FIRST_RUN_CHECKLIST.md`).
+
 ## 7. Common first-run issues
 
 | Symptom | Likely cause |

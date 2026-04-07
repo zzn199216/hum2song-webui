@@ -35,6 +35,8 @@
       background:linear-gradient(180deg, #0e1116 0%, var(--bg) 100%);
       color:var(--text);
       overflow:hidden;
+      display:flex;
+      flex-direction:column;
     }
     .topbar{
       height:54px;
@@ -187,8 +189,39 @@
     #aiAssistInput{ width:100%; min-height:52px; resize:vertical; padding:6px; font-size:12px; font-family:inherit; color:var(--text); background:rgba(0,0,0,.2); border:1px solid var(--border); border-radius:8px; box-sizing:border-box; }
     #aiAssistSend{ align-self:flex-end; }
 
+    /* Beginner first-open hint (dismissible; local dev) */
+    .beginnerHintBar{
+      flex-shrink:0;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 14px;
+      border-bottom:1px solid var(--border);
+      background:rgba(59,130,246,.09);
+      font-size:12px;
+      line-height:1.45;
+      color:var(--text);
+    }
+    .beginnerHintBar .beginnerHintBody{ flex:1; min-width:0; }
+    .beginnerHintBar .beginnerHintTitle{ font-weight:700; margin:0 0 4px; letter-spacing:.02em; }
+    .beginnerHintBar ol{ margin:4px 0 0 18px; padding:0; color:var(--muted); }
+    .beginnerHintBar li{ margin-bottom:2px; }
+    .beginnerHintBar code{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:11px;
+      padding:1px 5px;
+      border-radius:6px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.22);
+      color:rgba(255,255,255,.9);
+    }
+    .beginnerHintBar a{ color:var(--accent2); }
+    #btnBeginnerHintDismiss{ flex-shrink:0; align-self:flex-start; }
+
     .layout{
-      height: calc(100% - 54px);
+      flex:1;
+      min-height:0;
       display:grid;
       grid-template-columns: 280px 1fr 320px;
       gap:12px;
@@ -781,6 +814,19 @@
     <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>
   </div>
 
+  <div id="beginnerHintBar" class="beginnerHintBar" role="region" aria-label="Getting started">
+    <div class="beginnerHintBody">
+      <div class="beginnerHintTitle">Getting started (local setup)</div>
+      <ol>
+        <li>In the repo: run <code>python scripts/beginner_preflight.py</code> to verify FFmpeg, FluidSynth, and SoundFont.</li>
+        <li>Start the API: <code>python scripts/beginner_launch.py</code> or <code>uvicorn app:app</code> (see <code>docs/BEGINNER_FIRST_RUN_CHECKLIST.md</code>).</li>
+        <li>Here: use <strong>Import audio</strong> or <strong>Record</strong>, then double-click a clip to edit.</li>
+        <li>If something looks wrong: open <a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a> and check the beginner checklist in the repo.</li>
+      </ol>
+    </div>
+    <button type="button" id="btnBeginnerHintDismiss" class="btn ghost" style="padding:4px 10px;font-size:11px;">Dismiss</button>
+  </div>
+
   <div class="layout">
     <!-- Left -->
     <div class="panel">
@@ -1211,5 +1257,22 @@
   <script src="/static/pianoroll/controllers/export_wav_controller.js"></script>
   <script src="/static/pianoroll/core/score_heuristic_split.js"></script>
   <script src="/static/pianoroll/app.js"></script>
+  <script>
+    (function () {
+      var KEY = 'h2s_beginner_hint_dismissed';
+      var bar = document.getElementById('beginnerHintBar');
+      var btn = document.getElementById('btnBeginnerHintDismiss');
+      if (!bar || !btn) return;
+      try {
+        if (localStorage.getItem(KEY) === '1') bar.classList.add('hidden');
+      } catch (e) {}
+      btn.addEventListener('click', function () {
+        bar.classList.add('hidden');
+        try {
+          localStorage.setItem(KEY, '1');
+        } catch (e) {}
+      });
+    })();
+  </script>
 </body>
 </html>

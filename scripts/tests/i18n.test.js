@@ -21,6 +21,13 @@ if (fs.existsSync(enPath) && fs.existsSync(zhPath)){
   }
 }
 
+// Studio index: beginner hint bar (first-open guidance)
+var indexHtmlPath = path.join(__dirname, '../../static/pianoroll/index.html');
+if (fs.existsSync(indexHtmlPath)) {
+  var indexHtml = fs.readFileSync(indexHtmlPath, 'utf8');
+  assert(indexHtml.indexOf('id="beginnerHintBar"') !== -1, 'index.html must include beginnerHintBar');
+}
+
 const I18N = require('../../static/i18n/i18n.js');
 
 I18N.register('en', { common: { ok: 'OK', cancel: 'Cancel', missing_in_zh: 'From English' } });
