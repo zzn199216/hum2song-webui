@@ -269,6 +269,8 @@
       text-transform:uppercase; color:rgba(255,255,255,.55);
     }
     .beginnerHintHelpDocNote{ margin:10px 0 0; font-size:11px; line-height:1.4; opacity:.92; }
+    .beginnerHintRestoreWrap{ margin-top:12px; }
+    .beginnerHintRestoreBtn{ font-size:11px !important; padding:4px 10px !important; }
 
     /* Persistent entry: reopen same help overlay after hint strip is dismissed */
     .beginnerHelpEntryBtn{
@@ -931,6 +933,9 @@
           <li data-i18n="beginnerHint.helpF3">First pip install is slow: large ML/audio dependencies are expected.</li>
         </ul>
         <p class="beginnerHintHelpDocNote smallmuted" data-i18n="beginnerHint.helpDocNote">The full checklist file lives in your repo clone: docs/BEGINNER_FIRST_RUN_CHECKLIST.md</p>
+        <div class="beginnerHintRestoreWrap">
+          <button type="button" id="btnBeginnerHintRestore" class="btn ghost beginnerHintRestoreBtn" data-i18n="beginnerHint.showAgain">Show getting started bar again</button>
+        </div>
       </div>
     </div>
   </div>

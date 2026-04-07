@@ -41,6 +41,7 @@
   "beginnerHint.helpF2": "Port in use or bind error: stop other servers or change PORT in .env.",
   "beginnerHint.helpF3": "First pip install is slow: large ML/audio dependencies are expected.",
   "beginnerHint.helpDocNote": "The full checklist file lives in your repo clone: docs/BEGINNER_FIRST_RUN_CHECKLIST.md",
+  "beginnerHint.showAgain": "Show getting started bar again",
 
   "opt.run": "Run Optimize",
   "opt.optimize": "Optimize",

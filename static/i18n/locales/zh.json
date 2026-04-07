@@ -41,6 +41,7 @@
   "beginnerHint.helpF2": "端口占用或绑定失败：关闭占用进程或在 .env 修改 PORT。",
   "beginnerHint.helpF3": "首次 pip install 较慢：含较大 ML/音频依赖属正常。",
   "beginnerHint.helpDocNote": "完整清单文件位于克隆仓库：docs/BEGINNER_FIRST_RUN_CHECKLIST.md",
+  "beginnerHint.showAgain": "再次显示顶部入门提示条",
 
   "opt.run": "运行优化",
   "opt.optimize": "优化",

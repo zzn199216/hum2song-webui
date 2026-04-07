@@ -97,7 +97,7 @@ Inspect `checks`:
 - **Swagger:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - **Studio:** [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
 
-The Studio page shows a **dismissible “Getting started” bar** (first visit per browser) with the same high-level steps, **Copy** buttons for the preflight and launch commands (clipboard API with a simple fallback), a link to **`/api/v1/health`**, and a **More help** action that opens a compact in-browser summary (localized). After you dismiss the bar, **Beginner help** in the top bar still opens that same summary. The full checklist file remains in the repo as `docs/BEGINNER_FIRST_RUN_CHECKLIST.md`.
+The Studio page shows a **dismissible “Getting started” bar** (first visit per browser) with the same high-level steps, **Copy** buttons for the preflight and launch commands (clipboard API with a simple fallback), a link to **`/api/v1/health`**, and a **More help** action that opens a compact in-browser summary (localized). After you dismiss the bar, **Beginner help** in the top bar still opens that same summary; inside that overlay you can use **Show getting started bar again** to clear the dismissal and bring the strip back (no need to clear site storage manually). The full checklist file remains in the repo as `docs/BEGINNER_FIRST_RUN_CHECKLIST.md`.
 
 ## 7. Common first-run issues
 

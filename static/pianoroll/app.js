@@ -4499,6 +4499,7 @@ renderTimeline(){
         const btnMore = document.getElementById('btnBeginnerHintMoreHelp');
         const btnClose = document.getElementById('btnBeginnerHintHelpClose');
         const btnEntry = document.getElementById('btnBeginnerHelpEntry');
+        const bar = document.getElementById('beginnerHintBar');
 
         const openHelp = () => {
           if (!panel) return;
@@ -4511,6 +4512,16 @@ renderTimeline(){
           panel.setAttribute('aria-hidden', 'true');
         };
 
+        const btnRestore = document.getElementById('btnBeginnerHintRestore');
+        if (btnRestore && bar){
+          btnRestore.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try{ if (typeof localStorage !== 'undefined') localStorage.removeItem(KEY); }catch(err){}
+            bar.classList.remove('hidden');
+            closeHelp();
+          });
+        }
+
         if (btnEntry) btnEntry.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
         if (btnMore) btnMore.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
         if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
@@ -4521,7 +4532,6 @@ renderTimeline(){
           closeHelp();
         });
 
-        const bar = document.getElementById('beginnerHintBar');
         const btnDismiss = document.getElementById('btnBeginnerHintDismiss');
         if (!bar || !btnDismiss) return;
 
