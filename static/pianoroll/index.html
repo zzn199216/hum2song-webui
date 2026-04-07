@@ -270,6 +270,13 @@
     }
     .beginnerHintHelpDocNote{ margin:10px 0 0; font-size:11px; line-height:1.4; opacity:.92; }
 
+    /* Persistent entry: reopen same help overlay after hint strip is dismissed */
+    .beginnerHelpEntryBtn{
+      font-size:11px !important; font-weight:600; padding:4px 8px !important;
+      opacity:.78;
+    }
+    .beginnerHelpEntryBtn:hover{ opacity:1; }
+
     .layout{
       flex:1;
       min-height:0;
@@ -855,6 +862,7 @@
       </span>
     </div>
     <div class="spacer"></div>
+    <button type="button" id="btnBeginnerHelpEntry" class="btn ghost beginnerHelpEntryBtn" data-i18n="beginnerHint.entryHelp" data-i18n-title="beginnerHint.entryHelpTitle">Beginner help</button>
     <button id="btnAiSettings" class="topbarBtn aiSettingsBtn" data-i18n-title="top.aiSettingsTitle">
         <span class="aiIcon">⚙</span>
         <span class="aiWord">AI</span>

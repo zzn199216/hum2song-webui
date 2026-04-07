@@ -26,6 +26,8 @@
   "beginnerHint.copied": "已复制",
   "beginnerHint.dismiss": "关闭提示",
   "beginnerHint.copyTitle": "复制命令到剪贴板",
+  "beginnerHint.entryHelp": "新手帮助",
+  "beginnerHint.entryHelpTitle": "打开首次运行清单与提示（与「更多帮助」相同）",
   "beginnerHint.moreHelp": "更多帮助",
   "beginnerHint.helpClose": "关闭",
   "beginnerHint.helpTitle": "快速清单（本地）",

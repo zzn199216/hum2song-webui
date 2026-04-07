@@ -31,6 +31,7 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('data-i18n-aria-label') !== -1, 'index.html beginner hint must support aria i18n');
   assert(indexHtml.indexOf('id="beginnerHintHelpPanel"') !== -1, 'index.html must include beginner help panel');
   assert(indexHtml.indexOf('id="btnBeginnerHintMoreHelp"') !== -1, 'index.html must include More help button');
+  assert(indexHtml.indexOf('id="btnBeginnerHelpEntry"') !== -1, 'index.html must include persistent beginner help entry');
   assert(indexHtml.indexOf('python scripts/beginner_preflight.py') !== -1, 'index.html must include preflight command');
   assert(indexHtml.indexOf('python scripts/beginner_launch.py') !== -1, 'index.html must include launch command');
 }

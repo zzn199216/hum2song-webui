@@ -4490,12 +4490,40 @@ renderTimeline(){
 
     _initBeginnerHintBar(){
       try{
+        if (this._beginnerHintBarWired) return;
+        this._beginnerHintBarWired = true;
+
         const KEY = 'h2s_beginner_hint_dismissed';
+        const panel = document.getElementById('beginnerHintHelpPanel');
+        const backdrop = document.getElementById('beginnerHintHelpBackdrop');
+        const btnMore = document.getElementById('btnBeginnerHintMoreHelp');
+        const btnClose = document.getElementById('btnBeginnerHintHelpClose');
+        const btnEntry = document.getElementById('btnBeginnerHelpEntry');
+
+        const openHelp = () => {
+          if (!panel) return;
+          panel.classList.remove('hidden');
+          panel.setAttribute('aria-hidden', 'false');
+        };
+        const closeHelp = () => {
+          if (!panel) return;
+          panel.classList.add('hidden');
+          panel.setAttribute('aria-hidden', 'true');
+        };
+
+        if (btnEntry) btnEntry.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
+        if (btnMore) btnMore.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
+        if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
+        if (backdrop) backdrop.addEventListener('click', closeHelp);
+        document.addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Escape') return;
+          if (!panel || panel.classList.contains('hidden')) return;
+          closeHelp();
+        });
+
         const bar = document.getElementById('beginnerHintBar');
         const btnDismiss = document.getElementById('btnBeginnerHintDismiss');
         if (!bar || !btnDismiss) return;
-        if (this._beginnerHintBarWired) return;
-        this._beginnerHintBarWired = true;
 
         const applyDismissed = () => {
           try{ if (typeof localStorage !== 'undefined' && localStorage.getItem(KEY) === '1') bar.classList.add('hidden'); }catch(e){}
@@ -4550,29 +4578,6 @@ renderTimeline(){
         btnDismiss.addEventListener('click', () => {
           bar.classList.add('hidden');
           try{ if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, '1'); }catch(e){}
-        });
-
-        const panel = document.getElementById('beginnerHintHelpPanel');
-        const backdrop = document.getElementById('beginnerHintHelpBackdrop');
-        const btnMore = document.getElementById('btnBeginnerHintMoreHelp');
-        const btnClose = document.getElementById('btnBeginnerHintHelpClose');
-        const openHelp = () => {
-          if (!panel) return;
-          panel.classList.remove('hidden');
-          panel.setAttribute('aria-hidden', 'false');
-        };
-        const closeHelp = () => {
-          if (!panel) return;
-          panel.classList.add('hidden');
-          panel.setAttribute('aria-hidden', 'true');
-        };
-        if (btnMore) btnMore.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
-        if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
-        if (backdrop) backdrop.addEventListener('click', closeHelp);
-        document.addEventListener('keydown', (ev) => {
-          if (ev.key !== 'Escape') return;
-          if (!panel || panel.classList.contains('hidden')) return;
-          closeHelp();
         });
       }catch(e){ console.warn('[beginnerHint] _initBeginnerHintBar failed', e); }
     },

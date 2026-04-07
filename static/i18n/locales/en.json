@@ -26,6 +26,8 @@
   "beginnerHint.copied": "Copied",
   "beginnerHint.dismiss": "Dismiss",
   "beginnerHint.copyTitle": "Copy command to clipboard",
+  "beginnerHint.entryHelp": "Beginner help",
+  "beginnerHint.entryHelpTitle": "Open first-run checklist and tips (same as More help)",
   "beginnerHint.moreHelp": "More help",
   "beginnerHint.helpClose": "Close",
   "beginnerHint.helpTitle": "Quick checklist (local)",
