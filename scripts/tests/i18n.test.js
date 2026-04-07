@@ -39,6 +39,15 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('data-i18n="lastOpt.label"') !== -1, 'index.html last optimize row must use i18n label');
 }
 
+// Last optimize: staleness uses revision + project doc key (see app.js)
+var appJsPath = path.join(__dirname, '../../static/pianoroll/app.js');
+if (fs.existsSync(appJsPath)) {
+  var appJs = fs.readFileSync(appJsPath, 'utf8');
+  assert(appJs.indexOf('_isLastOptimizeSnapshotStale') !== -1, 'app.js should detect last-optimize staleness');
+  assert(appJs.indexOf('revisionIdAtRun') !== -1, 'app.js should pin last optimize to clip revision');
+  assert(appJs.indexOf('docKeyAtRun') !== -1, 'app.js should pin last optimize to project storage key');
+}
+
 const I18N = require('../../static/i18n/i18n.js');
 
 I18N.register('en', { common: { ok: 'OK', cancel: 'Cancel', missing_in_zh: 'From English' } });

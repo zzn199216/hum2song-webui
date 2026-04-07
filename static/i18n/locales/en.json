@@ -175,6 +175,7 @@
 
   "lastOpt.label": "Last optimize",
   "lastOpt.none": "No run yet",
+  "lastOpt.stale": "Summary out of date (project or clip changed)",
   "lastOpt.lineOk": "{path} · {outcome} · {revision}",
   "lastOpt.lineFailed": "{path} · {detail}",
   "lastOpt.path.llm": "AI (LLM)",

@@ -175,6 +175,7 @@
 
   "lastOpt.label": "上次优化",
   "lastOpt.none": "尚无记录",
+  "lastOpt.stale": "摘要已过期（项目或片段已变化）",
   "lastOpt.lineOk": "{path} · {outcome} · {revision}",
   "lastOpt.lineFailed": "{path} · {detail}",
   "lastOpt.path.llm": "AI（大模型）",

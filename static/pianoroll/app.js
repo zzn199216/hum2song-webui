@@ -1713,15 +1713,47 @@ async optimizeClip(clipId, optOverride){
   },
 
   _updateLastOptimizeSummary(res, clipId){
-    this._lastOptimizeSnapshot = { res: res || null, clipId: clipId || null };
+    const p2 = this.getProjectV2 && this.getProjectV2();
+    const cid = clipId || null;
+    const clip = cid && p2 && p2.clips && p2.clips[cid] ? p2.clips[cid] : null;
+    const revisionIdAtRun = (clip && clip.revisionId != null) ? String(clip.revisionId) : '';
+    let docKeyAtRun = null;
+    try { docKeyAtRun = _getActiveProjectDocStorageKey(); } catch (e) { docKeyAtRun = null; }
+    this._lastOptimizeSnapshot = {
+      res: res || null,
+      clipId: cid,
+      revisionIdAtRun,
+      docKeyAtRun,
+    };
     this._applyLastOptimizeSummaryI18n();
+  },
+
+  /** True when stored summary no longer matches current project doc or clip head revision. */
+  _isLastOptimizeSnapshotStale(){
+    const s = this._lastOptimizeSnapshot;
+    if (!s) return false;
+    if (!s.clipId) return true;
+    let curKey = null;
+    try { curKey = _getActiveProjectDocStorageKey(); } catch (e) { curKey = null; }
+    if (s.docKeyAtRun != null && curKey != null && s.docKeyAtRun !== curKey) return true;
+    const p2 = this.getProjectV2 && this.getProjectV2();
+    if (!p2 || !p2.clips || !p2.clips[s.clipId]) return true;
+    const clip = p2.clips[s.clipId];
+    const curRev = (clip && clip.revisionId != null) ? String(clip.revisionId) : '';
+    if (s.revisionIdAtRun === undefined || s.revisionIdAtRun === null) return true;
+    return curRev !== String(s.revisionIdAtRun);
   },
 
   _applyLastOptimizeSummaryI18n(){
     const el = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeSummary') : null;
     if (!el) return;
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
     if (!this._lastOptimizeSnapshot){
-      el.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('lastOpt.none') : '—';
+      el.textContent = t('lastOpt.none');
+      return;
+    }
+    if (typeof this._isLastOptimizeSnapshotStale === 'function' && this._isLastOptimizeSnapshotStale()){
+      el.textContent = t('lastOpt.stale');
       return;
     }
     const s = this._lastOptimizeSnapshot;
