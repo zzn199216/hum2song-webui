@@ -15,7 +15,7 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 **可选快速自检：** 在项目根目录执行 `python scripts/beginner_preflight.py`（只读检查，不安装任何内容）。详见清单 **0. Quick preflight**。
 
-**启动服务（完成 venv + `pip install` 后）：** 在项目根目录执行 `python scripts/beginner_launch.py`（先跑 preflight，再启动 `uvicorn`，并打印 Studio / health / 文档链接）。可选 `--reload`、`--skip-preflight`。与 `uvicorn app:app` 等价 —— 见 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4。
+**启动服务（完成 venv + `pip install` 后）：** 在项目根目录执行 `python scripts/beginner_launch.py`（先跑 preflight，再启动 `uvicorn`，**等待** `/api/v1/health` 就绪后打印 Studio / health / 文档链接）。可选 `--reload`、`--skip-preflight`、**`--open`**（就绪后在浏览器打开 Studio）。与 `uvicorn app:app` 等价 —— 见 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4。
 
 ### Quick Start (TL;DR)
 

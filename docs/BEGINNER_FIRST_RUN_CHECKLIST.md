@@ -6,8 +6,8 @@ Short path to a **working local** Hum2Song MVP + Studio. For API details see the
 
 1. **`python scripts/beginner_preflight.py`** — quick read-only check (Python, SoundFont, FluidSynth, FFmpeg; optional live health if a server is already up).
 2. **Create a venv and install deps** (once): `pip install -r requirements.txt` (see §3).
-3. **`python scripts/beginner_launch.py`** — starts the same stack as `uvicorn app:app` from the repo root, prints **Studio**, **health**, and **API docs** URLs.
-4. Open the URLs in your browser (or use **health** to confirm `checks`).
+3. **`python scripts/beginner_launch.py`** — starts the same stack as `uvicorn app:app` from the repo root, **waits until** `GET /api/v1/health` returns `ok: true` (or times out after ~45s), then prints **Studio**, **health**, and **API docs** URLs. Optional **`--open`** opens **Studio** in your default browser after readiness (or after the timeout, with a short notice).
+4. If you did not use `--open`, open the URLs in your browser (or use **health** to confirm `checks`).
 
 ## 0. Quick preflight (optional)
 
@@ -64,6 +64,11 @@ python scripts/beginner_launch.py
 
 - **`--reload`** — pass `--reload` to uvicorn for local code changes.
 - **`--skip-preflight`** — skip the doctor step (not recommended the first time).
+- **`--open`** — after the server is **ready** (see below), open **Studio** (`/ui`) in the system default browser. If readiness is not confirmed within ~45s, the script still tries to open Studio and prints a short warning (you may need to refresh).
+
+**What “ready” means:** the launch script polls `http://127.0.0.1:<PORT>/api/v1/health` until the JSON includes `"ok": true` (same endpoint as §5). First startup can take several seconds while Python imports the app.
+
+**If the server never becomes ready:** check the terminal for import errors; confirm the port is free (`PORT` in `.env`, default `8000`); run **`python scripts/beginner_preflight.py`** again; or start manually with `uvicorn app:app` and open **health** yourself.
 
 **Manual (equivalent):**
 
