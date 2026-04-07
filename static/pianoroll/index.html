@@ -437,6 +437,27 @@
     }
     .transport .hint{ color:var(--muted); font-size:12px; margin-left:auto; }
 
+    .studioLastOptimizeRow{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:11px;
+      line-height:1.35;
+      padding:5px 10px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:rgba(255,255,255,.02);
+      color:rgba(255,255,255,.72);
+    }
+    .studioLastOptimizeRow .studioLastOptimizeLabel{ flex-shrink:0; opacity:.85; }
+    .studioLastOptimizeRow .studioLastOptimizeText{
+      flex:1;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
     .timeline{
       flex:1;
       min-height:0;
@@ -975,6 +996,11 @@
         </div>
         <div class="pill" id="lblPlayhead">Playhead: 0.00s</div>
         <div class="hint" data-i18n="timeline.tipDrag">Tip: drag clip blocks; double-click to open editor.</div>
+      </div>
+
+      <div id="studioLastOptimizeRow" class="studioLastOptimizeRow" aria-live="polite">
+        <span class="studioLastOptimizeLabel muted" data-i18n="lastOpt.label">Last optimize</span>
+        <span id="studioLastOptimizeSummary" class="studioLastOptimizeText">—</span>
       </div>
 
       <div class="timeline">

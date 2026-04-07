@@ -1183,6 +1183,7 @@ try{
     project: null,
     _projectV2: null,
     _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
+    _lastOptimizeSnapshot: null, // Studio “last optimize” summary (user-facing; refreshed on lang change)
     _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
     _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
     _pendingClipFromProject: null, // full project doc v2 while "Import clip from project JSON" chooser is open
@@ -1576,7 +1577,9 @@ async optimizeClip(clipId, optOverride){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
     console.warn('[App] optimizeClip called but agent controller is not available');
     try{ alert('Optimize unavailable: agent controller not initialized. Check console for details.'); }catch(_){}
-    return {ok:false, error:'no_agent_controller'};
+    const bad = { ok: false, error: 'no_agent_controller' };
+    try { this._updateLastOptimizeSummary(bad, clipId); } catch (e) { /* ignore */ }
+    return bad;
   }
   let options = optOverride;
   if (options && typeof options === 'object') {
@@ -1629,8 +1632,101 @@ async optimizeClip(clipId, optOverride){
       options.rhythmNoteIds = merged.rhythmNoteIds.slice();
     }
   }
-  return await this.agentCtrl.optimizeClip(clipId, options);
+  const out = await this.agentCtrl.optimizeClip(clipId, options);
+  try { this._updateLastOptimizeSummary(out, clipId); } catch (e) { /* ignore */ }
+  return out;
 },
+
+  _lastOptPathLabel(pathRaw, t){
+    const p = String(pathRaw || '').trim();
+    const keyBy = {
+      'llm': 'lastOpt.path.llm',
+      'velocity_shape': 'lastOpt.path.velocityShape',
+      'local_transpose': 'lastOpt.path.localTranspose',
+      'rhythm_tighten_loosen': 'lastOpt.path.rhythm',
+      'pseudo': 'lastOpt.path.pseudo',
+      'preset': 'lastOpt.path.preset',
+    };
+    if (keyBy[p]) return t(keyBy[p]);
+    return t('lastOpt.path.other').replace('{id}', p ? p.slice(0, 28) : '?');
+  },
+
+  _lastOptLlmOutcomeLabel(lo, t){
+    const x = String(lo || '').trim().toLowerCase();
+    if (x === 'applied') return t('lastOpt.llm.applied');
+    if (x === 'no_op') return t('lastOpt.llm.noOp');
+    if (x.indexOf('rejected') === 0) return t('lastOpt.llm.rejected');
+    if (x === 'failed_config' || x === 'failed_client') return t('lastOpt.llm.configProblem');
+    if (x === 'failed_apply' || x === 'apply_failed') return t('lastOpt.llm.failedApply');
+    if (x === 'failed_revision' || x.indexOf('beginnewcliprevision') === 0) return t('lastOpt.llm.failedRevision');
+    if (x.indexOf('failed') === 0) return t('lastOpt.llm.failed');
+    return t('lastOpt.llm.other');
+  },
+
+  _lastOptDeterministicOutcome(ps, ops, noCh, t){
+    if (noCh || ops === 0) return t('lastOpt.change.noChange');
+    if (ps && ps.isVelocityOnly === true) return t('lastOpt.change.velocityOnly');
+    if (ps && (ps.hasPitchChange === true || ps.hasTimingChange === true)) return t('lastOpt.change.pitchTiming');
+    if (ps && ps.hasStructuralChange === true) return t('lastOpt.change.structure');
+    return t('lastOpt.change.updated');
+  },
+
+  _lastOptFailureDetail(res, t){
+    const r = (res && res.reason != null) ? String(res.reason)
+      : (res && res.error != null) ? String(res.error) : '';
+    const key = 'lastOpt.fail.' + r;
+    const localized = t(key);
+    if (localized !== key) return localized;
+    return t('lastOpt.fail.generic').replace('{reason}', r ? r.slice(0, 56) : t('lastOpt.fail.unknownReason'));
+  },
+
+  _formatLastOptimizeLine(res, clipId){
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    if (!res) return t('lastOpt.none');
+    const p2 = this.getProjectV2 && this.getProjectV2();
+    const clip = clipId && p2 && p2.clips && p2.clips[clipId] ? p2.clips[clipId] : null;
+    const ps = (res.patchSummary && typeof res.patchSummary === 'object') ? res.patchSummary
+      : (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) ? clip.meta.agent.patchSummary : null;
+    const pathRaw = (res.executionPath != null && String(res.executionPath).trim() !== '') ? String(res.executionPath).trim()
+      : (ps && ps.executionPath) ? String(ps.executionPath) : '';
+    const pathLabel = this._lastOptPathLabel(pathRaw || 'unknown', t);
+
+    if (!res.ok) {
+      const detail = this._lastOptFailureDetail(res, t);
+      return t('lastOpt.lineFailed').replace('{path}', pathLabel).replace('{detail}', detail);
+    }
+
+    const ops = (res.ops != null) ? Number(res.ops) : 0;
+    const noCh = (ps && ps.noChanges === true) || ops === 0;
+    const pathStr = String(pathRaw || '');
+    let outcomeLine = '';
+    if (pathStr === 'llm') {
+      const lo = res.llmOutcome || (ps && ps.llm && ps.llm.outcome) || '';
+      outcomeLine = this._lastOptLlmOutcomeLabel(lo, t);
+    } else {
+      outcomeLine = this._lastOptDeterministicOutcome(ps, ops, noCh, t);
+    }
+
+    const revNew = !noCh && ops > 0;
+    const revText = revNew ? t('lastOpt.rev.newVersion') : t('lastOpt.rev.noChange');
+    return t('lastOpt.lineOk').replace('{path}', pathLabel).replace('{outcome}', outcomeLine).replace('{revision}', revText);
+  },
+
+  _updateLastOptimizeSummary(res, clipId){
+    this._lastOptimizeSnapshot = { res: res || null, clipId: clipId || null };
+    this._applyLastOptimizeSummaryI18n();
+  },
+
+  _applyLastOptimizeSummaryI18n(){
+    const el = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeSummary') : null;
+    if (!el) return;
+    if (!this._lastOptimizeSnapshot){
+      el.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('lastOpt.none') : '—';
+      return;
+    }
+    const s = this._lastOptimizeSnapshot;
+    el.textContent = this._formatLastOptimizeLine(s.res, s.clipId);
+  },
 
 // PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
 rollbackClipRevision(clipId){
@@ -4612,6 +4708,7 @@ renderTimeline(){
           const k = el.getAttribute('data-i18n-aria-label');
           if (k) el.setAttribute('aria-label', I18N.t(k));
         });
+        if (typeof this._applyLastOptimizeSummaryI18n === 'function') this._applyLastOptimizeSummaryI18n();
       }catch(e){}
     },
     _initMasterVolumeUI(){

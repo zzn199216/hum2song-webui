@@ -35,6 +35,8 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('id="btnBeginnerHintRestore"') !== -1, 'index.html must include restore hint strip control');
   assert(indexHtml.indexOf('python scripts/beginner_preflight.py') !== -1, 'index.html must include preflight command');
   assert(indexHtml.indexOf('python scripts/beginner_launch.py') !== -1, 'index.html must include launch command');
+  assert(indexHtml.indexOf('id="studioLastOptimizeRow"') !== -1, 'index.html must include last optimize summary row');
+  assert(indexHtml.indexOf('data-i18n="lastOpt.label"') !== -1, 'index.html last optimize row must use i18n label');
 }
 
 const I18N = require('../../static/i18n/i18n.js');
