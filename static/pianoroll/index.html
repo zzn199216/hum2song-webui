@@ -457,6 +457,39 @@
       text-overflow:ellipsis;
       white-space:nowrap;
     }
+    .studioLastOptimizeRow .lastOptDetailsBtn{ flex-shrink:0; font-size:10px !important; padding:2px 8px !important; }
+    .lastOptDetailsPop{
+      position:absolute;
+      right:0;
+      top:100%;
+      margin-top:6px;
+      z-index:60;
+      min-width:268px;
+      max-width:min(360px, 94vw);
+      padding:10px 12px 12px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:rgba(18,20,26,.98);
+      box-shadow:var(--shadow);
+      text-align:left;
+    }
+    .lastOptDetailsPop.hidden{ display:none !important; }
+    .lastOptDetailsHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:8px;
+      font-size:12px;
+      font-weight:700;
+      color:var(--text);
+    }
+    .lastOptDetailsHeader .btn{ font-size:14px !important; line-height:1; padding:2px 8px !important; min-width:auto; }
+    .lastOptDetailsBody{ font-size:11px; line-height:1.45; color:rgba(255,255,255,.78); }
+    .lastOptDetailRow{ display:flex; gap:10px; margin-bottom:6px; align-items:flex-start; }
+    .lastOptDetailRow:last-child{ margin-bottom:0; }
+    .lastOptDetailRow .lbl{ flex:0 0 42%; max-width:11em; opacity:.88; }
+    .lastOptDetailRow .val{ flex:1; min-width:0; word-break:break-word; }
 
     .timeline{
       flex:1;
@@ -998,9 +1031,17 @@
         <div class="hint" data-i18n="timeline.tipDrag">Tip: drag clip blocks; double-click to open editor.</div>
       </div>
 
-      <div id="studioLastOptimizeRow" class="studioLastOptimizeRow" aria-live="polite">
+      <div id="studioLastOptimizeRow" class="studioLastOptimizeRow" style="position:relative;" aria-live="polite">
         <span class="studioLastOptimizeLabel muted" data-i18n="lastOpt.label">Last optimize</span>
         <span id="studioLastOptimizeSummary" class="studioLastOptimizeText">—</span>
+        <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details">Details</button>
+        <div id="studioLastOptimizeDetails" class="lastOptDetailsPop hidden" role="dialog" aria-hidden="true" aria-labelledby="lastOptDetailsHeading">
+          <div class="lastOptDetailsHeader">
+            <span id="lastOptDetailsHeading" data-i18n="lastOpt.detailTitle">Last optimize — details</span>
+            <button type="button" id="btnLastOptimizeDetailsClose" class="btn mini ghost" data-i18n-aria-label="lastOpt.detailsCloseAria">×</button>
+          </div>
+          <div id="studioLastOptimizeDetailsBody" class="lastOptDetailsBody"></div>
+        </div>
       </div>
 
       <div class="timeline">

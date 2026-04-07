@@ -1760,6 +1760,168 @@ async optimizeClip(clipId, optOverride){
     el.textContent = this._formatLastOptimizeLine(s.res, s.clipId);
   },
 
+  _lastOptIntentDetailLine(ps, pathRaw, t){
+    if (!ps || !pathRaw) return '';
+    const p = String(pathRaw);
+    if (p === 'llm' && ps.promptMeta && ps.promptMeta.templateId != null && String(ps.promptMeta.templateId).trim()){
+      return String(ps.promptMeta.templateId).trim().slice(0, 48);
+    }
+    if (p === 'velocity_shape' && ps.velocityShape && typeof ps.velocityShape === 'object'){
+      const m = ps.velocityShape.mode;
+      if (m != null && String(m).trim()) return t('lastOpt.detail.intentFmt').replace('{n}', String(m).slice(0, 48));
+    }
+    if (p === 'local_transpose' && ps.localTranspose && typeof ps.localTranspose === 'object'){
+      const n = ps.localTranspose.semitone_delta;
+      if (Number.isFinite(Number(n))) return t('lastOpt.detail.intentTranspose').replace('{n}', String(n));
+    }
+    if (p === 'rhythm_tighten_loosen' && ps.rhythm && typeof ps.rhythm === 'object'){
+      const m = ps.rhythm.mode;
+      if (m != null && String(m).trim()) return t('lastOpt.detail.intentFmt').replace('{n}', String(m).slice(0, 48));
+    }
+    return '';
+  },
+
+  _renderLastOptimizeDetailsBody(){
+    const body = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetailsBody') : null;
+    if (!body) return;
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    while (body.firstChild) body.removeChild(body.firstChild);
+    const addRow = (labelKey, valueStr) => {
+      const row = document.createElement('div');
+      row.className = 'lastOptDetailRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t(labelKey);
+      const val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = valueStr;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      body.appendChild(row);
+    };
+    const s = this._lastOptimizeSnapshot;
+    if (!s || !s.res){
+      const p = document.createElement('div');
+      p.style.opacity = '0.9';
+      p.textContent = t('lastOpt.detail.empty');
+      body.appendChild(p);
+      return;
+    }
+    const res = s.res;
+    const ps = (res.patchSummary && typeof res.patchSummary === 'object') ? res.patchSummary : null;
+    const pathRaw = (res.executionPath != null && String(res.executionPath).trim() !== '') ? String(res.executionPath).trim()
+      : (ps && ps.executionPath) ? String(ps.executionPath) : '';
+    const pathStr = String(pathRaw || '');
+    addRow('lastOpt.detail.lblPath', this._lastOptPathLabel(pathRaw || 'unknown', t));
+    if (!res.ok){
+      addRow('lastOpt.detail.lblOutcome', this._lastOptFailureDetail(res, t));
+    } else {
+      const ops = (res.ops != null) ? Number(res.ops) : 0;
+      const noCh = (ps && ps.noChanges === true) || ops === 0;
+      let outcomeLine = '';
+      if (pathStr === 'llm'){
+        const lo = res.llmOutcome || (ps && ps.llm && ps.llm.outcome) || '';
+        outcomeLine = this._lastOptLlmOutcomeLabel(lo, t);
+      } else {
+        outcomeLine = this._lastOptDeterministicOutcome(ps, ops, noCh, t);
+      }
+      addRow('lastOpt.detail.lblOutcome', outcomeLine);
+      addRow('lastOpt.detail.lblOps', String(ops));
+      const revNew = !noCh && ops > 0;
+      addRow('lastOpt.detail.lblRevision', revNew ? t('lastOpt.rev.newVersion') : t('lastOpt.rev.noChange'));
+    }
+    const stale = (typeof this._isLastOptimizeSnapshotStale === 'function') && this._isLastOptimizeSnapshotStale();
+    addRow('lastOpt.detail.lblStale', stale ? t('lastOpt.detail.valStale') : t('lastOpt.detail.valCurrent'));
+    if (s.clipId) addRow('lastOpt.detail.lblClip', String(s.clipId).slice(0, 28));
+    if (ps && ps.executedPreset != null && String(ps.executedPreset).trim()){
+      addRow('lastOpt.detail.lblPreset', String(ps.executedPreset).slice(0, 48));
+    }
+    const intentLine = this._lastOptIntentDetailLine(ps, pathRaw, t);
+    if (intentLine) addRow('lastOpt.detail.lblIntent', intentLine);
+    if (pathStr === 'llm' && ps && ps.llm && typeof ps.llm === 'object' && ps.llm.preRequestExit === true){
+      addRow('lastOpt.detail.lblNote', t('lastOpt.detail.preRequest'));
+    }
+    if (pathStr === 'llm'){
+      const llmB = ps && ps.llm && typeof ps.llm === 'object' ? ps.llm : null;
+      const total = llmB && (llmB.totalAttempts != null) ? Number(llmB.totalAttempts)
+        : (res.llmDebug && res.llmDebug.totalAttempts != null) ? Number(res.llmDebug.totalAttempts) : null;
+      const finalIdx = llmB && (llmB.finalAttemptIndex != null) ? Number(llmB.finalAttemptIndex)
+        : (res.llmDebug && res.llmDebug.finalAttemptIndex != null) ? Number(res.llmDebug.finalAttemptIndex) : null;
+      if (total != null && Number.isFinite(total) && total >= 1){
+        addRow('lastOpt.detail.lblRetries', t('lastOpt.detail.retryFmt')
+          .replace('{total}', String(Math.min(Math.floor(total), 99)))
+          .replace('{final}', (finalIdx != null && Number.isFinite(finalIdx)) ? String(Math.floor(finalIdx)) : '—'));
+      }
+    }
+  },
+
+  _renderLastOptimizeDetailsBodyIfOpen(){
+    if (!this._lastOptimizeDetailsOpen) return;
+    this._renderLastOptimizeDetailsBody();
+  },
+
+  _closeLastOptimizeDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetails') : null;
+    const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
+    if (panel) panel.classList.add('hidden');
+    if (panel) panel.setAttribute('aria-hidden', 'true');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    this._lastOptimizeDetailsOpen = false;
+    if (this._lastOptimizeDetailsOnDocDown){
+      document.removeEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
+      this._lastOptimizeDetailsOnDocDown = null;
+    }
+    if (this._lastOptimizeDetailsOnKey){
+      document.removeEventListener('keydown', this._lastOptimizeDetailsOnKey);
+      this._lastOptimizeDetailsOnKey = null;
+    }
+  },
+
+  _openLastOptimizeDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetails') : null;
+    const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
+    if (!panel) return;
+    this._closeLastOptimizeDetails();
+    this._renderLastOptimizeDetailsBody();
+    panel.classList.remove('hidden');
+    panel.setAttribute('aria-hidden', 'false');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    this._lastOptimizeDetailsOpen = true;
+    const app = this;
+    this._lastOptimizeDetailsOnDocDown = function(ev){
+      const raw = ev.target;
+      const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
+      if (!node || typeof node.closest !== 'function') return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails')) return;
+      app._closeLastOptimizeDetails();
+    };
+    document.addEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
+    this._lastOptimizeDetailsOnKey = function(ev){
+      if (ev.key === 'Escape') app._closeLastOptimizeDetails();
+    };
+    document.addEventListener('keydown', this._lastOptimizeDetailsOnKey);
+  },
+
+  _toggleLastOptimizeDetails(){
+    if (this._lastOptimizeDetailsOpen) this._closeLastOptimizeDetails();
+    else this._openLastOptimizeDetails();
+  },
+
+  _initLastOptimizeDetails(){
+    try{
+      if (typeof document === 'undefined') return;
+      if (this._lastOptimizeDetailsInitialized) return;
+      const btn = document.getElementById('btnLastOptimizeDetails');
+      const closeBtn = document.getElementById('btnLastOptimizeDetailsClose');
+      if (!btn) return;
+      this._lastOptimizeDetailsInitialized = true;
+      this._lastOptimizeDetailsOpen = false;
+      btn.setAttribute('aria-expanded', 'false');
+      btn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._toggleLastOptimizeDetails(); });
+      if (closeBtn) closeBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._closeLastOptimizeDetails(); });
+    }catch(e){ console.warn('[lastOpt] _initLastOptimizeDetails failed', e); }
+  },
+
 // PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
 rollbackClipRevision(clipId){
   const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
@@ -2078,6 +2240,7 @@ if (typeof localStorage !== 'undefined') {
       // PR-G1b: Language switch (Inspector dropdown)
       this._initLangDropdown();
       this._initBeginnerHintBar();
+      this._initLastOptimizeDetails();
 
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
@@ -4741,6 +4904,7 @@ renderTimeline(){
           if (k) el.setAttribute('aria-label', I18N.t(k));
         });
         if (typeof this._applyLastOptimizeSummaryI18n === 'function') this._applyLastOptimizeSummaryI18n();
+        if (typeof this._renderLastOptimizeDetailsBodyIfOpen === 'function') this._renderLastOptimizeDetailsBodyIfOpen();
       }catch(e){}
     },
     _initMasterVolumeUI(){

@@ -37,6 +37,8 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('python scripts/beginner_launch.py') !== -1, 'index.html must include launch command');
   assert(indexHtml.indexOf('id="studioLastOptimizeRow"') !== -1, 'index.html must include last optimize summary row');
   assert(indexHtml.indexOf('data-i18n="lastOpt.label"') !== -1, 'index.html last optimize row must use i18n label');
+  assert(indexHtml.indexOf('id="btnLastOptimizeDetails"') !== -1, 'index.html must include last optimize details button');
+  assert(indexHtml.indexOf('id="studioLastOptimizeDetails"') !== -1, 'index.html must include last optimize details panel');
 }
 
 // Last optimize: staleness uses revision + project doc key (see app.js)
@@ -46,6 +48,7 @@ if (fs.existsSync(appJsPath)) {
   assert(appJs.indexOf('_isLastOptimizeSnapshotStale') !== -1, 'app.js should detect last-optimize staleness');
   assert(appJs.indexOf('revisionIdAtRun') !== -1, 'app.js should pin last optimize to clip revision');
   assert(appJs.indexOf('docKeyAtRun') !== -1, 'app.js should pin last optimize to project storage key');
+  assert(appJs.indexOf('_initLastOptimizeDetails') !== -1, 'app.js should wire last optimize details popover');
 }
 
 const I18N = require('../../static/i18n/i18n.js');
