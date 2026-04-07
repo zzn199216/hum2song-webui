@@ -26,6 +26,13 @@ var indexHtmlPath = path.join(__dirname, '../../static/pianoroll/index.html');
 if (fs.existsSync(indexHtmlPath)) {
   var indexHtml = fs.readFileSync(indexHtmlPath, 'utf8');
   assert(indexHtml.indexOf('id="beginnerHintBar"') !== -1, 'index.html must include beginnerHintBar');
+  assert(indexHtml.indexOf('data-copy-cmd') !== -1, 'index.html must include copy-cmd buttons for beginner hint');
+  assert(indexHtml.indexOf('data-i18n="beginnerHint.title"') !== -1, 'index.html beginner hint must use i18n keys');
+  assert(indexHtml.indexOf('data-i18n-aria-label') !== -1, 'index.html beginner hint must support aria i18n');
+  assert(indexHtml.indexOf('id="beginnerHintHelpPanel"') !== -1, 'index.html must include beginner help panel');
+  assert(indexHtml.indexOf('id="btnBeginnerHintMoreHelp"') !== -1, 'index.html must include More help button');
+  assert(indexHtml.indexOf('python scripts/beginner_preflight.py') !== -1, 'index.html must include preflight command');
+  assert(indexHtml.indexOf('python scripts/beginner_launch.py') !== -1, 'index.html must include launch command');
 }
 
 const I18N = require('../../static/i18n/i18n.js');

@@ -1949,6 +1949,7 @@ if (typeof localStorage !== 'undefined') {
 
       // PR-G1b: Language switch (Inspector dropdown)
       this._initLangDropdown();
+      this._initBeginnerHintBar();
 
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
@@ -4486,6 +4487,96 @@ renderTimeline(){
         ]).then(() => { populate(); this._updateI18nLabels(); this.render(); }).catch(() => { populate(); this._updateI18nLabels(); this.render(); });
       }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
     },
+
+    _initBeginnerHintBar(){
+      try{
+        const KEY = 'h2s_beginner_hint_dismissed';
+        const bar = document.getElementById('beginnerHintBar');
+        const btnDismiss = document.getElementById('btnBeginnerHintDismiss');
+        if (!bar || !btnDismiss) return;
+        if (this._beginnerHintBarWired) return;
+        this._beginnerHintBarWired = true;
+
+        const applyDismissed = () => {
+          try{ if (typeof localStorage !== 'undefined' && localStorage.getItem(KEY) === '1') bar.classList.add('hidden'); }catch(e){}
+        };
+        applyDismissed();
+
+        const copyFallback = (text) => {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          try{ document.execCommand('copy'); }catch(err){}
+          document.body.removeChild(ta);
+        };
+
+        const copyToClipboard = (text, el) => {
+          const I18N = window.I18N;
+          const i18nKey = el.getAttribute('data-i18n');
+          const copiedLabel = (I18N && I18N.t) ? I18N.t('beginnerHint.copied') : 'Copied';
+          const orig = el.textContent;
+          const restore = () => {
+            if (I18N && I18N.t && i18nKey) el.textContent = I18N.t(i18nKey);
+            else el.textContent = orig;
+          };
+          const flash = () => {
+            el.textContent = copiedLabel;
+            setTimeout(restore, 1400);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(text).then(flash).catch(() => { copyFallback(text); flash(); });
+          } else {
+            copyFallback(text);
+            flash();
+          }
+        };
+
+        bar.addEventListener('click', (ev) => {
+          const raw = ev.target;
+          const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
+          if (!node || typeof node.closest !== 'function') return;
+          const t = node.closest('[data-copy-cmd]');
+          if (!t || !bar.contains(t)) return;
+          const cmd = t.getAttribute('data-copy-cmd');
+          if (!cmd) return;
+          ev.preventDefault();
+          copyToClipboard(cmd, t);
+        });
+
+        btnDismiss.addEventListener('click', () => {
+          bar.classList.add('hidden');
+          try{ if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, '1'); }catch(e){}
+        });
+
+        const panel = document.getElementById('beginnerHintHelpPanel');
+        const backdrop = document.getElementById('beginnerHintHelpBackdrop');
+        const btnMore = document.getElementById('btnBeginnerHintMoreHelp');
+        const btnClose = document.getElementById('btnBeginnerHintHelpClose');
+        const openHelp = () => {
+          if (!panel) return;
+          panel.classList.remove('hidden');
+          panel.setAttribute('aria-hidden', 'false');
+        };
+        const closeHelp = () => {
+          if (!panel) return;
+          panel.classList.add('hidden');
+          panel.setAttribute('aria-hidden', 'true');
+        };
+        if (btnMore) btnMore.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
+        if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
+        if (backdrop) backdrop.addEventListener('click', closeHelp);
+        document.addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Escape') return;
+          if (!panel || panel.classList.contains('hidden')) return;
+          closeHelp();
+        });
+      }catch(e){ console.warn('[beginnerHint] _initBeginnerHintBar failed', e); }
+    },
+
     _updateI18nLabels(){
       try{
         if (typeof document === 'undefined' || !window.I18N || typeof window.I18N.t !== 'function') return;
@@ -4501,6 +4592,10 @@ renderTimeline(){
         document.querySelectorAll('[data-i18n-title]').forEach(function(el){
           const k = el.getAttribute('data-i18n-title');
           if (k) el.title = I18N.t(k);
+        });
+        document.querySelectorAll('[data-i18n-aria-label]').forEach(function(el){
+          const k = el.getAttribute('data-i18n-aria-label');
+          if (k) el.setAttribute('aria-label', I18N.t(k));
         });
       }catch(e){}
     },

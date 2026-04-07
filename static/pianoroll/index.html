@@ -206,7 +206,16 @@
     .beginnerHintBar .beginnerHintBody{ flex:1; min-width:0; }
     .beginnerHintBar .beginnerHintTitle{ font-weight:700; margin:0 0 4px; letter-spacing:.02em; }
     .beginnerHintBar ol{ margin:4px 0 0 18px; padding:0; color:var(--muted); }
-    .beginnerHintBar li{ margin-bottom:2px; }
+    .beginnerHintBar li{ margin-bottom:8px; }
+    .beginnerHintBar li:last-child{ margin-bottom:2px; }
+    .beginnerHintCmdLine{
+      display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+      margin-top:4px; margin-left:-18px; padding-left:18px;
+    }
+    .beginnerHintBar .btn.beginnerHintMini{
+      font-size:11px; font-weight:600; padding:2px 8px; border-radius:8px;
+      flex-shrink:0;
+    }
     .beginnerHintBar code{
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size:11px;
@@ -217,7 +226,49 @@
       color:rgba(255,255,255,.9);
     }
     .beginnerHintBar a{ color:var(--accent2); }
-    #btnBeginnerHintDismiss{ flex-shrink:0; align-self:flex-start; }
+    /* Must win over .beginnerHintBar { display:flex } so Dismiss can hide the bar */
+    .beginnerHintBar.hidden{ display:none !important; }
+    .beginnerHintActions{
+      flex-shrink:0; align-self:flex-start;
+      display:flex; flex-direction:column; align-items:stretch; gap:6px;
+    }
+    #btnBeginnerHintDismiss{ align-self:flex-end; }
+
+    /* Beginner "More help" compact dialog (above layout, below topbar strip) */
+    .beginnerHintHelpPanel{
+      position:fixed; inset:0; z-index:10002;
+      display:flex; align-items:center; justify-content:center; padding:16px;
+      box-sizing:border-box;
+    }
+    .beginnerHintHelpPanel.hidden{ display:none !important; }
+    .beginnerHintHelpBackdrop{
+      position:absolute; inset:0; background:rgba(0,0,0,.52); cursor:pointer;
+    }
+    .beginnerHintHelpCard{
+      position:relative; z-index:1; width:min(420px, 100%);
+      max-height:min(78vh, 460px); overflow:auto;
+      border-radius:var(--radius); border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(32,39,52,.98), rgba(18,22,28,.98));
+      box-shadow:var(--shadow);
+      padding:14px 16px 16px;
+      pointer-events:auto;
+    }
+    .beginnerHintHelpHeader{
+      display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+      margin-bottom:10px;
+    }
+    .beginnerHintHelpHeader h3{
+      margin:0; font-size:15px; font-weight:800; letter-spacing:.02em; color:var(--text);
+    }
+    .beginnerHintHelpBody{ font-size:12px; line-height:1.45; color:var(--muted); }
+    .beginnerHintHelpBody ul{ margin:0 0 8px; padding-left:18px; }
+    .beginnerHintHelpBody li{ margin-bottom:6px; }
+    .beginnerHintHelpBody a{ color:var(--accent2); word-break:break-all; }
+    .beginnerHintHelpFailTitle{
+      margin:10px 0 4px; font-size:11px; font-weight:700; letter-spacing:.06em;
+      text-transform:uppercase; color:rgba(255,255,255,.55);
+    }
+    .beginnerHintHelpDocNote{ margin:10px 0 0; font-size:11px; line-height:1.4; opacity:.92; }
 
     .layout{
       flex:1;
@@ -814,17 +865,66 @@
     <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>
   </div>
 
-  <div id="beginnerHintBar" class="beginnerHintBar" role="region" aria-label="Getting started">
+  <div id="beginnerHintBar" class="beginnerHintBar" role="region" data-i18n-aria-label="beginnerHint.region" aria-label="Getting started (local setup)">
     <div class="beginnerHintBody">
-      <div class="beginnerHintTitle">Getting started (local setup)</div>
+      <div class="beginnerHintTitle" data-i18n="beginnerHint.title">Getting started (local setup)</div>
       <ol>
-        <li>In the repo: run <code>python scripts/beginner_preflight.py</code> to verify FFmpeg, FluidSynth, and SoundFont.</li>
-        <li>Start the API: <code>python scripts/beginner_launch.py</code> or <code>uvicorn app:app</code> (see <code>docs/BEGINNER_FIRST_RUN_CHECKLIST.md</code>).</li>
-        <li>Here: use <strong>Import audio</strong> or <strong>Record</strong>, then double-click a clip to edit.</li>
-        <li>If something looks wrong: open <a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a> and check the beginner checklist in the repo.</li>
+        <li>
+          <span data-i18n="beginnerHint.step1">In the repo root, run preflight (checks FFmpeg, FluidSynth, SoundFont):</span>
+          <div class="beginnerHintCmdLine">
+            <code>python scripts/beginner_preflight.py</code>
+            <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_preflight.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+          </div>
+        </li>
+        <li>
+          <span data-i18n="beginnerHint.step2a">Start the API (or use </span><code>uvicorn app:app</code><span data-i18n="beginnerHint.step2b">):</span>
+          <div class="beginnerHintCmdLine">
+            <code>python scripts/beginner_launch.py</code>
+            <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_launch.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+          </div>
+          <span class="smallmuted" style="display:block;margin-top:4px;" data-i18n="beginnerHint.checklistNote">Full steps: docs/BEGINNER_FIRST_RUN_CHECKLIST.md in the repo.</span>
+        </li>
+        <li>
+          <span data-i18n="beginnerHint.step3a">Here: use </span><strong data-i18n="top.uploadWav">Import audio</strong><span data-i18n="beginnerHint.step3b"> or </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.step3c">, then double-click a clip to edit.</span>
+        </li>
+        <li>
+          <span data-i18n="beginnerHint.step4a">If something looks wrong: open </span><a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a><span data-i18n="beginnerHint.step4b"> in a new tab.</span>
+        </li>
       </ol>
     </div>
-    <button type="button" id="btnBeginnerHintDismiss" class="btn ghost" style="padding:4px 10px;font-size:11px;">Dismiss</button>
+    <div class="beginnerHintActions">
+      <button type="button" id="btnBeginnerHintMoreHelp" class="btn ghost" style="padding:4px 10px;font-size:11px;" data-i18n="beginnerHint.moreHelp">More help</button>
+      <button type="button" id="btnBeginnerHintDismiss" class="btn ghost" style="padding:4px 10px;font-size:11px;" data-i18n="beginnerHint.dismiss">Dismiss</button>
+    </div>
+  </div>
+
+  <div id="beginnerHintHelpPanel" class="beginnerHintHelpPanel hidden" role="dialog" aria-modal="true" aria-hidden="true" data-i18n-aria-label="beginnerHint.helpTitle">
+    <div class="beginnerHintHelpBackdrop" id="beginnerHintHelpBackdrop" aria-hidden="true"></div>
+    <div class="beginnerHintHelpCard" role="document">
+      <div class="beginnerHintHelpHeader">
+        <h3 id="beginnerHintHelpHeading" data-i18n="beginnerHint.helpTitle">Quick checklist (local)</h3>
+        <button type="button" id="btnBeginnerHintHelpClose" class="btnClose" data-i18n="beginnerHint.helpClose">Close</button>
+      </div>
+      <div class="beginnerHintHelpBody">
+        <ul>
+          <li data-i18n="beginnerHint.helpL1">Preflight (repo root): python scripts/beginner_preflight.py — checks FFmpeg, FluidSynth, and SoundFont.</li>
+          <li data-i18n="beginnerHint.helpL2">Launch server: python scripts/beginner_launch.py (or uvicorn app:app from repo root).</li>
+          <li data-i18n="beginnerHint.helpL3">In Studio: Import audio or Record, then double-click a clip to edit.</li>
+          <li>
+            <span data-i18n="beginnerHint.helpL4a">Verify the backend:</span>
+            <a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a>
+            <span data-i18n="beginnerHint.helpL4b">— JSON shows checks (soundfont, ffmpeg, fluidsynth).</span>
+          </li>
+        </ul>
+        <div class="beginnerHintHelpFailTitle" data-i18n="beginnerHint.helpFailuresTitle">Common issues</div>
+        <ul>
+          <li data-i18n="beginnerHint.helpF1">Missing SoundFont: add a .sf2 under assets/ (default assets/piano.sf2).</li>
+          <li data-i18n="beginnerHint.helpF2">Port in use or bind error: stop other servers or change PORT in .env.</li>
+          <li data-i18n="beginnerHint.helpF3">First pip install is slow: large ML/audio dependencies are expected.</li>
+        </ul>
+        <p class="beginnerHintHelpDocNote smallmuted" data-i18n="beginnerHint.helpDocNote">The full checklist file lives in your repo clone: docs/BEGINNER_FIRST_RUN_CHECKLIST.md</p>
+      </div>
+    </div>
   </div>
 
   <div class="layout">
@@ -1257,22 +1357,5 @@
   <script src="/static/pianoroll/controllers/export_wav_controller.js"></script>
   <script src="/static/pianoroll/core/score_heuristic_split.js"></script>
   <script src="/static/pianoroll/app.js"></script>
-  <script>
-    (function () {
-      var KEY = 'h2s_beginner_hint_dismissed';
-      var bar = document.getElementById('beginnerHintBar');
-      var btn = document.getElementById('btnBeginnerHintDismiss');
-      if (!bar || !btn) return;
-      try {
-        if (localStorage.getItem(KEY) === '1') bar.classList.add('hidden');
-      } catch (e) {}
-      btn.addEventListener('click', function () {
-        bar.classList.add('hidden');
-        try {
-          localStorage.setItem(KEY, '1');
-        } catch (e) {}
-      });
-    })();
-  </script>
 </body>
 </html>
