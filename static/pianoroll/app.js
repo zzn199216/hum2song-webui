@@ -104,6 +104,25 @@
     return { templateId: null, templateLabel: '', intent: null };
   }
 
+  /**
+   * Narrow Assistant command: add track (matches `runCommand('add_track')` only).
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddTrackIntentFromText`.
+   */
+  function _resolveAssistantAddTrackIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const phrases = [
+      'add a track',
+      'add track',
+      'create a new track',
+      'create new track',
+      'new track',
+    ];
+    return phrases.indexOf(s) >= 0;
+  }
+
   /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
   function _templateExecutionFieldsFromPlanKind(planKind){
     if (planKind == null || typeof planKind !== 'string') return null;
@@ -2912,6 +2931,36 @@ ensureTrackButtons(){
       if (!text) return;
       inp.value = '';
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      if (_resolveAssistantAddTrackIntentFromText(text)){
+        this._aiAssistItems = this._aiAssistItems || [];
+        const pending = { type: 'sys', text: _t('aiAssist.addTrackRunning'), _pendingAddTrack: true };
+        this._aiAssistItems.push(pending);
+        this.render();
+        const self = this;
+        Promise.resolve(this.runCommand('add_track', {})).then(function(res){
+          const idx = (self._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            if (res && res.ok){
+              const d = res.data || {};
+              const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
+              const num = (ti != null) ? String(ti + 1) : '?';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackOk').replace(/\{n\}/g, num) };
+            } else {
+              const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+            }
+          }
+          self.render();
+        }).catch(function(err){
+          const idx = (self._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            const msg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+          }
+          self.render();
+        });
+        return;
+      }
       const clipId = this.state.selectedClipId;
       if (!clipId) {
         this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });

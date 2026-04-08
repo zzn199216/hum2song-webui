@@ -9,7 +9,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -41,6 +41,22 @@ function mapAiAssistTextToTemplate(text) {
     }
   }
   return { templateId: null, templateLabel: '', intent: null };
+}
+
+/** Mirror static/pianoroll/app.js `_resolveAssistantAddTrackIntentFromText` (keep in sync). */
+function resolveAssistantAddTrackIntentFromText(text) {
+  if (!text || typeof text !== 'string') return false;
+  let s = String(text).toLowerCase().trim();
+  s = s.replace(/^please\s+/, '');
+  s = s.replace(/[.!?]+$/g, '').trim();
+  const phrases = [
+    'add a track',
+    'add track',
+    'create a new track',
+    'create new track',
+    'new track',
+  ];
+  return phrases.indexOf(s) >= 0;
 }
 
 function templateExecutionFieldsFromPlanKind(planKind) {
@@ -426,6 +442,9 @@ function createFakeApp(opts) {
           data: { clipId: cid, rollbackResult: { ok: true, changed: true } },
         });
       }
+      if (cmd === 'add_track') {
+        return Promise.resolve({ ok: true, data: { trackIndex: 2, trackId: 't-new' } });
+      }
       return Promise.resolve({ ok: true });
     },
     getProjectV2() {
@@ -439,6 +458,28 @@ function createFakeApp(opts) {
     const text = String(inp ? inp.value : '').trim();
     if (!text) return;
     if (inp) inp.value = '';
+    if (resolveAssistantAddTrackIntentFromText(text)) {
+      this._aiAssistItems = this._aiAssistItems || [];
+      const pending = { type: 'sys', text: this._t('aiAssist.addTrackRunning'), _pendingAddTrack: true };
+      this._aiAssistItems.push(pending);
+      this.render();
+      const self = this;
+      return Promise.resolve(this.runCommand('add_track', {})).then(function (res) {
+        const idx = (self._aiAssistItems || []).indexOf(pending);
+        if (idx >= 0) {
+          if (res && res.ok) {
+            const d = res.data || {};
+            const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
+            const num = (ti != null) ? String(ti + 1) : '?';
+            self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.addTrackOk').replace(/\{n\}/g, num) };
+          } else {
+            const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+            self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+          }
+        }
+        self.render();
+      });
+    }
     const clipId = this.state.selectedClipId;
     if (!clipId) {
       this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
@@ -612,6 +653,44 @@ function createFakeApp(opts) {
   assert(app._aiAssistItems[0].text === 'Select a clip first.', 'should show selectClipFirst');
   console.log('PASS Send with no clip => selectClipFirst');
 })();
+
+(function testResolveAddTrackIntentNarrow() {
+  assert(resolveAssistantAddTrackIntentFromText('add a track') === true);
+  assert(resolveAssistantAddTrackIntentFromText('Add A Track.') === true);
+  assert(resolveAssistantAddTrackIntentFromText('please add a track') === true);
+  assert(resolveAssistantAddTrackIntentFromText('create new track') === true);
+  assert(resolveAssistantAddTrackIntentFromText('new track') === true);
+  assert(resolveAssistantAddTrackIntentFromText('add more dynamics') === false);
+  assert(resolveAssistantAddTrackIntentFromText('the pitch is off') === false);
+  assert(resolveAssistantAddTrackIntentFromText('create a new melody') === false);
+  console.log('PASS add-track intent phrases narrow');
+})();
+
+(function testSendAddTrackNoClipCallsRunCommand() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = null;
+  doc.getElementById('aiAssistInput').value = 'add a track';
+  const p = app._aiAssistSend();
+  assert(runCommandCalls.length === 1, 'runCommand once');
+  assert(runCommandCalls[0].command === 'add_track', 'command add_track');
+  assert(JSON.stringify(runCommandCalls[0].payload || {}) === '{}', 'empty payload');
+  return p.then(function () {
+    assert(app._aiAssistItems.length === 1, 'one sys line after done');
+    assert(app._aiAssistItems[0].text === 'Added track 3.', '1-based track label from trackIndex 2');
+  });
+})().then(function () { console.log('PASS Send add a track => runCommand add_track'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddTrackWithClipSelectedDoesNotCreateOptimizeCard() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'add a track';
+  const p = app._aiAssistSend();
+  assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'add_track', 'add_track not optimize');
+  return p.then(function () {
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'sys', 'sys result not optimize card');
+    assert(!runCommandCalls.some(function (c) { return c.command === 'optimize_clip'; }), 'no optimize on send');
+  });
+})().then(function () { console.log('PASS add track with clip selected still command add_track only'); }).catch(function (e) { console.error(e); process.exit(1); });
 
 (function testSendWithClipCreatesCard() {
   const { app, doc } = createFakeApp();
