@@ -29,6 +29,7 @@ runOne('scripts/tests/regression_templates_directives.test.js');
 runOne('scripts/tests/instrument_library_store.test.js');
 runOne('scripts/tests/i18n.test.js');
 runOne('scripts/tests/commands.test.js');
+runOne('scripts/tests/run_command_mvp.test.js');
 runOne('scripts/tests/ai_assist_dock.test.js');
 runOne('scripts/tests/selection_sync.test.js');
 runOne('scripts/tests/score_heuristic_split.test.js');

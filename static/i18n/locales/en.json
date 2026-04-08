@@ -163,6 +163,10 @@
   "cmd.undoing": "Undoing…",
   "cmd.undone": "Undone.",
   "cmd.openingEditor": "Opening editor…",
+  "cmd.addClipTimeline": "Adding clip…",
+  "cmd.removeInstance": "Removing clip…",
+  "cmd.moveInstance": "Moving clip…",
+  "cmd.addTrack": "Adding track…",
   "cmd.failedPrefix": "Failed",
 
   "cliplib.title": "Clip Library",

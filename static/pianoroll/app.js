@@ -1226,6 +1226,10 @@ _cmdLabel(cmd){
   if (cmd === 'optimize_clip') return _t('cmd.optimizing');
   if (cmd === 'rollback_clip') return _t('cmd.undoing');
   if (cmd === 'open_editor') return _t('cmd.openingEditor');
+  if (cmd === 'add_clip_to_timeline') return _t('cmd.addClipTimeline');
+  if (cmd === 'remove_instance') return _t('cmd.removeInstance');
+  if (cmd === 'move_instance') return _t('cmd.moveInstance');
+  if (cmd === 'add_track') return _t('cmd.addTrack');
   return cmd;
 },
 _cmdDoneLabel(cmd){
@@ -1296,6 +1300,85 @@ async runCommand(command, payload){
         const res = this.rollbackClipRevision(clipId);
         if (res && res.ok) { persist(); this.render(); }
         result.data = { clipId, rollbackResult: res };
+        break;
+      }
+      case 'add_clip_to_timeline': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        const clips = this.project.clips || [];
+        const clipOk = Array.isArray(clips) && clips.some(c => c && c.id === clipId);
+        if (!clipOk) throw new Error('clip not found');
+        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+        const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? this.project.bpm : 120;
+        let startSec;
+        if (payload.startBeat != null && P && typeof P.normalizeBeat === 'function' && typeof P.beatToSec === 'function' && isFinite(Number(payload.startBeat))){
+          const sb = P.normalizeBeat(Number(payload.startBeat));
+          startSec = P.beatToSec(sb, bpm);
+        }
+        let trackIndex;
+        if (payload.trackIndex != null && Number.isFinite(Number(payload.trackIndex))){
+          const max = Math.max(0, ((this.project.tracks || []).length) - 1);
+          trackIndex = Math.max(0, Math.min(max, Math.round(Number(payload.trackIndex))));
+        }
+        this.addClipToTimeline(clipId, startSec, trackIndex);
+        result.message = 'added';
+        const selId = this.state && this.state.selectedInstanceId;
+        const instAdded = selId ? (this.project.instances || []).find(x => x && x.id === selId) : null;
+        const tiOut = instAdded && typeof instAdded.trackIndex === 'number' ? instAdded.trackIndex : (trackIndex != null ? trackIndex : (Number.isFinite(this.state.activeTrackIndex) ? this.state.activeTrackIndex : 0));
+        const sbOut = (instAdded && P && typeof P.secToBeat === 'function') ? P.secToBeat(instAdded.startSec || 0, bpm) : ((startSec != null && P && typeof P.secToBeat === 'function') ? P.secToBeat(startSec, bpm) : null);
+        result.data = { clipId, instanceId: instAdded ? instAdded.id : null, startBeat: sbOut, trackIndex: tiOut };
+        break;
+      }
+      case 'remove_instance': {
+        const instanceId = payload.instanceId;
+        if (!instanceId) throw new Error('instanceId required');
+        const idx = (this.project.instances || []).findIndex(x => x && x.id === instanceId);
+        if (idx < 0) throw new Error('instance not found');
+        this.deleteInstance(instanceId);
+        result.message = 'removed';
+        result.data = { instanceId };
+        break;
+      }
+      case 'move_instance': {
+        const instanceId = payload.instanceId;
+        if (!instanceId) throw new Error('instanceId required');
+        const inst = (this.project.instances || []).find(x => x && x.id === instanceId);
+        if (!inst) throw new Error('instance not found');
+        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+        const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? this.project.bpm : 120;
+        let changed = false;
+        if (payload.startBeat != null && P && typeof P.normalizeBeat === 'function' && typeof P.beatToSec === 'function' && isFinite(Number(payload.startBeat))){
+          const sb = P.normalizeBeat(Number(payload.startBeat));
+          inst.startSec = P.beatToSec(sb, bpm);
+          changed = true;
+        }
+        if (payload.trackIndex != null && Number.isFinite(Number(payload.trackIndex))){
+          const max = Math.max(0, ((this.project.tracks || []).length) - 1);
+          inst.trackIndex = Math.max(0, Math.min(max, Math.round(Number(payload.trackIndex))));
+          changed = true;
+        }
+        if (!changed){
+          result.message = 'noop';
+          result.data = { instanceId, noop: true };
+          break;
+        }
+        persist();
+        this.render();
+        result.message = 'moved';
+        result.data = {
+          instanceId,
+          startBeat: (P && typeof P.secToBeat === 'function') ? P.secToBeat(inst.startSec || 0, bpm) : null,
+          trackIndex: (typeof inst.trackIndex === 'number') ? inst.trackIndex : 0,
+        };
+        break;
+      }
+      case 'add_track': {
+        this.addTrack();
+        result.message = 'added';
+        const p2 = (typeof this.getProjectV2 === 'function') ? this.getProjectV2() : null;
+        const tracks = (p2 && Array.isArray(p2.tracks)) ? p2.tracks : [];
+        const last = tracks.length ? tracks[tracks.length - 1] : null;
+        result.data = { trackIndex: tracks.length - 1, trackId: last && (last.trackId || last.id) ? String(last.trackId || last.id) : null };
         break;
       }
       default:

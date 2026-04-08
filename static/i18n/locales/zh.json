@@ -163,6 +163,10 @@
   "cmd.undoing": "正在撤销…",
   "cmd.undone": "已撤销。",
   "cmd.openingEditor": "正在打开编辑器…",
+  "cmd.addClipTimeline": "正在添加片段…",
+  "cmd.removeInstance": "正在移除片段…",
+  "cmd.moveInstance": "正在移动片段…",
+  "cmd.addTrack": "正在添加轨道…",
   "cmd.failedPrefix": "失败",
 
   "cliplib.title": "片段库",
