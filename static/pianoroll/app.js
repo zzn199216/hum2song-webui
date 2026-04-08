@@ -123,6 +123,28 @@
     return phrases.indexOf(s) >= 0;
   }
 
+  /**
+   * Narrow Assistant command: move selected timeline instance horizontally by beat delta.
+   * Returns { direction: 'left'|'right', deltaBeats: number } or null.
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantMoveInstanceIntentFromText`.
+   */
+  function _resolveAssistantMoveInstanceIntentFromText(text){
+    if (!text || typeof text !== 'string') return null;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/\s+please\s*$/g, '').trim();
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const re = /^move\s+(?:this|(?:the\s+)?selected\s+instance|(?:the\s+)?selected\s+block)\s+(left|right)\s+(\d+(?:\.\d+)?)\s*(?:beat|beats)?$/;
+    const m = s.match(re);
+    if (!m) return null;
+    const dir = m[1];
+    const num = Number(m[2]);
+    if (!isFinite(num) || num <= 0) return null;
+    const MAX_DELTA = 64;
+    if (num > MAX_DELTA) return null;
+    return { direction: (dir === 'left') ? 'left' : 'right', deltaBeats: num };
+  }
+
   /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
   function _templateExecutionFieldsFromPlanKind(planKind){
     if (planKind == null || typeof planKind !== 'string') return null;
@@ -2956,6 +2978,59 @@ ensureTrackButtons(){
           if (idx >= 0){
             const msg = (err && err.message) ? String(err.message).slice(0, 120) : '';
             self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+          }
+          self.render();
+        });
+        return;
+      }
+      const moveIntent = _resolveAssistantMoveInstanceIntentFromText(text);
+      if (moveIntent){
+        this._aiAssistItems = this._aiAssistItems || [];
+        const instId = this.state && this.state.selectedInstanceId;
+        if (!instId){
+          this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectInstanceFirst') });
+          this.render();
+          return;
+        }
+        const inst = (this.project.instances || []).find(function(x){ return x && x.id === instId; });
+        if (!inst){
+          this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
+          this.render();
+          return;
+        }
+        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+        const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? this.project.bpm : 120;
+        const curBeat = (P && typeof P.secToBeat === 'function') ? P.secToBeat(inst.startSec || 0, bpm) : 0;
+        const delta = (moveIntent.direction === 'right') ? moveIntent.deltaBeats : -moveIntent.deltaBeats;
+        const rawNext = curBeat + delta;
+        const clamped = rawNext < 0;
+        let nextBeat = clamped ? 0 : rawNext;
+        if (P && typeof P.normalizeBeat === 'function') nextBeat = P.normalizeBeat(nextBeat);
+        const pending = { type: 'sys', text: _t('aiAssist.moveInstanceRunning'), _pendingMoveInstance: true };
+        this._aiAssistItems.push(pending);
+        this.render();
+        const self = this;
+        const dirWord = _t(moveIntent.direction === 'left' ? 'aiAssist.dirLeft' : 'aiAssist.dirRight');
+        Promise.resolve(this.runCommand('move_instance', { instanceId: instId, startBeat: nextBeat })).then(function(res){
+          const idx = (self._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            if (res && res.ok){
+              let msg = _t('aiAssist.moveInstanceOk')
+                .replace(/\{dir\}/g, dirWord)
+                .replace(/\{delta\}/g, String(moveIntent.deltaBeats));
+              if (clamped) msg += ' ' + _t('aiAssist.moveInstanceClamped');
+              self._aiAssistItems[idx] = { type: 'sys', text: msg };
+            } else {
+              const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+            }
+          }
+          self.render();
+        }).catch(function(err){
+          const idx = (self._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
           }
           self.render();
         });

@@ -9,7 +9,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -57,6 +57,24 @@ function resolveAssistantAddTrackIntentFromText(text) {
     'new track',
   ];
   return phrases.indexOf(s) >= 0;
+}
+
+/** Mirror static/pianoroll/app.js `_resolveAssistantMoveInstanceIntentFromText` (keep in sync). */
+function resolveAssistantMoveInstanceIntentFromText(text) {
+  if (!text || typeof text !== 'string') return null;
+  let s = String(text).toLowerCase().trim();
+  s = s.replace(/^please\s+/, '');
+  s = s.replace(/\s+please\s*$/g, '').trim();
+  s = s.replace(/[.!?]+$/g, '').trim();
+  const re = /^move\s+(?:this|(?:the\s+)?selected\s+instance|(?:the\s+)?selected\s+block)\s+(left|right)\s+(\d+(?:\.\d+)?)\s*(?:beat|beats)?$/;
+  const m = s.match(re);
+  if (!m) return null;
+  const dir = m[1];
+  const num = Number(m[2]);
+  if (!isFinite(num) || num <= 0) return null;
+  const MAX_DELTA = 64;
+  if (num > MAX_DELTA) return null;
+  return { direction: (dir === 'left') ? 'left' : 'right', deltaBeats: num };
 }
 
 function templateExecutionFieldsFromPlanKind(planKind) {
@@ -417,8 +435,8 @@ function createFakeApp(opts) {
   const setOptimizeOptionsCalls = [];
   const runCommandCalls = [];
   const app = {
-    state: { selectedClipId: null },
-    project: { clips: [{ id: 'clip-1', name: 'Test Clip', parentRevisionId: 'rev-0' }] },
+    state: { selectedClipId: null, selectedInstanceId: null },
+    project: { bpm: 120, clips: [{ id: 'clip-1', name: 'Test Clip', parentRevisionId: 'rev-0' }], instances: [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }], tracks: [{ id: 'tr0' }] },
     _aiAssistItems: [],
     _aiAssistBound: false,
     setOptimizeOptions(cid, opts) {
@@ -444,6 +462,9 @@ function createFakeApp(opts) {
       }
       if (cmd === 'add_track') {
         return Promise.resolve({ ok: true, data: { trackIndex: 2, trackId: 't-new' } });
+      }
+      if (cmd === 'move_instance') {
+        return Promise.resolve({ ok: true, data: { instanceId: payload.instanceId, startBeat: payload.startBeat } });
       }
       return Promise.resolve({ ok: true });
     },
@@ -475,6 +496,46 @@ function createFakeApp(opts) {
           } else {
             const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
             self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+          }
+        }
+        self.render();
+      });
+    }
+    const moveIntent = resolveAssistantMoveInstanceIntentFromText(text);
+    if (moveIntent) {
+      if (!this.state.selectedInstanceId) {
+        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectInstanceFirst') });
+        this.render();
+        return Promise.resolve();
+      }
+      const instId = this.state.selectedInstanceId;
+      const inst = (this.project.instances || []).find(function (x) { return x && x.id === instId; });
+      if (!inst) {
+        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.moveInstanceStale') });
+        this.render();
+        return Promise.resolve();
+      }
+      const bpm = (this.project && this.project.bpm) || 120;
+      const curBeat = (Number(inst.startSec) || 0) * bpm / 60;
+      const delta = (moveIntent.direction === 'right') ? moveIntent.deltaBeats : -moveIntent.deltaBeats;
+      const rawNext = curBeat + delta;
+      const clamped = rawNext < 0;
+      let nextBeat = clamped ? 0 : rawNext;
+      const pending = { type: 'sys', text: this._t('aiAssist.moveInstanceRunning'), _pendingMoveInstance: true };
+      this._aiAssistItems.push(pending);
+      this.render();
+      const self = this;
+      const dirWord = this._t(moveIntent.direction === 'left' ? 'aiAssist.dirLeft' : 'aiAssist.dirRight');
+      return Promise.resolve(this.runCommand('move_instance', { instanceId: inst.id, startBeat: nextBeat })).then(function (res) {
+        const idx = (self._aiAssistItems || []).indexOf(pending);
+        if (idx >= 0) {
+          if (res && res.ok) {
+            let msg = self._t('aiAssist.moveInstanceOk').replace(/\{dir\}/g, dirWord).replace(/\{delta\}/g, String(moveIntent.deltaBeats));
+            if (clamped) msg += ' ' + self._t('aiAssist.moveInstanceClamped');
+            self._aiAssistItems[idx] = { type: 'sys', text: msg };
+          } else {
+            const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+            self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
           }
         }
         self.render();
@@ -665,6 +726,56 @@ function createFakeApp(opts) {
   assert(resolveAssistantAddTrackIntentFromText('create a new melody') === false);
   console.log('PASS add-track intent phrases narrow');
 })();
+
+(function testResolveMoveInstanceIntentNarrow() {
+  const a = resolveAssistantMoveInstanceIntentFromText('move this right 1 beat');
+  assert(a && a.direction === 'right' && a.deltaBeats === 1);
+  const b = resolveAssistantMoveInstanceIntentFromText('move selected instance left 2 beats');
+  assert(b && b.direction === 'left' && b.deltaBeats === 2);
+  const c = resolveAssistantMoveInstanceIntentFromText('move selected block left 0.5 beat');
+  assert(c && c.direction === 'left' && c.deltaBeats === 0.5);
+  assert(resolveAssistantMoveInstanceIntentFromText('shift it later') === null);
+  assert(resolveAssistantMoveInstanceIntentFromText('move this right 1 bar') === null);
+  assert(resolveAssistantMoveInstanceIntentFromText('move this right 100 beats') === null);
+  console.log('PASS move-instance intent phrases narrow');
+})();
+
+(function testSendMoveInstanceNoSelectionRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.state.selectedInstanceId = null;
+  doc.getElementById('aiAssistInput').value = 'move this right 1 beat';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text.indexOf('timeline instance') >= 0);
+  console.log('PASS move instance without selection => refuse');
+})();
+
+(function testSendMoveInstanceNoClipCallsRunCommand() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = null;
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'move this right 1 beat';
+  return app._aiAssistSend().then(function () {
+    assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'move_instance');
+    assert(runCommandCalls[0].payload.instanceId === 'inst-1');
+    assert(runCommandCalls[0].payload.startBeat === 1);
+    assert(runCommandCalls[0].payload.trackIndex === undefined);
+    assert(app._aiAssistItems[0].text.indexOf('Moved') >= 0 && app._aiAssistItems[0].text.indexOf('1') >= 0);
+  });
+})().then(function () { console.log('PASS move instance without clip => move_instance'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendMoveInstanceClampLeft() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'move this left 1 beat';
+  return app._aiAssistSend().then(function () {
+    assert(runCommandCalls[0].payload.startBeat === 0);
+    assert(app._aiAssistItems[0].text.indexOf('clamped') >= 0 || app._aiAssistItems[0].text.indexOf('beat 0') >= 0);
+  });
+})().then(function () { console.log('PASS move left clamps to beat 0'); }).catch(function (e) { console.error(e); process.exit(1); });
 
 (function testSendAddTrackNoClipCallsRunCommand() {
   const { app, doc, runCommandCalls } = createFakeApp();
