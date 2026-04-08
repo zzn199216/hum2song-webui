@@ -79,6 +79,7 @@
   "io.importAudioStoredLocal": "已导入音频片段（已保存在本浏览器本地）。",
   "io.importAudioNoStore": "当前环境无法使用本地音频存储。",
   "io.importAudioStoreFailed": "无法将导入的音频保存到本地（存储空间不足或已被阻止）。",
+  "io.addRecordingAsAudioDone": "已将录音添加为音频片段（已保存在本浏览器）。",
 
   "export.exportMIDI": "导出 MIDI",
   "export.exportWAV": "导出 WAV",
@@ -165,6 +166,9 @@
   "cliplib.title": "片段库",
   "cliplib.useLastRecording": "使用上次录音",
   "cliplib.playLastRecording": "播放上次录音",
+  "cliplib.addLastAsAudio": "添加为音频",
+  "cliplib.addLastAsAudioTitle": "将上次麦克风录音添加为原始音频片段（与文件导入相同）",
+  "cliplib.recordingClipName": "录音",
   "cliplib.clear": "清除",
   "cliplib.autoOpenAfterImport": "导入后自动打开编辑器",
   "cliplib.generatePill": "音符：导入音频 → 服务器转录 → 可编辑片段",

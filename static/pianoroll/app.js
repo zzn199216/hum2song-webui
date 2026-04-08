@@ -2235,6 +2235,8 @@ if (typeof localStorage !== 'undefined') {
       });
       $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
       $('#btnPlayLast').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.playLastRecording(); });
+      const btnAddLastAsAudio = $('#btnAddLastAsAudio');
+      if (btnAddLastAsAudio) btnAddLastAsAudio.addEventListener('click', () => { this.addLastRecordingAsNativeAudioClip(); });
       const chkAutoOpen = $('#chkAutoOpenAfterImport');
       if (chkAutoOpen) {
         chkAutoOpen.checked = !!this.state.autoOpenAfterImport;
@@ -3883,19 +3885,22 @@ renderTimeline(){
       });
     },
 
-    async importAudioFileAsNativeClip(){
+    /**
+     * Shared path for native audio clips: decode duration, IndexedDB store, create clip + instance, persist.
+     * @param {File|Blob} file
+     * @param {{ baseName?: string, statusDoneKey?: string }} opts - baseName overrides stem from file.name; optional i18n key for final status (default io.importAudioStoredLocal)
+     * @returns {Promise<{ ok: boolean, reason?: string, clipId?: string }>}
+     */
+    async _commitNativeAudioFile(file, opts){
+      opts = opts || {};
       const P = window.H2SProject;
       if (!P || typeof P.createClipFromAudio !== 'function' || typeof P.createInstanceV2 !== 'function'){
         try { alert('Audio import is unavailable (project helpers missing).'); } catch (_e) {}
-        return;
+        return { ok: false, reason: 'no_project_helpers' };
       }
-      let file;
-      try{
-        file = await this.pickFile('audio/*');
-      } catch (e){
-        return;
+      if (!file || !(file instanceof Blob)){
+        return { ok: false, reason: 'no_file' };
       }
-      if (!file) return;
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       this.setImportStatus(_t('io.importAudioDecoding'), false);
       let durationSec = 1;
@@ -3909,7 +3914,7 @@ renderTimeline(){
       const LAS = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
       if (!LAS || typeof LAS.storeImportedAudioFile !== 'function'){
         try { alert(_t('io.importAudioNoStore') || 'Local audio storage is not available in this environment.'); } catch (_e) {}
-        return;
+        return { ok: false, reason: 'no_local_store' };
       }
       let assetRef;
       try{
@@ -3918,19 +3923,22 @@ renderTimeline(){
       } catch (e){
         console.warn('[App] storeImportedAudioFile failed', e);
         try { alert(_t('io.importAudioStoreFailed') || 'Could not save imported audio locally (storage full or blocked).'); } catch (_e) {}
-        return;
+        return { ok: false, reason: 'store_failed' };
       }
       if (!assetRef){
         try { alert(_t('io.importAudioStoreFailed') || 'Could not save imported audio locally.'); } catch (_e) {}
-        return;
+        return { ok: false, reason: 'no_asset_ref' };
       }
-      const baseName = (file.name && /\.[^/.]+$/.test(file.name))
+      const nameFromFile = (file.name && /\.[^/.]+$/.test(String(file.name)))
         ? String(file.name).replace(/\.[^/.]+$/, '')
-        : 'Imported audio';
+        : '';
+      const baseName = (typeof opts.baseName === 'string' && String(opts.baseName).trim())
+        ? String(opts.baseName).trim()
+        : (nameFromFile || 'Imported audio');
       let p2 = this.getProjectV2();
       if (!p2) p2 = _projectV1ToV2(this.project);
       if (!p2 || !_isProjectV2(p2)){
-        return;
+        return { ok: false, reason: 'no_project_v2' };
       }
       const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
       const clip = P.createClipFromAudio({
@@ -3955,8 +3963,30 @@ renderTimeline(){
       this.state.selectedClipId = clip.id;
       this.state.selectedInstanceId = inst.id;
       this.setProjectFromV2(p2);
-      this.setImportStatus(_t('io.importAudioStoredLocal'), false);
-      log('Imported native audio clip: ' + clip.id);
+      const doneKey = (typeof opts.statusDoneKey === 'string' && opts.statusDoneKey.trim()) ? opts.statusDoneKey.trim() : 'io.importAudioStoredLocal';
+      this.setImportStatus(_t(doneKey), false);
+      log('Committed native audio clip: ' + clip.id);
+      return { ok: true, clipId: clip.id };
+    },
+
+    async importAudioFileAsNativeClip(){
+      let file;
+      try{
+        file = await this.pickFile('audio/*');
+      } catch (e){
+        return;
+      }
+      if (!file) return;
+      await this._commitNativeAudioFile(file, {});
+    },
+
+    /** Record → native audio: uses same pipeline as direct import (`_commitNativeAudioFile`). */
+    async addLastRecordingAsNativeAudioClip(){
+      const f = this.state && this.state.lastRecordedFile;
+      if (!f) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const baseName = _t('cliplib.recordingClipName') || 'Recording';
+      await this._commitNativeAudioFile(f, { baseName, statusDoneKey: 'io.addRecordingAsAudioDone' });
     },
 
     /** PR-C2: Set import status (upload/generate progress). showCancel: only during active import. */
@@ -4345,6 +4375,11 @@ renderTimeline(){
       if (playLast) {
         playLast.disabled = !this.state.lastRecordedFile;
         playLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
+      }
+      const addLastAsAudio = document.getElementById('btnAddLastAsAudio');
+      if (addLastAsAudio) {
+        addLastAsAudio.disabled = !this.state.lastRecordedFile;
+        addLastAsAudio.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
       }
       if (timerEl) timerEl.style.display = active ? '' : 'none';
       if (waveEl) waveEl.style.display = active ? '' : 'none';
