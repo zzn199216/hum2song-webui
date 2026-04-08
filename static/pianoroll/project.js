@@ -452,9 +452,20 @@
         if (!isFiniteNumber(c.createdAt)) c.createdAt = Date.now();
         if (!c.meta || typeof c.meta !== 'object') c.meta = {};
         const srcTempo = (c.meta && isFiniteNumber(c.meta.sourceTempoBpm)) ? Number(c.meta.sourceTempoBpm) : null;
-        c.score = ensureScoreBeatIds(c.score);
-        recomputeClipMetaFromScoreBeat(c);
-        if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        if (clipKind(c) === 'audio'){
+          if (!c.audio || typeof c.audio !== 'object') c.audio = {};
+          c.audio.assetRef = (typeof c.audio.assetRef === 'string') ? c.audio.assetRef : '';
+          let dur = Number(c.audio.durationSec);
+          if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+          c.audio.durationSec = dur;
+          if ('score' in c) delete c.score;
+          recomputeClipMetaFromAudio(c, bpm);
+          if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        } else {
+          c.score = ensureScoreBeatIds(c.score);
+          recomputeClipMetaFromScoreBeat(c);
+          if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        }
         if (c.meta && 'spanSec' in c.meta) delete c.meta.spanSec;
         map[id] = c;
         order.push(id);
@@ -822,6 +833,36 @@
     return clip;
   }
 
+  /** ProjectDoc v2: 'note' (default) or 'audio'. Missing/invalid kind => note clip. */
+  function clipKind(clip){
+    if (!clip || typeof clip !== 'object') return 'note';
+    return (clip.kind === 'audio') ? 'audio' : 'note';
+  }
+
+  /**
+   * Audio clips: derive meta.spanBeat from audio.durationSec and project BPM.
+   * Does not require clip.score. Preserves meta.agent and meta.sourceTempoBpm when present.
+   */
+  function recomputeClipMetaFromAudio(clip, bpm){
+    if (!clip) return clip;
+    const bpmUsed = coerceBpm(bpm);
+    const audio = clip.audio && typeof clip.audio === 'object' ? clip.audio : {};
+    const durSec = Number(audio.durationSec);
+    const spanBeat = (isFiniteNumber(durSec) && durSec > 0)
+      ? normalizeBeat(secToBeat(durSec, bpmUsed))
+      : 0;
+    const oldMeta = clip.meta;
+    if (!clip.meta) clip.meta = {};
+    clip.meta.notes = 0;
+    clip.meta.pitchMin = null;
+    clip.meta.pitchMax = null;
+    clip.meta.spanBeat = spanBeat;
+    if (oldMeta && oldMeta.agent) clip.meta.agent = oldMeta.agent;
+    if (oldMeta && isFiniteNumber(oldMeta.sourceTempoBpm)) clip.meta.sourceTempoBpm = Number(oldMeta.sourceTempoBpm);
+    else clip.meta.sourceTempoBpm = null;
+    return clip;
+  }
+
 /* -------------------- T3-1 clip revisions (version chain) -------------------- */
 
 // clip.revisions is a plain object map: { [revisionId]: snapshot }. NOT an Array.
@@ -1170,11 +1211,25 @@ function beginNewClipRevision(project, clipId, opts){
       if (!clip.name) clip.name = String(clip.name ?? '');
       if (!isFiniteNumber(clip.createdAt)) clip.createdAt = Date.now();
       if (!clip.meta) clip.meta = { notes:0, pitchMin:null, pitchMax:null, spanBeat:0, sourceTempoBpm:null };
-      clip.score = ensureScoreBeatIds(clip.score);
-      // keep meta.sourceTempoBpm if exists
-      const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
-      recomputeClipMetaFromScoreBeat(clip);
-      if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+
+      if (clipKind(clip) === 'audio'){
+        clip.kind = 'audio';
+        if (!clip.audio || typeof clip.audio !== 'object') clip.audio = {};
+        clip.audio.assetRef = (typeof clip.audio.assetRef === 'string') ? clip.audio.assetRef : '';
+        let dur = Number(clip.audio.durationSec);
+        if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+        clip.audio.durationSec = dur;
+        if ('score' in clip) delete clip.score;
+        const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
+        recomputeClipMetaFromAudio(clip, project.bpm);
+        if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+      } else {
+        clip.score = ensureScoreBeatIds(clip.score);
+        const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
+        recomputeClipMetaFromScoreBeat(clip);
+        if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+      }
+
       normalizeClipRevisionChain(clip);
       ensureClipRevisionChain(clip);
       // remove v1 fields if they exist
@@ -1255,7 +1310,7 @@ function beginNewClipRevision(project, clipId, opts){
   function flatten(projectV2, opts){
     const p = projectV2;
     const bpm = getProjectBpm(p);
-    const out = { bpm, tracks: [] };
+    const out = { bpm, tracks: [], audioSegments: [] };
     if (!p || !isProjectV2(p)) return out;
 
     const drop = (opts && typeof opts.onDrop === 'function') ? opts.onDrop : null;
@@ -1265,12 +1320,35 @@ function beginNewClipRevision(project, clipId, opts){
     const trackOrder = Array.isArray(p.tracks) ? p.tracks.map(t => t.id) : [];
     for (const tid of trackOrder) trackBuckets[tid] = [];
 
+    const audioSegments = [];
+
     for (const inst of (p.instances || [])){
       const clip = p.clips ? p.clips[inst.clipId] : null;
-      if (!clip || !clip.score || !Array.isArray(clip.score.tracks)) continue;
+      if (!clip) continue;
 
       const trackId = inst.trackId;
       if (!trackBuckets[trackId]) trackBuckets[trackId] = [];
+
+      if (clipKind(clip) === 'audio'){
+        const spanBeat = (clip.meta && isFiniteNumber(clip.meta.spanBeat)) ? Number(clip.meta.spanBeat) : 0;
+        if (!(spanBeat > 0)) continue;
+        const instStartBeat = Number(inst.startBeat || 0);
+        const startSec = beatToSec(instStartBeat, bpm);
+        const durationSec = beatToSec(spanBeat, bpm);
+        const assetRef = (clip.audio && typeof clip.audio.assetRef === 'string') ? clip.audio.assetRef : '';
+        if (!isFinite(startSec) || !isFinite(durationSec) || !(durationSec > 0)) continue;
+        audioSegments.push({
+          trackId,
+          startSec,
+          durationSec,
+          clipId: clip.id,
+          instanceId: inst.id,
+          assetRef,
+        });
+        continue;
+      }
+
+      if (!clip.score || !Array.isArray(clip.score.tracks)) continue;
 
       const instStartBeat = Number(inst.startBeat || 0);
       const instTranspose = coerceTranspose(inst.transpose);
@@ -1343,6 +1421,18 @@ function beginNewClipRevision(project, clipId, opts){
       arr.sort(cmp);
       out.tracks.push({ trackId: tid, notes: arr });
     }
+
+    function cmpAudio(a, b){
+      if (a.startSec !== b.startSec) return a.startSec - b.startSec;
+      const ca = String(a.clipId || '');
+      const cb = String(b.clipId || '');
+      if (ca !== cb) return ca.localeCompare(cb);
+      return String(a.instanceId || '').localeCompare(String(b.instanceId || ''));
+    }
+
+    out.audioSegments = audioSegments.filter(function(seg){
+      return seg && seg.trackId != null && !mutedByTid.get(seg.trackId);
+    }).sort(cmpAudio);
 
     return out;
   }
@@ -1771,6 +1861,8 @@ function toggleClipAB(projectV2, clipId){
     ensureScoreBeatIds,
     recomputeScoreBeatStats,
     recomputeClipMetaFromScoreBeat,
+    clipKind,
+    recomputeClipMetaFromAudio,
     createClipFromScoreBeat,
     createInstanceV2,
     repairClipOrderV2,

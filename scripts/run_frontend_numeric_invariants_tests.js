@@ -379,6 +379,83 @@ function testSemanticSanityGate(){
   assertOk(Array.isArray(r.errors) && r.errors.length > 0, 'insane patch returns errors');
 }
 
+function testAudioClipSliceA(){
+  console.log('[numeric] Test F: audio clip slice A (normalize + flatten)');
+  const P = loadH2SProject();
+
+  const tid = P.SCHEMA_V2 && P.SCHEMA_V2.DEFAULT_TRACK_ID ? P.SCHEMA_V2.DEFAULT_TRACK_ID : 'trk_0';
+  const p2 = P.defaultProjectV2();
+  p2.bpm = 120;
+  p2.clips['ca'] = {
+    id: 'ca',
+    kind: 'audio',
+    name: 'Audio A',
+    createdAt: 1,
+    audio: { assetRef: 'blob:test-a', durationSec: 2 },
+    meta: { notes: 0, pitchMin: null, pitchMax: null, spanBeat: 0, sourceTempoBpm: null },
+  };
+  const cn = P.createClipFromScoreBeat({
+    version: 2,
+    tempo_bpm: null,
+    time_signature: null,
+    tracks: [{ id: 's0', name: '', notes: [{ id: 'n1', pitch: 60, velocity: 100, startBeat: 0, durationBeat: 1 }] }],
+  }, { id: 'cn', name: 'Note N' });
+  p2.clips['cn'] = cn;
+  p2.clipOrder = ['ca', 'cn'];
+  p2.instances = [
+    { id: 'ia', clipId: 'ca', trackId: tid, startBeat: 0, transpose: 0 },
+    { id: 'in', clipId: 'cn', trackId: tid, startBeat: 4, transpose: 0 },
+  ];
+
+  P.normalizeProjectV2(p2);
+
+  const ca = p2.clips['ca'];
+  assertEq(ca.kind, 'audio', 'audio kind preserved');
+  assertOk(!Object.prototype.hasOwnProperty.call(ca, 'score'), 'audio clip has no score field');
+  assertOk(ca.meta.spanBeat > 0, 'audio spanBeat derived (not collapsed to 0)');
+  assertEq(ca.meta.spanBeat, P.normalizeBeat(P.secToBeat(2, 120)), 'spanBeat matches durationSec at BPM');
+
+  const cn2 = p2.clips['cn'];
+  assertEq(P.clipKind(cn2), 'note', 'missing kind behaves as note');
+  assertOk(!!cn2.score && Array.isArray(cn2.score.tracks), 'note clip retains score');
+
+  const flat = P.flatten(p2);
+  assertOk(Array.isArray(flat.audioSegments), 'flatten exposes audioSegments');
+  assertEq(flat.audioSegments.length, 1, 'one audio segment');
+  const seg = flat.audioSegments[0];
+  assertEq(seg.assetRef, 'blob:test-a');
+  assertEq(seg.clipId, 'ca');
+  assertEq(seg.instanceId, 'ia');
+  assertEq(seg.trackId, tid);
+  assertEq(seg.startSec, 0);
+  assertOk(Math.abs(seg.durationSec - 2) < 1e-9, 'audio durationSec');
+
+  const notes = (flat.tracks || []).flatMap(t => t.notes || []);
+  assertEq(notes.length, 1, 'note clip still flattened');
+  assertEq(notes[0].clipId, 'cn');
+
+  // Muted track: audio segment omitted (same rule as note tracks)
+  const pMute = P.defaultProjectV2();
+  pMute.bpm = 120;
+  pMute.tracks = [
+    { id: 't1', name: 'T1', instrument: 'default', gainDb: 0, muted: false },
+    { id: 't2', name: 'T2', instrument: 'default', gainDb: 0, muted: true },
+  ];
+  pMute.clips['ca2'] = {
+    id: 'ca2',
+    kind: 'audio',
+    name: 'Muted lane',
+    createdAt: 1,
+    audio: { assetRef: 'x', durationSec: 1 },
+    meta: { notes: 0, pitchMin: null, pitchMax: null, spanBeat: 0, sourceTempoBpm: null },
+  };
+  pMute.clipOrder = ['ca2'];
+  pMute.instances = [{ id: 'i2', clipId: 'ca2', trackId: 't2', startBeat: 0, transpose: 0 }];
+  P.normalizeProjectV2(pMute);
+  const flatM = P.flatten(pMute);
+  assertEq(flatM.audioSegments.length, 0, 'muted track audio omitted from flatten');
+}
+
 function main(){
   testScoreRoundtrip();
   testProjectMigration();
@@ -387,6 +464,7 @@ function main(){
   testFlattenRespectsMute();
   testAgentPatchRoundtrip();
   testSemanticSanityGate();
+  testAudioClipSliceA();
 
   console.log('\nNumeric invariants tests passed.');
 }
