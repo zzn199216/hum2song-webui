@@ -49,6 +49,15 @@ if (fs.existsSync(appJsPath)) {
   assert(appJs.indexOf('revisionIdAtRun') !== -1, 'app.js should pin last optimize to clip revision');
   assert(appJs.indexOf('docKeyAtRun') !== -1, 'app.js should pin last optimize to project storage key');
   assert(appJs.indexOf('_initLastOptimizeDetails') !== -1, 'app.js should wire last optimize details popover');
+  assert(appJs.indexOf('modalSyncGhostFromClipParent') !== -1, 'app.render should refresh clip-editor ghost when modal open');
+}
+
+// Clip editor ghost: parent revision overlay sync (editor_runtime.js)
+var editorRtPath = path.join(__dirname, '../../static/pianoroll/controllers/editor_runtime.js');
+if (fs.existsSync(editorRtPath)) {
+  var editorRtJs = fs.readFileSync(editorRtPath, 'utf8');
+  assert(editorRtJs.indexOf('modalSyncGhostFromClipParent') !== -1, 'editor_runtime must expose modalSyncGhostFromClipParent');
+  assert(editorRtJs.indexOf('_ghostScoreFromClipParentRevision') !== -1, 'editor_runtime must resolve ghost from parent revision');
 }
 
 const I18N = require('../../static/i18n/i18n.js');

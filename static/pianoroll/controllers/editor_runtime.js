@@ -399,6 +399,29 @@
         return _manualScoreSecToBeat(scoreSec, bpm);
       }
 
+      /**
+       * Ghost overlay source: the CURRENT clip head's parent revision score (seconds-score for editor).
+       * No parent id or missing parent snapshot => null (no ghost).
+       */
+      function _ghostScoreFromClipParentRevision(p2b, clipId, bpmFallback){
+        if (!clipId || !p2b || !p2b.clips || !p2b.clips[clipId]) return null;
+        const clipV2 = p2b.clips[clipId];
+        const parentId = clipV2 && clipV2.parentRevisionId;
+        if (parentId == null || String(parentId).trim() === '') return null;
+        const revs = clipV2 && clipV2.revisions;
+        const revsIsMap = revs && typeof revs === 'object' && !Array.isArray(revs);
+        const pid = String(parentId);
+        const parent = (revsIsMap && revs[pid]) ? revs[pid] : null;
+        if (!parent || !parent.score) return null;
+        const ps = parent.score;
+        const bpm = (p2b && p2b.bpm) ? p2b.bpm : (Number(bpmFallback) || 120);
+        if (_isBeatScore(ps)){
+          try { return _scoreBeatToSec(ps, bpm); }
+          catch(e){ return H2SProject.deepClone(ps); }
+        }
+        return H2SProject.deepClone(ps);
+      }
+
       function _recomputeClipMetaFromBeatScore(clip, scoreBeat){
         const meta0 = (clip && clip.meta) ? clip.meta : {};
         if (H2SProject && typeof H2SProject.recomputeClipMetaFromScoreBeat === 'function' && clip){
@@ -529,25 +552,12 @@
       this.state.modal.draftScore = H2SProject.deepClone(savedScoreSec);
       this.state.modal.dirty = false;
 
-      // T3-4: ghost + patch summary (revision UI bridge)
-      // Parent revision must be loaded from V2 clip (object map); V1 view has revisions:[].
-      this.state.modal.ghostScore = null;
+      // T3-4: ghost + patch summary (revision UI bridge) — parent revision score under current head
       try{
-        const clipV2 = p2b && p2b.clips && p2b.clips[clipId] ? p2b.clips[clipId] : null;
-        const parentId = clipV2 && clipV2.parentRevisionId;
-        const revs = clipV2 && clipV2.revisions;
-        const revsIsMap = revs && typeof revs === 'object' && !Array.isArray(revs);
-        const parent = (parentId && revsIsMap && revs[parentId]) ? revs[parentId] : null;
-        if (parent && parent.score){
-          const ps = parent.score;
-          if (_isBeatScore(ps)){
-            try { this.state.modal.ghostScore = _scoreBeatToSec(ps, bpm); }
-            catch(e){ this.state.modal.ghostScore = H2SProject.deepClone(ps); }
-          } else {
-            this.state.modal.ghostScore = H2SProject.deepClone(ps);
-          }
-        }
-      }catch(e){}
+        this.state.modal.ghostScore = _ghostScoreFromClipParentRevision(p2b, clipId, bpm);
+      }catch(e){
+        this.state.modal.ghostScore = null;
+      }
 
       try{
         const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
@@ -1190,6 +1200,7 @@
         }
         this.state.modal.draftScore = H2SProject.deepClone(draftSec);
         this.state.modal.savedScore = H2SProject.deepClone(draftSec);
+        this.modalSyncGhostFromClipParent();
         this.modalUpdateRightPanel();
         this.modalResizeCanvasToContent();
         this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
@@ -1197,6 +1208,23 @@
         this.modalUpdateEditorOptimizeUI();
         this.modalUpdateEditorRevisionUI();
       }catch(e){}
+    },
+
+    /** Keep ghost overlay aligned with current head's parent revision (same-session optimize / revision changes). */
+    modalSyncGhostFromClipParent(){
+      if (!this.state.modal || !this.state.modal.show) return;
+      const clipId = this.state.modal.clipId;
+      if (!clipId){
+        this.state.modal.ghostScore = null;
+        return;
+      }
+      try{
+        const p2 = getProjectV2 && getProjectV2();
+        const bpm = (p2 && p2.bpm) ? p2.bpm : (this.project && this.project.bpm) ? this.project.bpm : 120;
+        this.state.modal.ghostScore = _ghostScoreFromClipParentRevision(p2, clipId, bpm);
+      }catch(e){
+        this.state.modal.ghostScore = null;
+      }
     },
 
     modalRequestDraw(){

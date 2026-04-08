@@ -3340,6 +3340,13 @@ ensureTrackButtons(){
       this._renderAiAssistDock();
       try{ this.updateRecordButtonStates(); }catch(e){}
       try{ this._updateI18nLabels(); }catch(e){}
+      // Clip editor: ghost overlay must track current head's parent after optimize / revision changes (same session).
+      try{
+        if (this.state.modal && this.state.modal.show && this.editorRt){
+          if (typeof this.editorRt.modalSyncGhostFromClipParent === 'function') this.editorRt.modalSyncGhostFromClipParent();
+          if (typeof this.editorRt.modalRequestDraw === 'function') this.editorRt.modalRequestDraw();
+        }
+      }catch(e){}
       } finally {
         if (_perf && typeof performance !== 'undefined'){
           console.log('[H2S perf] render', (performance.now() - _perfT0).toFixed(2) + 'ms');
@@ -3603,6 +3610,9 @@ renderTimeline(){
             const target = p2 || self.project;
             const res = P.setClipActiveRevision(target, cid, revId);
             if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+            if (res && res.ok && self.state.modal && self.state.modal.show && self.state.modal.clipId === cid && !self.state.modal.dirty && self.editorRt && typeof self.editorRt.modalRefreshDraftFromClip === 'function'){
+              try { self.editorRt.modalRefreshDraftFromClip(); } catch (e) {}
+            }
             self.render();
             return;
           }
@@ -3639,6 +3649,9 @@ renderTimeline(){
           const target = p2 || self.project;
           const res = P.setClipActiveRevision(target, cid, revId);
           if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+          if (res && res.ok && self.state.modal && self.state.modal.show && self.state.modal.clipId === cid && !self.state.modal.dirty && self.editorRt && typeof self.editorRt.modalRefreshDraftFromClip === 'function'){
+            try { self.editorRt.modalRefreshDraftFromClip(); } catch (e) {}
+          }
           self.render();
         };
         box.__h2sKeydownHandler = function(ev){
