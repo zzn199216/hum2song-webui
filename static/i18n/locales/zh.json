@@ -76,6 +76,9 @@
   "io.cancelled": "已取消。",
   "io.importAudioDecoding": "正在解码音频…",
   "io.importAudioSessionBlob": "已导入音频片段（浏览器会话 — 刷新后可能需重新导入才能播放）。",
+  "io.importAudioStoredLocal": "已导入音频片段（已保存在本浏览器本地）。",
+  "io.importAudioNoStore": "当前环境无法使用本地音频存储。",
+  "io.importAudioStoreFailed": "无法将导入的音频保存到本地（存储空间不足或已被阻止）。",
 
   "export.exportMIDI": "导出 MIDI",
   "export.exportWAV": "导出 WAV",

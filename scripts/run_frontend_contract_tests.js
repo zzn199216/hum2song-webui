@@ -9,6 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const assert = (cond, msg) => {
   if (!cond) throw new Error(msg || 'assertion failed');
@@ -86,5 +87,8 @@ pass('ui audio clip slice (library/timeline/guards/mixed)');
 
 require(path.join(__dirname, 'tests', 'audio_direct_import_slice.test.js'));
 pass('audio direct import slice (createClipFromAudio + migrate)');
+
+execFileSync(process.execPath, [path.join(__dirname, 'tests', 'audio_local_asset_persistence.test.js')], { stdio: 'inherit' });
+pass('audio local asset persistence (localidb ref + resolve)');
 
 console.log('\nAll frontend contract tests passed.');

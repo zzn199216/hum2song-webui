@@ -28,6 +28,25 @@
     return Math.max(lo, Math.min(hi, v));
   }
 
+  /**
+   * Slice E: map clip.audio.assetRef to a URL Tone.Player accepts (http(s), blob:, or localidb: -> blob).
+   * @returns {Promise<{ url: string, revoke: (function()|null) }|null>}
+   */
+  async function resolveAssetRefForTone(assetRef){
+    const s = String(assetRef || '').trim();
+    if (!s) return null;
+    const LAS = G.H2SLocalAudioAssets;
+    if (LAS && typeof LAS.resolveAssetRefToPlaybackUrl === 'function'){
+      try{
+        return await LAS.resolveAssetRefToPlaybackUrl(s);
+      } catch (e){
+        return null;
+      }
+    }
+    if (s.indexOf('localidb:') === 0) return null;
+    return { url: s, revoke: null };
+  }
+
   function deepClone(x){
     try{ return JSON.parse(JSON.stringify(x)); }
     catch(e){ return x; }
@@ -191,6 +210,8 @@
       _projPlayRafMax = 0;
     }
     let _trackSynths = [];
+    /** @type {Array<function():void>} Slice E: revoke blob URLs created for localidb: playback */
+    let _audioRevokeList = [];
     const synthByTrackId = new Map();
     const lastInstrumentKeyByTid = new Map();
 
@@ -210,6 +231,10 @@ function _disposeTrackSynths(){
   _trackSynths = [];
   synthByTrackId.clear();
   lastInstrumentKeyByTid.clear();
+  for (const rev of _audioRevokeList){
+    try{ rev(); }catch(e){}
+  }
+  _audioRevokeList = [];
 }
 
   function _makeSynthByInstrument(instr){
@@ -527,6 +552,13 @@ vel = clamp(vel, 0.01, 1);
   // Slice B: audio clip instances (flatten audioSegments) — same transport timeline as notes.
   const audioSched = computeAudioPlaybackSchedule(flat2, startAt, metaByTrackId);
   async function loadTonePlayer(assetRef){
+    const resolved = await resolveAssetRefForTone(assetRef);
+    if (!resolved || !resolved.url){
+      try{ onLog('Audio segment skipped (unresolved asset): ' + String(assetRef).slice(0, 64)); }catch(e){}
+      return null;
+    }
+    const playUrl = resolved.url;
+    const revoke = resolved.revoke;
     return new Promise(function(resolve){
       let settled = false;
       function done(pl){
@@ -537,14 +569,16 @@ vel = clamp(vel, 0.01, 1);
       const timeout = setTimeout(function(){ done(null); }, AUDIO_PLAYER_LOAD_TIMEOUT_MS);
       try{
         const pl = new G.Tone.Player({
-          url: assetRef,
+          url: playUrl,
           onload: function(){
             clearTimeout(timeout);
+            if (typeof revoke === 'function') _audioRevokeList.push(revoke);
             done(pl);
           },
         });
       }catch(e){
         clearTimeout(timeout);
+        try{ if (typeof revoke === 'function') revoke(); }catch(e2){}
         done(null);
       }
     });
@@ -630,6 +664,14 @@ vel = clamp(vel, 0.01, 1);
         G.Tone.Transport.seconds = 0;
         G.Tone.Transport.bpm.value = (project && project.bpm) ? project.bpm : 120;
 
+        const resolved = await resolveAssetRefForTone(assetRef);
+        if (!resolved || !resolved.url){
+          try{ onLog('Audio clip play: missing or unresolved local asset'); }catch(e){}
+          return false;
+        }
+        const playUrl = resolved.url;
+        const revokeAfterLoad = resolved.revoke;
+
         const player = await new Promise(function(resolve){
           let settled = false;
           function done(pl){
@@ -637,17 +679,22 @@ vel = clamp(vel, 0.01, 1);
             settled = true;
             resolve(pl);
           }
-          const timeout = setTimeout(function(){ done(null); }, AUDIO_PLAYER_LOAD_TIMEOUT_MS);
+          const timeout = setTimeout(function(){
+            try{ if (typeof revokeAfterLoad === 'function') revokeAfterLoad(); }catch(e){}
+            done(null);
+          }, AUDIO_PLAYER_LOAD_TIMEOUT_MS);
           try{
             const pl = new G.Tone.Player({
-              url: assetRef,
+              url: playUrl,
               onload: function(){
                 clearTimeout(timeout);
+                if (typeof revokeAfterLoad === 'function') _audioRevokeList.push(revokeAfterLoad);
                 done(pl);
               },
             });
           }catch(e){
             clearTimeout(timeout);
+            try{ if (typeof revokeAfterLoad === 'function') revokeAfterLoad(); }catch(e2){}
             done(null);
           }
         });
@@ -738,5 +785,6 @@ vel = clamp(vel, 0.01, 1);
     create,
     flattenProjectToEvents,
     computeAudioPlaybackSchedule,
+    resolveAssetRefForTone,
   };
 });

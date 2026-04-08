@@ -3857,9 +3857,8 @@ renderTimeline(){
     },
 
     /**
-     * Slice D: import a local audio file as a native `kind: 'audio'` clip (object URL in assetRef).
-     * Playback uses the same flatten + Tone.Player path as other audio clips.
-     * assetRef is session-scoped (blob:); project JSON may persist the URL string but the blob is lost after reload.
+     * Slice D/E: import a local audio file as a native `kind: 'audio'` clip.
+     * Slice E: audio bytes are stored in IndexedDB; assetRef is `localidb:<id>` (durable across reload in this browser).
      */
     async _decodeAudioFileDurationSec(file){
       if (!file || !(file instanceof Blob)) return 1e-6;
@@ -3907,18 +3906,30 @@ renderTimeline(){
         durationSec = 1;
       }
       if (!isFinite(durationSec) || durationSec <= 0) durationSec = 1e-6;
-      if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function'){
-        try { alert('Object URLs are not supported in this environment.'); } catch (_e) {}
+      const LAS = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
+      if (!LAS || typeof LAS.storeImportedAudioFile !== 'function'){
+        try { alert(_t('io.importAudioNoStore') || 'Local audio storage is not available in this environment.'); } catch (_e) {}
         return;
       }
-      const assetRef = URL.createObjectURL(file);
+      let assetRef;
+      try{
+        const st = await LAS.storeImportedAudioFile(file);
+        assetRef = st && st.assetRef ? String(st.assetRef) : '';
+      } catch (e){
+        console.warn('[App] storeImportedAudioFile failed', e);
+        try { alert(_t('io.importAudioStoreFailed') || 'Could not save imported audio locally (storage full or blocked).'); } catch (_e) {}
+        return;
+      }
+      if (!assetRef){
+        try { alert(_t('io.importAudioStoreFailed') || 'Could not save imported audio locally.'); } catch (_e) {}
+        return;
+      }
       const baseName = (file.name && /\.[^/.]+$/.test(file.name))
         ? String(file.name).replace(/\.[^/.]+$/, '')
         : 'Imported audio';
       let p2 = this.getProjectV2();
       if (!p2) p2 = _projectV1ToV2(this.project);
       if (!p2 || !_isProjectV2(p2)){
-        try { URL.revokeObjectURL(assetRef); } catch (_e) {}
         return;
       }
       const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
@@ -3944,7 +3955,7 @@ renderTimeline(){
       this.state.selectedClipId = clip.id;
       this.state.selectedInstanceId = inst.id;
       this.setProjectFromV2(p2);
-      this.setImportStatus(_t('io.importAudioSessionBlob'), false);
+      this.setImportStatus(_t('io.importAudioStoredLocal'), false);
       log('Imported native audio clip: ' + clip.id);
     },
 
