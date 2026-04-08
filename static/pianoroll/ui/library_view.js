@@ -77,7 +77,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     fmtSec = (typeof fmtSec === 'function') ? fmtSec : _defaultFmtSec;
     escapeHtml = (typeof escapeHtml === 'function') ? escapeHtml : _defaultEscapeHtml;
 
-    const _tDefaults = { 'cliplib.play':'Play', 'cliplib.addToSong':'Add to Song', 'cliplib.edit':'Edit', 'cliplib.remove':'Remove', 'cliplib.optimize':'Optimize', 'cliplib.details':'Details', 'cliplib.preset':'Preset', 'cliplib.default':'Default', 'cliplib.notes':'notes', 'cliplib.audio':'Audio', 'cliplib.lastOptimized':'Last optimized', 'cliplib.last':'Last', 'opt.dynamicsAccent':'Dynamics Accent', 'opt.dynamicsLevel':'Dynamics Level', 'opt.durationGentle':'Duration Gentle' };
+    const _tDefaults = { 'cliplib.play':'Play', 'cliplib.addToSong':'Add to Song', 'cliplib.edit':'Edit', 'cliplib.remove':'Remove', 'cliplib.optimize':'Optimize', 'cliplib.details':'Details', 'cliplib.preset':'Preset', 'cliplib.default':'Default', 'cliplib.notes':'notes', 'cliplib.badgeAudio':'Original audio', 'cliplib.lastOptimized':'Last optimized', 'cliplib.last':'Last', 'opt.dynamicsAccent':'Dynamics Accent', 'opt.dynamicsLevel':'Dynamics Level', 'opt.durationGentle':'Duration Gentle' };
     const win = (typeof window !== 'undefined') ? window : null;
     const t = (win && win.I18N && typeof win.I18N.t === 'function') ? (k) => win.I18N.t(k) : (k) => (_tDefaults[k] !== undefined ? _tDefaults[k] : k);
 
@@ -90,9 +90,8 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     const spanSec = Number(stats.spanSec ?? 0) || 0;
     const isAudio = (clip.kind === 'audio');
     const subLine = isAudio
-      ? (escapeHtml(t('cliplib.audio') || 'Audio') + ' · ' + fmtSec(spanSec))
+      ? (escapeHtml(t('cliplib.badgeAudio') || 'Original audio') + ' · ' + fmtSec(spanSec))
       : (notes + ' ' + t('cliplib.notes') + ' · ' + fmtSec(spanSec));
-    const disAudio = isAudio ? ' disabled' : '';
 
     
     
@@ -130,7 +129,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     let lastOptimizeShort = '';
     let optStatusFullHtml = '';
     try{
-      const agent = clip && clip.meta && clip.meta.agent;
+      const agent = !isAudio && clip && clip.meta && clip.meta.agent;
       if (agent){
         const opsRaw = (agent.patchOps != null) ? agent.patchOps : (agent.patchSummary && agent.patchSummary.ops);
         const ops = Number(opsRaw);
@@ -189,7 +188,7 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
       }
     }catch(_){ /* ignore */ }
 
-    const lastLineHtml = lastOptimizeShort ? `<div class="clip-last-opt" style="font-size:11px; opacity:0.75; margin-top:2px;">${lastOptimizeShort}</div>` : '';
+    const lastLineHtml = (!isAudio && lastOptimizeShort) ? `<div class="clip-last-opt" style="font-size:11px; opacity:0.75; margin-top:2px;">${lastOptimizeShort}</div>` : '';
 
     const advancedHtml =
       `<details class="clipAdvanced" style="margin-top:6px; font-size:12px;">` +
@@ -203,17 +202,26 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
         `</div>` +
       `</details>`;
 
+    const primaryActions = isAudio
+      ? (
+          `<button class="btn" data-act="play" data-id="${id}">${escapeHtml(t('cliplib.play'))}</button>` +
+          `<button class="btn" data-act="add" data-id="${id}">${escapeHtml(t('cliplib.addToSong'))}</button>`
+        )
+      : (
+          `<button class="btn" data-act="play" data-id="${id}">${escapeHtml(t('cliplib.play'))}</button>` +
+          `<button class="btn" data-act="add" data-id="${id}">${escapeHtml(t('cliplib.addToSong'))}</button>` +
+          `<button class="btn" data-act="edit" data-id="${id}">${escapeHtml(t('cliplib.edit'))}</button>` +
+          (presetVal ? `<span class="clip-preset-label" style="font-size:11px; opacity:0.7;">${escapeHtml(t('cliplib.preset'))}: ${escapeHtml(presetLabel)}</span>` : '') +
+          `<button class="btn" data-act="optimize" data-id="${id}">${escapeHtml(t('cliplib.optimize'))}</button>`
+        );
+
     return (
       `<div class="clip-card clipCard${isSelected ? ' clipSelected' : ''}${isAudio ? ' clip-card-audio' : ''}" data-clip-id="${id}" data-clip-kind="${isAudio ? 'audio' : 'note'}">` +
-        `<div class="clip-title">${isAudio ? ('<span class="clip-badge">' + escapeHtml(t('cliplib.audio') || 'Audio') + '</span> ') : ''}${name}</div>` +
+        `<div class="clip-title">${isAudio ? ('<span class="clip-badge">' + escapeHtml(t('cliplib.badgeAudio') || 'Original audio') + '</span> ') : ''}${name}</div>` +
         `<div class="clip-sub">${subLine}</div>` +
         lastLineHtml +
         `<div class="clip-actions" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center;">` +
-          `<button class="btn" data-act="play" data-id="${id}">${escapeHtml(t('cliplib.play'))}</button>` +
-          `<button class="btn" data-act="add" data-id="${id}">${escapeHtml(t('cliplib.addToSong'))}</button>` +
-          `<button class="btn" data-act="edit" data-id="${id}"${disAudio}>${escapeHtml(t('cliplib.edit'))}</button>` +
-          (presetVal ? `<span class="clip-preset-label" style="font-size:11px; opacity:0.7;">${escapeHtml(t('cliplib.preset'))}: ${escapeHtml(presetLabel)}</span>` : '') +
-          `<button class="btn" data-act="optimize" data-id="${id}"${disAudio}>${escapeHtml(t('cliplib.optimize'))}</button>` +
+          primaryActions +
         `</div>` +
         advancedHtml +
       `</div>`

@@ -655,21 +655,24 @@
                 removeLabel: _t('actions.remove'),
                 editLabel: _t('actions.edit'),
                 optimizeLabel: _t('actions.optimize'),
+                audioBadge: _t('cliplib.badgeAudio'),
               });
             } else {
               const subR = isAudio
-                ? (ctrl._fmtSec(spanSec) + ' · Audio')
+                ? (ctrl._fmtSec(spanSec) + ' · ' + ctrl._escapeHtml(_t('cliplib.badgeAudio')))
                 : (st.count + ' ' + _t('trackpanel.notes'));
-              const dis = isAudio ? ' disabled' : '';
+              const actionsHtml = isAudio
+                ? ''
+                : `
+                <div class="instActions">
+                  <button class="instAct" type="button" data-act="instEdit" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.edit'))}</button>
+                  <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.optimize'))}</button>
+                </div>`;
               el.innerHTML = `
                 <div class="instBody" data-role="inst-body">
-                  <div class="instTitle">${isAudio ? '<span class="inst-badge">Audio</span> ' : ''}${ctrl._escapeHtml(clip.name)}</div>
+                  <div class="instTitle">${isAudio ? '<span class="inst-badge">' + ctrl._escapeHtml(_t('cliplib.badgeAudio')) + '</span> ' : ''}${ctrl._escapeHtml(clip.name)}</div>
                   <div class="instSub"><span>${ctrl._fmtSec(startSec)}</span><span>${subR}</span></div>
-                </div>
-                <div class="instActions">
-                  <button class="instAct" type="button" data-act="instEdit" data-inst-id="${ctrl._escapeHtml(inst.id)}"${dis}>${ctrl._escapeHtml(_t('actions.edit'))}</button>
-                  <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${ctrl._escapeHtml(inst.id)}"${dis}>${ctrl._escapeHtml(_t('actions.optimize'))}</button>
-                </div>
+                </div>${actionsHtml}
                 <button class="instRemove" type="button" data-act="remove" title="${ctrl._escapeHtml(_t('actions.remove'))}" aria-label="${ctrl._escapeHtml(_t('actions.remove'))}">×</button>
               `;
             }

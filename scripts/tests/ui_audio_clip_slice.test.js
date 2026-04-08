@@ -21,9 +21,9 @@ function testLibraryAudioVsNote(){
   assert(/clip-card-audio/.test(htmlA), 'audio card class');
   assert(/data-clip-kind="audio"/.test(htmlA), 'data-clip-kind audio');
   assert(!/\b0\s+notes\b/.test(htmlA), 'audio must not show 0 notes');
-  assert(/Audio/.test(htmlA) && /3\.5s/.test(htmlA), 'audio subtitle duration');
-  assert(/<button[^>]*data-act="edit"[^>]*disabled/.test(htmlA), 'edit disabled');
-  assert(/<button[^>]*data-act="optimize"[^>]*disabled/.test(htmlA), 'optimize disabled');
+  assert(/Original audio/.test(htmlA) && /3\.5s/.test(htmlA), 'audio badge + duration subline');
+  assert(!/<button[^>]*data-act="edit"/.test(htmlA), 'audio card must not show edit');
+  assert(!/<button[^>]*data-act="optimize"/.test(htmlA), 'audio card must not show optimize');
 
   const noteClip = { id: 'n1', name: 'Melody' };
   const noteStats = { count: 5, spanSec: 2 };
@@ -50,9 +50,10 @@ function testTimelineAudioVsNote(){
     escapeHtml,
   });
   assert(/inst-badge/.test(htmlA), 'badge');
+  assert(/Original audio/.test(htmlA), 'audio badge label');
   assert(!/\b0\s+notes\b/.test(htmlA), 'no 0 notes for audio');
-  assert(/<button[^>]*data-act="instEdit"[^>]*disabled/.test(htmlA), 'inst edit disabled');
-  assert(/<button[^>]*data-act="instOptimize"[^>]*disabled/.test(htmlA), 'inst optimize disabled');
+  assert(!/data-act="instEdit"/.test(htmlA), 'audio instance must not show instEdit');
+  assert(!/data-act="instOptimize"/.test(htmlA), 'audio instance must not show instOptimize');
 
   const htmlN = tv.instanceInnerHTML({
     clipName: 'Melody',
@@ -89,6 +90,14 @@ function testGuardsSource(){
   const libPath = path.join(repoRoot, 'static', 'pianoroll', 'controllers', 'library_controller.js');
   const libSrc = fs.readFileSync(libPath, 'utf8');
   assert(/clipKind\([^\)]*\)\s*===\s*['"]audio['"]/.test(libSrc), 'library controller audio guard');
+}
+
+function testImportWordingInIndexHtml(){
+  const indexPath = path.join(repoRoot, 'static', 'pianoroll', 'index.html');
+  const html = fs.readFileSync(indexPath, 'utf8');
+  assert(html.includes('data-i18n="top.uploadWav"'), 'top bar transcribe import key');
+  assert(html.includes('data-i18n="top.importAudioClip"'), 'top bar native audio import key');
+  assert(html.includes('data-i18n-title="top.uploadWavTitle"'), 'transcribe import title key');
 }
 
 function testMixedProjectH2S(){
@@ -130,6 +139,8 @@ function testMixedProjectH2S(){
   console.log('PASS ui slice: library audio vs note');
   testTimelineAudioVsNote();
   console.log('PASS ui slice: timeline audio vs note');
+  testImportWordingInIndexHtml();
+  console.log('PASS ui slice: import wording keys in index.html');
   testAppV1ProjectionSource();
   console.log('PASS ui slice: app v1 projection source');
   testGuardsSource();
