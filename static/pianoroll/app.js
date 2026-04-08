@@ -4336,6 +4336,39 @@ renderTimeline(){
       }
     },
 
+    /**
+     * Original audio clip → new editable note clip via the same /generate → poll → /score path as Import as notes.
+     * Does not remove or modify the source audio clip.
+     */
+    async convertAudioClipToEditable(clipId){
+      const P = window.H2SProject;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      if (!clipId || !P || typeof P.clipKind !== 'function') return { ok: false, reason: 'bad_args' };
+      const p2 = (typeof this.getProjectV2 === 'function') ? this.getProjectV2() : null;
+      const c = p2 && p2.clips && p2.clips[clipId];
+      if (!c || P.clipKind(c) !== 'audio'){
+        try { alert(_t('cliplib.convertToEditableNeedAudio')); } catch (_e) {}
+        return { ok: false, reason: 'not_audio' };
+      }
+      const assetRef = (c.audio && typeof c.audio.assetRef === 'string') ? c.audio.assetRef.trim() : '';
+      const LAS = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
+      if (!LAS || typeof LAS.getFileForLocalAssetRef !== 'function'){
+        try { alert(_t('io.convertAudioBlobMissing')); } catch (_e) {}
+        return { ok: false, reason: 'no_local_assets_api' };
+      }
+      if (typeof LAS.isLocalImportedAudioRef !== 'function' || !LAS.isLocalImportedAudioRef(assetRef)){
+        try { alert(_t('io.convertAudioOnlyLocal')); } catch (_e) {}
+        return { ok: false, reason: 'not_localidb' };
+      }
+      const file = await LAS.getFileForLocalAssetRef(assetRef);
+      if (!file){
+        try { alert(_t('io.convertAudioBlobMissing')); } catch (_e) {}
+        return { ok: false, reason: 'no_file' };
+      }
+      await this.uploadFileAndGenerate(file);
+      return { ok: true };
+    },
+
     /** PR-C5.3b: Reliable isPlaying for S button visibility. */
     _isPlaying(){
       if (this.audioCtrl && typeof this.audioCtrl.playing === 'boolean') return this.audioCtrl.playing;

@@ -24,6 +24,8 @@ function testLibraryAudioVsNote(){
   assert(/Original audio/.test(htmlA) && /3\.5s/.test(htmlA), 'audio badge + duration subline');
   assert(!/<button[^>]*data-act="edit"/.test(htmlA), 'audio card must not show edit');
   assert(!/<button[^>]*data-act="optimize"/.test(htmlA), 'audio card must not show optimize');
+  assert(/data-act="convertToEditable"/.test(htmlA), 'audio card shows convert to editable');
+  assert(/Convert to editable/.test(htmlA), 'audio convert button label');
 
   const noteClip = { id: 'n1', name: 'Melody' };
   const noteStats = { count: 5, spanSec: 2 };
@@ -33,6 +35,7 @@ function testLibraryAudioVsNote(){
   assert(/\b5\s+notes\b/.test(htmlN), 'note count subline');
   assert(!/<button[^>]*data-act="edit"[^>]*disabled/.test(htmlN), 'note edit not disabled');
   assert(!/<button[^>]*data-act="optimize"[^>]*disabled/.test(htmlN), 'note optimize not disabled');
+  assert(!/data-act="convertToEditable"/.test(htmlN), 'note card must not show convert to editable');
 }
 
 function testTimelineAudioVsNote(){
@@ -114,6 +117,33 @@ function testRecordToNativeAudioWiring(){
   assert(impIdx >= 0 && src.indexOf('_commitNativeAudioFile', impIdx) > impIdx, 'importAudioFileAsNativeClip uses _commitNativeAudioFile');
 }
 
+function testConvertAudioToEditableWiring(){
+  const libPath = path.join(repoRoot, 'static', 'pianoroll', 'controllers', 'library_controller.js');
+  const libSrc = fs.readFileSync(libPath, 'utf8');
+  assert(libSrc.includes("act === 'convertToEditable'"), 'library handles convertToEditable');
+  assert(/clipKind\([^\)]*\)\s*===\s*['"]audio['"]/.test(libSrc) && libSrc.indexOf('convertToEditable') > 0, 'convert gated to audio clips');
+
+  const lasPath = path.join(repoRoot, 'static', 'pianoroll', 'core', 'local_audio_assets.js');
+  const lasSrc = fs.readFileSync(lasPath, 'utf8');
+  assert(lasSrc.includes('getFileForLocalAssetRef'), 'local audio exposes getFileForLocalAssetRef');
+
+  const appPath = path.join(repoRoot, 'static', 'pianoroll', 'app.js');
+  const appSrc = fs.readFileSync(appPath, 'utf8');
+  assert(appSrc.includes('convertAudioClipToEditable'), 'app defines convertAudioClipToEditable');
+  assert(
+    appSrc.includes('convertAudioClipToEditable') && appSrc.includes('uploadFileAndGenerate'),
+    'convert path delegates to uploadFileAndGenerate'
+  );
+  assert(
+    appSrc.includes('getFileForLocalAssetRef') && appSrc.includes('isLocalImportedAudioRef'),
+    'convert resolves localidb file before upload'
+  );
+
+  const enPath = path.join(repoRoot, 'static', 'i18n', 'locales', 'en.json');
+  const en = JSON.parse(fs.readFileSync(enPath, 'utf8'));
+  assert(en['cliplib.convertToEditable'] && en['cliplib.convertToEditableTitle'], 'en i18n convert keys');
+}
+
 function testMixedProjectH2S(){
   global.window = global.window || {};
   require(path.join(repoRoot, 'static', 'pianoroll', 'project.js'));
@@ -163,4 +193,6 @@ function testMixedProjectH2S(){
   console.log('PASS ui slice: guard sources');
   testMixedProjectH2S();
   console.log('PASS ui slice: mixed project H2S');
+  testConvertAudioToEditableWiring();
+  console.log('PASS ui slice: convert audio → editable wiring');
 })();

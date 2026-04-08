@@ -142,11 +142,53 @@
     });
   }
 
+  /**
+   * Build a File from IndexedDB for re-upload (e.g. transcribe original audio clip).
+   * @returns {Promise<File|null>}
+   */
+  function getFileForLocalAssetRef(assetRef){
+    if (!isLocalImportedAudioRef(assetRef)){
+      return Promise.resolve(null);
+    }
+    if (typeof indexedDB === 'undefined'){
+      return Promise.resolve(null);
+    }
+    var id = localAssetIdFromRef(assetRef);
+    if (!id) return Promise.resolve(null);
+    if (typeof File === 'undefined'){
+      return Promise.resolve(null);
+    }
+    return _getRecord(id).then(function(rec){
+      if (!rec || !rec.buffer) return null;
+      var mime = (rec.mimeType && String(rec.mimeType).trim()) ? String(rec.mimeType) : 'application/octet-stream';
+      var base = (rec.name && String(rec.name).trim()) ? String(rec.name).trim() : 'audio';
+      if (!/\.[a-z0-9]+$/i.test(base)){
+        var ext = '.wav';
+        if (mime.indexOf('webm') >= 0) ext = '.webm';
+        else if (mime.indexOf('mpeg') >= 0 || mime.indexOf('mp3') >= 0) ext = '.mp3';
+        else if (mime.indexOf('mp4') >= 0 || mime.indexOf('m4a') >= 0 || mime.indexOf('x-m4a') >= 0) ext = '.m4a';
+        else if (mime.indexOf('ogg') >= 0) ext = '.ogg';
+        else if (mime.indexOf('flac') >= 0) ext = '.flac';
+        base = base + ext;
+      }
+      try{
+        return new File([rec.buffer], base, { type: mime });
+      } catch (e){
+        console.warn('[H2SLocalAudioAssets] File construct failed', e);
+        return null;
+      }
+    }).catch(function(e){
+      console.warn('[H2SLocalAudioAssets] getFile failed', e);
+      return null;
+    });
+  }
+
   return {
     LOCAL_AUDIO_ASSET_PREFIX: LOCAL_AUDIO_ASSET_PREFIX,
     isLocalImportedAudioRef: isLocalImportedAudioRef,
     localAssetIdFromRef: localAssetIdFromRef,
     storeImportedAudioFile: storeImportedAudioFile,
     resolveAssetRefToPlaybackUrl: resolveAssetRefToPlaybackUrl,
+    getFileForLocalAssetRef: getFileForLocalAssetRef,
   };
 });

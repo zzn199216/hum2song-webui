@@ -169,6 +169,17 @@
         if (app && typeof app.addClipInstance === 'function') return app.addClipInstance(clipId);
         return;
       }
+      if (act === 'convertToEditable'){
+        if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
+          const fn = (app && typeof app.convertAudioClipToEditable === 'function') ? app.convertAudioClipToEditable.bind(app) : null;
+          if (fn){
+            Promise.resolve(fn(clipId)).catch(function(err){
+              console.warn('[LibraryController] convertAudioClipToEditable failed', err);
+            });
+          }
+        }
+        return;
+      }
       if (act === 'edit'){
         if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
           try{ if (typeof alert !== 'undefined') alert('Audio clips cannot be edited in the piano roll yet.'); }catch(_){}

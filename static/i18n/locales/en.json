@@ -80,6 +80,8 @@
   "io.importAudioNoStore": "Local audio storage is not available in this environment.",
   "io.importAudioStoreFailed": "Could not save imported audio locally (storage may be full or blocked).",
   "io.addRecordingAsAudioDone": "Recording added as audio clip (saved locally in this browser).",
+  "io.convertAudioOnlyLocal": "Convert to editable needs audio stored in this browser (use Import as audio).",
+  "io.convertAudioBlobMissing": "Could not read stored audio for this clip.",
 
   "export.exportMIDI": "Export MIDI",
   "export.exportWAV": "Export WAV",
@@ -168,6 +170,9 @@
   "cliplib.playLastRecording": "Play last recording",
   "cliplib.addLastAsAudio": "Add as audio",
   "cliplib.addLastAsAudioTitle": "Add the last mic recording as an original audio clip (same as file import)",
+  "cliplib.convertToEditable": "Convert to editable",
+  "cliplib.convertToEditableTitle": "Transcribe this original audio into a new editable note clip (server; same as Import as notes)",
+  "cliplib.convertToEditableNeedAudio": "Choose an original audio clip first.",
   "cliplib.recordingClipName": "Recording",
   "cliplib.clear": "Clear",
   "cliplib.autoOpenAfterImport": "Auto-open editor after import",
