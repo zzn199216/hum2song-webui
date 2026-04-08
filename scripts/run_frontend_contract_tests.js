@@ -84,4 +84,7 @@ const libView = require('../static/pianoroll/ui/library_view.js');
 require(path.join(__dirname, 'tests', 'ui_audio_clip_slice.test.js'));
 pass('ui audio clip slice (library/timeline/guards/mixed)');
 
+require(path.join(__dirname, 'tests', 'audio_direct_import_slice.test.js'));
+pass('audio direct import slice (createClipFromAudio + migrate)');
+
 console.log('\nAll frontend contract tests passed.');

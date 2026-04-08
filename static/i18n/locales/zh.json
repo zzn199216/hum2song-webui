@@ -74,6 +74,8 @@
   "io.done": "完成",
   "io.cancel": "取消",
   "io.cancelled": "已取消。",
+  "io.importAudioDecoding": "正在解码音频…",
+  "io.importAudioSessionBlob": "已导入音频片段（浏览器会话 — 刷新后可能需重新导入才能播放）。",
 
   "export.exportMIDI": "导出 MIDI",
   "export.exportWAV": "导出 WAV",
@@ -102,6 +104,8 @@
   "top.aiSettingsSuffix": "设置",
   "top.aiSettingsTitle": "AI 设置",
   "top.uploadWav": "导入音频",
+  "top.importAudioClip": "导入音频片段",
+  "top.importAudioClipTitle": "从文件添加原生音频片段（会话 blob；刷新后需重新导入）",
   "top.vol": "音量",
   "top.localClipsHint": "本地片段 + 时间轴。双击片段进行编辑。",
   "top.projectHomeBtn": "工程",

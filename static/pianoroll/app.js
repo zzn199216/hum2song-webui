@@ -2047,6 +2047,8 @@ if (typeof localStorage !== 'undefined') {
 
       // Bind UI
       $('#btnUpload').addEventListener('click', () => this.pickWavAndGenerate());
+      const btnImportAudioClip = $('#btnImportAudioClip');
+      if (btnImportAudioClip) btnImportAudioClip.addEventListener('click', () => { this.importAudioFileAsNativeClip(); });
       $('#btnClear').addEventListener('click', () => this.clearProject());
       $('#btnClearLog').addEventListener('click', () => { $('#log').textContent = ''; _lastLogLine = ''; if (typeof this.updateLogStatusBar === 'function') this.updateLogStatusBar(); });
       // PR-UX3a: Log panel — restore open state from localStorage, bind status bar click to toggle
@@ -3854,6 +3856,98 @@ renderTimeline(){
       await this.uploadFileAndGenerate(f);
     },
 
+    /**
+     * Slice D: import a local audio file as a native `kind: 'audio'` clip (object URL in assetRef).
+     * Playback uses the same flatten + Tone.Player path as other audio clips.
+     * assetRef is session-scoped (blob:); project JSON may persist the URL string but the blob is lost after reload.
+     */
+    async _decodeAudioFileDurationSec(file){
+      if (!file || !(file instanceof Blob)) return 1e-6;
+      const Ctx = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
+      if (!Ctx) return 1;
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try{
+            const ctx = new Ctx();
+            const ab = reader.result;
+            const buf = await ctx.decodeAudioData(ab instanceof ArrayBuffer ? ab.slice(0) : ab);
+            const d = buf.duration;
+            try { await ctx.close(); } catch (_e) {}
+            resolve((isFinite(d) && d > 0) ? d : 1e-6);
+          } catch (e){
+            reject(e);
+          }
+        };
+        reader.onerror = () => reject(reader.error || new Error('file read failed'));
+        reader.readAsArrayBuffer(file);
+      });
+    },
+
+    async importAudioFileAsNativeClip(){
+      const P = window.H2SProject;
+      if (!P || typeof P.createClipFromAudio !== 'function' || typeof P.createInstanceV2 !== 'function'){
+        try { alert('Audio import is unavailable (project helpers missing).'); } catch (_e) {}
+        return;
+      }
+      let file;
+      try{
+        file = await this.pickFile('audio/*');
+      } catch (e){
+        return;
+      }
+      if (!file) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      this.setImportStatus(_t('io.importAudioDecoding'), false);
+      let durationSec = 1;
+      try{
+        durationSec = await this._decodeAudioFileDurationSec(file);
+      } catch (e){
+        console.warn('[App] audio duration decode failed', e);
+        durationSec = 1;
+      }
+      if (!isFinite(durationSec) || durationSec <= 0) durationSec = 1e-6;
+      if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function'){
+        try { alert('Object URLs are not supported in this environment.'); } catch (_e) {}
+        return;
+      }
+      const assetRef = URL.createObjectURL(file);
+      const baseName = (file.name && /\.[^/.]+$/.test(file.name))
+        ? String(file.name).replace(/\.[^/.]+$/, '')
+        : 'Imported audio';
+      let p2 = this.getProjectV2();
+      if (!p2) p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)){
+        try { URL.revokeObjectURL(assetRef); } catch (_e) {}
+        return;
+      }
+      const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      const clip = P.createClipFromAudio({
+        assetRef,
+        durationSec,
+        name: baseName,
+        bpm: projBpm,
+      });
+      if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+      p2.clips[clip.id] = clip;
+      if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+      p2.clipOrder.unshift(clip.id);
+      if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+      const ti = Number.isFinite(this.state.activeTrackIndex) ? Math.max(0, Math.floor(this.state.activeTrackIndex)) : 0;
+      const tr = (p2.tracks && p2.tracks.length) ? p2.tracks[Math.min(ti, p2.tracks.length - 1)] : null;
+      const trackId = (tr && (tr.trackId || tr.id)) ? String(tr.trackId || tr.id) : (P.SCHEMA_V2 && P.SCHEMA_V2.DEFAULT_TRACK_ID) ? P.SCHEMA_V2.DEFAULT_TRACK_ID : 'trk_0';
+      const startBeat = (p2.ui && typeof p2.ui.playheadBeat === 'number' && isFinite(p2.ui.playheadBeat)) ? Math.max(0, p2.ui.playheadBeat) : 0;
+      const inst = P.createInstanceV2(clip.id, startBeat, trackId);
+      if (!Array.isArray(p2.instances)) p2.instances = [];
+      p2.instances.push(inst);
+      if (typeof P.normalizeProjectV2 === 'function') P.normalizeProjectV2(p2);
+      this.state.selectedClipId = clip.id;
+      this.state.selectedInstanceId = inst.id;
+      this.setProjectFromV2(p2);
+      this.setImportStatus(_t('io.importAudioSessionBlob'), false);
+      log('Imported native audio clip: ' + clip.id);
+    },
+
     /** PR-C2: Set import status (upload/generate progress). showCancel: only during active import. */
     setImportStatus(text, showCancel){
       if (typeof document === 'undefined') return;
@@ -4581,9 +4675,16 @@ renderTimeline(){
       const clip = P.deepClone(sourceClip);
       clip.id = newId;
       if (typeof clip.name !== 'string' || !String(clip.name).trim()) clip.name = 'Imported clip';
+      const isAudio = (typeof P.clipKind === 'function' && P.clipKind(clip) === 'audio');
+      if (isAudio && 'score' in clip) delete clip.score;
       if (typeof P.normalizeClipRevisionChain === 'function') P.normalizeClipRevisionChain(clip);
-      if (clip.score && typeof P.ensureScoreBeatIds === 'function') P.ensureScoreBeatIds(clip.score);
-      if (typeof P.recomputeClipMetaFromScoreBeat === 'function') P.recomputeClipMetaFromScoreBeat(clip);
+      if (isAudio){
+        const bpmMeta = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+        if (typeof P.recomputeClipMetaFromAudio === 'function') P.recomputeClipMetaFromAudio(clip, bpmMeta);
+      } else {
+        if (clip.score && typeof P.ensureScoreBeatIds === 'function') P.ensureScoreBeatIds(clip.score);
+        if (typeof P.recomputeClipMetaFromScoreBeat === 'function') P.recomputeClipMetaFromScoreBeat(clip);
+      }
       const bundleBpm = (typeof sourceBpmForMeta === 'number' && isFinite(sourceBpmForMeta)) ? sourceBpmForMeta : null;
       if (bundleBpm != null) {
         if (!clip.meta || typeof clip.meta !== 'object') clip.meta = {};

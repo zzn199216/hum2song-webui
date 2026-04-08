@@ -74,6 +74,8 @@
   "io.done": "Done",
   "io.cancel": "Cancel",
   "io.cancelled": "Cancelled.",
+  "io.importAudioDecoding": "Decoding audio…",
+  "io.importAudioSessionBlob": "Imported audio clip (browser session — reload may lose playback until re-import).",
 
   "export.exportMIDI": "Export MIDI",
   "export.exportWAV": "Export WAV",
@@ -102,6 +104,8 @@
   "top.aiSettingsSuffix": "Settings",
   "top.aiSettingsTitle": "AI Settings",
   "top.uploadWav": "Import audio",
+  "top.importAudioClip": "Import audio clip",
+  "top.importAudioClipTitle": "Add a native audio clip from a file (session blob URL; re-import after reload)",
   "top.vol": "Vol",
   "top.localClipsHint": "Local clips + timeline. Double-click a clip to edit.",
   "top.projectHomeBtn": "Project",

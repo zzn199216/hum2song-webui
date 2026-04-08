@@ -1131,6 +1131,42 @@ function beginNewClipRevision(project, clipId, opts){
     };
   }
 
+  /**
+   * Native audio clip (ProjectDoc v2). No score; meta.spanBeat derived via recomputeClipMetaFromAudio.
+   * @param {{ assetRef: string, durationSec: number, name?: string, id?: string, bpm?: number, createdAt?: number }} opts
+   */
+  function createClipFromAudio(opts){
+    opts = opts || {};
+    const assetRef = (typeof opts.assetRef === 'string') ? opts.assetRef : '';
+    let dur = Number(opts.durationSec);
+    if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+    const name = (opts.name != null && String(opts.name).trim()) ? String(opts.name).trim() : ('Audio ' + uid('').slice(0, 5));
+    const clipId = (opts.id != null && String(opts.id).trim()) ? String(opts.id) : uid('clip_');
+    const now = isFiniteNumber(opts.createdAt) ? Number(opts.createdAt) : Date.now();
+    const bpmForMeta = isFiniteNumber(opts.bpm) ? Number(opts.bpm) : TIMEBASE.BPM_DEFAULT;
+    const clip = {
+      id: clipId,
+      kind: 'audio',
+      name,
+      createdAt: now,
+      updatedAt: isFiniteNumber(opts.updatedAt) ? Number(opts.updatedAt) : now,
+      revisionId: (opts.revisionId != null && String(opts.revisionId).trim()) ? String(opts.revisionId) : uid('rev_'),
+      parentRevisionId: (opts.parentRevisionId !== undefined && opts.parentRevisionId !== null) ? String(opts.parentRevisionId) : null,
+      revisions: (opts.revisions && typeof opts.revisions === 'object' && !Array.isArray(opts.revisions)) ? opts.revisions : {},
+      sourceTaskId: (opts.sourceTaskId !== undefined && opts.sourceTaskId !== null) ? String(opts.sourceTaskId) : null,
+      audio: { assetRef, durationSec: dur },
+      meta: {
+        notes: 0,
+        pitchMin: null,
+        pitchMax: null,
+        spanBeat: 0,
+        sourceTempoBpm: isFiniteNumber(opts.sourceTempoBpm) ? Number(opts.sourceTempoBpm) : null,
+      },
+    };
+    recomputeClipMetaFromAudio(clip, bpmForMeta);
+    return clip;
+  }
+
   function createInstanceV2(clipId, startBeat, trackId){
     return {
       id: uid('inst_'),
@@ -1538,6 +1574,38 @@ function beginNewClipRevision(project, clipId, opts){
     const clipOrder = [];
     for (const c of clipsArr){
       if (!c || !c.id) continue;
+      if (c.kind === 'audio'){
+        const a = (c.audio && typeof c.audio === 'object') ? c.audio : {};
+        let dur = Number(a.durationSec);
+        if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+        const clip2 = {
+          id: String(c.id),
+          kind: 'audio',
+          name: (typeof c.name === 'string') ? c.name : String(c.name ?? ''),
+          createdAt: isFiniteNumber(c.createdAt) ? Number(c.createdAt) : Date.now(),
+          updatedAt: isFiniteNumber(c.updatedAt) ? Number(c.updatedAt) : (isFiniteNumber(c.createdAt) ? Number(c.createdAt) : Date.now()),
+          sourceTaskId: (c.sourceTaskId !== undefined && c.sourceTaskId !== null) ? String(c.sourceTaskId) : null,
+          audio: {
+            assetRef: (typeof a.assetRef === 'string') ? a.assetRef : '',
+            durationSec: dur,
+          },
+          meta: {
+            notes: 0,
+            pitchMin: null,
+            pitchMax: null,
+            spanBeat: 0,
+            sourceTempoBpm: null,
+          },
+        };
+        if (c.meta && c.meta.agent) clip2.meta.agent = c.meta.agent;
+        if (c.revisionId != null && String(c.revisionId).trim()) clip2.revisionId = String(c.revisionId);
+        if (c.parentRevisionId !== undefined) clip2.parentRevisionId = c.parentRevisionId;
+        if (c.revisions && typeof c.revisions === 'object' && !Array.isArray(c.revisions)) clip2.revisions = deepClone(c.revisions);
+        recomputeClipMetaFromAudio(clip2, bpm);
+        clips[clip2.id] = clip2;
+        clipOrder.push(clip2.id);
+        continue;
+      }
       const scoreSec = c.score || { tracks: [] };
       const scoreBeat = scoreSecToBeat(scoreSec, bpm);
 
@@ -1864,6 +1932,7 @@ function toggleClipAB(projectV2, clipId){
     clipKind,
     recomputeClipMetaFromAudio,
     createClipFromScoreBeat,
+    createClipFromAudio,
     createInstanceV2,
     repairClipOrderV2,
     normalizeProjectV2,
