@@ -97,6 +97,43 @@
   }
 
   /**
+   * Pure helper: flatten v2 output + per-track mute/gain meta -> schedule rows for audio playback.
+   * Does not depend on Tone (Node-testable). Skips muted tracks and empty assetRef.
+   * @returns {{ items: Array<{ trackId: string, t: number, dur: number, assetRef: string, gainDb: number }>, skipped: Array<{ reason: string, trackId?: string }> }}
+   */
+  function computeAudioPlaybackSchedule(flat2, startAtSec, metaByTrackId){
+    const items = [];
+    const skipped = [];
+    const segs = (flat2 && Array.isArray(flat2.audioSegments)) ? flat2.audioSegments : [];
+    const startAt = Number(startAtSec || 0);
+    for (let i = 0; i < segs.length; i++){
+      const seg = segs[i];
+      if (!seg) continue;
+      const tid = seg.trackId;
+      const meta = (metaByTrackId && typeof metaByTrackId.get === 'function')
+        ? (metaByTrackId.get(tid) || { muted: false, gainDb: 0 })
+        : { muted: false, gainDb: 0 };
+      if (meta.muted){
+        skipped.push({ reason: 'muted', trackId: tid });
+        continue;
+      }
+      const assetRef = String(seg.assetRef || '').trim();
+      if (!assetRef){
+        skipped.push({ reason: 'empty_assetRef', trackId: tid });
+        continue;
+      }
+      const absStart = Number(seg.startSec || 0);
+      const dur = Math.max(0.01, Number(seg.durationSec || 0));
+      const t = Math.max(0, absStart - startAt);
+      const gainDb = Number.isFinite(Number(meta.gainDb)) ? Number(meta.gainDb) : 0;
+      items.push({ trackId: tid, t, dur, assetRef, gainDb });
+    }
+    return { items, skipped };
+  }
+
+  const AUDIO_PLAYER_LOAD_TIMEOUT_MS = 8000;
+
+  /**
    * Controller factory
    *
    * opts:
@@ -486,6 +523,53 @@ vel = clamp(vel, 0.01, 1);
       }, t);
     }
   }
+
+  // Slice B: audio clip instances (flatten audioSegments) — same transport timeline as notes.
+  const audioSched = computeAudioPlaybackSchedule(flat2, startAt, metaByTrackId);
+  async function loadTonePlayer(assetRef){
+    return new Promise(function(resolve){
+      let settled = false;
+      function done(pl){
+        if (settled) return;
+        settled = true;
+        resolve(pl);
+      }
+      const timeout = setTimeout(function(){ done(null); }, AUDIO_PLAYER_LOAD_TIMEOUT_MS);
+      try{
+        const pl = new G.Tone.Player({
+          url: assetRef,
+          onload: function(){
+            clearTimeout(timeout);
+            done(pl);
+          },
+        });
+      }catch(e){
+        clearTimeout(timeout);
+        done(null);
+      }
+    });
+  }
+  for (let ai = 0; ai < audioSched.items.length; ai++){
+    const item = audioSched.items[ai];
+    const player = await loadTonePlayer(item.assetRef);
+    if (!player){
+      try{ onLog('Audio segment skipped (load failed): ' + String(item.assetRef).slice(0, 80)); }catch(e){}
+      continue;
+    }
+    try{
+      const dest = (player.toDestination && player.toDestination.call) ? player.toDestination() : player;
+      if (dest && dest.volume && Number.isFinite(item.gainDb)) dest.volume.value = item.gainDb;
+    }catch(e){}
+    _trackSynths.push(player);
+    if (item.t + item.dur > maxT) maxT = item.t + item.dur;
+    (function(pl, dur, t){
+      G.Tone.Transport.schedule(function(time){
+        try{
+          if (pl && typeof pl.start === 'function') pl.start(time, 0, dur);
+        }catch(e){}
+      }, t);
+    })(player, item.dur, item.t);
+  }
 } else {
   // Legacy fallback: v1 seconds-only schedule, single synth.
   const synth = new G.Tone.PolySynth(G.Tone.Synth).toDestination();
@@ -584,5 +668,6 @@ vel = clamp(vel, 0.01, 1);
   return {
     create,
     flattenProjectToEvents,
+    computeAudioPlaybackSchedule,
   };
 });
