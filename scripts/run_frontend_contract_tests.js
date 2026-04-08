@@ -81,4 +81,7 @@ const libView = require('../static/pianoroll/ui/library_view.js');
   pass('timeline controller binds to instBody + data-act remove');
 })();
 
+require(path.join(__dirname, 'tests', 'ui_audio_clip_slice.test.js'));
+pass('ui audio clip slice (library/timeline/guards/mixed)');
+
 console.log('\nAll frontend contract tests passed.');

@@ -170,6 +170,10 @@
         return;
       }
       if (act === 'edit'){
+        if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
+          try{ if (typeof alert !== 'undefined') alert('Audio clips cannot be edited in the piano roll yet.'); }catch(_){}
+          return;
+        }
         if (typeof opts.onEdit === 'function') return opts.onEdit(clipId);
         if (app && typeof app.openClipEditor === 'function') return app.openClipEditor(clipId);
         return;
@@ -183,6 +187,11 @@
       // T3-4: Optimize (agent runner v0)
       // PR-D2d: Preset moved to Inspector; Optimize uses stored per-clip options via getOptimizeOptions.
       if (act === 'optimize'){
+        if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
+          try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
+          try{ if (typeof alert !== 'undefined') alert('Optimize is not available for audio clips yet.'); }catch(_){}
+          return;
+        }
         // Important: bind this handler in capture phase so we can reliably intercept
         // optimize clicks even if a fallback listener is added later.
         // This also prevents double-handling (e.g. App fallback + controller).

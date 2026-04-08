@@ -1105,6 +1105,9 @@
       const cid = String(clipId||'');
       const clip = project && project.clips && project.clips[cid];
       if (!clip) return { ok:false, reason:'clip_not_found' };
+      if (H2SProject && typeof H2SProject.clipKind === 'function' && H2SProject.clipKind(clip) === 'audio'){
+        return { ok:false, reason:'audio_clip_not_supported' };
+      }
 
       const optsIn = (options && typeof options === 'object') ? options : {};
       const requestedPresetId = (optsIn.requestedPresetId != null && optsIn.requestedPresetId !== '') ? String(optsIn.requestedPresetId) : null;

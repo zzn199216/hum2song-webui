@@ -612,7 +612,10 @@
             const clip = (proj.clips||[]).find(c => c.id === inst.clipId);
             if (!clip) continue;
 
-            const st = (window.H2SProject && window.H2SProject.scoreStats) ? window.H2SProject.scoreStats(clip.score) : {count:0, spanSec:1};
+            const isAudio = (clip.kind === 'audio');
+            const st = isAudio
+              ? { count: 0, spanSec: (clip.meta && typeof clip.meta.spanSec === 'number' && isFinite(clip.meta.spanSec)) ? clip.meta.spanSec : 1 }
+              : ((window.H2SProject && window.H2SProject.scoreStats) ? window.H2SProject.scoreStats(clip.score) : {count:0, spanSec:1});
 
             // v2 beats-only clips carry meta.spanBeat and instances may carry startBeat.
             // Timeline pixels are in seconds (pxPerSec), so convert beats -> seconds via bpm when available.
@@ -621,7 +624,9 @@
               : (window.H2SApp && typeof window.H2SApp.getProjectV2 === 'function' && window.H2SApp.getProjectV2().bpm) ? window.H2SApp.getProjectV2().bpm : 120;
 
             const spanBeat = (clip && clip.meta && typeof clip.meta.spanBeat === 'number' && isFinite(clip.meta.spanBeat)) ? clip.meta.spanBeat : null;
-            const spanSec = (spanBeat != null) ? (spanBeat * 60 / bpm) : (st.spanSec || 1);
+            const spanSec = (isAudio && clip.meta && typeof clip.meta.spanSec === 'number' && isFinite(clip.meta.spanSec))
+              ? clip.meta.spanSec
+              : ((spanBeat != null) ? (spanBeat * 60 / bpm) : (st.spanSec || 1));
 
             const startSec = (typeof inst.startBeat === 'number' && isFinite(inst.startBeat)) ? (inst.startBeat * 60 / bpm) : (inst.startSec || 0);
 
@@ -629,7 +634,7 @@
             const x = ctrl._labelW + (isFinite(startSec) ? startSec : 0) * pxPerSec;
 
             const el = document.createElement('div');
-            el.className = 'instance';
+            el.className = 'instance' + (isAudio ? ' instance--audio' : '');
             if (state && state.selectedInstanceId === inst.id) el.classList.add('selected');
             el.style.left = x + 'px';
             el.style.width = w + 'px';
@@ -639,8 +644,10 @@
             if (window.H2STimelineView && typeof window.H2STimelineView.instanceInnerHTML === 'function'){
               el.innerHTML = window.H2STimelineView.instanceInnerHTML({
                 clipName: clip.name,
-                startSec: (typeof inst.startSec === 'number') ? inst.startSec : 0,
+                startSec: startSec,
                 noteCount: (typeof st.count === 'number') ? st.count : 0,
+                spanSec: spanSec,
+                isAudio: isAudio,
                 instId: inst.id,
                 fmtSec: ctrl._fmtSec.bind(ctrl),
                 escapeHtml: ctrl._escapeHtml.bind(ctrl),
@@ -650,14 +657,18 @@
                 optimizeLabel: _t('actions.optimize'),
               });
             } else {
+              const subR = isAudio
+                ? (ctrl._fmtSec(spanSec) + ' · Audio')
+                : (st.count + ' ' + _t('trackpanel.notes'));
+              const dis = isAudio ? ' disabled' : '';
               el.innerHTML = `
                 <div class="instBody" data-role="inst-body">
-                  <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
-                  <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} ${_t('trackpanel.notes')}</span></div>
+                  <div class="instTitle">${isAudio ? '<span class="inst-badge">Audio</span> ' : ''}${ctrl._escapeHtml(clip.name)}</div>
+                  <div class="instSub"><span>${ctrl._fmtSec(startSec)}</span><span>${subR}</span></div>
                 </div>
                 <div class="instActions">
-                  <button class="instAct" type="button" data-act="instEdit" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.edit'))}</button>
-                  <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.optimize'))}</button>
+                  <button class="instAct" type="button" data-act="instEdit" data-inst-id="${ctrl._escapeHtml(inst.id)}"${dis}>${ctrl._escapeHtml(_t('actions.edit'))}</button>
+                  <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${ctrl._escapeHtml(inst.id)}"${dis}>${ctrl._escapeHtml(_t('actions.optimize'))}</button>
                 </div>
                 <button class="instRemove" type="button" data-act="remove" title="${ctrl._escapeHtml(_t('actions.remove'))}" aria-label="${ctrl._escapeHtml(_t('actions.remove'))}">×</button>
               `;

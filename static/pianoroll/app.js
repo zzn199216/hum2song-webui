@@ -771,11 +771,13 @@
       const c = clipsMap[cid];
       if (!c) continue;
 
-      const scoreSec = _scoreBeatToSec(c.score, bpm);
+      const P = window.H2SProject;
+      const isAudio = P && typeof P.clipKind === 'function' && P.clipKind(c) === 'audio';
+      const scoreSec = isAudio ? _scoreBeatToSec({ version: 2, tracks: [] }, bpm) : _scoreBeatToSec(c.score, bpm);
       const meta = c.meta || {};
       const spanBeat = (typeof meta.spanBeat === 'number') ? meta.spanBeat : 0;
 
-      clips.push({
+      const clipV1 = {
         id: c.id || cid,
         name: c.name || 'Clip',
         createdAt: c.createdAt || Date.now(),
@@ -802,7 +804,14 @@
           spanSec: _beatToSec(spanBeat, bpm),
           sourceTempoBpm: (typeof meta.sourceTempoBpm === 'number') ? meta.sourceTempoBpm : null
         }
-      });
+      };
+      if (isAudio){
+        clipV1.kind = 'audio';
+        clipV1.audio = (c.audio && typeof c.audio === 'object')
+          ? { assetRef: String(c.audio.assetRef || ''), durationSec: (isFinite(Number(c.audio.durationSec)) ? Number(c.audio.durationSec) : 0) }
+          : { assetRef: '', durationSec: 0 };
+      }
+      clips.push(clipV1);
     }
 
     const instances = [];

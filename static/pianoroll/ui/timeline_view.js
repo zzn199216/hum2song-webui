@@ -40,21 +40,29 @@
     const clipName = escapeHtml(args.clipName || '');
     const startSec = (typeof args.startSec === 'number') ? args.startSec : 0;
     const noteCount = (typeof args.noteCount === 'number') ? args.noteCount : 0;
+    const spanSec = (typeof args.spanSec === 'number' && isFinite(args.spanSec)) ? args.spanSec : 0;
+    const isAudio = !!args.isAudio;
     const instId = (args.instId != null && String(args.instId)) ? escapeHtml(String(args.instId)) : '';
     const editLabel = (args.editLabel != null && String(args.editLabel)) ? String(args.editLabel) : 'Edit';
     const optimizeLabel = (args.optimizeLabel != null && String(args.optimizeLabel)) ? String(args.optimizeLabel) : 'Optimize';
+    const audioBadge = (args.audioBadge != null && String(args.audioBadge)) ? String(args.audioBadge) : 'Audio';
+    const subRight = isAudio
+      ? (fmtSec(spanSec) + ' · ' + escapeHtml(audioBadge))
+      : (noteCount + ' ' + escapeHtml(notesLabel));
+    const editDisabled = isAudio ? ' disabled' : '';
+    const optDisabled = isAudio ? ' disabled' : '';
 
     // NOTE: instBody is the intended hit area for drag + dblclick.
     // Keep legacy class names for compatibility.
     // PR-UX5b: instActions overlay (Edit, Optimize) — shown on hover/selected
     return `
       <div class="instBody inst-body" data-role="inst-body">
-        <div class="instTitle inst-title">${clipName}</div>
-        <div class="instSub inst-sub"><span>${fmtSec(startSec)}</span><span>${noteCount} ${escapeHtml(notesLabel)}</span></div>
+        <div class="instTitle inst-title">${isAudio ? ('<span class="inst-badge">' + escapeHtml(audioBadge) + '</span> ') : ''}${clipName}</div>
+        <div class="instSub inst-sub"><span>${fmtSec(startSec)}</span><span>${subRight}</span></div>
       </div>
       <div class="instActions">
-        <button class="instAct" type="button" data-act="instEdit" data-inst-id="${instId}">${escapeHtml(editLabel)}</button>
-        <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${instId}">${escapeHtml(optimizeLabel)}</button>
+        <button class="instAct" type="button" data-act="instEdit" data-inst-id="${instId}"${editDisabled}>${escapeHtml(editLabel)}</button>
+        <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${instId}"${optDisabled}>${escapeHtml(optimizeLabel)}</button>
       </div>
       <button class="instRemove btn-inst-remove" type="button" data-act="remove" title="${escapeHtml(removeLabel)}" aria-label="${escapeHtml(removeLabel)}">×</button>
     `;

@@ -523,13 +523,26 @@
       const clip = _findClip(this.project, clipId);
       if (!clip) return;
 
+      const p2b = getProjectV2 && getProjectV2();
+      const cV2 = p2b && p2b.clips && clipId ? p2b.clips[clipId] : null;
+      const audioGuard = (H2SProject && typeof H2SProject.clipKind === 'function')
+        ? (H2SProject.clipKind(cV2 || clip) === 'audio')
+        : (clip.kind === 'audio');
+      if (audioGuard){
+        try{
+          const msg = _t('msg.audioClipNoEditor') || 'Audio clips cannot be edited in the piano roll yet.';
+          if (typeof alert !== 'undefined') alert(msg);
+          else log(msg);
+        }catch(e){}
+        return;
+      }
+
       const _perfOpen = _h2sDevPerfTimingEnabled();
       const _perfW = _perfOpen && typeof performance !== 'undefined';
       if (_perfW){
         this._h2sOpenPerf = { pendingFirstDraw: true, t0: performance.now(), clipId: String(clipId) };
       }
 
-      const p2b = getProjectV2 && getProjectV2();
       const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
       const projectWantsBeat = !!(
         (p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2)) ||

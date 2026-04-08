@@ -371,6 +371,26 @@
     }
     .clipCard:hover{ border-color: rgba(59,130,246,.45); }
     .clipCard.clipSelected{ border-color: rgba(80,140,255,0.8); background: rgba(80,140,255,0.08); }
+    .clip-card-audio{
+      border-color: rgba(16,185,129,.55);
+      background: rgba(16,185,129,.10);
+    }
+    .clip-card-audio:hover{ border-color: rgba(52,211,153,.75); }
+    .clip-card-audio.clipSelected{
+      border-color: rgba(52,211,153,.85);
+      background: rgba(16,185,129,.14);
+    }
+    .clip-badge{
+      display:inline-block;
+      font-size:10px;
+      font-weight:800;
+      padding:1px 6px;
+      border-radius:6px;
+      margin-right:6px;
+      background:rgba(16,185,129,.35);
+      border:1px solid rgba(52,211,153,.45);
+      vertical-align:middle;
+    }
     .clipAdvanced summary{ font-size:11px; }
     .clipTitle{ font-weight:800; font-size:13px; }
     .clipMeta{ display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
@@ -573,6 +593,27 @@
       border-color: rgba(255,255,255,.85);
       background: rgba(59,130,246,.35);
       box-shadow: 0 0 0 2px rgba(59,130,246,.35), 0 10px 25px rgba(0,0,0,.35);
+    }
+    .instance--audio{
+      border-color: rgba(16,185,129,.72);
+      background: rgba(16,185,129,.16);
+    }
+    .instance--audio:hover{ border-color: rgba(52,211,153,.92); }
+    .instance--audio.selected{
+      border-color: rgba(255,255,255,.85);
+      background: rgba(16,185,129,.26);
+      box-shadow: 0 0 0 2px rgba(16,185,129,.35), 0 10px 25px rgba(0,0,0,.35);
+    }
+    .inst-badge{
+      display:inline-block;
+      font-size:10px;
+      font-weight:800;
+      padding:1px 6px;
+      border-radius:6px;
+      margin-right:4px;
+      background:rgba(16,185,129,.35);
+      border:1px solid rgba(52,211,153,.45);
+      vertical-align:middle;
     }
     .instActions{ position:absolute; top:4px; right:28px; display:none; gap:4px; flex-direction:row; align-items:center; z-index:2; }
     .instance:hover .instActions{ display:flex; }

@@ -608,6 +608,75 @@ vel = clamp(vel, 0.01, 1);
       const clip = clips.find(c => c && c.id === clipId);
       if (!clip) return false;
 
+      const p2 = (typeof getProjectV2 === 'function' && getProjectV2()) ? getProjectV2() : null;
+      const c2 = p2 && p2.clips && p2.clips[clipId];
+      const isAudioResolved = (G.H2SProject && typeof G.H2SProject.clipKind === 'function' && c2)
+        ? (G.H2SProject.clipKind(c2) === 'audio')
+        : (clip.kind === 'audio');
+
+      if (isAudioResolved){
+        const assetRef = String((c2 && c2.audio && c2.audio.assetRef) || (clip.audio && clip.audio.assetRef) || '').trim();
+        const durSec = Math.max(0.01, Number((c2 && c2.audio && c2.audio.durationSec) || (clip.audio && clip.audio.durationSec) || (clip.meta && clip.meta.spanSec) || 1));
+        if (!assetRef){
+          try{ onLog('Audio clip play: empty assetRef'); }catch(e){}
+          return false;
+        }
+        const ok = await ensureTone();
+        if (!ok){ onAlert('Tone.js not available.'); return false; }
+        await G.Tone.start();
+        _disposeTrackSynths();
+        G.Tone.Transport.stop();
+        G.Tone.Transport.cancel();
+        G.Tone.Transport.seconds = 0;
+        G.Tone.Transport.bpm.value = (project && project.bpm) ? project.bpm : 120;
+
+        const player = await new Promise(function(resolve){
+          let settled = false;
+          function done(pl){
+            if (settled) return;
+            settled = true;
+            resolve(pl);
+          }
+          const timeout = setTimeout(function(){ done(null); }, AUDIO_PLAYER_LOAD_TIMEOUT_MS);
+          try{
+            const pl = new G.Tone.Player({
+              url: assetRef,
+              onload: function(){
+                clearTimeout(timeout);
+                done(pl);
+              },
+            });
+          }catch(e){
+            clearTimeout(timeout);
+            done(null);
+          }
+        });
+        if (!player){
+          try{ onLog('Audio clip play: load failed'); }catch(e){}
+          return false;
+        }
+        try{
+          const dest = (player.toDestination && player.toDestination.call) ? player.toDestination() : player;
+          _trackSynths.push(dest);
+        }catch(e){
+          try{ if (player.dispose) player.dispose(); }catch(e2){}
+          return false;
+        }
+        const maxT = durSec;
+        G.Tone.Transport.schedule(function(time){
+          try{
+            if (player && typeof player.start === 'function') player.start(time, 0, maxT);
+          }catch(e){}
+        }, 0);
+        G.Tone.Transport.start('+0.05');
+        onLog('Clip play (audio): ' + (clip.name || clipId));
+        setTimeout(function(){
+          try{ G.Tone.Transport.stop(); G.Tone.Transport.cancel(); }catch(e){}
+          try{ _disposeTrackSynths(); }catch(e2){}
+        }, Math.ceil((maxT + 0.2) * 1000));
+        return true;
+      }
+
       const ok = await ensureTone();
       if (!ok){ onAlert('Tone.js not available.'); return false; }
       await G.Tone.start();
