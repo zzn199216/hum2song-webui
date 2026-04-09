@@ -145,6 +145,27 @@
     return { direction: (dir === 'left') ? 'left' : 'right', deltaBeats: num };
   }
 
+  /**
+   * Narrow Assistant command: remove selected timeline instance (matches `runCommand('remove_instance')` only).
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantRemoveInstanceIntentFromText`.
+   */
+  function _resolveAssistantRemoveInstanceIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/\s+please\s*$/g, '').trim();
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const phrases = [
+      'remove this',
+      'delete this',
+      'remove selected instance',
+      'delete selected instance',
+      'remove selected block',
+      'delete selected block',
+    ];
+    return phrases.indexOf(s) >= 0;
+  }
+
   /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
   function _templateExecutionFieldsFromPlanKind(planKind){
     if (planKind == null || typeof planKind !== 'string') return null;
@@ -3033,6 +3054,54 @@ ensureTrackButtons(){
             self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
           }
           self.render();
+        });
+        return;
+      }
+      if (_resolveAssistantRemoveInstanceIntentFromText(text)){
+        this._aiAssistItems = this._aiAssistItems || [];
+        const instIdRm = this.state && this.state.selectedInstanceId;
+        if (!instIdRm){
+          this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectInstanceFirst') });
+          this.render();
+          return;
+        }
+        const instRm = (this.project.instances || []).find(function(x){ return x && x.id === instIdRm; });
+        if (!instRm){
+          this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
+          this.render();
+          return;
+        }
+        const clipRm = (this.project.clips || []).find(function(c){ return c && c.id === instRm.clipId; });
+        const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
+        const confirmMsg = _t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
+        const win = (typeof window !== 'undefined') ? window : null;
+        if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
+          this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.removeInstanceCancelled') });
+          this.render();
+          return;
+        }
+        const pendingRm = { type: 'sys', text: _t('aiAssist.removeInstanceRunning'), _pendingRemoveInstance: true };
+        this._aiAssistItems.push(pendingRm);
+        this.render();
+        const selfRm = this;
+        Promise.resolve(this.runCommand('remove_instance', { instanceId: instIdRm })).then(function(res){
+          const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
+          if (idx >= 0){
+            if (res && res.ok){
+              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.removeInstanceOk') };
+            } else {
+              const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.removeInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+            }
+          }
+          selfRm.render();
+        }).catch(function(err){
+          const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
+          if (idx >= 0){
+            const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.removeInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+          }
+          selfRm.render();
         });
         return;
       }

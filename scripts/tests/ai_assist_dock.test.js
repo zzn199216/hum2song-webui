@@ -9,7 +9,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -75,6 +75,24 @@ function resolveAssistantMoveInstanceIntentFromText(text) {
   const MAX_DELTA = 64;
   if (num > MAX_DELTA) return null;
   return { direction: (dir === 'left') ? 'left' : 'right', deltaBeats: num };
+}
+
+/** Mirror static/pianoroll/app.js `_resolveAssistantRemoveInstanceIntentFromText` (keep in sync). */
+function resolveAssistantRemoveInstanceIntentFromText(text) {
+  if (!text || typeof text !== 'string') return false;
+  let s = String(text).toLowerCase().trim();
+  s = s.replace(/^please\s+/, '');
+  s = s.replace(/\s+please\s*$/g, '').trim();
+  s = s.replace(/[.!?]+$/g, '').trim();
+  const phrases = [
+    'remove this',
+    'delete this',
+    'remove selected instance',
+    'delete selected instance',
+    'remove selected block',
+    'delete selected block',
+  ];
+  return phrases.indexOf(s) >= 0;
 }
 
 function templateExecutionFieldsFromPlanKind(planKind) {
@@ -431,6 +449,7 @@ function createStubDocument() {
 function createFakeApp(opts) {
   opts = opts || {};
   const tryGenerateAiPlan = opts.tryGenerateAiPlan || (() => Promise.resolve(null));
+  const confirmImpl = (typeof opts.confirmImpl === 'function') ? opts.confirmImpl : function () { return true; };
   const doc = createStubDocument();
   const setOptimizeOptionsCalls = [];
   const runCommandCalls = [];
@@ -465,6 +484,9 @@ function createFakeApp(opts) {
       }
       if (cmd === 'move_instance') {
         return Promise.resolve({ ok: true, data: { instanceId: payload.instanceId, startBeat: payload.startBeat } });
+      }
+      if (cmd === 'remove_instance') {
+        return Promise.resolve({ ok: true, data: { instanceId: payload.instanceId } });
       }
       return Promise.resolve({ ok: true });
     },
@@ -539,6 +561,44 @@ function createFakeApp(opts) {
           }
         }
         self.render();
+      });
+    }
+    if (resolveAssistantRemoveInstanceIntentFromText(text)) {
+      if (!this.state.selectedInstanceId) {
+        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectInstanceFirst') });
+        this.render();
+        return Promise.resolve();
+      }
+      const instIdRm = this.state.selectedInstanceId;
+      const instRm = (this.project.instances || []).find(function (x) { return x && x.id === instIdRm; });
+      if (!instRm) {
+        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.moveInstanceStale') });
+        this.render();
+        return Promise.resolve();
+      }
+      const clipRm = (this.project.clips || []).find(function (c) { return c && c.id === instRm.clipId; });
+      const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
+      const confirmMsg = this._t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
+      if (!confirmImpl(confirmMsg)) {
+        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.removeInstanceCancelled') });
+        this.render();
+        return Promise.resolve();
+      }
+      const pendingRm = { type: 'sys', text: this._t('aiAssist.removeInstanceRunning'), _pendingRemoveInstance: true };
+      this._aiAssistItems.push(pendingRm);
+      this.render();
+      const selfRm = this;
+      return Promise.resolve(this.runCommand('remove_instance', { instanceId: instIdRm })).then(function (res) {
+        const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
+        if (idx >= 0) {
+          if (res && res.ok) {
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t('aiAssist.removeInstanceOk') };
+          } else {
+            const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t('aiAssist.removeInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+          }
+        }
+        selfRm.render();
       });
     }
     const clipId = this.state.selectedClipId;
@@ -738,6 +798,79 @@ function createFakeApp(opts) {
   assert(resolveAssistantMoveInstanceIntentFromText('move this right 1 bar') === null);
   assert(resolveAssistantMoveInstanceIntentFromText('move this right 100 beats') === null);
   console.log('PASS move-instance intent phrases narrow');
+})();
+
+(function testResolveRemoveInstanceIntentNarrow() {
+  assert(resolveAssistantRemoveInstanceIntentFromText('remove this') === true);
+  assert(resolveAssistantRemoveInstanceIntentFromText('Delete This.') === true);
+  assert(resolveAssistantRemoveInstanceIntentFromText('please remove selected block') === true);
+  assert(resolveAssistantRemoveInstanceIntentFromText('delete selected instance') === true);
+  assert(resolveAssistantRemoveInstanceIntentFromText('remove selected instance') === true);
+  assert(resolveAssistantRemoveInstanceIntentFromText('clean this up') === false);
+  assert(resolveAssistantRemoveInstanceIntentFromText('delete the clip') === false);
+  assert(resolveAssistantRemoveInstanceIntentFromText('remove the chorus') === false);
+  console.log('PASS remove-instance intent phrases narrow');
+})();
+
+(function testSendRemoveInstanceNoSelectionRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.state.selectedInstanceId = null;
+  doc.getElementById('aiAssistInput').value = 'remove this';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand without selected instance');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text.indexOf('timeline instance') >= 0);
+  console.log('PASS remove instance without selection => refuse');
+})();
+
+(function testSendRemoveInstanceStaleRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedInstanceId = 'ghost-id';
+  app.project.instances = [];
+  doc.getElementById('aiAssistInput').value = 'delete this';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0);
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text.indexOf('no longer') >= 0);
+  console.log('PASS remove instance stale selection => refuse');
+})();
+
+(function testSendRemoveInstanceConfirmFalseSkipsRunCommand() {
+  const { app, doc, runCommandCalls } = createFakeApp({ confirmImpl: () => false });
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'remove this';
+  return app._aiAssistSend().then(function () {
+    assert(runCommandCalls.length === 0, 'remove_instance must not run when confirm declines');
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Remove cancelled.');
+  });
+})().then(function () { console.log('PASS remove instance confirm false => no runCommand'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendRemoveInstanceConfirmTrueCallsRemoveInstance() {
+  let seenMsg = '';
+  const { app, doc, runCommandCalls } = createFakeApp({
+    confirmImpl: (msg) => { seenMsg = msg; return true; },
+  });
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'delete selected block';
+  return app._aiAssistSend().then(function () {
+    assert(seenMsg.indexOf('Test Clip') >= 0, 'confirm should name the clip');
+    assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'remove_instance');
+    assert(runCommandCalls[0].payload.instanceId === 'inst-1');
+    assert(Object.keys(runCommandCalls[0].payload).length === 1, 'payload shape: instanceId only');
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Removed timeline instance.');
+  });
+})().then(function () { console.log('PASS remove instance confirm true => runCommand remove_instance'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendVagueCleanupNotRemoveInstance() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.state.selectedInstanceId = 'inst-1';
+  doc.getElementById('aiAssistInput').value = 'clean this up';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'vague phrase must not call runCommand on send');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'card', 'optimize card path');
+  console.log('PASS vague cleanup => card not remove_instance');
 })();
 
 (function testSendMoveInstanceNoSelectionRefuses() {
