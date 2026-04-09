@@ -754,6 +754,33 @@
     };
   }
 
+  /**
+   * Resolve placement for audio -> editable conversion in v1 view space.
+   * Align only when there is exactly one source instance; otherwise fallback.
+   */
+  function resolveAudioConvertPlacementV1(projectV1, sourceClipId, fallbackStartSec, fallbackTrackIndex){
+    const fallbackStart = (isFiniteNumber(fallbackStartSec) && Number(fallbackStartSec) >= 0) ? Number(fallbackStartSec) : 0;
+    const fallbackTrack = (isFiniteNumber(fallbackTrackIndex) && Number(fallbackTrackIndex) >= 0) ? Math.floor(Number(fallbackTrackIndex)) : 0;
+    if (!projectV1 || !sourceClipId){
+      return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'missing_input' };
+    }
+    const matches = Array.isArray(projectV1.instances)
+      ? projectV1.instances.filter(inst => inst && String(inst.clipId || '') === String(sourceClipId))
+      : [];
+    if (matches.length !== 1){
+      return {
+        startSec: fallbackStart,
+        trackIndex: fallbackTrack,
+        aligned: false,
+        reason: (matches.length === 0) ? 'no_source_instance' : 'multiple_source_instances'
+      };
+    }
+    const only = matches[0];
+    const startSec = (isFiniteNumber(only.startSec) && Number(only.startSec) >= 0) ? Number(only.startSec) : fallbackStart;
+    const trackIndex = (isFiniteNumber(only.trackIndex) && Number(only.trackIndex) >= 0) ? Math.floor(Number(only.trackIndex)) : fallbackTrack;
+    return { startSec, trackIndex, aligned: true, reason: 'single_source_instance' };
+  }
+
   /* -------------------- T1-1 ProjectDoc v2 helpers (beats) -------------------- */
 
   function defaultProjectV2(){
@@ -1896,6 +1923,7 @@ function toggleClipAB(projectV2, clipId){
     defaultProject,
     createClipFromScore,
     createInstance,
+    resolveAudioConvertPlacementV1,
 
     // constants
     TIMEBASE,

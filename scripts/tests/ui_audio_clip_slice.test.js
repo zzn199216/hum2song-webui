@@ -135,6 +135,10 @@ function testConvertAudioToEditableWiring(){
     'convert path delegates to uploadFileAndGenerate'
   );
   assert(
+    /uploadFileAndGenerate\s*\(\s*file\s*,\s*\{\s*sourceAudioClipId\s*:\s*clipId\s*\}/.test(appSrc),
+    'convert passes sourceAudioClipId for placement + provenance'
+  );
+  assert(
     appSrc.includes('getFileForLocalAssetRef') && appSrc.includes('isLocalImportedAudioRef'),
     'convert resolves localidb file before upload'
   );

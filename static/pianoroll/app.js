@@ -4298,8 +4298,12 @@ renderTimeline(){
       } catch (e) {}
     },
 
-    /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording. */
-    async uploadFileAndGenerate(f){
+    /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
+     * @param {Blob|File} f
+     * @param {{ sourceAudioClipId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; bar-segment / explode paths unchanged.
+     */
+    async uploadFileAndGenerate(f, opts){
+      opts = opts || {};
       if (!f || !(f instanceof Blob)) return;
       const file = f instanceof File ? f : new File([f], (f.name || 'recording.webm'), { type: (f.type || 'audio/webm') });
       this.state.importCancelled = false;
@@ -4573,13 +4577,24 @@ renderTimeline(){
           log('Import: editor not auto-opened (multi-clip).');
           setTimeout(() => this.setImportStatus('', false), 2500);
         } else {
+          let placeStartSec = playheadSec;
+          let placeTrackIndex = 0;
+          const Pproj = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+          if (opts.sourceAudioClipId && Pproj && typeof Pproj.resolveAudioConvertPlacementV1 === 'function'){
+            const pl = Pproj.resolveAudioConvertPlacementV1(this.project, String(opts.sourceAudioClipId), playheadSec, 0);
+            placeStartSec = pl.startSec;
+            placeTrackIndex = pl.trackIndex;
+          }
+          const maxTi = Math.max(0, ((this.project.tracks || []).length) - 1);
+          placeTrackIndex = Math.max(0, Math.min(maxTi, Math.floor(placeTrackIndex)));
           const clip = H2SProject.createClipFromScore(scoreForClip, { name: importBaseName, sourceTaskId: tid });
           if (!clip.meta) clip.meta = {};
           if (typeof scoreForClip.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.tempo_bpm;
           else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
           if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+          if (opts.sourceAudioClipId) clip.meta.sourceAudioClipId = String(opts.sourceAudioClipId);
           this.project.clips.unshift(clip);
-          this.addClipToTimeline(clip.id, playheadSec, 0);
+          this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
           persist();
           this.render();
           this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
@@ -4641,7 +4656,7 @@ renderTimeline(){
         try { alert(_t('io.convertAudioBlobMissing')); } catch (_e) {}
         return { ok: false, reason: 'no_file' };
       }
-      await this.uploadFileAndGenerate(file);
+      await this.uploadFileAndGenerate(file, { sourceAudioClipId: clipId });
       return { ok: true };
     },
 
