@@ -72,18 +72,35 @@ function baseProject(playheadSec){
   console.log('PASS multiple instances → fallback');
 })();
 
+(function testExplicitInstanceIdAlignsWhenMultiple(){
+  const proj = baseProject(2);
+  proj.clips = [{ id: 'audio_a', name: 'A' }];
+  proj.instances = [
+    { id: 'i1', clipId: 'audio_a', startSec: 1, trackIndex: 0 },
+    { id: 'i2', clipId: 'audio_a', startSec: 5, trackIndex: 1 },
+  ];
+  const r = H2SProject.resolveAudioConvertPlacementV1(proj, 'audio_a', 2, 0, 'i2');
+  assert.strictEqual(r.aligned, true);
+  assert.strictEqual(r.reason, 'explicit_source_instance');
+  assert.strictEqual(r.startSec, 5);
+  assert.strictEqual(r.trackIndex, 1);
+  console.log('PASS explicit instance id → aligned despite multiple');
+})();
+
 (function testAppWiringStrings(){
   const appPath = path.join(repoRoot, 'static', 'pianoroll', 'app.js');
   const appSrc = fs.readFileSync(appPath, 'utf8');
   assert(
-    /uploadFileAndGenerate\s*\(\s*file\s*,\s*\{\s*sourceAudioClipId\s*:\s*clipId\s*\}/.test(appSrc),
-    'convertAudioClipToEditable passes sourceAudioClipId'
+    /uploadFileAndGenerate\s*\(\s*file\s*,\s*uploadOpts\s*\)/.test(appSrc) && /sourceAudioClipId\s*:\s*clipId/.test(appSrc),
+    'convertAudioClipToEditable passes sourceAudioClipId via uploadOpts'
   );
   assert(
     /resolveAudioConvertPlacementV1/.test(appSrc) && /opts\.sourceAudioClipId/.test(appSrc),
     'uploadFileAndGenerate uses resolveAudioConvertPlacementV1 when opts.sourceAudioClipId set'
   );
+  assert(/opts\.sourceAudioInstanceId/.test(appSrc), 'upload passes optional sourceAudioInstanceId to placement');
   assert(/clip\.meta\.sourceAudioClipId/.test(appSrc), 'new clip meta gets sourceAudioClipId on conversion');
+  assert(/clip\.meta\.sourceAudioInstanceId/.test(appSrc), 'new clip meta gets sourceAudioInstanceId when instance-scoped');
   console.log('PASS app.js wiring strings');
 })();
 
@@ -98,5 +115,6 @@ function baseProject(playheadSec){
   assert(i0 >= 0 && i1 > i0, 'can slice convertAudioClipToEditable');
   const convertFn = appSrc.slice(i0, i1);
   assert(!/removeClip|\.clips\.splice|delete\s+.*\.clips/.test(convertFn), 'convertAudioClipToEditable does not remove source clip');
+  assert(!/project\.instances/.test(convertFn), 'convertAudioClipToEditable does not mutate timeline instances');
   console.log('PASS conversion still uses shared upload/generate/score path; source not removed in convert');
 })();

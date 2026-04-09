@@ -135,7 +135,7 @@ function testConvertAudioToEditableWiring(){
     'convert path delegates to uploadFileAndGenerate'
   );
   assert(
-    /uploadFileAndGenerate\s*\(\s*file\s*,\s*\{\s*sourceAudioClipId\s*:\s*clipId\s*\}/.test(appSrc),
+    /uploadFileAndGenerate\s*\(\s*file\s*,\s*uploadOpts\s*\)/.test(appSrc) && /sourceAudioClipId\s*:\s*clipId/.test(appSrc),
     'convert passes sourceAudioClipId for placement + provenance'
   );
   assert(

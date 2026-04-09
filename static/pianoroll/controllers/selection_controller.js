@@ -26,6 +26,8 @@
     const onEditClip = opts.onEditClip || function(){};
     const onDuplicateInstance = opts.onDuplicateInstance || function(){};
     const onRemoveInstance = opts.onRemoveInstance || function(){};
+    const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
+    const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
     const onLog = opts.onLog || null;
 
     const view = (window.H2SSelectionView && window.H2SSelectionView.selectionBoxInnerHTML)
@@ -49,6 +51,7 @@
 
     function bindActions(){
       const btnEdit = rootEl.querySelector('[data-act="edit"]');
+      const btnConv = rootEl.querySelector('[data-act="convertAudioEditable"]');
       const btnDup = rootEl.querySelector('[data-act="duplicate"]');
       const btnDel = rootEl.querySelector('[data-act="remove"]');
 
@@ -60,6 +63,12 @@
         btnEdit.addEventListener('click', (e) => {
           e.preventDefault();
           onEditClip(inst.clipId);
+        });
+      }
+      if (btnConv){
+        btnConv.addEventListener('click', (e) => {
+          e.preventDefault();
+          onConvertAudioToEditable(inst.clipId, inst.id);
         });
       }
       if (btnDup){
@@ -86,6 +95,8 @@
 
       const inst = sel.inst;
       const clipName = sel.clip ? sel.clip.name : inst.clipId;
+      const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+      const isAudio = !!(sel.clip && P && typeof P.clipKind === 'function' && P.clipKind(sel.clip) === 'audio');
       rootEl.className = '';
       if (view){
         rootEl.innerHTML = view.selectionBoxInnerHTML({
@@ -95,15 +106,20 @@
           transpose: inst.transpose || 0,
           fmtSec,
           escapeHtml,
+          isAudio,
+          convertLabel: getConvertLabel(),
         });
       } else {
         // Fallback markup (should not happen in normal builds)
+        const editOrConv = isAudio
+          ? `<button class="btn mini primary" type="button" data-act="convertAudioEditable">${escapeHtml(getConvertLabel())}</button>`
+          : `<button class="btn mini" data-act="edit">Edit</button>`;
         rootEl.innerHTML = `
           <div class="kv"><b>Clip</b><span>${escapeHtml(clipName)}</span></div>
           <div class="kv"><b>Start</b><span>${fmtSec(inst.startSec)}</span></div>
           <div class="kv"><b>Transpose</b><span>${inst.transpose || 0}</span></div>
           <div class="row" style="margin-top:10px;">
-            <button class="btn mini" data-act="edit">Edit</button>
+            ${editOrConv}
             <button class="btn mini" data-act="duplicate">Duplicate</button>
             <button class="btn mini danger" data-act="remove">Remove</button>
           </div>

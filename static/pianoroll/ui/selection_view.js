@@ -12,13 +12,22 @@
     const transpose = Number(opts.transpose || 0);
     const fmtSec = opts.fmtSec || ((x)=>String(x));
     const escapeHtml = opts.escapeHtml || ((s)=>String(s));
+    const isAudio = !!opts.isAudio;
+    const convertLabel = (opts.convertLabel != null && String(opts.convertLabel)) ? String(opts.convertLabel) : 'Convert to editable';
+    const editBtn = isAudio
+      ? ''
+      : `<button id="btnSelEdit" class="btn mini" data-act="edit">Edit</button>`;
+    const audioConvertBtn = isAudio
+      ? `<button id="btnSelConvertAudio" class="btn mini primary" type="button" data-act="convertAudioEditable" title="${escapeHtml(convertLabel)}">${escapeHtml(convertLabel)}</button>`
+      : '';
 
     return `
       <div class="kv"><b>Clip</b><span>${escapeHtml(clipName)}</span></div>
       <div class="kv"><b>Start</b><span>${fmtSec(startSec)}</span></div>
       <div class="kv"><b>Transpose</b><span>${transpose}</span></div>
       <div class="row" style="margin-top:10px;">
-        <button id="btnSelEdit" class="btn mini" data-act="edit">Edit</button>
+        ${editBtn}
+        ${audioConvertBtn}
         <button id="btnSelDup" class="btn mini" data-act="duplicate">Duplicate</button>
         <button id="btnSelDel" class="btn mini danger" data-act="remove">Remove</button>
       </div>

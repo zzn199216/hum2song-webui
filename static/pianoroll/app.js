@@ -2524,6 +2524,12 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onEditClip: (clipId) => this.openClipEditor(clipId),
             onDuplicateInstance: (instId) => this.duplicateInstance(instId),
             onRemoveInstance: (instId) => this.deleteInstance(instId),
+            getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
+            onConvertAudioToEditable: (clipId, instId) => {
+              Promise.resolve(this.convertAudioClipToEditable(clipId, { sourceAudioInstanceId: instId })).catch(function(err){
+                console.warn('[App] convertAudioClipToEditable (instance) failed', err);
+              });
+            },
             onLog: log,
           });
         }
@@ -3999,17 +4005,29 @@ renderTimeline(){
       box.removeAttribute('data-i18n');
       box.className = '';
       const _t2 = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const P = window.H2SProject;
+      const isAudio = !!(clip && P && typeof P.clipKind === 'function' && P.clipKind(clip) === 'audio');
+      const editOrConv = isAudio
+        ? `<button id="btnSelConvertAudio" class="btn mini primary" type="button">${escapeHtml(_t2('cliplib.convertToEditable'))}</button>`
+        : `<button id="btnSelEdit" class="btn mini">${escapeHtml(_t2('actions.edit'))}</button>`;
       box.innerHTML = `
         <div class="kv"><b>Clip</b><span>${escapeHtml(clip ? clip.name : inst.clipId)}</span></div>
         <div class="kv"><b>Start</b><span>${fmtSec(inst.startSec)}</span></div>
         <div class="kv"><b>Transpose</b><span>${inst.transpose || 0}</span></div>
         <div class="row" style="margin-top:10px;">
-          <button id="btnSelEdit" class="btn mini">${escapeHtml(_t2('actions.edit'))}</button>
+          ${editOrConv}
           <button id="btnSelDup" class="btn mini">${escapeHtml(_t2('actions.duplicate'))}</button>
           <button id="btnSelDel" class="btn mini danger">${escapeHtml(_t2('actions.remove'))}</button>
         </div>
       `;
-      box.querySelector('#btnSelEdit').addEventListener('click', () => this.openClipEditor(inst.clipId));
+      if (isAudio){
+        const b = box.querySelector('#btnSelConvertAudio');
+        if (b) b.addEventListener('click', () => {
+          Promise.resolve(this.convertAudioClipToEditable(inst.clipId, { sourceAudioInstanceId: inst.id })).catch((err) => console.warn('[App] convertAudioClipToEditable (fallback) failed', err));
+        });
+      } else {
+        box.querySelector('#btnSelEdit').addEventListener('click', () => this.openClipEditor(inst.clipId));
+      }
       box.querySelector('#btnSelDup').addEventListener('click', () => this.duplicateInstance(inst.id));
       box.querySelector('#btnSelDel').addEventListener('click', () => this.deleteInstance(inst.id));
     },
@@ -4300,7 +4318,7 @@ renderTimeline(){
 
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
      * @param {Blob|File} f
-     * @param {{ sourceAudioClipId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; bar-segment / explode paths unchanged.
+     * @param {{ sourceAudioClipId?: string, sourceAudioInstanceId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; optional `sourceAudioInstanceId` pins placement to that timeline instance. Bar-segment / explode paths unchanged.
      */
     async uploadFileAndGenerate(f, opts){
       opts = opts || {};
@@ -4581,7 +4599,13 @@ renderTimeline(){
           let placeTrackIndex = 0;
           const Pproj = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
           if (opts.sourceAudioClipId && Pproj && typeof Pproj.resolveAudioConvertPlacementV1 === 'function'){
-            const pl = Pproj.resolveAudioConvertPlacementV1(this.project, String(opts.sourceAudioClipId), playheadSec, 0);
+            const pl = Pproj.resolveAudioConvertPlacementV1(
+              this.project,
+              String(opts.sourceAudioClipId),
+              playheadSec,
+              0,
+              opts.sourceAudioInstanceId ? String(opts.sourceAudioInstanceId) : undefined
+            );
             placeStartSec = pl.startSec;
             placeTrackIndex = pl.trackIndex;
           }
@@ -4593,6 +4617,7 @@ renderTimeline(){
           else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
           if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
           if (opts.sourceAudioClipId) clip.meta.sourceAudioClipId = String(opts.sourceAudioClipId);
+          if (opts.sourceAudioInstanceId) clip.meta.sourceAudioInstanceId = String(opts.sourceAudioInstanceId);
           this.project.clips.unshift(clip);
           this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
           persist();
@@ -4631,7 +4656,12 @@ renderTimeline(){
      * Original audio clip → new editable note clip via the same /generate → poll → /score path as Import as notes.
      * Does not remove or modify the source audio clip.
      */
-    async convertAudioClipToEditable(clipId){
+    /**
+     * @param {string} clipId
+     * @param {{ sourceAudioInstanceId?: string }} [opts] When set, placement aligns to that timeline instance (inspector / instance-scoped conversion).
+     */
+    async convertAudioClipToEditable(clipId, opts){
+      opts = opts || {};
       const P = window.H2SProject;
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       if (!clipId || !P || typeof P.clipKind !== 'function') return { ok: false, reason: 'bad_args' };
@@ -4656,7 +4686,9 @@ renderTimeline(){
         try { alert(_t('io.convertAudioBlobMissing')); } catch (_e) {}
         return { ok: false, reason: 'no_file' };
       }
-      await this.uploadFileAndGenerate(file, { sourceAudioClipId: clipId });
+      const uploadOpts = { sourceAudioClipId: clipId };
+      if (opts.sourceAudioInstanceId) uploadOpts.sourceAudioInstanceId = String(opts.sourceAudioInstanceId);
+      await this.uploadFileAndGenerate(file, uploadOpts);
       return { ok: true };
     },
 

@@ -756,13 +756,29 @@
 
   /**
    * Resolve placement for audio -> editable conversion in v1 view space.
-   * Align only when there is exactly one source instance; otherwise fallback.
+   * When `sourceInstanceId` is set, align to that instance (must match `sourceClipId`).
+   * Otherwise align only when there is exactly one timeline instance for the clip; else fallback.
    */
-  function resolveAudioConvertPlacementV1(projectV1, sourceClipId, fallbackStartSec, fallbackTrackIndex){
+  function resolveAudioConvertPlacementV1(projectV1, sourceClipId, fallbackStartSec, fallbackTrackIndex, sourceInstanceId){
     const fallbackStart = (isFiniteNumber(fallbackStartSec) && Number(fallbackStartSec) >= 0) ? Number(fallbackStartSec) : 0;
     const fallbackTrack = (isFiniteNumber(fallbackTrackIndex) && Number(fallbackTrackIndex) >= 0) ? Math.floor(Number(fallbackTrackIndex)) : 0;
     if (!projectV1 || !sourceClipId){
       return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'missing_input' };
+    }
+    const sid = (sourceInstanceId != null && String(sourceInstanceId).trim() !== '') ? String(sourceInstanceId).trim() : '';
+    if (sid){
+      const inst = Array.isArray(projectV1.instances)
+        ? projectV1.instances.find(i => i && String(i.id) === sid)
+        : null;
+      if (!inst){
+        return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'source_instance_not_found' };
+      }
+      if (String(inst.clipId || '') !== String(sourceClipId)){
+        return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'source_instance_clip_mismatch' };
+      }
+      const startSec = (isFiniteNumber(inst.startSec) && Number(inst.startSec) >= 0) ? Number(inst.startSec) : fallbackStart;
+      const trackIndex = (isFiniteNumber(inst.trackIndex) && Number(inst.trackIndex) >= 0) ? Math.floor(Number(inst.trackIndex)) : fallbackTrack;
+      return { startSec, trackIndex, aligned: true, reason: 'explicit_source_instance' };
     }
     const matches = Array.isArray(projectV1.instances)
       ? projectV1.instances.filter(inst => inst && String(inst.clipId || '') === String(sourceClipId))
