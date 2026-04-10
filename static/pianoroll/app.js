@@ -166,6 +166,31 @@
     return phrases.indexOf(s) >= 0;
   }
 
+  function _getInternalSkillRegistry(){
+    return (typeof globalThis !== 'undefined' && globalThis.H2SInternalSkillRegistry) ? globalThis.H2SInternalSkillRegistry : null;
+  }
+  /** When registry is missing, treat bounded assistant skills as enabled (legacy/tests). */
+  function _isAssistantBoundedSkillEnabled(commandId){
+    const R = _getInternalSkillRegistry();
+    if (!R || typeof R.isAssistantSkillEnabled !== 'function') return true;
+    return R.isAssistantSkillEnabled(commandId);
+  }
+  function _assistantSkillDisabledKey(commandId){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill(commandId) : null;
+    return (sk && sk.i18n && sk.i18n.skillDisabled) ? sk.i18n.skillDisabled : 'aiAssist.skillDisabled';
+  }
+  function _assistantSkillI18nAddTrack(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_track') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.addTrackRunning', ok: 'aiAssist.addTrackOk', fail: 'aiAssist.addTrackFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+  function _assistantSkillI18nMoveInstance(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+
   /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
   function _templateExecutionFieldsFromPlanKind(planKind){
     if (planKind == null || typeof planKind !== 'string') return null;
@@ -2909,8 +2934,15 @@ ensureTrackButtons(){
       inp.value = '';
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       if (_resolveAssistantAddTrackIntentFromText(text)){
+        if (!_isAssistantBoundedSkillEnabled('add_track')){
+          this._aiAssistItems = this._aiAssistItems || [];
+          this._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey('add_track')) });
+          this.render();
+          return;
+        }
+        const kiAdd = _assistantSkillI18nAddTrack();
         this._aiAssistItems = this._aiAssistItems || [];
-        const pending = { type: 'sys', text: _t('aiAssist.addTrackRunning'), _pendingAddTrack: true };
+        const pending = { type: 'sys', text: _t(kiAdd.running), _pendingAddTrack: true };
         this._aiAssistItems.push(pending);
         this.render();
         const self = this;
@@ -2921,10 +2953,10 @@ ensureTrackButtons(){
               const d = res.data || {};
               const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
               const num = (ti != null) ? String(ti + 1) : '?';
-              self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackOk').replace(/\{n\}/g, num) };
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.ok).replace(/\{n\}/g, num) };
             } else {
               const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-              self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.fail) + (msg ? ': ' + msg : '') };
             }
           }
           self.render();
@@ -2932,7 +2964,7 @@ ensureTrackButtons(){
           const idx = (self._aiAssistItems || []).indexOf(pending);
           if (idx >= 0){
             const msg = (err && err.message) ? String(err.message).slice(0, 120) : '';
-            self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+            self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.fail) + (msg ? ': ' + msg : '') };
           }
           self.render();
         });
@@ -2940,6 +2972,13 @@ ensureTrackButtons(){
       }
       const moveIntent = _resolveAssistantMoveInstanceIntentFromText(text);
       if (moveIntent){
+        if (!_isAssistantBoundedSkillEnabled('move_instance')){
+          this._aiAssistItems = this._aiAssistItems || [];
+          this._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey('move_instance')) });
+          this.render();
+          return;
+        }
+        const kiMv = _assistantSkillI18nMoveInstance();
         this._aiAssistItems = this._aiAssistItems || [];
         const instId = this.state && this.state.selectedInstanceId;
         if (!instId){
@@ -2961,23 +3000,23 @@ ensureTrackButtons(){
         const clamped = rawNext < 0;
         let nextBeat = clamped ? 0 : rawNext;
         if (P && typeof P.normalizeBeat === 'function') nextBeat = P.normalizeBeat(nextBeat);
-        const pending = { type: 'sys', text: _t('aiAssist.moveInstanceRunning'), _pendingMoveInstance: true };
+        const pending = { type: 'sys', text: _t(kiMv.running), _pendingMoveInstance: true };
         this._aiAssistItems.push(pending);
         this.render();
         const self = this;
-        const dirWord = _t(moveIntent.direction === 'left' ? 'aiAssist.dirLeft' : 'aiAssist.dirRight');
+        const dirWord = _t(moveIntent.direction === 'left' ? kiMv.dirLeft : kiMv.dirRight);
         Promise.resolve(this.runCommand('move_instance', { instanceId: instId, startBeat: nextBeat })).then(function(res){
           const idx = (self._aiAssistItems || []).indexOf(pending);
           if (idx >= 0){
             if (res && res.ok){
-              let msg = _t('aiAssist.moveInstanceOk')
+              let msg = _t(kiMv.ok)
                 .replace(/\{dir\}/g, dirWord)
                 .replace(/\{delta\}/g, String(moveIntent.deltaBeats));
-              if (clamped) msg += ' ' + _t('aiAssist.moveInstanceClamped');
+              if (clamped) msg += ' ' + _t(kiMv.clamp);
               self._aiAssistItems[idx] = { type: 'sys', text: msg };
             } else {
               const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-              self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
             }
           }
           self.render();
@@ -2985,7 +3024,7 @@ ensureTrackButtons(){
           const idx = (self._aiAssistItems || []).indexOf(pending);
           if (idx >= 0){
             const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
-            self._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+            self._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
           }
           self.render();
         });

@@ -144,6 +144,7 @@
   "aiAssist.noClip": "未选择片段",
   "aiAssist.clipPrefix": "片段：",
   "aiAssist.selectClipFirst": "请先选择一个片段。",
+  "aiAssist.skillDisabled": "该助手操作暂不可用。",
   "aiAssist.addTrackRunning": "正在添加轨道…",
   "aiAssist.addTrackOk": "已添加轨道 {n}。",
   "aiAssist.addTrackFail": "无法添加轨道",

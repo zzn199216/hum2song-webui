@@ -24,14 +24,24 @@ if (globalThis.window && globalThis.window.H2SInternalActionRegistry) {
   globalThis.H2SInternalActionRegistry = globalThis.window.H2SInternalActionRegistry;
 }
 
+require(path.resolve(__dirname, '../../static/pianoroll/internal_skill_registry.js'));
+if (globalThis.window && globalThis.window.H2SInternalSkillRegistry) {
+  globalThis.H2SInternalSkillRegistry = globalThis.window.H2SInternalSkillRegistry;
+}
+
 // Contract: bounded actions live in internal_action_registry.js; app.js dispatches via H2SInternalActionRegistry
 (function testAppSourceUsesBoundedRegistry(){
   const appPath = path.join(__dirname, '..', '..', 'static', 'pianoroll', 'app.js');
   const regPath = path.join(__dirname, '..', '..', 'static', 'pianoroll', 'internal_action_registry.js');
+  const skillPath = path.join(__dirname, '..', '..', 'static', 'pianoroll', 'internal_skill_registry.js');
   const appSrc = fs.readFileSync(appPath, 'utf8');
   const regSrc = fs.readFileSync(regPath, 'utf8');
+  const skillSrc = fs.readFileSync(skillPath, 'utf8');
   assert(/H2SInternalActionRegistry/.test(appSrc), 'app.js should dispatch bounded commands via H2SInternalActionRegistry');
   assert(/executeBounded/.test(appSrc), 'app.js should call executeBounded for bounded commands');
+  assert(/H2SInternalSkillRegistry/.test(appSrc), 'app.js should reference internal skill registry for assistant metadata');
+  assert(/_isAssistantBoundedSkillEnabled/.test(appSrc), 'app.js should gate assistant bounded skills');
+  assert(/add_track/.test(skillSrc) && /move_instance/.test(skillSrc), 'skill registry defines first slice');
   assert(/add_clip_to_timeline/.test(regSrc) && /move_instance/.test(regSrc) && /remove_instance/.test(regSrc) && /add_track/.test(regSrc), 'registry should define MVP command ids');
   const R = globalThis.H2SInternalActionRegistry;
   assert(R && typeof R.boundedActionIds === 'function', 'registry exposes boundedActionIds');

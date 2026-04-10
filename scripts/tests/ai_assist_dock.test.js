@@ -4,12 +4,21 @@
 
 const path = require('path');
 
+require(path.resolve(__dirname, '../../static/pianoroll/internal_action_registry.js'));
+if (globalThis.window && globalThis.window.H2SInternalActionRegistry) {
+  globalThis.H2SInternalActionRegistry = globalThis.window.H2SInternalActionRegistry;
+}
+require(path.resolve(__dirname, '../../static/pianoroll/internal_skill_registry.js'));
+if (globalThis.window && globalThis.window.H2SInternalSkillRegistry) {
+  globalThis.H2SInternalSkillRegistry = globalThis.window.H2SInternalSkillRegistry;
+}
+
 function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed');
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -496,14 +505,44 @@ function createFakeApp(opts) {
     render: () => {},
   };
   app._t = I18N.t.bind(I18N);
+  function _getInternalSkillRegistry() {
+    return (typeof globalThis !== 'undefined' && globalThis.H2SInternalSkillRegistry) ? globalThis.H2SInternalSkillRegistry : null;
+  }
+  function _isAssistantBoundedSkillEnabled(commandId) {
+    const R = _getInternalSkillRegistry();
+    if (!R || typeof R.isAssistantSkillEnabled !== 'function') return true;
+    return R.isAssistantSkillEnabled(commandId);
+  }
+  function _assistantSkillDisabledKey(commandId) {
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill(commandId) : null;
+    return (sk && sk.i18n && sk.i18n.skillDisabled) ? sk.i18n.skillDisabled : 'aiAssist.skillDisabled';
+  }
+  function _assistantSkillI18nAddTrack() {
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_track') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.addTrackRunning', ok: 'aiAssist.addTrackOk', fail: 'aiAssist.addTrackFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+  function _assistantSkillI18nMoveInstance() {
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
+  }
   app._aiAssistSend = function () {
     const inp = doc.getElementById('aiAssistInput');
     const text = String(inp ? inp.value : '').trim();
     if (!text) return;
     if (inp) inp.value = '';
     if (resolveAssistantAddTrackIntentFromText(text)) {
+      if (!_isAssistantBoundedSkillEnabled('add_track')) {
+        this._aiAssistItems = this._aiAssistItems || [];
+        this._aiAssistItems.push({ type: 'sys', text: this._t(_assistantSkillDisabledKey('add_track')) });
+        this.render();
+        return Promise.resolve();
+      }
+      const kiAdd = _assistantSkillI18nAddTrack();
       this._aiAssistItems = this._aiAssistItems || [];
-      const pending = { type: 'sys', text: this._t('aiAssist.addTrackRunning'), _pendingAddTrack: true };
+      const pending = { type: 'sys', text: this._t(kiAdd.running), _pendingAddTrack: true };
       this._aiAssistItems.push(pending);
       this.render();
       const self = this;
@@ -514,10 +553,10 @@ function createFakeApp(opts) {
             const d = res.data || {};
             const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
             const num = (ti != null) ? String(ti + 1) : '?';
-            self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.addTrackOk').replace(/\{n\}/g, num) };
+            self._aiAssistItems[idx] = { type: 'sys', text: self._t(kiAdd.ok).replace(/\{n\}/g, num) };
           } else {
             const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-            self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.addTrackFail') + (msg ? ': ' + msg : '') };
+            self._aiAssistItems[idx] = { type: 'sys', text: self._t(kiAdd.fail) + (msg ? ': ' + msg : '') };
           }
         }
         self.render();
@@ -525,6 +564,13 @@ function createFakeApp(opts) {
     }
     const moveIntent = resolveAssistantMoveInstanceIntentFromText(text);
     if (moveIntent) {
+      if (!_isAssistantBoundedSkillEnabled('move_instance')) {
+        this._aiAssistItems = this._aiAssistItems || [];
+        this._aiAssistItems.push({ type: 'sys', text: this._t(_assistantSkillDisabledKey('move_instance')) });
+        this.render();
+        return Promise.resolve();
+      }
+      const kiMv = _assistantSkillI18nMoveInstance();
       if (!this.state.selectedInstanceId) {
         this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectInstanceFirst') });
         this.render();
@@ -543,21 +589,21 @@ function createFakeApp(opts) {
       const rawNext = curBeat + delta;
       const clamped = rawNext < 0;
       let nextBeat = clamped ? 0 : rawNext;
-      const pending = { type: 'sys', text: this._t('aiAssist.moveInstanceRunning'), _pendingMoveInstance: true };
+      const pending = { type: 'sys', text: this._t(kiMv.running), _pendingMoveInstance: true };
       this._aiAssistItems.push(pending);
       this.render();
       const self = this;
-      const dirWord = this._t(moveIntent.direction === 'left' ? 'aiAssist.dirLeft' : 'aiAssist.dirRight');
+      const dirWord = this._t(moveIntent.direction === 'left' ? kiMv.dirLeft : kiMv.dirRight);
       return Promise.resolve(this.runCommand('move_instance', { instanceId: inst.id, startBeat: nextBeat })).then(function (res) {
         const idx = (self._aiAssistItems || []).indexOf(pending);
         if (idx >= 0) {
           if (res && res.ok) {
-            let msg = self._t('aiAssist.moveInstanceOk').replace(/\{dir\}/g, dirWord).replace(/\{delta\}/g, String(moveIntent.deltaBeats));
-            if (clamped) msg += ' ' + self._t('aiAssist.moveInstanceClamped');
+            let msg = self._t(kiMv.ok).replace(/\{dir\}/g, dirWord).replace(/\{delta\}/g, String(moveIntent.deltaBeats));
+            if (clamped) msg += ' ' + self._t(kiMv.clamp);
             self._aiAssistItems[idx] = { type: 'sys', text: msg };
           } else {
             const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-            self._aiAssistItems[idx] = { type: 'sys', text: self._t('aiAssist.moveInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+            self._aiAssistItems[idx] = { type: 'sys', text: self._t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
           }
         }
         self.render();
@@ -935,6 +981,33 @@ function createFakeApp(opts) {
     assert(!runCommandCalls.some(function (c) { return c.command === 'optimize_clip'; }), 'no optimize on send');
   });
 })().then(function () { console.log('PASS add track with clip selected still command add_track only'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddTrackWhenSkillDisabledSkipsRunCommand() {
+  const R = globalThis.H2SInternalSkillRegistry;
+  const { app, doc, runCommandCalls } = createFakeApp();
+  R._setSkillEnabledForTest('add_track', false);
+  app.state.selectedClipId = null;
+  doc.getElementById('aiAssistInput').value = 'add a track';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand when add_track skill disabled');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
+  R._setSkillEnabledForTest('add_track', true);
+  console.log('PASS add track skill disabled => no runCommand');
+})();
+
+(function testSendMoveInstanceWhenSkillDisabledSkipsRunCommand() {
+  const R = globalThis.H2SInternalSkillRegistry;
+  const { app, doc, runCommandCalls } = createFakeApp();
+  R._setSkillEnabledForTest('move_instance', false);
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'move this right 1 beat';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand when move_instance skill disabled');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
+  R._setSkillEnabledForTest('move_instance', true);
+  console.log('PASS move instance skill disabled => no runCommand');
+})();
 
 (function testSendWithClipCreatesCard() {
   const { app, doc } = createFakeApp();

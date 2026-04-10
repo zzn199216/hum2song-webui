@@ -144,6 +144,7 @@
   "aiAssist.noClip": "No clip selected",
   "aiAssist.clipPrefix": "Clip: ",
   "aiAssist.selectClipFirst": "Select a clip first.",
+  "aiAssist.skillDisabled": "That assistant action is unavailable.",
   "aiAssist.addTrackRunning": "Adding track…",
   "aiAssist.addTrackOk": "Added track {n}.",
   "aiAssist.addTrackFail": "Could not add track",
