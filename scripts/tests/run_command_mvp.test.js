@@ -19,20 +19,30 @@ if (globalThis.window && globalThis.window.H2SProject) {
   globalThis.H2SProject = globalThis.window.H2SProject;
 }
 
-// Contract: app.js must expose these runCommand cases (keep in sync with static/pianoroll/app.js)
-(function testAppSourceHasMvpCases(){
-  const p = path.join(__dirname, '..', '..', 'static', 'pianoroll', 'app.js');
-  const src = fs.readFileSync(p, 'utf8');
-  assert(/case 'add_clip_to_timeline':/.test(src), 'app.js missing add_clip_to_timeline');
-  assert(/case 'remove_instance':/.test(src), 'app.js missing remove_instance');
-  assert(/case 'move_instance':/.test(src), 'app.js missing move_instance');
-  assert(/case 'add_track':/.test(src), 'app.js missing add_track');
-  console.log('PASS run_command_mvp: app.js contains MVP command cases');
+require(path.resolve(__dirname, '../../static/pianoroll/internal_action_registry.js'));
+if (globalThis.window && globalThis.window.H2SInternalActionRegistry) {
+  globalThis.H2SInternalActionRegistry = globalThis.window.H2SInternalActionRegistry;
+}
+
+// Contract: bounded actions live in internal_action_registry.js; app.js dispatches via H2SInternalActionRegistry
+(function testAppSourceUsesBoundedRegistry(){
+  const appPath = path.join(__dirname, '..', '..', 'static', 'pianoroll', 'app.js');
+  const regPath = path.join(__dirname, '..', '..', 'static', 'pianoroll', 'internal_action_registry.js');
+  const appSrc = fs.readFileSync(appPath, 'utf8');
+  const regSrc = fs.readFileSync(regPath, 'utf8');
+  assert(/H2SInternalActionRegistry/.test(appSrc), 'app.js should dispatch bounded commands via H2SInternalActionRegistry');
+  assert(/executeBounded/.test(appSrc), 'app.js should call executeBounded for bounded commands');
+  assert(/add_clip_to_timeline/.test(regSrc) && /move_instance/.test(regSrc) && /remove_instance/.test(regSrc) && /add_track/.test(regSrc), 'registry should define MVP command ids');
+  const R = globalThis.H2SInternalActionRegistry;
+  assert(R && typeof R.boundedActionIds === 'function', 'registry exposes boundedActionIds');
+  const ids = R.boundedActionIds().sort();
+  const exp = ['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance'].sort();
+  assert(JSON.stringify(ids) === JSON.stringify(exp), 'bounded ids must match MVP set');
+  console.log('PASS run_command_mvp: bounded registry contract');
 })();
 
 /**
- * Minimal app.runCommand implementation for the four MVP commands only.
- * Logic mirrors static/pianoroll/app.js — update both when changing behavior.
+ * Minimal app.runCommand for the four bounded commands — uses H2SInternalActionRegistry.executeBounded (same as app.js).
  */
 function createMvpCommandHarness() {
   const calls = {
@@ -108,89 +118,14 @@ function createMvpCommandHarness() {
       this._emitCmd('started', { command, payload, startedAt });
       try {
         let result = { ok: true, command, payload, startedAt, finishedAt: null, message: '', data: null };
-        switch (command) {
-          case 'add_clip_to_timeline': {
-            const clipId = payload.clipId;
-            if (!clipId) throw new Error('clipId required');
-            const clips = this.project.clips || [];
-            const clipOk = Array.isArray(clips) && clips.some(c => c && c.id === clipId);
-            if (!clipOk) throw new Error('clip not found');
-            const P = (typeof globalThis !== 'undefined' && globalThis.H2SProject) ? globalThis.H2SProject : null;
-            const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? this.project.bpm : 120;
-            let startSec;
-            if (payload.startBeat != null && P && typeof P.normalizeBeat === 'function' && typeof P.beatToSec === 'function' && isFinite(Number(payload.startBeat))) {
-              const sb = P.normalizeBeat(Number(payload.startBeat));
-              startSec = P.beatToSec(sb, bpm);
-            }
-            let trackIndex;
-            if (payload.trackIndex != null && Number.isFinite(Number(payload.trackIndex))) {
-              const max = Math.max(0, ((this.project.tracks || []).length) - 1);
-              trackIndex = Math.max(0, Math.min(max, Math.round(Number(payload.trackIndex))));
-            }
-            this.addClipToTimeline(clipId, startSec, trackIndex);
-            result.message = 'added';
-            const selId = this.state && this.state.selectedInstanceId;
-            const instAdded = selId ? (this.project.instances || []).find(x => x && x.id === selId) : null;
-            const tiOut = instAdded && typeof instAdded.trackIndex === 'number' ? instAdded.trackIndex : (trackIndex != null ? trackIndex : (Number.isFinite(this.state.activeTrackIndex) ? this.state.activeTrackIndex : 0));
-            const sbOut = (instAdded && P && typeof P.secToBeat === 'function') ? P.secToBeat(instAdded.startSec || 0, bpm) : ((startSec != null && P && typeof P.secToBeat === 'function') ? P.secToBeat(startSec, bpm) : null);
-            result.data = { clipId, instanceId: instAdded ? instAdded.id : null, startBeat: sbOut, trackIndex: tiOut };
-            break;
-          }
-          case 'remove_instance': {
-            const instanceId = payload.instanceId;
-            if (!instanceId) throw new Error('instanceId required');
-            const idx = (this.project.instances || []).findIndex(x => x && x.id === instanceId);
-            if (idx < 0) throw new Error('instance not found');
-            this.deleteInstance(instanceId);
-            result.message = 'removed';
-            result.data = { instanceId };
-            break;
-          }
-          case 'move_instance': {
-            const instanceId = payload.instanceId;
-            if (!instanceId) throw new Error('instanceId required');
-            const inst = (this.project.instances || []).find(x => x && x.id === instanceId);
-            if (!inst) throw new Error('instance not found');
-            const P = (typeof globalThis !== 'undefined' && globalThis.H2SProject) ? globalThis.H2SProject : null;
-            const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? this.project.bpm : 120;
-            let changed = false;
-            if (payload.startBeat != null && P && typeof P.normalizeBeat === 'function' && typeof P.beatToSec === 'function' && isFinite(Number(payload.startBeat))) {
-              const sb = P.normalizeBeat(Number(payload.startBeat));
-              inst.startSec = P.beatToSec(sb, bpm);
-              changed = true;
-            }
-            if (payload.trackIndex != null && Number.isFinite(Number(payload.trackIndex))) {
-              const max = Math.max(0, ((this.project.tracks || []).length) - 1);
-              inst.trackIndex = Math.max(0, Math.min(max, Math.round(Number(payload.trackIndex))));
-              changed = true;
-            }
-            if (!changed) {
-              result.message = 'noop';
-              result.data = { instanceId, noop: true };
-              break;
-            }
-            this.persist();
-            this.render();
-            result.message = 'moved';
-            result.data = {
-              instanceId,
-              startBeat: (P && typeof P.secToBeat === 'function') ? P.secToBeat(inst.startSec || 0, bpm) : null,
-              trackIndex: (typeof inst.trackIndex === 'number') ? inst.trackIndex : 0,
-            };
-            break;
-          }
-          case 'add_track': {
-            this.addTrack();
-            result.message = 'added';
-            const p2 = (typeof this.getProjectV2 === 'function') ? this.getProjectV2() : null;
-            const tracks = (p2 && Array.isArray(p2.tracks)) ? p2.tracks : [];
-            const last = tracks.length ? tracks[tracks.length - 1] : null;
-            result.data = { trackIndex: tracks.length - 1, trackId: last && (last.trackId || last.id) ? String(last.trackId || last.id) : null };
-            break;
-          }
-          default:
-            throw new Error('unknown command: ' + command);
+        const R = globalThis.H2SInternalActionRegistry;
+        if (!R || !R.isBounded(command)) {
+          throw new Error('unknown command: ' + command);
         }
+        const hooks = { persist: () => this.persist(), render: () => this.render() };
+        const out = R.executeBounded(this, command, payload, hooks);
+        result.message = out.message;
+        result.data = out.data;
         result.finishedAt = Date.now();
         this._emitCmd('done', { command, payload, result });
         return result;
