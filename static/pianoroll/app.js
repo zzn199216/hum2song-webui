@@ -2544,6 +2544,7 @@ if (typeof localStorage !== 'undefined') {
       // PR-G1b: Language switch (Inspector dropdown)
       this._initLangDropdown();
       this._initBeginnerHintBar();
+      this._fetchBackendReadinessOnce();
       this._initLastOptimizeDetails();
 
       // Modal
@@ -5310,6 +5311,7 @@ renderTimeline(){
             await I18N.load(lang);
             I18N.setLang(lang);
             this._updateI18nLabels();
+            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
             this.render();
           }catch(e){ console.warn('[i18n] load locale failed', e); }
         };
@@ -5319,7 +5321,7 @@ renderTimeline(){
         Promise.all([
           I18N.loadManifest ? I18N.loadManifest().catch(() => {}) : Promise.resolve(),
           I18N.load(I18N.getLang()).catch(() => {})
-        ]).then(() => { populate(); this._updateI18nLabels(); this.render(); }).catch(() => { populate(); this._updateI18nLabels(); this.render(); });
+        ]).then(() => { populate(); this._updateI18nLabels(); if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip(); this.render(); }).catch(() => { populate(); this._updateI18nLabels(); if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip(); this.render(); });
       }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
     },
 
@@ -5425,6 +5427,74 @@ renderTimeline(){
           try{ if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, '1'); }catch(e){}
         });
       }catch(e){ console.warn('[beginnerHint] _initBeginnerHintBar failed', e); }
+    },
+
+    /** One GET /api/v1/health; caches booleans for a compact beginner readiness strip. */
+    _fetchBackendReadinessOnce(){
+      try{
+        if (this._backendReadinessFetched) return;
+        this._backendReadinessFetched = true;
+        if (typeof fetch !== 'function') return;
+        fetch('/api/v1/health', { method: 'GET', headers: { Accept: 'application/json' } })
+          .then((r) => {
+            if (!r.ok) throw new Error('http ' + r.status);
+            return r.json();
+          })
+          .then((data) => {
+            const ch = (data && data.checks && typeof data.checks === 'object') ? data.checks : {};
+            // Only treat explicit false as a problem (missing keys => assume OK).
+            this._backendReadinessState = {
+              fetchFailed: false,
+              soundfontOk: ch.soundfont_exists !== false,
+              fluidsynthOk: ch.fluidsynth !== false,
+              ffmpegOk: ch.ffmpeg !== false,
+            };
+            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
+          })
+          .catch(() => {
+            this._backendReadinessState = { fetchFailed: true };
+            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
+          });
+      }catch(e){
+        console.warn('[readiness] _fetchBackendReadinessOnce failed', e);
+      }
+    },
+
+    _renderBackendReadinessStrip(){
+      try{
+        const wrap = document.getElementById('studioBackendReadiness');
+        const msgEl = document.getElementById('studioBackendReadinessMsg');
+        const linkEl = document.getElementById('studioBackendReadinessLink');
+        if (!wrap || !msgEl) return;
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+        if (linkEl){
+          linkEl.textContent = _t('beginnerHint.readinessHealthLink');
+        }
+        const st = this._backendReadinessState;
+        if (!st){
+          wrap.classList.add('hidden');
+          msgEl.textContent = '';
+          return;
+        }
+        if (st.fetchFailed){
+          wrap.classList.remove('hidden');
+          msgEl.textContent = _t('beginnerHint.readinessFetchFailed');
+          return;
+        }
+        const parts = [];
+        if (!st.soundfontOk) parts.push(_t('beginnerHint.readinessSoundfont'));
+        if (!st.fluidsynthOk) parts.push(_t('beginnerHint.readinessFluidsynth'));
+        if (!st.ffmpegOk) parts.push(_t('beginnerHint.readinessFfmpeg'));
+        if (!parts.length){
+          wrap.classList.add('hidden');
+          msgEl.textContent = '';
+          return;
+        }
+        wrap.classList.remove('hidden');
+        msgEl.textContent = _t('beginnerHint.readinessPrefix') + parts.join(' · ');
+      }catch(e){
+        console.warn('[readiness] _renderBackendReadinessStrip failed', e);
+      }
     },
 
     _updateI18nLabels(){

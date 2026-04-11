@@ -287,6 +287,29 @@
     .beginnerHintRestoreWrap{ margin-top:12px; }
     .beginnerHintRestoreBtn{ font-size:11px !important; padding:4px 10px !important; }
 
+    /* One-shot backend readiness (from GET /api/v1/health); hidden when checks OK */
+    .studioBackendReadiness{
+      flex-shrink:0;
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:6px 10px;
+      padding:6px 14px;
+      border-bottom:1px solid var(--border);
+      background:rgba(245,158,11,.14);
+      font-size:11px;
+      line-height:1.45;
+      color:var(--text);
+    }
+    .studioBackendReadiness.hidden{ display:none !important; }
+    .studioBackendReadinessMsg{ color:rgba(231,237,246,.95); min-width:0; flex:1 1 200px; }
+    .studioBackendReadinessLink{
+      flex-shrink:0;
+      color:var(--accent2);
+      font-weight:600;
+      white-space:nowrap;
+    }
+
     /* Persistent entry: reopen same help overlay after hint strip is dismissed */
     .beginnerHelpEntryBtn{
       font-size:11px !important; font-weight:600; padding:4px 8px !important;
@@ -984,6 +1007,11 @@
     <div id="studioImportStatus" class="smallmuted" style="min-width:120px;"></div>
     <button id="btnCancelImport" class="btn ghost" style="display:none;" data-i18n="common.cancel">Cancel</button>
     <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>
+  </div>
+
+  <div id="studioBackendReadiness" class="studioBackendReadiness hidden" role="status" aria-live="polite">
+    <span id="studioBackendReadinessMsg" class="studioBackendReadinessMsg"></span>
+    <a id="studioBackendReadinessLink" class="studioBackendReadinessLink" href="/api/v1/health" target="_blank" rel="noopener">Open health JSON</a>
   </div>
 
   <div id="beginnerHintBar" class="beginnerHintBar" role="region" data-i18n-aria-label="beginnerHint.region" aria-label="First steps in Studio">
