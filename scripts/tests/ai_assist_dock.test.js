@@ -610,6 +610,12 @@ function createFakeApp(opts) {
       });
     }
     if (resolveAssistantRemoveInstanceIntentFromText(text)) {
+      if (!_isAssistantBoundedSkillEnabled('remove_instance')) {
+        this._aiAssistItems = this._aiAssistItems || [];
+        this._aiAssistItems.push({ type: 'sys', text: this._t(_assistantSkillDisabledKey('remove_instance')) });
+        this.render();
+        return Promise.resolve();
+      }
       if (!this.state.selectedInstanceId) {
         this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectInstanceFirst') });
         this.render();
@@ -1030,6 +1036,27 @@ function createFakeApp(opts) {
   assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
   R._setSkillEnabledForTest('move_instance', true);
   console.log('PASS move instance skill disabled => no runCommand');
+})();
+
+(function testSendRemoveInstanceWhenSkillDisabledSkipsRunCommand() {
+  const R = globalThis.H2SInternalSkillRegistry;
+  const orig = R.isAssistantSkillEnabled.bind(R);
+  R.isAssistantSkillEnabled = function (id) {
+    if (id === 'remove_instance') return false;
+    return orig(id);
+  };
+  try {
+    const { app, doc, runCommandCalls } = createFakeApp({ confirmImpl: () => true });
+    app.state.selectedInstanceId = 'inst-1';
+    app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+    doc.getElementById('aiAssistInput').value = 'remove this';
+    app._aiAssistSend();
+    assert(runCommandCalls.length === 0, 'no runCommand when remove_instance skill gate reports disabled');
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
+  } finally {
+    R.isAssistantSkillEnabled = orig;
+  }
+  console.log('PASS remove instance skill disabled => no runCommand');
 })();
 
 (function testSendWithClipCreatesCard() {

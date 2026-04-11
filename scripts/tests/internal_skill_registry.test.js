@@ -29,7 +29,7 @@ assert(JSON.stringify(ids) === JSON.stringify(['add_track', 'move_instance']), '
 
 assert(R.isAssistantSkillEnabled('add_track') === true, 'add_track enabled');
 assert(R.isAssistantSkillEnabled('move_instance') === true, 'move_instance enabled');
-assert(R.isAssistantSkillEnabled('remove_instance') === false, 'remove_instance not a skill');
+assert(R.isAssistantSkillEnabled('remove_instance') === true, 'bounded remove_instance enabled until listed in SKILLS');
 assert(R.getSkill('add_track').phraseResolverId === 'assistant_add_track_v1', 'phraseResolverId add_track');
 assert(R.getSkill('move_instance').target === R.TARGET.selected_instance, 'move target');
 

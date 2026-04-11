@@ -3031,6 +3031,12 @@ ensureTrackButtons(){
         return;
       }
       if (_resolveAssistantRemoveInstanceIntentFromText(text)){
+        if (!_isAssistantBoundedSkillEnabled('remove_instance')){
+          this._aiAssistItems = this._aiAssistItems || [];
+          this._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey('remove_instance')) });
+          this.render();
+          return;
+        }
         this._aiAssistItems = this._aiAssistItems || [];
         const instIdRm = this.state && this.state.selectedInstanceId;
         if (!instIdRm){

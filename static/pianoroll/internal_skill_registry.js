@@ -63,13 +63,18 @@
   }
 
   /**
+   * Bounded commands not yet listed in SKILLS are treated as enabled until skillized.
    * @param {string} commandId
    * @returns {boolean}
    */
   function isAssistantSkillEnabled(commandId) {
     var s = SKILLS[commandId];
-    if (!s || !s.enabled) return false;
     var AR = ROOT.H2SInternalActionRegistry;
+    if (!s) {
+      if (AR && typeof AR.isBounded === 'function' && AR.isBounded(commandId)) return true;
+      return false;
+    }
+    if (!s.enabled) return false;
     if (AR && typeof AR.isBounded === 'function' && !AR.isBounded(commandId)) return false;
     return true;
   }
