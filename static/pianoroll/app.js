@@ -2818,7 +2818,7 @@ try{
       this.render();
       log('UI ready.');
 
-      // Project Home MVP: toolbar entry + optional first-load auto-open
+      // Project Home MVP: toolbar entry + rare auto-open (avoid covering first-run beginner hint)
       const phModal = $('#projectHomeModal');
       if (phModal){
         const btnPh = $('#btnProjectHome');
@@ -2839,7 +2839,10 @@ try{
         });
         try{
           if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_SKIP_PROJECT_HOME_AUTO) !== '1'){
-            this.openProjectHome();
+            const idx = _readProjectsIndex();
+            const nProj = (idx && Array.isArray(idx.projects)) ? idx.projects.length : 0;
+            // First visit / single project: leave Project Home closed so beginner hint + top bar are visible.
+            if (nProj >= 2) this.openProjectHome();
           }
         }catch(e){}
       }
