@@ -3047,11 +3047,17 @@ ensureTrackButtons(){
         const clipRm = (this.project.clips || []).find(function(c){ return c && c.id === instRm.clipId; });
         const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
         const confirmMsg = _t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
-        const win = (typeof window !== 'undefined') ? window : null;
-        if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
-          this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.removeInstanceCancelled') });
-          this.render();
-          return;
+        const ActReg = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
+        const needAssistantConfirm = (!ActReg || typeof ActReg.requiresAssistantConfirmBeforeRun !== 'function')
+          ? true
+          : ActReg.requiresAssistantConfirmBeforeRun('remove_instance');
+        if (needAssistantConfirm) {
+          const win = (typeof window !== 'undefined') ? window : null;
+          if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
+            this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.removeInstanceCancelled') });
+            this.render();
+            return;
+          }
         }
         const pendingRm = { type: 'sys', text: _t('aiAssist.removeInstanceRunning'), _pendingRemoveInstance: true };
         this._aiAssistItems.push(pendingRm);

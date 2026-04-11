@@ -27,4 +27,16 @@ assert(threw, 'executeBounded rejects unknown command id');
 
 assert(typeof R.labelRunningKey === 'function' && R.labelRunningKey('add_track') === 'cmd.addTrack', 'labelRunningKey for add_track');
 
+assert(typeof R.requiresAssistantConfirmBeforeRun === 'function', 'requiresAssistantConfirmBeforeRun exported');
+assert(R.requiresAssistantConfirmBeforeRun('remove_instance') === true, 'remove_instance requires assistant confirm per registry');
+assert(R.requiresAssistantConfirmBeforeRun('add_track') === false, 'add_track never');
+assert(R.requiresAssistantConfirmBeforeRun('move_instance') === false, 'move_instance never');
+assert(R.requiresAssistantConfirmBeforeRun('not_bounded') === false, 'unknown command false');
+
+const origRmConfirm = R._BOUNDED.remove_instance.confirm;
+R._BOUNDED.remove_instance.confirm = R.CONFIRM.never;
+assert(R.requiresAssistantConfirmBeforeRun('remove_instance') === false, 'honors registry when confirm is never');
+R._BOUNDED.remove_instance.confirm = origRmConfirm;
+assert(R.requiresAssistantConfirmBeforeRun('remove_instance') === true, 'restored remove_instance policy');
+
 console.log('PASS internal_action_registry.test.js');

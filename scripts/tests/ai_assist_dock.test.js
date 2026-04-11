@@ -625,7 +625,11 @@ function createFakeApp(opts) {
       const clipRm = (this.project.clips || []).find(function (c) { return c && c.id === instRm.clipId; });
       const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
       const confirmMsg = this._t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
-      if (!confirmImpl(confirmMsg)) {
+      const ActReg = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
+      const needAssistantConfirm = (!ActReg || typeof ActReg.requiresAssistantConfirmBeforeRun !== 'function')
+        ? true
+        : ActReg.requiresAssistantConfirmBeforeRun('remove_instance');
+      if (needAssistantConfirm && !confirmImpl(confirmMsg)) {
         this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.removeInstanceCancelled') });
         this.render();
         return Promise.resolve();
@@ -907,6 +911,25 @@ function createFakeApp(opts) {
     assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Removed timeline instance.');
   });
 })().then(function () { console.log('PASS remove instance confirm true => runCommand remove_instance'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendRemoveInstanceRegistryNeverSkipsAssistantConfirm() {
+  const R = globalThis.H2SInternalActionRegistry;
+  const orig = R._BOUNDED.remove_instance.confirm;
+  R._BOUNDED.remove_instance.confirm = R.CONFIRM.never;
+  let confirmCalls = 0;
+  const { app, doc, runCommandCalls } = createFakeApp({
+    confirmImpl: () => { confirmCalls++; return false; },
+  });
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'remove this';
+  return app._aiAssistSend().then(function () {
+    assert(confirmCalls === 0, 'confirm must not run when registry policy is never');
+    assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'remove_instance', 'remove_instance runs without assistant confirm');
+  }).finally(function () {
+    R._BOUNDED.remove_instance.confirm = orig;
+  });
+})().then(function () { console.log('PASS remove instance registry never => no confirmImpl, runCommand'); }).catch(function (e) { console.error(e); process.exit(1); });
 
 (function testSendVagueCleanupNotRemoveInstance() {
   const { app, doc, runCommandCalls } = createFakeApp();

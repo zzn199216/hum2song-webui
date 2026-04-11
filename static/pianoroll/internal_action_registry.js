@@ -156,6 +156,18 @@
     return BOUNDED[command] || null;
   }
 
+  /**
+   * Assistant/skill callers should consult this before runCommand for bounded commands whose
+   * registry entry uses confirm metadata (executeBounded does not enforce confirm).
+   * @param {string} commandId
+   * @returns {boolean}
+   */
+  function requiresAssistantConfirmBeforeRun(commandId) {
+    var entry = BOUNDED[commandId];
+    if (!entry) return false;
+    return entry.confirm === CONFIRM.assistant_remove_instance;
+  }
+
   function labelRunningKey(command) {
     var e = BOUNDED[command];
     return (e && e.labels && e.labels.running) ? e.labels.running : null;
@@ -181,6 +193,7 @@
     boundedActionIds: boundedActionIds,
     isBounded: isBounded,
     getBoundedEntry: getBoundedEntry,
+    requiresAssistantConfirmBeforeRun: requiresAssistantConfirmBeforeRun,
     labelRunningKey: labelRunningKey,
     executeBounded: executeBounded,
     /** @internal test hook */
