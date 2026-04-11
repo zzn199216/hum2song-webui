@@ -41,6 +41,11 @@ if (globalThis.window && globalThis.window.H2SInternalSkillRegistry) {
   assert(/executeBounded/.test(appSrc), 'app.js should call executeBounded for bounded commands');
   assert(/H2SInternalSkillRegistry/.test(appSrc), 'app.js should reference internal skill registry for assistant metadata');
   assert(/_isAssistantBoundedSkillEnabled/.test(appSrc), 'app.js should gate assistant bounded skills');
+  assert(/_ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID/.test(appSrc), 'app.js should map phraseResolverId to resolvers');
+  assert(/_tryAssistantBoundedSkillDispatch/.test(appSrc), 'app.js should dispatch bounded assistant skills via helper');
+  assert(/assistant_add_track_v1:\s*_resolveAssistantAddTrackIntentFromText/.test(appSrc), 'add_track phrase resolver wiring');
+  assert(/assistant_move_instance_v1:\s*_resolveAssistantMoveInstanceIntentFromText/.test(appSrc), 'move_instance phrase resolver wiring');
+  assert(/assistant_remove_instance_v1:\s*_resolveAssistantRemoveInstanceIntentFromText/.test(appSrc), 'remove_instance phrase resolver wiring');
   assert(/add_track/.test(skillSrc) && /move_instance/.test(skillSrc) && /remove_instance/.test(skillSrc), 'skill registry defines bounded assistant slice');
   assert(/add_clip_to_timeline/.test(regSrc) && /move_instance/.test(regSrc) && /remove_instance/.test(regSrc) && /add_track/.test(regSrc), 'registry should define MVP command ids');
   const R = globalThis.H2SInternalActionRegistry;

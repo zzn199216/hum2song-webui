@@ -533,136 +533,155 @@ function createFakeApp(opts) {
     const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
   }
+  /** Mirror static/pianoroll/app.js bounded dispatch (phraseResolverId → resolver; same order). */
+  const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_track', 'move_instance', 'remove_instance']);
+  const ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_track_v1: resolveAssistantAddTrackIntentFromText,
+    assistant_move_instance_v1: resolveAssistantMoveInstanceIntentFromText,
+    assistant_remove_instance_v1: resolveAssistantRemoveInstanceIntentFromText,
+  });
+  const ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_track: 'assistant_add_track_v1',
+    move_instance: 'assistant_move_instance_v1',
+    remove_instance: 'assistant_remove_instance_v1',
+  });
+  function _tryAssistantBoundedSkillDispatchMirror(self, text, _t) {
+    const R = _getInternalSkillRegistry();
+    for (let si = 0; si < ASSISTANT_BOUNDED_SKILL_ORDER.length; si++) {
+      const skillId = ASSISTANT_BOUNDED_SKILL_ORDER[si];
+      const sk = R && R.getSkill ? R.getSkill(skillId) : null;
+      const phraseId = (sk && sk.phraseResolverId) ? sk.phraseResolverId : ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK[skillId];
+      if (!phraseId) continue;
+      const resolveFn = ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID[phraseId];
+      if (typeof resolveFn !== 'function') continue;
+      let moveIntent = null;
+      if (skillId === 'move_instance') {
+        moveIntent = resolveFn(text);
+        if (!moveIntent) continue;
+      } else {
+        if (!resolveFn(text)) continue;
+      }
+      if (!_isAssistantBoundedSkillEnabled(skillId)) {
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
+        self.render();
+        return Promise.resolve();
+      }
+      if (skillId === 'add_track') {
+        const kiAdd = _assistantSkillI18nAddTrack();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const pending = { type: 'sys', text: _t(kiAdd.running), _pendingAddTrack: true };
+        self._aiAssistItems.push(pending);
+        self.render();
+        return Promise.resolve(self.runCommand('add_track', {})).then(function (res) {
+          const idx = (self._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0) {
+            if (res && res.ok) {
+              const d = res.data || {};
+              const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
+              const num = (ti != null) ? String(ti + 1) : '?';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.ok).replace(/\{n\}/g, num) };
+            } else {
+              const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.fail) + (msg ? ': ' + msg : '') };
+            }
+          }
+          self.render();
+        });
+      }
+      if (skillId === 'move_instance') {
+        const kiMv = _assistantSkillI18nMoveInstance();
+        self._aiAssistItems = self._aiAssistItems || [];
+        if (!self.state.selectedInstanceId) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectInstanceFirst') });
+          self.render();
+          return Promise.resolve();
+        }
+        const instId = self.state.selectedInstanceId;
+        const inst = (self.project.instances || []).find(function (x) { return x && x.id === instId; });
+        if (!inst) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
+          self.render();
+          return Promise.resolve();
+        }
+        const bpm = (self.project && self.project.bpm) || 120;
+        const curBeat = (Number(inst.startSec) || 0) * bpm / 60;
+        const delta = (moveIntent.direction === 'right') ? moveIntent.deltaBeats : -moveIntent.deltaBeats;
+        const rawNext = curBeat + delta;
+        const clamped = rawNext < 0;
+        let nextBeat = clamped ? 0 : rawNext;
+        const pending = { type: 'sys', text: _t(kiMv.running), _pendingMoveInstance: true };
+        self._aiAssistItems.push(pending);
+        self.render();
+        const dirWord = _t(moveIntent.direction === 'left' ? kiMv.dirLeft : kiMv.dirRight);
+        return Promise.resolve(self.runCommand('move_instance', { instanceId: inst.id, startBeat: nextBeat })).then(function (res) {
+          const idx = (self._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0) {
+            if (res && res.ok) {
+              let msg = _t(kiMv.ok).replace(/\{dir\}/g, dirWord).replace(/\{delta\}/g, String(moveIntent.deltaBeats));
+              if (clamped) msg += ' ' + _t(kiMv.clamp);
+              self._aiAssistItems[idx] = { type: 'sys', text: msg };
+            } else {
+              const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+            }
+          }
+          self.render();
+        });
+      }
+      if (skillId === 'remove_instance') {
+        self._aiAssistItems = self._aiAssistItems || [];
+        if (!self.state.selectedInstanceId) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectInstanceFirst') });
+          self.render();
+          return Promise.resolve();
+        }
+        const instIdRm = self.state.selectedInstanceId;
+        const instRm = (self.project.instances || []).find(function (x) { return x && x.id === instIdRm; });
+        if (!instRm) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
+          self.render();
+          return Promise.resolve();
+        }
+        const clipRm = (self.project.clips || []).find(function (c) { return c && c.id === instRm.clipId; });
+        const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
+        const confirmMsg = _t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
+        const ActReg = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
+        const needAssistantConfirm = (!ActReg || typeof ActReg.requiresAssistantConfirmBeforeRun !== 'function')
+          ? true
+          : ActReg.requiresAssistantConfirmBeforeRun('remove_instance');
+        if (needAssistantConfirm && !confirmImpl(confirmMsg)) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.removeInstanceCancelled') });
+          self.render();
+          return Promise.resolve();
+        }
+        const kiRm = _assistantSkillI18nRemoveInstance();
+        const pendingRm = { type: 'sys', text: _t(kiRm.running), _pendingRemoveInstance: true };
+        self._aiAssistItems.push(pendingRm);
+        self.render();
+        return Promise.resolve(self.runCommand('remove_instance', { instanceId: instIdRm })).then(function (res) {
+          const idx = (self._aiAssistItems || []).indexOf(pendingRm);
+          if (idx >= 0) {
+            if (res && res.ok) {
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.ok) };
+            } else {
+              const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
+            }
+          }
+          self.render();
+        });
+      }
+    }
+    return false;
+  }
   app._aiAssistSend = function () {
     const inp = doc.getElementById('aiAssistInput');
     const text = String(inp ? inp.value : '').trim();
     if (!text) return;
     if (inp) inp.value = '';
-    if (resolveAssistantAddTrackIntentFromText(text)) {
-      if (!_isAssistantBoundedSkillEnabled('add_track')) {
-        this._aiAssistItems = this._aiAssistItems || [];
-        this._aiAssistItems.push({ type: 'sys', text: this._t(_assistantSkillDisabledKey('add_track')) });
-        this.render();
-        return Promise.resolve();
-      }
-      const kiAdd = _assistantSkillI18nAddTrack();
-      this._aiAssistItems = this._aiAssistItems || [];
-      const pending = { type: 'sys', text: this._t(kiAdd.running), _pendingAddTrack: true };
-      this._aiAssistItems.push(pending);
-      this.render();
-      const self = this;
-      return Promise.resolve(this.runCommand('add_track', {})).then(function (res) {
-        const idx = (self._aiAssistItems || []).indexOf(pending);
-        if (idx >= 0) {
-          if (res && res.ok) {
-            const d = res.data || {};
-            const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
-            const num = (ti != null) ? String(ti + 1) : '?';
-            self._aiAssistItems[idx] = { type: 'sys', text: self._t(kiAdd.ok).replace(/\{n\}/g, num) };
-          } else {
-            const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-            self._aiAssistItems[idx] = { type: 'sys', text: self._t(kiAdd.fail) + (msg ? ': ' + msg : '') };
-          }
-        }
-        self.render();
-      });
-    }
-    const moveIntent = resolveAssistantMoveInstanceIntentFromText(text);
-    if (moveIntent) {
-      if (!_isAssistantBoundedSkillEnabled('move_instance')) {
-        this._aiAssistItems = this._aiAssistItems || [];
-        this._aiAssistItems.push({ type: 'sys', text: this._t(_assistantSkillDisabledKey('move_instance')) });
-        this.render();
-        return Promise.resolve();
-      }
-      const kiMv = _assistantSkillI18nMoveInstance();
-      if (!this.state.selectedInstanceId) {
-        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectInstanceFirst') });
-        this.render();
-        return Promise.resolve();
-      }
-      const instId = this.state.selectedInstanceId;
-      const inst = (this.project.instances || []).find(function (x) { return x && x.id === instId; });
-      if (!inst) {
-        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.moveInstanceStale') });
-        this.render();
-        return Promise.resolve();
-      }
-      const bpm = (this.project && this.project.bpm) || 120;
-      const curBeat = (Number(inst.startSec) || 0) * bpm / 60;
-      const delta = (moveIntent.direction === 'right') ? moveIntent.deltaBeats : -moveIntent.deltaBeats;
-      const rawNext = curBeat + delta;
-      const clamped = rawNext < 0;
-      let nextBeat = clamped ? 0 : rawNext;
-      const pending = { type: 'sys', text: this._t(kiMv.running), _pendingMoveInstance: true };
-      this._aiAssistItems.push(pending);
-      this.render();
-      const self = this;
-      const dirWord = this._t(moveIntent.direction === 'left' ? kiMv.dirLeft : kiMv.dirRight);
-      return Promise.resolve(this.runCommand('move_instance', { instanceId: inst.id, startBeat: nextBeat })).then(function (res) {
-        const idx = (self._aiAssistItems || []).indexOf(pending);
-        if (idx >= 0) {
-          if (res && res.ok) {
-            let msg = self._t(kiMv.ok).replace(/\{dir\}/g, dirWord).replace(/\{delta\}/g, String(moveIntent.deltaBeats));
-            if (clamped) msg += ' ' + self._t(kiMv.clamp);
-            self._aiAssistItems[idx] = { type: 'sys', text: msg };
-          } else {
-            const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-            self._aiAssistItems[idx] = { type: 'sys', text: self._t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
-          }
-        }
-        self.render();
-      });
-    }
-    if (resolveAssistantRemoveInstanceIntentFromText(text)) {
-      if (!_isAssistantBoundedSkillEnabled('remove_instance')) {
-        this._aiAssistItems = this._aiAssistItems || [];
-        this._aiAssistItems.push({ type: 'sys', text: this._t(_assistantSkillDisabledKey('remove_instance')) });
-        this.render();
-        return Promise.resolve();
-      }
-      if (!this.state.selectedInstanceId) {
-        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectInstanceFirst') });
-        this.render();
-        return Promise.resolve();
-      }
-      const instIdRm = this.state.selectedInstanceId;
-      const instRm = (this.project.instances || []).find(function (x) { return x && x.id === instIdRm; });
-      if (!instRm) {
-        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.moveInstanceStale') });
-        this.render();
-        return Promise.resolve();
-      }
-      const clipRm = (this.project.clips || []).find(function (c) { return c && c.id === instRm.clipId; });
-      const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
-      const confirmMsg = this._t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
-      const ActReg = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
-      const needAssistantConfirm = (!ActReg || typeof ActReg.requiresAssistantConfirmBeforeRun !== 'function')
-        ? true
-        : ActReg.requiresAssistantConfirmBeforeRun('remove_instance');
-      if (needAssistantConfirm && !confirmImpl(confirmMsg)) {
-        this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.removeInstanceCancelled') });
-        this.render();
-        return Promise.resolve();
-      }
-      const kiRm = _assistantSkillI18nRemoveInstance();
-      const pendingRm = { type: 'sys', text: this._t(kiRm.running), _pendingRemoveInstance: true };
-      this._aiAssistItems.push(pendingRm);
-      this.render();
-      const selfRm = this;
-      return Promise.resolve(this.runCommand('remove_instance', { instanceId: instIdRm })).then(function (res) {
-        const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
-        if (idx >= 0) {
-          if (res && res.ok) {
-            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t(kiRm.ok) };
-          } else {
-            const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
-          }
-        }
-        selfRm.render();
-      });
-    }
+    const d = _tryAssistantBoundedSkillDispatchMirror(this, text, this._t);
+    if (d !== false) return d;
     const clipId = this.state.selectedClipId;
     if (!clipId) {
       this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
@@ -1056,6 +1075,38 @@ function createFakeApp(opts) {
   assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
   R._setSkillEnabledForTest('remove_instance', true);
   console.log('PASS remove instance skill disabled => no runCommand');
+})();
+
+(function testPhraseResolverIdsMatchBoundedDispatchSet() {
+  const R = globalThis.H2SInternalSkillRegistry;
+  const expected = new Set(['assistant_add_track_v1', 'assistant_move_instance_v1', 'assistant_remove_instance_v1']);
+  for (const sid of ['add_track', 'move_instance', 'remove_instance']) {
+    const pid = R.getSkill(sid).phraseResolverId;
+    assert(expected.has(pid), 'phraseResolverId for ' + sid + ': ' + pid);
+  }
+  console.log('PASS phraseResolverIds are the three bounded assistant v1 ids');
+})();
+
+(function testAppJsBoundedResolverRegistryAndOrder() {
+  const fs = require('fs');
+  const appPath = path.join(__dirname, '../../static/pianoroll/app.js');
+  const s = fs.readFileSync(appPath, 'utf8');
+  assert(s.includes("Object.freeze(['add_track', 'move_instance', 'remove_instance'])"), 'bounded dispatch order add → move → remove');
+  assert(s.includes('assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText'), 'resolver registry add_track');
+  assert(s.includes('assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText'), 'resolver registry move_instance');
+  assert(s.includes('assistant_remove_instance_v1: _resolveAssistantRemoveInstanceIntentFromText'), 'resolver registry remove_instance');
+  assert(s.includes('_tryAssistantBoundedSkillDispatch(this, text, _t)'), '_aiAssistSend calls bounded dispatch');
+  console.log('PASS app.js bounded resolver registry + dispatch hook');
+})();
+
+(function testNonMatchingBoundedTextFallsThroughToOptimizeCard() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'add more dynamics';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no bounded runCommand for non-matching phrase');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'card', 'optimize card path');
+  console.log('PASS non-bounded phrase with clip still creates optimize card');
 })();
 
 (function testSendWithClipCreatesCard() {

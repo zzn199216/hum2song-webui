@@ -32,6 +32,7 @@ assert(R.isAssistantSkillEnabled('move_instance') === true, 'move_instance enabl
 assert(R.isAssistantSkillEnabled('remove_instance') === true, 'remove_instance enabled');
 assert(R.isAssistantSkillEnabled('add_clip_to_timeline') === false, 'bounded-only command not a skill until listed');
 assert(R.getSkill('add_track').phraseResolverId === 'assistant_add_track_v1', 'phraseResolverId add_track');
+assert(R.getSkill('move_instance').phraseResolverId === 'assistant_move_instance_v1', 'phraseResolverId move_instance');
 assert(R.getSkill('move_instance').target === R.TARGET.selected_instance, 'move target');
 assert(R.getSkill('remove_instance').phraseResolverId === 'assistant_remove_instance_v1', 'phraseResolverId remove_instance');
 assert(R.getSkill('remove_instance').confirmPolicy === R.CONFIRM.assistant_remove_instance, 'remove confirmPolicy matches action slice');
