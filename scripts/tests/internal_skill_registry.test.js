@@ -25,18 +25,29 @@ const AR = globalThis.H2SInternalActionRegistry;
 
 assert(R && typeof R.assistantSkillIds === 'function', 'registry exposes assistantSkillIds');
 const ids = R.assistantSkillIds();
-assert(JSON.stringify(ids) === JSON.stringify(['add_track', 'move_instance']), 'exactly two skills in first slice');
+assert(JSON.stringify(ids) === JSON.stringify(['add_track', 'move_instance', 'remove_instance']), 'three internal skills');
 
 assert(R.isAssistantSkillEnabled('add_track') === true, 'add_track enabled');
 assert(R.isAssistantSkillEnabled('move_instance') === true, 'move_instance enabled');
-assert(R.isAssistantSkillEnabled('remove_instance') === true, 'bounded remove_instance enabled until listed in SKILLS');
+assert(R.isAssistantSkillEnabled('remove_instance') === true, 'remove_instance enabled');
+assert(R.isAssistantSkillEnabled('add_clip_to_timeline') === false, 'bounded-only command not a skill until listed');
 assert(R.getSkill('add_track').phraseResolverId === 'assistant_add_track_v1', 'phraseResolverId add_track');
 assert(R.getSkill('move_instance').target === R.TARGET.selected_instance, 'move target');
+assert(R.getSkill('remove_instance').phraseResolverId === 'assistant_remove_instance_v1', 'phraseResolverId remove_instance');
+assert(R.getSkill('remove_instance').confirmPolicy === R.CONFIRM.assistant_remove_instance, 'remove confirmPolicy matches action slice');
+assert(R.getSkill('remove_instance').target === R.TARGET.selected_instance, 'remove target');
 
 R._setSkillEnabledForTest('add_track', false);
 assert(R.isAssistantSkillEnabled('add_track') === false, 'disabled add_track');
 R._setSkillEnabledForTest('add_track', true);
 
-assert(AR.isBounded('add_track') && AR.isBounded('move_instance'), 'skills map to bounded commands');
+R._setSkillEnabledForTest('remove_instance', false);
+assert(R.isAssistantSkillEnabled('remove_instance') === false, 'disabled remove_instance');
+R._setSkillEnabledForTest('remove_instance', true);
+
+assert(
+  AR.isBounded('add_track') && AR.isBounded('move_instance') && AR.isBounded('remove_instance'),
+  'skills map to bounded commands',
+);
 
 console.log('PASS internal_skill_registry.test.js');

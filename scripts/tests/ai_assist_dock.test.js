@@ -528,6 +528,11 @@ function createFakeApp(opts) {
     const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
   }
+  function _assistantSkillI18nRemoveInstance() {
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
   app._aiAssistSend = function () {
     const inp = doc.getElementById('aiAssistInput');
     const text = String(inp ? inp.value : '').trim();
@@ -640,7 +645,8 @@ function createFakeApp(opts) {
         this.render();
         return Promise.resolve();
       }
-      const pendingRm = { type: 'sys', text: this._t('aiAssist.removeInstanceRunning'), _pendingRemoveInstance: true };
+      const kiRm = _assistantSkillI18nRemoveInstance();
+      const pendingRm = { type: 'sys', text: this._t(kiRm.running), _pendingRemoveInstance: true };
       this._aiAssistItems.push(pendingRm);
       this.render();
       const selfRm = this;
@@ -648,10 +654,10 @@ function createFakeApp(opts) {
         const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
         if (idx >= 0) {
           if (res && res.ok) {
-            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t('aiAssist.removeInstanceOk') };
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t(kiRm.ok) };
           } else {
             const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t('aiAssist.removeInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: selfRm._t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
           }
         }
         selfRm.render();
@@ -1040,22 +1046,15 @@ function createFakeApp(opts) {
 
 (function testSendRemoveInstanceWhenSkillDisabledSkipsRunCommand() {
   const R = globalThis.H2SInternalSkillRegistry;
-  const orig = R.isAssistantSkillEnabled.bind(R);
-  R.isAssistantSkillEnabled = function (id) {
-    if (id === 'remove_instance') return false;
-    return orig(id);
-  };
-  try {
-    const { app, doc, runCommandCalls } = createFakeApp({ confirmImpl: () => true });
-    app.state.selectedInstanceId = 'inst-1';
-    app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
-    doc.getElementById('aiAssistInput').value = 'remove this';
-    app._aiAssistSend();
-    assert(runCommandCalls.length === 0, 'no runCommand when remove_instance skill gate reports disabled');
-    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
-  } finally {
-    R.isAssistantSkillEnabled = orig;
-  }
+  const { app, doc, runCommandCalls } = createFakeApp({ confirmImpl: () => true });
+  R._setSkillEnabledForTest('remove_instance', false);
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'remove this';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand when remove_instance skill disabled');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
+  R._setSkillEnabledForTest('remove_instance', true);
   console.log('PASS remove instance skill disabled => no runCommand');
 })();
 

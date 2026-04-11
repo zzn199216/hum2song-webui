@@ -41,7 +41,7 @@ if (globalThis.window && globalThis.window.H2SInternalSkillRegistry) {
   assert(/executeBounded/.test(appSrc), 'app.js should call executeBounded for bounded commands');
   assert(/H2SInternalSkillRegistry/.test(appSrc), 'app.js should reference internal skill registry for assistant metadata');
   assert(/_isAssistantBoundedSkillEnabled/.test(appSrc), 'app.js should gate assistant bounded skills');
-  assert(/add_track/.test(skillSrc) && /move_instance/.test(skillSrc), 'skill registry defines first slice');
+  assert(/add_track/.test(skillSrc) && /move_instance/.test(skillSrc) && /remove_instance/.test(skillSrc), 'skill registry defines bounded assistant slice');
   assert(/add_clip_to_timeline/.test(regSrc) && /move_instance/.test(regSrc) && /remove_instance/.test(regSrc) && /add_track/.test(regSrc), 'registry should define MVP command ids');
   const R = globalThis.H2SInternalActionRegistry;
   assert(R && typeof R.boundedActionIds === 'function', 'registry exposes boundedActionIds');

@@ -1,13 +1,13 @@
 /* Hum2Song Studio — internal assistant skill metadata (MVP slice).
  * Not user-configurable. Sits above H2SInternalActionRegistry: describes assistant-facing
  * labels/targets/policies; execution remains runCommand → executeBounded.
- * First slice: add_track, move_instance only.
+ * Slice: add_track, move_instance, remove_instance (confirm UI stays assistant-side).
  */
 (function (ROOT) {
   'use strict';
 
   var TARGET = { none: 'none', selected_instance: 'selected_instance' };
-  var CONFIRM = { never: 'never' };
+  var CONFIRM = { never: 'never', assistant_remove_instance: 'assistant_remove_instance' };
 
   /**
    * @typedef {Object} InternalAssistantSkill
@@ -52,6 +52,20 @@
         skillDisabled: 'aiAssist.skillDisabled',
       },
     },
+    remove_instance: {
+      skillId: 'remove_instance',
+      commandId: 'remove_instance',
+      target: TARGET.selected_instance,
+      confirmPolicy: CONFIRM.assistant_remove_instance,
+      enabled: true,
+      phraseResolverId: 'assistant_remove_instance_v1',
+      i18n: {
+        running: 'aiAssist.removeInstanceRunning',
+        ok: 'aiAssist.removeInstanceOk',
+        fail: 'aiAssist.removeInstanceFail',
+        skillDisabled: 'aiAssist.skillDisabled',
+      },
+    },
   };
 
   function getSkill(skillId) {
@@ -63,18 +77,14 @@
   }
 
   /**
-   * Bounded commands not yet listed in SKILLS are treated as enabled until skillized.
+   * Only commands listed in SKILLS participate; must still be bounded in the action registry.
    * @param {string} commandId
    * @returns {boolean}
    */
   function isAssistantSkillEnabled(commandId) {
     var s = SKILLS[commandId];
+    if (!s || !s.enabled) return false;
     var AR = ROOT.H2SInternalActionRegistry;
-    if (!s) {
-      if (AR && typeof AR.isBounded === 'function' && AR.isBounded(commandId)) return true;
-      return false;
-    }
-    if (!s.enabled) return false;
     if (AR && typeof AR.isBounded === 'function' && !AR.isBounded(commandId)) return false;
     return true;
   }

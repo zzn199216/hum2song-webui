@@ -190,6 +190,11 @@
     const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
   }
+  function _assistantSkillI18nRemoveInstance(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
 
   /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
   function _templateExecutionFieldsFromPlanKind(planKind){
@@ -3065,7 +3070,8 @@ ensureTrackButtons(){
             return;
           }
         }
-        const pendingRm = { type: 'sys', text: _t('aiAssist.removeInstanceRunning'), _pendingRemoveInstance: true };
+        const kiRm = _assistantSkillI18nRemoveInstance();
+        const pendingRm = { type: 'sys', text: _t(kiRm.running), _pendingRemoveInstance: true };
         this._aiAssistItems.push(pendingRm);
         this.render();
         const selfRm = this;
@@ -3073,10 +3079,10 @@ ensureTrackButtons(){
           const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
           if (idx >= 0){
             if (res && res.ok){
-              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.removeInstanceOk') };
+              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.ok) };
             } else {
               const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
-              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.removeInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
             }
           }
           selfRm.render();
@@ -3084,7 +3090,7 @@ ensureTrackButtons(){
           const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
           if (idx >= 0){
             const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
-            selfRm._aiAssistItems[idx] = { type: 'sys', text: _t('aiAssist.removeInstanceFail') + (errMsg ? ': ' + errMsg : '') };
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
           }
           selfRm.render();
         });
