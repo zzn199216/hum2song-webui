@@ -6,7 +6,7 @@ Beginner-friendly local server launch: same path as the README (uvicorn app:app 
 - Prefers ./venv Python when present so you can run without activating the venv.
 - Waits until GET /api/v1/health responds (bounded time), then keeps the server running.
 - Optional --open: open Hum2Song Studio in the default browser after readiness (or after timeout).
-- Does not install packages or create a venv.
+- Does not install packages or create a venv (use scripts/beginner_setup.py for that).
 
 From repository root:
   python scripts/beginner_launch.py
@@ -136,7 +136,9 @@ def main() -> int:
     if not _have_uvicorn(py, _ROOT):
         print("[MISSING] Cannot import `uvicorn` with this interpreter:")
         print(f"          {py}")
-        print("          Install dependencies: pip install -r requirements.txt (usually inside a venv).")
+        print("          Prepare the Python environment (creates ./venv if needed, then pip install):")
+        print("            python scripts/beginner_setup.py")
+        print("          Or manually: activate ./venv and run pip install -r requirements.txt")
         print(f"          See: {_CHECKLIST}")
         return 1
 

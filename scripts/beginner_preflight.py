@@ -170,7 +170,7 @@ def main(suppress_next_step_hint: bool = False) -> int:
         return 1
     print("Result: OK for core audio prerequisites (see any [WARN] lines).")
     if not suppress_next_step_hint:
-        print(f"Next: venv + pip install -r requirements.txt - see {CHECKLIST}")
+        print(f"Next: python scripts/beginner_setup.py  (venv + pip) - see {CHECKLIST}")
     return 0
 
 
