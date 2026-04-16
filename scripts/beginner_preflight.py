@@ -135,6 +135,8 @@ def main(suppress_next_step_hint: bool = False) -> int:
             print(f"[PASS]    FluidSynth on PATH ({w})")
         else:
             print("[MISSING] FluidSynth not found (install and add to PATH, or set FLUIDSYNTH_PATH in .env)")
+            if os.name == "nt":
+                print("          Windows helper: beginner_install_audio_deps.bat")
             print(f"          See: {CHECKLIST}")
             fail = True
 
@@ -144,6 +146,8 @@ def main(suppress_next_step_hint: bool = False) -> int:
         print(f"[PASS]    FFmpeg on PATH ({ff})")
     else:
         print("[WARN]    FFmpeg not on PATH - MP3 and some conversions may fail (WAV may still work)")
+        if os.name == "nt":
+            print("          Windows helper: beginner_install_audio_deps.bat")
         print(f"          See: {CHECKLIST}")
 
     # --- Optional: live health if server is up ---
