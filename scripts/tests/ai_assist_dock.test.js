@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -50,6 +50,21 @@ function mapAiAssistTextToTemplate(text) {
     }
   }
   return { templateId: null, templateLabel: '', intent: null };
+}
+
+/** Mirror static/pianoroll/app.js `_resolveAssistantAddClipToTimelineIntentFromText` (keep in sync). */
+function resolveAssistantAddClipToTimelineIntentFromText(text) {
+  if (!text || typeof text !== 'string') return false;
+  let s = String(text).toLowerCase().trim();
+  s = s.replace(/^please\s+/, '');
+  s = s.replace(/\s+please\s*$/g, '').trim();
+  s = s.replace(/[.!?]+$/g, '').trim();
+  const phrases = [
+    'add this clip',
+    'insert this clip',
+    'put this clip on the timeline',
+  ];
+  return phrases.indexOf(s) >= 0;
 }
 
 /** Mirror static/pianoroll/app.js `_resolveAssistantAddTrackIntentFromText` (keep in sync). */
@@ -488,6 +503,9 @@ function createFakeApp(opts) {
           data: { clipId: cid, rollbackResult: { ok: true, changed: true } },
         });
       }
+      if (cmd === 'add_clip_to_timeline') {
+        return Promise.resolve({ ok: true, data: { clipId: payload.clipId } });
+      }
       if (cmd === 'add_track') {
         return Promise.resolve({ ok: true, data: { trackIndex: 2, trackId: 't-new' } });
       }
@@ -518,6 +536,11 @@ function createFakeApp(opts) {
     const sk = R && R.getSkill ? R.getSkill(commandId) : null;
     return (sk && sk.i18n && sk.i18n.skillDisabled) ? sk.i18n.skillDisabled : 'aiAssist.skillDisabled';
   }
+  function _assistantSkillI18nAddClipToTimeline() {
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_clip_to_timeline') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.addClipToTimelineRunning', ok: 'aiAssist.addClipToTimelineOk', fail: 'aiAssist.addClipToTimelineFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
   function _assistantSkillI18nAddTrack() {
     const R = _getInternalSkillRegistry();
     const sk = R && R.getSkill ? R.getSkill('add_track') : null;
@@ -534,13 +557,15 @@ function createFakeApp(opts) {
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
   }
   /** Mirror static/pianoroll/app.js bounded dispatch (phraseResolverId → resolver; same order). */
-  const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_track', 'move_instance', 'remove_instance']);
+  const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
   const ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_clip_to_timeline_v1: resolveAssistantAddClipToTimelineIntentFromText,
     assistant_add_track_v1: resolveAssistantAddTrackIntentFromText,
     assistant_move_instance_v1: resolveAssistantMoveInstanceIntentFromText,
     assistant_remove_instance_v1: resolveAssistantRemoveInstanceIntentFromText,
   });
   const ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_clip_to_timeline: 'assistant_add_clip_to_timeline_v1',
     add_track: 'assistant_add_track_v1',
     move_instance: 'assistant_move_instance_v1',
     remove_instance: 'assistant_remove_instance_v1',
@@ -566,6 +591,37 @@ function createFakeApp(opts) {
         self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
         self.render();
         return Promise.resolve();
+      }
+      if (skillId === 'add_clip_to_timeline') {
+        const kiAc = _assistantSkillI18nAddClipToTimeline();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const clipIdSel = self.state && self.state.selectedClipId;
+        if (!clipIdSel) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+          self.render();
+          return Promise.resolve();
+        }
+        const clipOk = (self.project.clips || []).some(function (c) { return c && c.id === clipIdSel; });
+        if (!clipOk) {
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectedClipStale') });
+          self.render();
+          return Promise.resolve();
+        }
+        const pendingAc = { type: 'sys', text: _t(kiAc.running), _pendingAddClipToTimeline: true };
+        self._aiAssistItems.push(pendingAc);
+        self.render();
+        return Promise.resolve(self.runCommand('add_clip_to_timeline', { clipId: clipIdSel })).then(function (res) {
+          const idx = (self._aiAssistItems || []).indexOf(pendingAc);
+          if (idx >= 0) {
+            if (res && res.ok) {
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.ok) };
+            } else {
+              const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              self._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.fail) + (msg ? ': ' + msg : '') };
+            }
+          }
+          self.render();
+        });
       }
       if (skillId === 'add_track') {
         const kiAdd = _assistantSkillI18nAddTrack();
@@ -862,10 +918,22 @@ function createFakeApp(opts) {
   assert(resolveAssistantAddTrackIntentFromText('please add a track') === true);
   assert(resolveAssistantAddTrackIntentFromText('create new track') === true);
   assert(resolveAssistantAddTrackIntentFromText('new track') === true);
+  assert(resolveAssistantAddTrackIntentFromText('add this clip') === false, 'add_track must not steal add-clip phrases');
   assert(resolveAssistantAddTrackIntentFromText('add more dynamics') === false);
   assert(resolveAssistantAddTrackIntentFromText('the pitch is off') === false);
   assert(resolveAssistantAddTrackIntentFromText('create a new melody') === false);
   console.log('PASS add-track intent phrases narrow');
+})();
+
+(function testResolveAddClipToTimelineIntentNarrow() {
+  assert(resolveAssistantAddClipToTimelineIntentFromText('add this clip') === true);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('Insert This Clip.') === true);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('please put this clip on the timeline') === true);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('add a track') === false, 'no collision with add_track');
+  assert(resolveAssistantAddClipToTimelineIntentFromText('new track') === false);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('add clip named melody') === false);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('place chorus on track 3') === false);
+  console.log('PASS add-clip-to-timeline intent phrases narrow');
 })();
 
 (function testResolveMoveInstanceIntentNarrow() {
@@ -1036,6 +1104,53 @@ function createFakeApp(opts) {
   });
 })().then(function () { console.log('PASS add track with clip selected still command add_track only'); }).catch(function (e) { console.error(e); process.exit(1); });
 
+(function testSendAddClipToTimelineNoClipRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = null;
+  doc.getElementById('aiAssistInput').value = 'add this clip';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand without selected clip');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Select a clip first.');
+  console.log('PASS add clip to timeline without selection => selectClipFirst');
+})();
+
+(function testSendAddClipToTimelineStaleRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'missing-clip-id';
+  app.project.clips = [{ id: 'clip-1', name: 'Test Clip' }];
+  doc.getElementById('aiAssistInput').value = 'insert this clip';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0);
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text.indexOf('no longer') >= 0);
+  console.log('PASS add clip to timeline stale selection => refuse');
+})();
+
+(function testSendAddClipToTimelineCallsRunCommandClipIdOnly() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'put this clip on the timeline';
+  const p = app._aiAssistSend();
+  assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'add_clip_to_timeline');
+  assert(runCommandCalls[0].payload.clipId === 'clip-1');
+  assert(Object.keys(runCommandCalls[0].payload).length === 1, 'payload shape: clipId only');
+  return p.then(function () {
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Added clip to timeline.');
+  });
+})().then(function () { console.log('PASS add clip to timeline => runCommand add_clip_to_timeline { clipId }'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddClipToTimelineWhenSkillDisabledSkipsRunCommand() {
+  const R = globalThis.H2SInternalSkillRegistry;
+  const { app, doc, runCommandCalls } = createFakeApp();
+  R._setSkillEnabledForTest('add_clip_to_timeline', false);
+  app.state.selectedClipId = 'clip-1';
+  doc.getElementById('aiAssistInput').value = 'add this clip';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand when add_clip_to_timeline skill disabled');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'That assistant action is unavailable.');
+  R._setSkillEnabledForTest('add_clip_to_timeline', true);
+  console.log('PASS add clip to timeline skill disabled => no runCommand');
+})();
+
 (function testSendAddTrackWhenSkillDisabledSkipsRunCommand() {
   const R = globalThis.H2SInternalSkillRegistry;
   const { app, doc, runCommandCalls } = createFakeApp();
@@ -1079,19 +1194,20 @@ function createFakeApp(opts) {
 
 (function testPhraseResolverIdsMatchBoundedDispatchSet() {
   const R = globalThis.H2SInternalSkillRegistry;
-  const expected = new Set(['assistant_add_track_v1', 'assistant_move_instance_v1', 'assistant_remove_instance_v1']);
-  for (const sid of ['add_track', 'move_instance', 'remove_instance']) {
+  const expected = new Set(['assistant_add_clip_to_timeline_v1', 'assistant_add_track_v1', 'assistant_move_instance_v1', 'assistant_remove_instance_v1']);
+  for (const sid of ['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']) {
     const pid = R.getSkill(sid).phraseResolverId;
     assert(expected.has(pid), 'phraseResolverId for ' + sid + ': ' + pid);
   }
-  console.log('PASS phraseResolverIds are the three bounded assistant v1 ids');
+  console.log('PASS phraseResolverIds are the bounded assistant v1 ids');
 })();
 
 (function testAppJsBoundedResolverRegistryAndOrder() {
   const fs = require('fs');
   const appPath = path.join(__dirname, '../../static/pianoroll/app.js');
   const s = fs.readFileSync(appPath, 'utf8');
-  assert(s.includes("Object.freeze(['add_track', 'move_instance', 'remove_instance'])"), 'bounded dispatch order add → move → remove');
+  assert(s.includes("Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance'])"), 'bounded dispatch order clip → track → move → remove');
+  assert(s.includes('assistant_add_clip_to_timeline_v1: _resolveAssistantAddClipToTimelineIntentFromText'), 'resolver registry add_clip_to_timeline');
   assert(s.includes('assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText'), 'resolver registry add_track');
   assert(s.includes('assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText'), 'resolver registry move_instance');
   assert(s.includes('assistant_remove_instance_v1: _resolveAssistantRemoveInstanceIntentFromText'), 'resolver registry remove_instance');

@@ -105,6 +105,24 @@
   }
 
   /**
+   * Narrow Assistant command: add selected library clip to timeline (matches `runCommand('add_clip_to_timeline', { clipId })` only).
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddClipToTimelineIntentFromText`.
+   */
+  function _resolveAssistantAddClipToTimelineIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/\s+please\s*$/g, '').trim();
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const phrases = [
+      'add this clip',
+      'insert this clip',
+      'put this clip on the timeline',
+    ];
+    return phrases.indexOf(s) >= 0;
+  }
+
+  /**
    * Narrow Assistant command: add track (matches `runCommand('add_track')` only).
    * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddTrackIntentFromText`.
    */
@@ -180,6 +198,11 @@
     const sk = R && R.getSkill ? R.getSkill(commandId) : null;
     return (sk && sk.i18n && sk.i18n.skillDisabled) ? sk.i18n.skillDisabled : 'aiAssist.skillDisabled';
   }
+  function _assistantSkillI18nAddClipToTimeline(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_clip_to_timeline') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.addClipToTimelineRunning', ok: 'aiAssist.addClipToTimelineOk', fail: 'aiAssist.addClipToTimelineFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
   function _assistantSkillI18nAddTrack(){
     const R = _getInternalSkillRegistry();
     const sk = R && R.getSkill ? R.getSkill('add_track') : null;
@@ -197,12 +220,13 @@
   }
 
   /** Product precedence for bounded assistant skills (internal slice; matches historical if-chain order). */
-  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_track', 'move_instance', 'remove_instance']);
+  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
 
   /**
    * phraseResolverId → in-code phrase resolver (must match internal_skill_registry SKILLS.*.phraseResolverId).
    */
   const _ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_clip_to_timeline_v1: _resolveAssistantAddClipToTimelineIntentFromText,
     assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText,
     assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText,
     assistant_remove_instance_v1: _resolveAssistantRemoveInstanceIntentFromText,
@@ -210,6 +234,7 @@
 
   /** If a skill row is missing, still resolve using the known phrase ids for this slice. */
   const _ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_clip_to_timeline: 'assistant_add_clip_to_timeline_v1',
     add_track: 'assistant_add_track_v1',
     move_instance: 'assistant_move_instance_v1',
     remove_instance: 'assistant_remove_instance_v1',
@@ -239,6 +264,46 @@
         self._aiAssistItems = self._aiAssistItems || [];
         self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
         self.render();
+        return true;
+      }
+      if (skillId === 'add_clip_to_timeline'){
+        const kiAc = _assistantSkillI18nAddClipToTimeline();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const clipIdSel = self.state && self.state.selectedClipId;
+        if (!clipIdSel){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+          self.render();
+          return true;
+        }
+        const clipOk = (self.project.clips || []).some(function(c){ return c && c.id === clipIdSel; });
+        if (!clipOk){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectedClipStale') });
+          self.render();
+          return true;
+        }
+        const pendingAc = { type: 'sys', text: _t(kiAc.running), _pendingAddClipToTimeline: true };
+        self._aiAssistItems.push(pendingAc);
+        self.render();
+        const selfAc = self;
+        Promise.resolve(selfAc.runCommand('add_clip_to_timeline', { clipId: clipIdSel })).then(function(res){
+          const idx = (selfAc._aiAssistItems || []).indexOf(pendingAc);
+          if (idx >= 0){
+            if (res && res.ok){
+              selfAc._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.ok) };
+            } else {
+              const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              selfAc._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.fail) + (msg ? ': ' + msg : '') };
+            }
+          }
+          selfAc.render();
+        }).catch(function(err){
+          const idx = (selfAc._aiAssistItems || []).indexOf(pendingAc);
+          if (idx >= 0){
+            const msg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            selfAc._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.fail) + (msg ? ': ' + msg : '') };
+          }
+          selfAc.render();
+        });
         return true;
       }
       if (skillId === 'add_track'){

@@ -1,7 +1,7 @@
 /* Hum2Song Studio — internal assistant skill metadata (MVP slice).
  * Not user-configurable. Sits above H2SInternalActionRegistry: describes assistant-facing
  * labels/targets/policies; execution remains runCommand → executeBounded.
- * Slice: add_track, move_instance, remove_instance (confirm UI stays assistant-side).
+ * Slice: add_clip_to_timeline, add_track, move_instance, remove_instance (confirm UI stays assistant-side).
  */
 (function (ROOT) {
   'use strict';
@@ -21,6 +21,20 @@
    */
 
   var SKILLS = {
+    add_clip_to_timeline: {
+      skillId: 'add_clip_to_timeline',
+      commandId: 'add_clip_to_timeline',
+      target: TARGET.none,
+      confirmPolicy: CONFIRM.never,
+      enabled: true,
+      phraseResolverId: 'assistant_add_clip_to_timeline_v1',
+      i18n: {
+        running: 'aiAssist.addClipToTimelineRunning',
+        ok: 'aiAssist.addClipToTimelineOk',
+        fail: 'aiAssist.addClipToTimelineFail',
+        skillDisabled: 'aiAssist.skillDisabled',
+      },
+    },
     add_track: {
       skillId: 'add_track',
       commandId: 'add_track',

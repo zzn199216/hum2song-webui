@@ -25,12 +25,13 @@ const AR = globalThis.H2SInternalActionRegistry;
 
 assert(R && typeof R.assistantSkillIds === 'function', 'registry exposes assistantSkillIds');
 const ids = R.assistantSkillIds();
-assert(JSON.stringify(ids) === JSON.stringify(['add_track', 'move_instance', 'remove_instance']), 'three internal skills');
+assert(JSON.stringify(ids) === JSON.stringify(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']), 'four internal skills');
 
+assert(R.isAssistantSkillEnabled('add_clip_to_timeline') === true, 'add_clip_to_timeline enabled when bounded');
 assert(R.isAssistantSkillEnabled('add_track') === true, 'add_track enabled');
 assert(R.isAssistantSkillEnabled('move_instance') === true, 'move_instance enabled');
 assert(R.isAssistantSkillEnabled('remove_instance') === true, 'remove_instance enabled');
-assert(R.isAssistantSkillEnabled('add_clip_to_timeline') === false, 'bounded-only command not a skill until listed');
+assert(R.getSkill('add_clip_to_timeline').phraseResolverId === 'assistant_add_clip_to_timeline_v1', 'phraseResolverId add_clip_to_timeline');
 assert(R.getSkill('add_track').phraseResolverId === 'assistant_add_track_v1', 'phraseResolverId add_track');
 assert(R.getSkill('move_instance').phraseResolverId === 'assistant_move_instance_v1', 'phraseResolverId move_instance');
 assert(R.getSkill('move_instance').target === R.TARGET.selected_instance, 'move target');
@@ -47,7 +48,7 @@ assert(R.isAssistantSkillEnabled('remove_instance') === false, 'disabled remove_
 R._setSkillEnabledForTest('remove_instance', true);
 
 assert(
-  AR.isBounded('add_track') && AR.isBounded('move_instance') && AR.isBounded('remove_instance'),
+  AR.isBounded('add_clip_to_timeline') && AR.isBounded('add_track') && AR.isBounded('move_instance') && AR.isBounded('remove_instance'),
   'skills map to bounded commands',
 );
 
