@@ -158,6 +158,7 @@
   "aiAssist.addClipToTimelineRunning": "正在将片段添加到时间轴…",
   "aiAssist.addClipToTimelineOk": "已将片段添加到时间轴。",
   "aiAssist.addClipToTimelineFail": "无法将片段添加到时间轴",
+  "aiAssist.addClipToTimelineTrackOutOfRange": "轨道 {n} 超出范围（1-{max}）。",
   "aiAssist.addTrackRunning": "正在添加轨道…",
   "aiAssist.addTrackOk": "已添加轨道 {n}。",
   "aiAssist.addTrackFail": "无法添加轨道",

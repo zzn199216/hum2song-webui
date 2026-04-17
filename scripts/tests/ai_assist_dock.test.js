@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -54,7 +54,7 @@ function mapAiAssistTextToTemplate(text) {
 
 /** Mirror static/pianoroll/app.js `_resolveAssistantAddClipToTimelineIntentFromText` (keep in sync). */
 function resolveAssistantAddClipToTimelineIntentFromText(text) {
-  if (!text || typeof text !== 'string') return false;
+  if (!text || typeof text !== 'string') return null;
   let s = String(text).toLowerCase().trim();
   s = s.replace(/^please\s+/, '');
   s = s.replace(/\s+please\s*$/g, '').trim();
@@ -64,7 +64,12 @@ function resolveAssistantAddClipToTimelineIntentFromText(text) {
     'insert this clip',
     'put this clip on the timeline',
   ];
-  return phrases.indexOf(s) >= 0;
+  if (phrases.indexOf(s) >= 0) return { trackIndex: null, trackNumber: null };
+  const m = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)$/);
+  if (!m) return null;
+  const trackNumber = Number(m[1]);
+  if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+  return { trackIndex: trackNumber - 1, trackNumber: trackNumber };
 }
 
 /** Mirror static/pianoroll/app.js `_resolveAssistantAddTrackIntentFromText` (keep in sync). */
@@ -580,9 +585,13 @@ function createFakeApp(opts) {
       const resolveFn = ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID[phraseId];
       if (typeof resolveFn !== 'function') continue;
       let moveIntent = null;
+      let addClipIntent = null;
       if (skillId === 'move_instance') {
         moveIntent = resolveFn(text);
         if (!moveIntent) continue;
+      } else if (skillId === 'add_clip_to_timeline') {
+        addClipIntent = resolveFn(text);
+        if (!addClipIntent) continue;
       } else {
         if (!resolveFn(text)) continue;
       }
@@ -607,10 +616,26 @@ function createFakeApp(opts) {
           self.render();
           return Promise.resolve();
         }
+        const cmdPayload = { clipId: clipIdSel };
+        if (addClipIntent && addClipIntent.trackIndex != null) {
+          const tiReq = Number(addClipIntent.trackIndex);
+          const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
+          if (!isFinite(tiReq) || tiReq < 0 || Math.floor(tiReq) !== tiReq || tiReq >= trackCount) {
+            const reqNum = Number.isFinite(Number(addClipIntent.trackNumber)) ? Math.round(Number(addClipIntent.trackNumber)) : (tiReq + 1);
+            const maxNum = Math.max(0, trackCount);
+            self._aiAssistItems.push({
+              type: 'sys',
+              text: _t('aiAssist.addClipToTimelineTrackOutOfRange').replace(/\{n\}/g, String(reqNum)).replace(/\{max\}/g, String(maxNum)),
+            });
+            self.render();
+            return Promise.resolve();
+          }
+          cmdPayload.trackIndex = tiReq;
+        }
         const pendingAc = { type: 'sys', text: _t(kiAc.running), _pendingAddClipToTimeline: true };
         self._aiAssistItems.push(pendingAc);
         self.render();
-        return Promise.resolve(self.runCommand('add_clip_to_timeline', { clipId: clipIdSel })).then(function (res) {
+        return Promise.resolve(self.runCommand('add_clip_to_timeline', cmdPayload)).then(function (res) {
           const idx = (self._aiAssistItems || []).indexOf(pendingAc);
           if (idx >= 0) {
             if (res && res.ok) {
@@ -926,13 +951,18 @@ function createFakeApp(opts) {
 })();
 
 (function testResolveAddClipToTimelineIntentNarrow() {
-  assert(resolveAssistantAddClipToTimelineIntentFromText('add this clip') === true);
-  assert(resolveAssistantAddClipToTimelineIntentFromText('Insert This Clip.') === true);
-  assert(resolveAssistantAddClipToTimelineIntentFromText('please put this clip on the timeline') === true);
-  assert(resolveAssistantAddClipToTimelineIntentFromText('add a track') === false, 'no collision with add_track');
-  assert(resolveAssistantAddClipToTimelineIntentFromText('new track') === false);
-  assert(resolveAssistantAddClipToTimelineIntentFromText('add clip named melody') === false);
-  assert(resolveAssistantAddClipToTimelineIntentFromText('place chorus on track 3') === false);
+  const base = resolveAssistantAddClipToTimelineIntentFromText('add this clip');
+  assert(base && base.trackIndex == null, 'plain phrase resolved with no track');
+  assert(resolveAssistantAddClipToTimelineIntentFromText('Insert This Clip.') != null);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('please put this clip on the timeline') != null);
+  const tr2 = resolveAssistantAddClipToTimelineIntentFromText('add this clip to track 2');
+  assert(tr2 && tr2.trackIndex === 1, 'track 2 -> trackIndex 1');
+  const tr1 = resolveAssistantAddClipToTimelineIntentFromText('insert this clip on track 1');
+  assert(tr1 && tr1.trackIndex === 0, 'track 1 -> trackIndex 0');
+  assert(resolveAssistantAddClipToTimelineIntentFromText('add a track') === null, 'no collision with add_track');
+  assert(resolveAssistantAddClipToTimelineIntentFromText('new track') === null);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('add clip named melody') === null);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('place chorus on track 3') === null);
   console.log('PASS add-clip-to-timeline intent phrases narrow');
 })();
 
@@ -1137,6 +1167,32 @@ function createFakeApp(opts) {
     assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Added clip to timeline.');
   });
 })().then(function () { console.log('PASS add clip to timeline => runCommand add_clip_to_timeline { clipId }'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddClipToTimelineWithTrackCallsRunCommandClipIdAndTrackIndex() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.project.tracks = [{ id: 't-1' }, { id: 't-2' }, { id: 't-3' }];
+  doc.getElementById('aiAssistInput').value = 'add this clip to track 2';
+  const p = app._aiAssistSend();
+  assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'add_clip_to_timeline');
+  assert(runCommandCalls[0].payload.clipId === 'clip-1');
+  assert(runCommandCalls[0].payload.trackIndex === 1, '1-based track wording converted to 0-based payload');
+  assert(Object.keys(runCommandCalls[0].payload).length === 2, 'payload shape: clipId + trackIndex');
+  return p.then(function () {
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Added clip to timeline.');
+  });
+})().then(function () { console.log('PASS add clip to timeline track phrase => runCommand add_clip_to_timeline { clipId, trackIndex }'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddClipToTimelineTrackOutOfRangeRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.project.tracks = [{ id: 't-1' }, { id: 't-2' }];
+  doc.getElementById('aiAssistInput').value = 'put this clip on track 3';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand for out-of-range track request');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Track 3 is out of range (1-2).');
+  console.log('PASS add clip to timeline out-of-range track => refuse');
+})();
 
 (function testSendAddClipToTimelineWhenSkillDisabledSkipsRunCommand() {
   const R = globalThis.H2SInternalSkillRegistry;

@@ -105,11 +105,12 @@
   }
 
   /**
-   * Narrow Assistant command: add selected library clip to timeline (matches `runCommand('add_clip_to_timeline', { clipId })` only).
+   * Narrow Assistant command: add selected library clip to timeline.
+   * Supports plain phrases ({ clipId }) and explicit track number placement ({ clipId, trackIndex }).
    * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddClipToTimelineIntentFromText`.
    */
   function _resolveAssistantAddClipToTimelineIntentFromText(text){
-    if (!text || typeof text !== 'string') return false;
+    if (!text || typeof text !== 'string') return null;
     let s = String(text).toLowerCase().trim();
     s = s.replace(/^please\s+/, '');
     s = s.replace(/\s+please\s*$/g, '').trim();
@@ -119,7 +120,12 @@
       'insert this clip',
       'put this clip on the timeline',
     ];
-    return phrases.indexOf(s) >= 0;
+    if (phrases.indexOf(s) >= 0) return { trackIndex: null, trackNumber: null };
+    const m = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)$/);
+    if (!m) return null;
+    const trackNumber = Number(m[1]);
+    if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+    return { trackIndex: trackNumber - 1, trackNumber: trackNumber };
   }
 
   /**
@@ -254,9 +260,13 @@
       const resolveFn = _ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID[phraseId];
       if (typeof resolveFn !== 'function') continue;
       let moveIntent = null;
+      let addClipIntent = null;
       if (skillId === 'move_instance'){
         moveIntent = resolveFn(text);
         if (!moveIntent) continue;
+      } else if (skillId === 'add_clip_to_timeline'){
+        addClipIntent = resolveFn(text);
+        if (!addClipIntent) continue;
       } else {
         if (!resolveFn(text)) continue;
       }
@@ -281,11 +291,29 @@
           self.render();
           return true;
         }
+        const cmdPayload = { clipId: clipIdSel };
+        if (addClipIntent && addClipIntent.trackIndex != null){
+          const tiReq = Number(addClipIntent.trackIndex);
+          const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
+          if (!isFinite(tiReq) || tiReq < 0 || Math.floor(tiReq) !== tiReq || tiReq >= trackCount){
+            const reqNum = Number.isFinite(Number(addClipIntent.trackNumber)) ? Math.round(Number(addClipIntent.trackNumber)) : (tiReq + 1);
+            const maxNum = Math.max(0, trackCount);
+            self._aiAssistItems.push({
+              type: 'sys',
+              text: _t('aiAssist.addClipToTimelineTrackOutOfRange')
+                .replace(/\{n\}/g, String(reqNum))
+                .replace(/\{max\}/g, String(maxNum)),
+            });
+            self.render();
+            return true;
+          }
+          cmdPayload.trackIndex = tiReq;
+        }
         const pendingAc = { type: 'sys', text: _t(kiAc.running), _pendingAddClipToTimeline: true };
         self._aiAssistItems.push(pendingAc);
         self.render();
         const selfAc = self;
-        Promise.resolve(selfAc.runCommand('add_clip_to_timeline', { clipId: clipIdSel })).then(function(res){
+        Promise.resolve(selfAc.runCommand('add_clip_to_timeline', cmdPayload)).then(function(res){
           const idx = (selfAc._aiAssistItems || []).indexOf(pendingAc);
           if (idx >= 0){
             if (res && res.ok){
