@@ -19,7 +19,7 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 ### Quick Start (TL;DR)
 
-1. **前置条件：** Python 3.11+，**FFmpeg** 与 **FluidSynth** 已在 PATH 中，并准备 **SoundFont** 文件 **`assets/piano.sf2`**（仓库不包含；见 [`assets/README.txt`](assets/README.txt)）。可选：复制 `.env.example` 为 `.env` 并调整路径。
+1. **前置条件：** Python 3.11+，**FFmpeg** 与 **FluidSynth** 已在 PATH 中，并准备 **SoundFont** 文件 **`assets/piano.sf2`**（仓库不包含；见 [`assets/README.txt`](assets/README.txt)）。可选：复制 `.env.example` 为 `.env` 并调整路径。若缺少任一项，请按 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg) 中的 **Manual install** 小节逐步安装。
 2. 创建 venv 并安装依赖（首次 `pip install` 可能较久，因含较大 ML/音频依赖）：
    ```powershell
    python -m venv venv

@@ -21,6 +21,11 @@ from typing import Any, Dict, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 CHECKLIST = "docs/BEGINNER_FIRST_RUN_CHECKLIST.md"
+CHECKLIST_AUDIO_SECTION = "Manual install (SoundFont, FluidSynth, FFmpeg)"
+
+
+def _checklist_audio_hint() -> str:
+    return f'{CHECKLIST} - section "{CHECKLIST_AUDIO_SECTION}"'
 
 
 def _load_env_file(path: Path) -> None:
@@ -92,7 +97,7 @@ def main(suppress_next_step_hint: bool = False) -> int:
     ver_s = f"{v.major}.{v.minor}.{v.micro}"
     if v < (3, 10):
         print(f"[MISSING] Python {ver_s} (need 3.10+; README recommends 3.11+ for local dev)")
-        print(f"          See: {CHECKLIST}")
+        print(f"          Next: {CHECKLIST} — section 1 (Install prerequisites)")
         fail = True
     elif v < (3, 11):
         print(f"[WARN]    Python {ver_s} (README recommends 3.11+; OK for many setups)")
@@ -116,7 +121,7 @@ def main(suppress_next_step_hint: bool = False) -> int:
         print(f"          Found other .sf2 in assets/: {fallback_sf2[0].name} (app may fall back; prefer piano.sf2)")
     else:
         print(f"[MISSING] SoundFont - place a .sf2 at {sf2} (see assets/README.txt)")
-        print(f"          See: {CHECKLIST}")
+        print(f"          Next: {_checklist_audio_hint()}")
         fail = True
 
     # --- FluidSynth ---
@@ -127,7 +132,7 @@ def main(suppress_next_step_hint: bool = False) -> int:
             print(f"[PASS]    FluidSynth via FLUIDSYNTH_PATH={fs_p}")
         else:
             print(f"[MISSING] FLUIDSYNTH_PATH points to missing file: {fs_p}")
-            print(f"          See: {CHECKLIST}")
+            print(f"          Next: {_checklist_audio_hint()}")
             fail = True
     else:
         w = _which_fluidsynth()
@@ -136,8 +141,8 @@ def main(suppress_next_step_hint: bool = False) -> int:
         else:
             print("[MISSING] FluidSynth not found (install and add to PATH, or set FLUIDSYNTH_PATH in .env)")
             if os.name == "nt":
-                print("          Windows helper: beginner_install_audio_deps.bat")
-            print(f"          See: {CHECKLIST}")
+                print("          On Windows you can try: beginner_install_audio_deps.bat — then preflight again in a new terminal")
+            print(f"          Next: {_checklist_audio_hint()}")
             fail = True
 
     # --- FFmpeg ---
@@ -147,8 +152,8 @@ def main(suppress_next_step_hint: bool = False) -> int:
     else:
         print("[WARN]    FFmpeg not on PATH - MP3 and some conversions may fail (WAV may still work)")
         if os.name == "nt":
-            print("          Windows helper: beginner_install_audio_deps.bat")
-        print(f"          See: {CHECKLIST}")
+            print("          On Windows you can try: beginner_install_audio_deps.bat — then preflight again in a new terminal")
+        print(f"          Next: {_checklist_audio_hint()}")
 
     # --- Optional: live health if server is up ---
     try:
@@ -171,10 +176,11 @@ def main(suppress_next_step_hint: bool = False) -> int:
     if fail:
         print("Result: some required items are missing. Fix the [MISSING] lines above.")
         print(f"Help: {CHECKLIST}")
+        print(f"      For SoundFont, FluidSynth, FFmpeg: section \"{CHECKLIST_AUDIO_SECTION}\"")
         return 1
     print("Result: OK for core audio prerequisites (see any [WARN] lines).")
     if not suppress_next_step_hint:
-        print(f"Next: python scripts/beginner_setup.py  (venv + pip) - see {CHECKLIST}")
+        print(f"Next: python scripts/beginner_setup.py  (venv + pip). If system tools are still wrong: {_checklist_audio_hint()}")
     return 0
 
 

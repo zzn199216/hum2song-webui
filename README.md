@@ -19,7 +19,7 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 
 ### Quick Start (TL;DR)
 
-1. **Prerequisites:** Python 3.11+, **FFmpeg** and **FluidSynth** on your PATH, and a **SoundFont** file at **`assets/piano.sf2`** (not bundled in git — see [`assets/README.txt`](assets/README.txt)). Optional: copy `.env.example` to `.env` and adjust paths.
+1. **Prerequisites:** Python 3.11+, **FFmpeg** and **FluidSynth** on your PATH, and a **SoundFont** file at **`assets/piano.sf2`** (not bundled in git — see [`assets/README.txt`](assets/README.txt)). Optional: copy `.env.example` to `.env` and adjust paths. **Missing any of these?** Follow the step-by-step manual path in [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg).
 2. Create venv and install dependencies (first install can take a while because `requirements.txt` includes larger ML/audio packages):
    ```powershell
    python -m venv venv

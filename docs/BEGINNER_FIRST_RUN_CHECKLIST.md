@@ -2,6 +2,8 @@
 
 Short path to a **working local** Hum2Song MVP + Studio. For API details see the root `README.md`.
 
+**If preflight, launch, or `beginner_install_audio_deps.bat` says something is missing:** open **`docs/BEGINNER_FIRST_RUN_CHECKLIST.md`** in your editor and go to **[Manual install (SoundFont, FluidSynth, FFmpeg)](#manual-install-soundfont-fluidsynth-ffmpeg)** — that section is the single place for the manual dependency path (we do not fully automate system tools).
+
 **Recommended order**
 
 1. **`python scripts/beginner_preflight.py`** — quick read-only check (Python, SoundFont, FluidSynth, FFmpeg; optional live health if a server is already up).
@@ -33,6 +35,40 @@ python scripts/beginner_preflight.py
 **Optional:** Copy [`.env.example`](../.env.example) to `.env` and adjust paths.
 
 **Not required to open the UI:** Node.js (only for `scripts/run_frontend_all_tests.js`), LLM gateway ([`docs/LLM_GATEWAY_QUICKSTART.md`](LLM_GATEWAY_QUICKSTART.md)), extra sampler samples ([`docs/INSTRUMENT_LIBRARY.md`](INSTRUMENT_LIBRARY.md)).
+
+## Manual install (SoundFont, FluidSynth, FFmpeg)
+
+Use this when automated helpers are not enough or when you prefer to install by hand. Scripts point here by path: **`docs/BEGINNER_FIRST_RUN_CHECKLIST.md`** (this file).
+
+### SoundFont (`.sf2`)
+
+1. Obtain a valid `.sf2` file (the repo does not ship one; see [`assets/README.txt`](../assets/README.txt) for guidance).
+2. Place it at **`assets/piano.sf2`** in the project root, **or** set **`SOUND_FONT_PATH`** or **`SF2_PATH`** in `.env` to the full path of your `.sf2`.
+3. Confirm the file exists on disk before expecting MIDI→audio to work.
+
+### FluidSynth
+
+FluidSynth must be a runnable **`fluidsynth`** (or **`fluidsynth.exe`**) on your **`PATH`**, unless you set **`FLUIDSYNTH_PATH`** in `.env` to the full path of the executable (common on Windows).
+
+| Platform | Practical options |
+|----------|-------------------|
+| **Windows** | **Chocolatey:** `choco install fluidsynth -y` (requires Chocolatey). Optional helper from repo root: **`beginner_install_audio_deps.bat`** (tries Chocolatey / winget for FFmpeg; see that file’s output — it does **not** install a SoundFont). **Manual:** download a FluidSynth build you trust, then add its folder to PATH or set `FLUIDSYNTH_PATH`. |
+| **macOS** | **Homebrew:** e.g. `brew install fluidsynth` |
+| **Linux** | Use your distro package manager, e.g. `apt install fluidsynth` (name may vary). |
+
+After installing, open a **new terminal**, run **`python scripts/beginner_preflight.py`**, and confirm FluidSynth is no longer `[MISSING]`.
+
+### FFmpeg
+
+FFmpeg must be **`ffmpeg`** on **`PATH`** for MP3 and some conversions (WAV may work without it in some paths).
+
+| Platform | Practical options |
+|----------|-------------------|
+| **Windows** | **winget:** `winget install --id Gyan.FFmpeg -e` — **Chocolatey:** `choco install ffmpeg -y`. Optional: **`beginner_install_audio_deps.bat`**. |
+| **macOS** | e.g. `brew install ffmpeg` |
+| **Linux** | e.g. `apt install ffmpeg` |
+
+The root **`Dockerfile`** also installs `ffmpeg` and `fluidsynth` inside the image; you still supply a SoundFont yourself.
 
 ## 2. Place the SoundFont
 

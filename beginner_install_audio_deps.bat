@@ -8,18 +8,18 @@ echo This helper tries to install FluidSynth and FFmpeg.
 echo It only runs when you start this file manually.
 echo.
 
-set "PKG_MANAGER="
+set "HAS_WINGET="
+set "HAS_CHOCO="
 set "INSTALL_FAIL="
+set "FLUIDSYNTH_OK="
+set "FFMPEG_OK="
 
 where winget >nul 2>&1
-if not errorlevel 1 set "PKG_MANAGER=winget"
+if not errorlevel 1 set "HAS_WINGET=1"
+where choco >nul 2>&1
+if not errorlevel 1 set "HAS_CHOCO=1"
 
-if not defined PKG_MANAGER (
-  where choco >nul 2>&1
-  if not errorlevel 1 set "PKG_MANAGER=choco"
-)
-
-if not defined PKG_MANAGER (
+if not defined HAS_WINGET if not defined HAS_CHOCO (
   echo [ERROR] Could not find winget or choco on PATH.
   echo         Install one of them first, then rerun this helper.
   echo.
@@ -27,46 +27,112 @@ if not defined PKG_MANAGER (
   echo   - Open a new terminal/session after installing a package manager.
   echo   - Run this helper again: beginner_install_audio_deps.bat
   echo   - Then run: beginner_launch.bat
+  echo   - Manual steps: docs\BEGINNER_FIRST_RUN_CHECKLIST.md - heading Manual install SoundFont FluidSynth FFmpeg
   echo.
   exit /b 1
 )
 
-echo [INFO] Using package manager: %PKG_MANAGER%
-echo.
-
-if /i "%PKG_MANAGER%"=="winget" (
-  echo [INFO] winget install --name "FluidSynth" --exact
-  call winget install --name "FluidSynth" --exact --accept-package-agreements --accept-source-agreements
-  if errorlevel 1 set "INSTALL_FAIL=1"
-  if errorlevel 1 echo [WARN] winget could not install "FluidSynth". Try: winget search FluidSynth
-  echo [INFO] winget install --name "FFmpeg" --exact
-  call winget install --name "FFmpeg" --exact --accept-package-agreements --accept-source-agreements
-  if errorlevel 1 set "INSTALL_FAIL=1"
-  if errorlevel 1 echo [WARN] winget could not install "FFmpeg". Try: winget search FFmpeg
-) else (
-  echo [INFO] choco install fluidsynth -y
+REM --- FluidSynth: prefer Chocolatey; winget often has no usable FluidSynth package ---
+if defined HAS_CHOCO (
+  echo [INFO] FluidSynth: choco install fluidsynth -y
   call choco install fluidsynth -y
-  if errorlevel 1 set "INSTALL_FAIL=1"
-  if errorlevel 1 echo [WARN] choco could not install "fluidsynth". Search Chocolatey and retry.
-  echo [INFO] choco install ffmpeg -y
+  if errorlevel 1 (
+    set "INSTALL_FAIL=1"
+    echo [WARN] choco did not install fluidsynth. See output above.
+  )
+) else (
+  echo [WARN] FluidSynth: Chocolatey is not on PATH.
+  echo         winget usually does not offer a reliable FluidSynth package name.
+  echo         Install Chocolatey from https://chocolatey.org/install then re-run this helper,
+  echo         or install FluidSynth manually and add it to PATH.
+  set "INSTALL_FAIL=1"
+)
+
+REM --- FFmpeg: winget Gyan.FFmpeg is reliable; else Chocolatey ---
+if defined HAS_WINGET (
+  echo [INFO] FFmpeg: winget install --id Gyan.FFmpeg -e
+  call winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
+  if errorlevel 1 (
+    set "INSTALL_FAIL=1"
+    echo [WARN] winget did not install FFmpeg. Try: winget search ffmpeg
+  )
+) else (
+  echo [INFO] FFmpeg: choco install ffmpeg -y
   call choco install ffmpeg -y
-  if errorlevel 1 set "INSTALL_FAIL=1"
-  if errorlevel 1 echo [WARN] choco could not install "ffmpeg". Search Chocolatey and retry.
+  if errorlevel 1 (
+    set "INSTALL_FAIL=1"
+    echo [WARN] choco did not install ffmpeg. See output above.
+  )
 )
 
 echo.
-if defined INSTALL_FAIL (
-  echo [WARN] One or more install commands failed.
-  echo        Review output above, then retry or install manually.
+echo [INFO] Post-check: verifying tools on PATH ...
+
+where fluidsynth >nul 2>&1
+if not errorlevel 1 (
+  set "FLUIDSYNTH_OK=1"
+  echo [PASS] FluidSynth found on PATH.
 ) else (
-  echo [OK]   Install commands completed.
+  where fluidsynth.exe >nul 2>&1
+  if not errorlevel 1 (
+    set "FLUIDSYNTH_OK=1"
+    echo [PASS] FluidSynth found as fluidsynth.exe on PATH.
+  ) else (
+    echo [MISSING] FluidSynth still not found on PATH.
+  )
 )
 
+where ffmpeg >nul 2>&1
+if not errorlevel 1 (
+  set "FFMPEG_OK=1"
+  echo [PASS] FFmpeg found on PATH.
+) else (
+  where ffmpeg.exe >nul 2>&1
+  if not errorlevel 1 (
+    set "FFMPEG_OK=1"
+    echo [PASS] FFmpeg found as ffmpeg.exe on PATH.
+  ) else (
+    echo [WARN] FFmpeg still not on PATH - MP3 and some conversions may fail. WAV may still work.
+  )
+)
+
+echo.
+if defined INSTALL_FAIL echo [WARN] One or more install steps reported an error above.
+
+if defined FLUIDSYNTH_OK goto :check_ff_outcome
+if defined FFMPEG_OK goto :partial_ffmpeg_only
+echo [FAIL] FluidSynth and FFmpeg are still not available.
 echo.
 echo Next step:
-echo   - You may need to open a NEW terminal/session so PATH updates apply.
-echo   - Then rerun: beginner_launch.bat
-echo.
+echo   - Fix errors above, or install Chocolatey for FluidSynth, then re-run this helper.
+echo   - Run: python scripts/beginner_preflight.py
+echo   - Manual steps: docs\BEGINNER_FIRST_RUN_CHECKLIST.md - heading Manual install SoundFont FluidSynth FFmpeg
+exit /b 1
 
-if defined INSTALL_FAIL exit /b 1
+:partial_ffmpeg_only
+echo [PARTIAL] FFmpeg looks ready; FluidSynth is still missing.
+echo.
+echo Next step:
+echo   - Install FluidSynth via Chocolatey or manually, then re-run this helper.
+echo   - Run: python scripts/beginner_preflight.py
+echo   - Manual steps: docs\BEGINNER_FIRST_RUN_CHECKLIST.md - heading Manual install SoundFont FluidSynth FFmpeg
+exit /b 1
+
+:check_ff_outcome
+if not defined FFMPEG_OK goto :partial_fs_only
+echo [OK] FluidSynth and FFmpeg look ready.
+echo.
+echo Next step:
+echo   - You may need a NEW terminal so PATH updates apply.
+echo   - Then rerun: beginner_launch.bat
+echo   - Manual steps if anything still fails: docs\BEGINNER_FIRST_RUN_CHECKLIST.md
 exit /b 0
+
+:partial_fs_only
+echo [PARTIAL] FluidSynth looks ready; FFmpeg is still missing.
+echo.
+echo Next step:
+echo   - You may need a NEW terminal so PATH updates apply.
+echo   - Rerun beginner_launch.bat. WAV may work; MP3 may fail without FFmpeg.
+echo   - Manual steps: docs\BEGINNER_FIRST_RUN_CHECKLIST.md - heading Manual install SoundFont FluidSynth FFmpeg
+exit /b 1

@@ -30,6 +30,7 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parent
 _ROOT = _SCRIPTS.parent
 _CHECKLIST = "docs/BEGINNER_FIRST_RUN_CHECKLIST.md"
+_CHECKLIST_AUDIO_SECTION = "Manual install (SoundFont, FluidSynth, FFmpeg)"
 
 # Bounded wait for FastAPI to accept connections (import-heavy app may take several seconds).
 _READY_TIMEOUT_SEC = 45.0
@@ -128,7 +129,8 @@ def main() -> int:
         rc = bp.main(suppress_next_step_hint=True)
         if rc != 0:
             print()
-            print("Launch aborted. Fix the [MISSING] items or see " + _CHECKLIST)
+            print("Launch aborted. Fix the [MISSING] items above.")
+            print("Next: open " + _CHECKLIST + ' — section "' + _CHECKLIST_AUDIO_SECTION + '"')
             return 1
         print()
 
