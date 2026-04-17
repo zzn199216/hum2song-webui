@@ -34,9 +34,10 @@ function createMinimalApp() {
       (this._cmdSubs || []).forEach(fn => { try { fn({ type, ...detail }); } catch (e) {} }); },
     openAiSettingsDrawer: () => {},
     closeAiSettingsDrawer: () => {},
-    render: () => {},
-    project: { instances: [], clips: {} },
+    render() { this._renderCount = (this._renderCount || 0) + 1; },
+    project: { instances: [], clips: [] },
     state: { selectedInstanceId: null, selectedClipId: null },
+    _renderCount: 0,
     setActiveTrackIndex: () => {},
     openClipEditor: () => {},
     optimizeClip: async () => ({ ok: true }),
@@ -74,6 +75,17 @@ function createMinimalApp() {
         case 'select_clip': {
           const clipId = payload.clipId;
           if (!clipId) throw new Error('clipId required');
+          const pc = this.project && this.project.clips;
+          let clipExists = false;
+          if (Array.isArray(pc)) {
+            clipExists = pc.some(c => c && String(c.id) === String(clipId));
+          } else if (pc && typeof pc === 'object') {
+            clipExists = !!pc[clipId];
+          }
+          if (!clipExists) throw new Error('clip not found');
+          this.state.selectedClipId = clipId;
+          this.state.selectedInstanceId = null;
+          this.render();
           result.data = { clipId };
           break;
         }
@@ -119,5 +131,50 @@ function createMinimalApp() {
     assert(seen.some(e => e.type === 'failed'), 'should have failed event');
     assert(seen[0].type === 'started', 'first event should still be started');
     console.log('PASS runCommand unknown: ok=false, failed event');
+  });
+})();
+
+(function testSelectClipValid() {
+  const app = createMinimalApp();
+  app.project.clips = [{ id: 'c1' }];
+  app.state.selectedInstanceId = 'inst_x';
+  return app.runCommand('select_clip', { clipId: 'c1' }).then(result => {
+    assert(result.ok === true, 'select_clip valid should return ok:true');
+    assert(app.state.selectedClipId === 'c1', 'selectedClipId should match');
+    assert(app.state.selectedInstanceId === null, 'selectedInstanceId should clear');
+    assert(result.data && result.data.clipId === 'c1', 'data.clipId');
+    assert(app._renderCount >= 1, 'render should run on success');
+    console.log('PASS runCommand select_clip: valid updates state');
+  });
+})();
+
+(function testSelectClipMissingClipId() {
+  const app = createMinimalApp();
+  app.project.clips = [{ id: 'c1' }];
+  app.state.selectedClipId = 'c1';
+  app.state.selectedInstanceId = 'i1';
+  const rc = app._renderCount;
+  return app.runCommand('select_clip', {}).then(result => {
+    assert(result.ok === false, 'missing clipId should return ok:false');
+    assert(/clipId required/i.test(result.message), 'message should mention clipId required');
+    assert(app.state.selectedClipId === 'c1', 'selection should be unchanged on failure');
+    assert(app.state.selectedInstanceId === 'i1', 'instance selection unchanged');
+    assert(app._renderCount === rc, 'render should not run on failure');
+    console.log('PASS runCommand select_clip: missing clipId fails cleanly');
+  });
+})();
+
+(function testSelectClipUnknownClipId() {
+  const app = createMinimalApp();
+  app.project.clips = [{ id: 'c1' }];
+  app.state.selectedClipId = 'c1';
+  app.state.selectedInstanceId = null;
+  const rc = app._renderCount;
+  return app.runCommand('select_clip', { clipId: 'ghost' }).then(result => {
+    assert(result.ok === false, 'unknown clipId should return ok:false');
+    assert(/clip not found/i.test(result.message), 'message should mention clip not found');
+    assert(app.state.selectedClipId === 'c1', 'prior clip selection unchanged');
+    assert(app._renderCount === rc, 'render should not run on failure');
+    console.log('PASS runCommand select_clip: unknown clipId fails cleanly');
   });
 })();

@@ -1625,6 +1625,14 @@ async runCommand(command, payload){
       case 'select_clip': {
         const clipId = payload.clipId;
         if (!clipId) throw new Error('clipId required');
+        const pc = this.project && this.project.clips;
+        let clipExists = false;
+        if (Array.isArray(pc)) {
+          clipExists = pc.some(c => c && String(c.id) === String(clipId));
+        } else if (pc && typeof pc === 'object') {
+          clipExists = !!pc[clipId];
+        }
+        if (!clipExists) throw new Error('clip not found');
         this.state.selectedClipId = clipId;
         this.state.selectedInstanceId = null;
         this.render();
