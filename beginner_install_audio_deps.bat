@@ -32,6 +32,9 @@ if not defined HAS_WINGET if not defined HAS_CHOCO (
   exit /b 1
 )
 
+REM --- No choco but winget: bootstrap Chocolatey, then stop (new session needed for choco on PATH) ---
+if not defined HAS_CHOCO if defined HAS_WINGET goto :bootstrap_choco
+
 REM --- FluidSynth: prefer Chocolatey; winget often has no usable FluidSynth package ---
 if defined HAS_CHOCO (
   echo [INFO] FluidSynth: choco install fluidsynth -y
@@ -40,12 +43,6 @@ if defined HAS_CHOCO (
     set "INSTALL_FAIL=1"
     echo [WARN] choco did not install fluidsynth. See output above.
   )
-) else (
-  echo [WARN] FluidSynth: Chocolatey is not on PATH.
-  echo         winget usually does not offer a reliable FluidSynth package name.
-  echo         Install Chocolatey from https://chocolatey.org/install then re-run this helper,
-  echo         or install FluidSynth manually and add it to PATH.
-  set "INSTALL_FAIL=1"
 )
 
 REM --- FFmpeg: winget Gyan.FFmpeg is reliable; else Chocolatey ---
@@ -116,6 +113,26 @@ echo Next step:
 echo   - Install FluidSynth via Chocolatey or manually, then re-run this helper.
 echo   - Run: python scripts/beginner_preflight.py
 echo   - Manual steps: docs\BEGINNER_FIRST_RUN_CHECKLIST.md - heading Manual install SoundFont FluidSynth FFmpeg
+exit /b 1
+
+:bootstrap_choco
+echo [INFO] Chocolatey is not on PATH in this session, but winget is available.
+echo [INFO] Attempting: winget install Chocolatey (needed for a reliable FluidSynth install).
+echo.
+call winget install --id Chocolatey.Chocolatey -e --accept-package-agreements --accept-source-agreements
+if errorlevel 1 (
+  echo.
+  echo [WARN] winget did not complete the Chocolatey install. See output above.
+  echo         You may need an Administrator terminal, or install manually from https://chocolatey.org/install
+)
+echo.
+echo [INFO] Stopping here on purpose: even after a successful install, choco may not work in THIS window.
+echo [INFO] Next steps:
+echo   1. Close this window or open a NEW Command Prompt or PowerShell.
+echo   2. Run beginner_install_audio_deps.bat again from this project folder.
+echo   3. Then run beginner_launch.bat (or python scripts/beginner_preflight.py) as usual.
+echo.
+echo [INFO] This run did not install FluidSynth or FFmpeg yet, and did not run the final PATH checks.
 exit /b 1
 
 :check_ff_outcome
