@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -115,6 +115,12 @@ function resolveAssistantMoveInstanceIntentFromText(text) {
   s = s.replace(/^please\s+/, '');
   s = s.replace(/\s+please\s*$/g, '').trim();
   s = s.replace(/[.!?]+$/g, '').trim();
+  const mVert = s.match(/^move this(?:\s+clip|\s+instance)?\s+to track\s+([1-9]\d*)$/);
+  if (mVert) {
+    const trackNumber = Number(mVert[1]);
+    if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+    return { trackIndex: trackNumber - 1, trackNumber: trackNumber };
+  }
   const re = /^move\s+(?:this|(?:the\s+)?selected\s+instance|(?:the\s+)?selected\s+block)\s+(left|right)\s+(\d+(?:\.\d+)?)\s*(?:beat|beats)?$/;
   const m = s.match(re);
   if (!m) return null;
@@ -535,7 +541,7 @@ function createFakeApp(opts) {
         return Promise.resolve({ ok: true, data: { trackIndex: 2, trackId: 't-new' } });
       }
       if (cmd === 'move_instance') {
-        return Promise.resolve({ ok: true, data: { instanceId: payload.instanceId, startBeat: payload.startBeat } });
+        return Promise.resolve({ ok: true, data: { instanceId: payload.instanceId, startBeat: payload.startBeat, trackIndex: payload.trackIndex } });
       }
       if (cmd === 'remove_instance') {
         return Promise.resolve({ ok: true, data: { instanceId: payload.instanceId } });
@@ -574,7 +580,7 @@ function createFakeApp(opts) {
   function _assistantSkillI18nMoveInstance() {
     const R = _getInternalSkillRegistry();
     const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
-    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', okTrack: 'aiAssist.moveInstanceOkTrack', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
   }
   function _assistantSkillI18nRemoveInstance() {
     const R = _getInternalSkillRegistry();
@@ -718,6 +724,38 @@ function createFakeApp(opts) {
           self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
           self.render();
           return Promise.resolve();
+        }
+        const isVerticalTrack = (moveIntent.trackNumber != null && moveIntent.trackIndex != null);
+        if (isVerticalTrack) {
+          const tiReq = Number(moveIntent.trackIndex);
+          const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
+          if (!isFinite(tiReq) || tiReq < 0 || Math.floor(tiReq) !== tiReq || tiReq >= trackCount) {
+            const reqNum = Number.isFinite(Number(moveIntent.trackNumber)) ? Math.round(Number(moveIntent.trackNumber)) : (tiReq + 1);
+            const maxNum = Math.max(0, trackCount);
+            self._aiAssistItems.push({
+              type: 'sys',
+              text: _t('aiAssist.addClipToTimelineTrackOutOfRange').replace(/\{n\}/g, String(reqNum)).replace(/\{max\}/g, String(maxNum)),
+            });
+            self.render();
+            return Promise.resolve();
+          }
+          const pendingVt = { type: 'sys', text: _t(kiMv.running), _pendingMoveInstance: true };
+          self._aiAssistItems.push(pendingVt);
+          self.render();
+          const trackNumOk = Math.round(Number(moveIntent.trackNumber));
+          const okTrackKey = (kiMv.okTrack != null && String(kiMv.okTrack).trim()) ? kiMv.okTrack : 'aiAssist.moveInstanceOkTrack';
+          return Promise.resolve(self.runCommand('move_instance', { instanceId: inst.id, trackIndex: tiReq })).then(function (res) {
+            const idx = (self._aiAssistItems || []).indexOf(pendingVt);
+            if (idx >= 0) {
+              if (res && res.ok) {
+                self._aiAssistItems[idx] = { type: 'sys', text: _t(okTrackKey).replace(/\{n\}/g, String(trackNumOk)) };
+              } else {
+                const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+                self._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+              }
+            }
+            self.render();
+          });
         }
         const bpm = (self.project && self.project.bpm) || 120;
         const curBeat = (Number(inst.startSec) || 0) * bpm / 60;
@@ -1030,9 +1068,21 @@ function createFakeApp(opts) {
   assert(b && b.direction === 'left' && b.deltaBeats === 2);
   const c = resolveAssistantMoveInstanceIntentFromText('move selected block left 0.5 beat');
   assert(c && c.direction === 'left' && c.deltaBeats === 0.5);
+  const v1 = resolveAssistantMoveInstanceIntentFromText('move this to track 2');
+  assert(v1 && v1.trackNumber === 2 && v1.trackIndex === 1 && !v1.direction);
+  const v2 = resolveAssistantMoveInstanceIntentFromText('move this clip to track 1');
+  assert(v2 && v2.trackNumber === 1 && v2.trackIndex === 0);
+  const v3 = resolveAssistantMoveInstanceIntentFromText('move this instance to track 3');
+  assert(v3 && v3.trackNumber === 3 && v3.trackIndex === 2);
+  const vPl = resolveAssistantMoveInstanceIntentFromText('please move this to track 2');
+  assert(vPl && vPl.trackIndex === 1 && vPl.trackNumber === 2);
   assert(resolveAssistantMoveInstanceIntentFromText('shift it later') === null);
   assert(resolveAssistantMoveInstanceIntentFromText('move this right 1 bar') === null);
   assert(resolveAssistantMoveInstanceIntentFromText('move this right 100 beats') === null);
+  assert(resolveAssistantMoveInstanceIntentFromText('move this to track 0') === null);
+  assert(resolveAssistantAddClipToTimelineIntentFromText('move this clip to track 2') === null);
+  assert(resolveAssistantAddTrackIntentFromText('move this to track 2') === false);
+  assert(resolveAssistantAddTrackIntentFromText('move this clip to track 1') === false);
   console.log('PASS move-instance intent phrases narrow');
 })();
 
@@ -1153,6 +1203,43 @@ function createFakeApp(opts) {
     assert(app._aiAssistItems[0].text.indexOf('Moved') >= 0 && app._aiAssistItems[0].text.indexOf('1') >= 0);
   });
 })().then(function () { console.log('PASS move instance without clip => move_instance'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendMoveInstanceVerticalTrackPayload() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.tracks = [{ id: 'a' }, { id: 'b' }];
+  app.project.instances = [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }];
+  doc.getElementById('aiAssistInput').value = 'move this clip to track 2';
+  return app._aiAssistSend().then(function () {
+    assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'move_instance');
+    assert(runCommandCalls[0].payload.instanceId === 'inst-1');
+    assert(runCommandCalls[0].payload.trackIndex === 1);
+    assert(!Object.prototype.hasOwnProperty.call(runCommandCalls[0].payload, 'startBeat'));
+    assert(app._aiAssistItems[0].text === 'Moved instance to track 2.');
+  });
+})().then(function () { console.log('PASS move instance vertical track => trackIndex payload only'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendMoveInstanceVerticalTrackOOR() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedInstanceId = 'inst-1';
+  app.project.tracks = [{ id: 'a' }];
+  doc.getElementById('aiAssistInput').value = 'move this to track 2';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0);
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Track 2 is out of range (1-1).');
+  console.log('PASS move instance vertical track out of range');
+})();
+
+(function testSendMoveInstanceVerticalNoSelection() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedInstanceId = null;
+  app.project.tracks = [{ id: 'a' }, { id: 'b' }];
+  doc.getElementById('aiAssistInput').value = 'move this to track 1';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0);
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text.indexOf('timeline instance') >= 0);
+  console.log('PASS move instance vertical without selection => refuse');
+})();
 
 (function testSendMoveInstanceClampLeft() {
   const { app, doc, runCommandCalls } = createFakeApp();

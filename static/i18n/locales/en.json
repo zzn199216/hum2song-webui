@@ -168,6 +168,7 @@
   "aiAssist.moveInstanceRunning": "Moving instance…",
   "aiAssist.moveInstanceFail": "Could not move instance",
   "aiAssist.moveInstanceOk": "Moved {dir} by {delta} beats.",
+  "aiAssist.moveInstanceOkTrack": "Moved instance to track {n}.",
   "aiAssist.moveInstanceClamped": "(Start clamped to beat 0.)",
   "aiAssist.removeInstanceConfirm": "Remove the selected timeline instance ({name})? This cannot be undone from the assistant.",
   "aiAssist.removeInstanceCancelled": "Remove cancelled.",

@@ -168,6 +168,7 @@
   "aiAssist.moveInstanceRunning": "正在移动实例…",
   "aiAssist.moveInstanceFail": "无法移动实例",
   "aiAssist.moveInstanceOk": "已向{dir}移动 {delta} 拍。",
+  "aiAssist.moveInstanceOkTrack": "已将实例移到轨道 {n}。",
   "aiAssist.moveInstanceClamped": "（起始位置已限制在 0 拍。）",
   "aiAssist.removeInstanceConfirm": "要移除当前选中的时间轴实例（{name}）吗？助手无法撤销此操作。",
   "aiAssist.removeInstanceCancelled": "已取消移除。",

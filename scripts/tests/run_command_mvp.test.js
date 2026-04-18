@@ -206,6 +206,15 @@ function createMvpCommandHarness() {
   }
   {
     const { app, calls } = createMvpCommandHarness();
+    const r = await app.runCommand('move_instance', { instanceId: 'inst_1', trackIndex: 0 });
+    assert(r.ok === true && r.data && !r.data.noop, 'track-only move ok');
+    const inst = app.project.instances.find(function (x) { return x.id === 'inst_1'; });
+    assert(inst && inst.trackIndex === 0, 'trackIndex applied');
+    assert(calls.persist.length >= 1 && calls.render.length >= 1, 'persist+render for track move');
+    console.log('PASS move_instance trackIndex only');
+  }
+  {
+    const { app, calls } = createMvpCommandHarness();
     const r = await app.runCommand('add_track', {});
     assert(r.ok === true && r.data && r.data.trackIndex === 1, 'second track');
     assert(calls.addTrack.length === 1, 'addTrack');

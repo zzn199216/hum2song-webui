@@ -169,8 +169,9 @@
   }
 
   /**
-   * Narrow Assistant command: move selected timeline instance horizontally by beat delta.
-   * Returns { direction: 'left'|'right', deltaBeats: number } or null.
+   * Narrow Assistant command: move selected timeline instance.
+   * - Horizontal: { direction: 'left'|'right', deltaBeats: number }
+   * - Vertical (explicit 1-based track only): { trackIndex, trackNumber }
    * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantMoveInstanceIntentFromText`.
    */
   function _resolveAssistantMoveInstanceIntentFromText(text){
@@ -179,6 +180,12 @@
     s = s.replace(/^please\s+/, '');
     s = s.replace(/\s+please\s*$/g, '').trim();
     s = s.replace(/[.!?]+$/g, '').trim();
+    const mVert = s.match(/^move this(?:\s+clip|\s+instance)?\s+to track\s+([1-9]\d*)$/);
+    if (mVert){
+      const trackNumber = Number(mVert[1]);
+      if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+      return { trackIndex: trackNumber - 1, trackNumber: trackNumber };
+    }
     const re = /^move\s+(?:this|(?:the\s+)?selected\s+instance|(?:the\s+)?selected\s+block)\s+(left|right)\s+(\d+(?:\.\d+)?)\s*(?:beat|beats)?$/;
     const m = s.match(re);
     if (!m) return null;
@@ -238,7 +245,7 @@
   function _assistantSkillI18nMoveInstance(){
     const R = _getInternalSkillRegistry();
     const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
-    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', okTrack: 'aiAssist.moveInstanceOkTrack', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
   }
   function _assistantSkillI18nRemoveInstance(){
     const R = _getInternalSkillRegistry();
@@ -413,6 +420,49 @@
         if (!inst){
           self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
           self.render();
+          return true;
+        }
+        const isVerticalTrack = (moveIntent.trackNumber != null && moveIntent.trackIndex != null);
+        if (isVerticalTrack){
+          const tiReq = Number(moveIntent.trackIndex);
+          const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
+          if (!isFinite(tiReq) || tiReq < 0 || Math.floor(tiReq) !== tiReq || tiReq >= trackCount){
+            const reqNum = Number.isFinite(Number(moveIntent.trackNumber)) ? Math.round(Number(moveIntent.trackNumber)) : (tiReq + 1);
+            const maxNum = Math.max(0, trackCount);
+            self._aiAssistItems.push({
+              type: 'sys',
+              text: _t('aiAssist.addClipToTimelineTrackOutOfRange')
+                .replace(/\{n\}/g, String(reqNum))
+                .replace(/\{max\}/g, String(maxNum)),
+            });
+            self.render();
+            return true;
+          }
+          const pendingVt = { type: 'sys', text: _t(kiMv.running), _pendingMoveInstance: true };
+          self._aiAssistItems.push(pendingVt);
+          self.render();
+          const selfMvt = self;
+          const trackNumOk = Math.round(Number(moveIntent.trackNumber));
+          const okTrackKey = (kiMv.okTrack != null && String(kiMv.okTrack).trim()) ? kiMv.okTrack : 'aiAssist.moveInstanceOkTrack';
+          Promise.resolve(selfMvt.runCommand('move_instance', { instanceId: instId, trackIndex: tiReq })).then(function(res){
+            const idx = (selfMvt._aiAssistItems || []).indexOf(pendingVt);
+            if (idx >= 0){
+              if (res && res.ok){
+                selfMvt._aiAssistItems[idx] = { type: 'sys', text: _t(okTrackKey).replace(/\{n\}/g, String(trackNumOk)) };
+              } else {
+                const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+                selfMvt._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+              }
+            }
+            selfMvt.render();
+          }).catch(function(err){
+            const idx = (selfMvt._aiAssistItems || []).indexOf(pendingVt);
+            if (idx >= 0){
+              const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+              selfMvt._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+            }
+            selfMvt.render();
+          });
           return true;
         }
         const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;

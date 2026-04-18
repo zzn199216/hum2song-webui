@@ -59,6 +59,7 @@
       i18n: {
         running: 'aiAssist.moveInstanceRunning',
         ok: 'aiAssist.moveInstanceOk',
+        okTrack: 'aiAssist.moveInstanceOkTrack',
         fail: 'aiAssist.moveInstanceFail',
         clamp: 'aiAssist.moveInstanceClamped',
         dirLeft: 'aiAssist.dirLeft',
