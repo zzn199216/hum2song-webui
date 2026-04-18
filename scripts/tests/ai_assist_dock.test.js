@@ -65,6 +65,18 @@ function resolveAssistantAddClipToTimelineIntentFromText(text) {
     'put this clip on the timeline',
   ];
   if (phrases.indexOf(s) >= 0) return { trackIndex: null, trackNumber: null };
+  const mCombo = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
+  if (mCombo) {
+    const trackNumber = Number(mCombo[1]);
+    const beat = Number(mCombo[2]);
+    if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+    if (!isFinite(beat) || beat < 0) return { invalidBeat: true };
+    return { trackIndex: trackNumber - 1, trackNumber: trackNumber, startBeat: beat };
+  }
+  const mComboEmptyBeat = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s*$/);
+  if (mComboEmptyBeat) return { invalidBeat: true };
+  const mComboInvalid = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s+.+$/);
+  if (mComboInvalid) return { invalidBeat: true };
   const mb = s.match(/^(?:add|insert|put)\s+this\s+clip\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
   if (mb) {
     const beat = Number(mb[1]);
@@ -991,7 +1003,20 @@ function createFakeApp(opts) {
   assert(badBeat && badBeat.invalidBeat === true, 'invalid beat is marked for clean refusal');
   const badBeatWord = resolveAssistantAddClipToTimelineIntentFromText('add this clip at beat first');
   assert(badBeatWord && badBeatWord.invalidBeat === true, 'non-numeric beat is marked invalid');
+  const combo = resolveAssistantAddClipToTimelineIntentFromText('add this clip to track 2 at beat 4');
+  assert(combo && combo.trackIndex === 1 && combo.trackNumber === 2 && combo.startBeat === 4, 'combined track+beat v1');
+  const comboPut = resolveAssistantAddClipToTimelineIntentFromText('put this clip on track 3 at beat 2');
+  assert(comboPut && comboPut.trackIndex === 2 && comboPut.startBeat === 2, 'put/on combined');
+  const comboIns = resolveAssistantAddClipToTimelineIntentFromText('insert this clip on track 1 at beat 8');
+  assert(comboIns && comboIns.trackIndex === 0 && comboIns.startBeat === 8, 'insert/on combined');
+  const comboBadBeat = resolveAssistantAddClipToTimelineIntentFromText('add this clip to track 2 at beat -1');
+  assert(comboBadBeat && comboBadBeat.invalidBeat === true, 'combined invalid beat');
+  const comboBadWord = resolveAssistantAddClipToTimelineIntentFromText('add this clip to track 2 at beat x');
+  assert(comboBadWord && comboBadWord.invalidBeat === true, 'combined non-numeric beat');
+  const comboEmptyBeat = resolveAssistantAddClipToTimelineIntentFromText('add this clip to track 2 at beat');
+  assert(comboEmptyBeat && comboEmptyBeat.invalidBeat === true, 'combined missing beat');
   assert(resolveAssistantAddClipToTimelineIntentFromText('add a track') === null, 'no collision with add_track');
+  assert(resolveAssistantAddTrackIntentFromText('add this clip to track 2 at beat 4') === false, 'combined add-clip phrase must not match add_track');
   assert(resolveAssistantAddClipToTimelineIntentFromText('new track') === null);
   assert(resolveAssistantAddClipToTimelineIntentFromText('add clip named melody') === null);
   assert(resolveAssistantAddClipToTimelineIntentFromText('place chorus on track 3') === null);
@@ -1229,6 +1254,55 @@ function createFakeApp(opts) {
     assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Added clip to timeline.');
   });
 })().then(function () { console.log('PASS add clip to timeline track phrase => runCommand add_clip_to_timeline { clipId, trackIndex }'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddClipToTimelineCombinedTrackBeatCallsRunCommandThreeKeys() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.project.tracks = [{ id: 't-1' }, { id: 't-2' }, { id: 't-3' }];
+  doc.getElementById('aiAssistInput').value = 'add this clip to track 2 at beat 4';
+  const p = app._aiAssistSend();
+  assert(runCommandCalls.length === 1 && runCommandCalls[0].command === 'add_clip_to_timeline');
+  assert(runCommandCalls[0].payload.clipId === 'clip-1');
+  assert(runCommandCalls[0].payload.trackIndex === 1);
+  assert(runCommandCalls[0].payload.startBeat === 4);
+  assert(Object.keys(runCommandCalls[0].payload).length === 3, 'payload shape: clipId + trackIndex + startBeat');
+  return p.then(function () {
+    assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Added clip to timeline.');
+  });
+})().then(function () { console.log('PASS add clip combined track+beat => runCommand add_clip_to_timeline three keys'); }).catch(function (e) { console.error(e); process.exit(1); });
+
+(function testSendAddClipToTimelineCombinedInvalidBeatRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.project.tracks = [{ id: 't-1' }, { id: 't-2' }];
+  doc.getElementById('aiAssistInput').value = 'insert this clip on track 1 at beat -3';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand for combined invalid beat');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Beat value must be a non-negative number.');
+  console.log('PASS add clip combined invalid beat => refuse');
+})();
+
+(function testSendAddClipToTimelineCombinedTrackOutOfRangeRefuses() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = 'clip-1';
+  app.project.tracks = [{ id: 't-1' }, { id: 't-2' }];
+  doc.getElementById('aiAssistInput').value = 'put this clip on track 3 at beat 2';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0, 'no runCommand for combined out-of-range track');
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Track 3 is out of range (1-2).');
+  console.log('PASS add clip combined out-of-range track => refuse');
+})();
+
+(function testSendAddClipToTimelineCombinedNoSelectionSelectClipFirst() {
+  const { app, doc, runCommandCalls } = createFakeApp();
+  app.state.selectedClipId = null;
+  app.project.tracks = [{ id: 't-1' }, { id: 't-2' }];
+  doc.getElementById('aiAssistInput').value = 'add this clip to track 1 at beat 4';
+  app._aiAssistSend();
+  assert(runCommandCalls.length === 0);
+  assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].text === 'Select a clip first.');
+  console.log('PASS add clip combined without selection => selectClipFirst');
+})();
 
 (function testSendAddClipToTimelineInvalidBeatRefuses() {
   const { app, doc, runCommandCalls } = createFakeApp();

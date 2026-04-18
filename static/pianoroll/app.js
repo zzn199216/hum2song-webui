@@ -106,8 +106,8 @@
 
   /**
    * Narrow Assistant command: add selected library clip to timeline.
-   * Supports plain phrases ({ clipId }), explicit track number placement ({ clipId, trackIndex }),
-   * and explicit beat placement ({ clipId, startBeat }).
+   * Supports plain phrases ({ clipId }), explicit track+beat placement ({ clipId, trackIndex, startBeat }),
+   * explicit track number placement ({ clipId, trackIndex }), and explicit beat placement ({ clipId, startBeat }).
    * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddClipToTimelineIntentFromText`.
    */
   function _resolveAssistantAddClipToTimelineIntentFromText(text){
@@ -122,6 +122,18 @@
       'put this clip on the timeline',
     ];
     if (phrases.indexOf(s) >= 0) return { trackIndex: null, trackNumber: null };
+    const mCombo = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
+    if (mCombo){
+      const trackNumber = Number(mCombo[1]);
+      const beat = Number(mCombo[2]);
+      if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+      if (!isFinite(beat) || beat < 0) return { invalidBeat: true };
+      return { trackIndex: trackNumber - 1, trackNumber: trackNumber, startBeat: beat };
+    }
+    const mComboEmptyBeat = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s*$/);
+    if (mComboEmptyBeat) return { invalidBeat: true };
+    const mComboInvalid = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s+.+$/);
+    if (mComboInvalid) return { invalidBeat: true };
     const mb = s.match(/^(?:add|insert|put)\s+this\s+clip\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
     if (mb){
       const beat = Number(mb[1]);
