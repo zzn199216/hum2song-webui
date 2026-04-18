@@ -159,6 +159,7 @@
   "aiAssist.addClipToTimelineOk": "Added clip to timeline.",
   "aiAssist.addClipToTimelineFail": "Could not add clip to timeline",
   "aiAssist.addClipToTimelineTrackOutOfRange": "Track {n} is out of range (1-{max}).",
+  "aiAssist.addClipToTimelineBeatInvalid": "Beat value must be a non-negative number.",
   "aiAssist.addTrackRunning": "Adding track…",
   "aiAssist.addTrackOk": "Added track {n}.",
   "aiAssist.addTrackFail": "Could not add track",

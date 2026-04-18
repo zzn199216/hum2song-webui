@@ -106,7 +106,8 @@
 
   /**
    * Narrow Assistant command: add selected library clip to timeline.
-   * Supports plain phrases ({ clipId }) and explicit track number placement ({ clipId, trackIndex }).
+   * Supports plain phrases ({ clipId }), explicit track number placement ({ clipId, trackIndex }),
+   * and explicit beat placement ({ clipId, startBeat }).
    * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddClipToTimelineIntentFromText`.
    */
   function _resolveAssistantAddClipToTimelineIntentFromText(text){
@@ -121,6 +122,14 @@
       'put this clip on the timeline',
     ];
     if (phrases.indexOf(s) >= 0) return { trackIndex: null, trackNumber: null };
+    const mb = s.match(/^(?:add|insert|put)\s+this\s+clip\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
+    if (mb){
+      const beat = Number(mb[1]);
+      if (!isFinite(beat) || beat < 0) return { invalidBeat: true };
+      return { startBeat: beat };
+    }
+    const mbInvalid = s.match(/^(?:add|insert|put)\s+this\s+clip\s+at\s+beat\s+.+$/);
+    if (mbInvalid) return { invalidBeat: true };
     const m = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)$/);
     if (!m) return null;
     const trackNumber = Number(m[1]);
@@ -292,6 +301,20 @@
           return true;
         }
         const cmdPayload = { clipId: clipIdSel };
+        if (addClipIntent && addClipIntent.invalidBeat){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addClipToTimelineBeatInvalid') });
+          self.render();
+          return true;
+        }
+        if (addClipIntent && addClipIntent.startBeat != null){
+          const sbReq = Number(addClipIntent.startBeat);
+          if (!isFinite(sbReq) || sbReq < 0){
+            self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addClipToTimelineBeatInvalid') });
+            self.render();
+            return true;
+          }
+          cmdPayload.startBeat = sbReq;
+        }
         if (addClipIntent && addClipIntent.trackIndex != null){
           const tiReq = Number(addClipIntent.trackIndex);
           const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
