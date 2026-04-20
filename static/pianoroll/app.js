@@ -2523,9 +2523,8 @@ if (typeof localStorage !== 'undefined') {
       if (!Array.isArray(this.project.instances)) this.project.instances = [];
 
       // Bind UI
-      $('#btnUpload').addEventListener('click', () => this.pickWavAndGenerate());
-      const btnImportAudioClip = $('#btnImportAudioClip');
-      if (btnImportAudioClip) btnImportAudioClip.addEventListener('click', () => { this.importAudioFileAsNativeClip(); });
+      const btnImportAudio = $('#btnImportAudio');
+      if (btnImportAudio) btnImportAudio.addEventListener('click', () => { this.runTopBarImportAudio(); });
       $('#btnClear').addEventListener('click', () => this.clearProject());
       $('#btnClearLog').addEventListener('click', () => { $('#log').textContent = ''; _lastLogLine = ''; if (typeof this.updateLogStatusBar === 'function') this.updateLogStatusBar(); });
       // PR-UX3a: Log panel — restore open state from localStorage, bind status bar click to toggle
@@ -4350,6 +4349,14 @@ renderTimeline(){
 
     timelinePointerUp(ev){
       // handled in pointerup on window
+    },
+
+    /** Top bar: one Import audio control + “Make editable notes” checkbox (default on). */
+    async runTopBarImportAudio(){
+      const chk = (typeof document !== 'undefined') ? document.getElementById('chkImportAudioToNotes') : null;
+      const toNotes = !chk || !!chk.checked;
+      if (toNotes) await this.pickWavAndGenerate();
+      else await this.importAudioFileAsNativeClip();
     },
 
     async pickWavAndGenerate(){

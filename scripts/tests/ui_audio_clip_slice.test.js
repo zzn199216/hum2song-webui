@@ -98,9 +98,11 @@ function testGuardsSource(){
 function testImportWordingInIndexHtml(){
   const indexPath = path.join(repoRoot, 'static', 'pianoroll', 'index.html');
   const html = fs.readFileSync(indexPath, 'utf8');
-  assert(html.includes('data-i18n="top.uploadWav"'), 'top bar transcribe import key');
-  assert(html.includes('data-i18n="top.importAudioClip"'), 'top bar native audio import key');
-  assert(html.includes('data-i18n-title="top.uploadWavTitle"'), 'transcribe import title key');
+  assert(html.includes('id="btnImportAudio"'), 'top bar Import audio button');
+  assert(html.includes('data-i18n="top.importAudio"'), 'top bar import audio i18n key');
+  assert(html.includes('data-i18n-title="top.importAudioTitle"'), 'import audio title key');
+  assert(html.includes('id="chkImportAudioToNotes"'), 'import audio make-notes checkbox');
+  assert(html.includes('data-i18n="top.importAudioMakeNotesLabel"'), 'make-notes label i18n key');
 }
 
 function testRecordToNativeAudioWiring(){
@@ -110,6 +112,7 @@ function testRecordToNativeAudioWiring(){
   assert(html.includes('data-i18n="cliplib.addLastAsAudio"'), 'add last as audio i18n');
   const appPath = path.join(repoRoot, 'static', 'pianoroll', 'app.js');
   const src = fs.readFileSync(appPath, 'utf8');
+  assert(src.includes('runTopBarImportAudio'), 'top bar import dispatches via runTopBarImportAudio');
   assert(src.includes('_commitNativeAudioFile'), 'shared _commitNativeAudioFile');
   assert(src.includes('addLastRecordingAsNativeAudioClip'), 'addLastRecordingAsNativeAudioClip');
   assert(src.includes('lastRecordedFile') && src.includes('addLastRecordingAsNativeAudioClip'), 'lastRecordedFile guard on record→audio path');

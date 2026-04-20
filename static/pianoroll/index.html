@@ -992,9 +992,12 @@
       <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
       <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
-      <span style="display:inline-flex; align-items:center; gap:8px;">
-        <button id="btnUpload" class="btn" data-i18n="top.uploadWav" data-i18n-title="top.uploadWavTitle">Import as notes</button>
-        <button type="button" id="btnImportAudioClip" class="btn ghost" data-i18n="top.importAudioClip" data-i18n-title="top.importAudioClipTitle">Import as audio</button>
+      <span style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <button type="button" id="btnImportAudio" class="btn" data-i18n="top.importAudio" data-i18n-title="top.importAudioTitle">Import audio</button>
+        <label class="row" style="align-items:center; gap:6px; margin:0; font-size:11px; cursor:pointer; user-select:none;">
+          <input type="checkbox" id="chkImportAudioToNotes" checked />
+          <span data-i18n="top.importAudioMakeNotesLabel" data-i18n-title="top.importAudioMakeNotesTitle">Make editable notes</span>
+        </label>
       </span>
     </div>
     <div class="spacer"></div>
@@ -1019,7 +1022,7 @@
       <div class="beginnerHintTitle" data-i18n="beginnerHint.title">First steps in Studio</div>
       <ol>
         <li>
-          <span data-i18n="beginnerHint.stepStudio1a">Use </span><strong data-i18n="top.uploadWav">Import as notes</strong><span data-i18n="beginnerHint.stepStudio1b">, </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.stepStudio1c">, or </span><strong data-i18n="top.importAudioClip">Import as audio</strong><span data-i18n="beginnerHint.stepStudio1d"> in the top bar. When a clip appears in the library, double-click it to edit.</span>
+          <span data-i18n="beginnerHint.stepStudio1a">In the top bar, use </span><strong data-i18n="top.importAudio">Import audio</strong><span data-i18n="beginnerHint.stepStudio1b"> or </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.stepStudio1c">. Turn off “Make editable notes” beside Import audio if you want original audio only. Double-click a note clip in the library to edit.</span>
         </li>
         <li>
           <span data-i18n="beginnerHint.step4a">If something looks wrong: open </span><a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a><span data-i18n="beginnerHint.step4b"> in a new tab.</span>
