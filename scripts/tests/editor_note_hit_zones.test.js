@@ -30,12 +30,18 @@ const H2SProject = {
 };
 
 const testState = {};
+const canvasEl = {
+  style: { cursor: '' },
+  width: 1400,
+  height: 2400,
+  getBoundingClientRect: () => ({ left: 0, top: 0, right: 1400, bottom: 2400, width: 1400, height: 2400 }),
+};
 const rtApi = require(path.resolve(__dirname, '../../static/pianoroll/controllers/editor_runtime.js'));
 const rt = rtApi.create({
   H2SProject,
   getProject: () => ({ bpm: 120 }),
   getState: () => testState,
-  $: () => null,
+  $: (sel) => (sel === '#canvas' ? canvasEl : null),
 });
 
 const padL = 60;
@@ -58,12 +64,22 @@ function hitOn(note, xOffset){
   return rt.modalHitTest(px, py);
 }
 
+function hoverOn(note, xOffset){
+  const r = noteRect(note);
+  const px = r.x + xOffset;
+  const py = r.y + Math.floor(r.h / 2);
+  rt.modalPointerMove({ clientX: px, clientY: py });
+}
+
 (function testNarrowAndOneCellHitZones(){
   const oneCell = { id: 'n_one', pitch: 60, start: 1.0, duration: 0.125 }; // 1/16 @120bpm = 1 grid cell
   const veryNarrow = { id: 'n_narrow', pitch: 58, start: 2.0, duration: 0.02 }; // width clamps to 6px
   const normal = { id: 'n_normal', pitch: 56, start: 3.0, duration: 0.5 };
 
   testState.modal = {
+    show: true,
+    mode: 'none',
+    drag: {},
     draftScore: { tracks: [{ notes: [oneCell, veryNarrow, normal] }] },
     padL,
     padT,
@@ -91,6 +107,20 @@ function hitOn(note, xOffset){
   assert(hitOn(normal, 1).type === 'resize_left', 'normal note left edge should resize_left');
   assert(hitOn(normal, noteRect(normal).w - 1).type === 'resize', 'normal note right edge should resize');
   assert(hitOn(normal, Math.floor(noteRect(normal).w / 2)).type === 'note', 'normal note center should move');
+
+  // Cursor discoverability: mirror hit zones.
+  hoverOn(oneCell, Math.floor(oneRect.w / 2));
+  assert(canvasEl.style.cursor === 'move', '1-cell center hover should show move cursor');
+  hoverOn(oneCell, 1);
+  assert(canvasEl.style.cursor === 'ew-resize', 'left edge hover should show horizontal resize cursor');
+  hoverOn(oneCell, oneRect.w - 1);
+  assert(canvasEl.style.cursor === 'ew-resize', 'right edge hover should show horizontal resize cursor');
+
+  hoverOn(normal, Math.floor(noteRect(normal).w / 2));
+  assert(canvasEl.style.cursor === 'move', 'normal note center hover should show move cursor');
+
+  rt.modalPointerMove({ clientX: 5, clientY: 5 });
+  assert(canvasEl.style.cursor === '', 'non-note hover should reset cursor');
 })();
 
-console.log('PASS editor note hit-zones: narrow + one-cell move/resize symmetry');
+console.log('PASS editor note hit-zones + hover cursor mapping');

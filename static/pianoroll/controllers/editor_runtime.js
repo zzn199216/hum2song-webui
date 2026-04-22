@@ -2554,6 +2554,58 @@
       return null;
     },
 
+    modalCursorForHit(hit){
+      if (!hit || !hit.type) return '';
+      if (hit.type === 'resize' || hit.type === 'resize_left') return 'ew-resize';
+      if (hit.type === 'note') return 'move';
+      return '';
+    },
+
+    modalSetCanvasCursor(cursor){
+      const canvas = $('#canvas');
+      if (!canvas || !canvas.style) return;
+      const next = String(cursor || '');
+      if (canvas.style.cursor !== next) canvas.style.cursor = next;
+    },
+
+    modalUpdateHoverCursor(ev){
+      const m = this.state.modal;
+      if (!m || !m.show) return;
+      const canvas = $('#canvas');
+      if (!canvas || typeof canvas.getBoundingClientRect !== 'function'){
+        this.modalSetCanvasCursor('');
+        return;
+      }
+      if (m.mode === 'resize_note'){
+        this.modalSetCanvasCursor('ew-resize');
+        return;
+      }
+      if (m.mode === 'drag_note'){
+        this.modalSetCanvasCursor('move');
+        return;
+      }
+      if (m.mode !== 'none'){
+        this.modalSetCanvasCursor('');
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const cx = Number(ev && ev.clientX);
+      const cy = Number(ev && ev.clientY);
+      const inside = Number.isFinite(cx) && Number.isFinite(cy) &&
+        cx >= rect.left && cx <= rect.right &&
+        cy >= rect.top && cy <= rect.bottom;
+      if (!inside){
+        this.modalSetCanvasCursor('');
+        return;
+      }
+      const scaleX = rect.width ? (canvas.width / rect.width) : 1;
+      const scaleY = rect.height ? (canvas.height / rect.height) : 1;
+      const px = (cx - rect.left) * scaleX;
+      const py = (cy - rect.top) * scaleY;
+      const hit = this.modalHitTest(px, py);
+      this.modalSetCanvasCursor(this.modalCursorForHit(hit));
+    },
+
     modalVelocityHitTest(pxCss, pyCss){
       const vCanvas = $('#velocityCanvas');
       if (!vCanvas) return null;
@@ -2955,6 +3007,7 @@ async modalPlay(){
     modalPointerMove(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
+      this.modalUpdateHoverCursor(ev);
       const _sess = this._h2sDragPerf;
       const _track = _h2sDevPerfTimingEnabled() && _sess && (m.mode === 'resize_velocity_lane' || m.mode === 'drag_velocity' || m.mode === 'drag_note' || m.mode === 'resize_note');
       const _tMove0 = _track ? _perfClipNow() : 0;
