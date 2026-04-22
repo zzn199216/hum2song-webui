@@ -1430,10 +1430,11 @@
         ctx.fill();
         ctx.stroke();
 
-        // resize handles (left / right 10px; narrow notes split at center)
+        // resize handles (symmetric left/right; keep center move zone on narrow notes)
+        const handles = this.modalResizeZoneWidths(w);
         ctx.fillStyle = 'rgba(255,255,255,.18)';
-        ctx.fillRect(x, y, Math.min(10, w / 2), h);
-        ctx.fillRect(x + w - Math.min(10, w / 2), y, Math.min(10, w / 2), h);
+        ctx.fillRect(x, y, handles.left, h);
+        ctx.fillRect(x + w - handles.right, y, handles.right, h);
       }
       const msNoteBodies = _split();
 
@@ -1602,6 +1603,18 @@
         if (idx >= 0) return { track:t, note:t.notes[idx], index: idx };
       }
       return null;
+    },
+
+    modalResizeZoneWidths(noteWidthPx){
+      const w = Math.max(1, Number(noteWidthPx) || 1);
+      const MIN_EDGE = 2;
+      const MAX_EDGE = 10;
+      const TARGET_MOVE = 6;
+      let edge = Math.floor((w - TARGET_MOVE) / 2);
+      edge = H2SProject.clamp(edge, MIN_EDGE, MAX_EDGE);
+      // Keep at least 1px center move zone for very narrow notes.
+      if ((edge * 2) >= w) edge = Math.max(1, Math.floor((w - 1) / 2));
+      return { left: edge, right: edge };
     },
 
 
@@ -2532,13 +2545,9 @@
         const w = Math.max(6, n.duration * pxPerSec);
         const h = rowH - 2;
         if (px >= x && px <= x+w && py >= y && py <= y+h){
-          const edge = 10;
-          if (w <= edge * 2){
-            if (px < x + w / 2) return { type:'resize_left', noteId:n.id };
-            return { type:'resize', noteId:n.id };
-          }
-          if (px < x + edge) return { type:'resize_left', noteId:n.id };
-          if (px >= x + w - edge) return { type:'resize', noteId:n.id };
+          const handles = this.modalResizeZoneWidths(w);
+          if (px < x + handles.left) return { type:'resize_left', noteId:n.id };
+          if (px >= x + w - handles.right) return { type:'resize', noteId:n.id };
           return { type:'note', noteId:n.id };
         }
       }
