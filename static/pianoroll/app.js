@@ -4615,11 +4615,16 @@ renderTimeline(){
           }
         }
         const useGapSeg = explodeSegmentDev && !barSegActive;
+        const explodeWeakGuardOpts = splitRes.applied
+          ? {
+              suppressWeakFragments: true,
+            }
+          : null;
 
         let explodeParts = null;
         if (SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
           if (splitRes.applied){
-            explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip);
+            explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip, explodeWeakGuardOpts || undefined);
           }
         }
         const useExplode = Array.isArray(explodeParts) && explodeParts.length >= 2;
@@ -4629,7 +4634,7 @@ renderTimeline(){
           for (let bx = 0; bx < barScoreSegments.length; bx++){
             const segSc = barScoreSegments[bx] && barScoreSegments[bx].score;
             if (!SplitApi || typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores !== 'function') continue;
-            const ep = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segSc);
+            const ep = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segSc, explodeWeakGuardOpts || undefined);
             if (Array.isArray(ep) && ep.length > maxExplodeParts) maxExplodeParts = ep.length;
           }
           if (!this.project.tracks) this.project.tracks = [];
@@ -4648,7 +4653,7 @@ renderTimeline(){
             if (!segScore) continue;
             let explodePartsSeg = null;
             if (SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
-              explodePartsSeg = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segScore);
+              explodePartsSeg = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segScore, explodeWeakGuardOpts || undefined);
             }
             if (!Array.isArray(explodePartsSeg) || explodePartsSeg.length === 0) continue;
             const barLabel = barScoreSegments.length > 1 ? (' · ' + (bi + 1)) : '';

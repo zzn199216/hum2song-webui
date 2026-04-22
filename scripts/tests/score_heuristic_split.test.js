@@ -208,4 +208,60 @@ function assertDeep(a, b, msg) {
   assert.strictEqual(one.length, 1);
 })();
 
+// --- conservative explode: singleton secondary fragment merges back ---
+(function () {
+  const bucketed = splitScoreDocByPitchBuckets(
+    {
+      version: 1,
+      tempo_bpm: 120,
+      tracks: [
+        {
+          notes: [
+            { id: 'a', pitch: 60, start: 0.0, duration: 0.3, velocity: 80 },
+            { id: 'b', pitch: 61, start: 0.35, duration: 0.3, velocity: 80 },
+            { id: 'c', pitch: 62, start: 0.7, duration: 0.3, velocity: 80 },
+            { id: 'd', pitch: 63, start: 1.05, duration: 0.3, velocity: 80 },
+            { id: 'e', pitch: 86, start: 1.4, duration: 0.3, velocity: 80 }, // lone high-bucket note
+          ],
+        },
+      ],
+    },
+    { numTracks: 3, lowMax: 41, midMax: 83 }
+  );
+  const parts = explodeNonEmptyTracksToSingleTrackScores(bucketed, {
+    suppressWeakFragments: true,
+  });
+  assert.strictEqual(parts.length, 1, 'singleton secondary bucket should not materialize as standalone part');
+  assert.strictEqual(parts[0].score.tracks[0].notes.length, 5, 'all notes should be retained after merge');
+})();
+
+// --- conservative explode keeps clearly meaningful multi-part split ---
+(function () {
+  const bucketed = splitScoreDocByPitchBuckets(
+    {
+      tracks: [
+        {
+          notes: [
+            { pitch: 60, start: 0.0, duration: 0.2, velocity: 80 },
+            { pitch: 61, start: 0.3, duration: 0.2, velocity: 80 },
+            { pitch: 62, start: 0.6, duration: 0.2, velocity: 80 },
+            { pitch: 63, start: 0.9, duration: 0.2, velocity: 80 },
+            { pitch: 86, start: 0.15, duration: 0.2, velocity: 80 },
+            { pitch: 87, start: 0.45, duration: 0.2, velocity: 80 },
+            { pitch: 88, start: 0.75, duration: 0.2, velocity: 80 },
+            { pitch: 89, start: 1.05, duration: 0.2, velocity: 80 },
+          ],
+        },
+      ],
+    },
+    { numTracks: 2, midMax: 83 }
+  );
+  const parts = explodeNonEmptyTracksToSingleTrackScores(bucketed, {
+    suppressWeakFragments: true,
+  });
+  assert.strictEqual(parts.length, 2, 'substantial second part should remain split');
+  assert.strictEqual(parts[0].score.tracks[0].notes.length, 4);
+  assert.strictEqual(parts[1].score.tracks[0].notes.length, 4);
+})();
+
 console.log('PASS score_heuristic_split tests');

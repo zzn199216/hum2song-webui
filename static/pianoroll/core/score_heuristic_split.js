@@ -75,6 +75,101 @@
     return o;
   }
 
+  function _avgPitch(notes) {
+    if (!Array.isArray(notes) || notes.length === 0) return 60;
+    var sum = 0;
+    var i;
+    for (i = 0; i < notes.length; i++) {
+      sum += Math.round(_num(notes[i] && notes[i].pitch));
+    }
+    return sum / notes.length;
+  }
+
+  function _mergeWeakExplodeTracks(parts, opts) {
+    opts = opts || {};
+    var weakMaxNotes =
+      opts.weakFragmentMaxNotes != null ? Math.max(1, Math.floor(_num(opts.weakFragmentMaxNotes))) : 1;
+    var weakRatio =
+      opts.weakFragmentMaxRatio != null ? Math.max(0, _num(opts.weakFragmentMaxRatio)) : 0.34;
+    var weakMaxNotesWhenPrimaryLarge =
+      opts.weakFragmentMaxNotesWhenPrimaryLarge != null
+        ? Math.max(1, Math.floor(_num(opts.weakFragmentMaxNotesWhenPrimaryLarge)))
+        : 2;
+    var primaryLargeMinNotes =
+      opts.primaryLargeMinNotes != null ? Math.max(1, Math.floor(_num(opts.primaryLargeMinNotes))) : 4;
+
+    if (!Array.isArray(parts) || parts.length <= 1) return parts;
+
+    var i;
+    var primaryIdx = 0;
+    var primaryCount = -1;
+    for (i = 0; i < parts.length; i++) {
+      var c = parts[i].score.tracks[0].notes.length;
+      if (c > primaryCount) {
+        primaryCount = c;
+        primaryIdx = i;
+      }
+    }
+    if (primaryCount <= 0) return parts;
+
+    var survivors = [];
+    var weak = [];
+    for (i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      var notes = p.score.tracks[0].notes;
+      var nCount = notes.length;
+      var isPrimary = i === primaryIdx;
+      var weakBySingleton = !isPrimary && nCount <= weakMaxNotes;
+      var weakByTinyRatio =
+        !isPrimary &&
+        nCount <= weakMaxNotesWhenPrimaryLarge &&
+        primaryCount >= primaryLargeMinNotes &&
+        nCount / Math.max(1, primaryCount) <= weakRatio;
+      if (weakBySingleton || weakByTinyRatio) {
+        weak.push(p);
+      } else {
+        survivors.push(p);
+      }
+    }
+
+    if (weak.length === 0) return parts;
+    if (survivors.length === 0) {
+      survivors.push(parts[primaryIdx]);
+      weak = parts.filter(function (_p, idx) {
+        return idx !== primaryIdx;
+      });
+    }
+
+    for (i = 0; i < weak.length; i++) {
+      var w = weak[i];
+      var wNotes = w.score.tracks[0].notes;
+      if (!wNotes.length) continue;
+      var wAvg = _avgPitch(wNotes);
+      var bestIdx = 0;
+      var bestDist = Infinity;
+      var si;
+      for (si = 0; si < survivors.length; si++) {
+        var sNotes = survivors[si].score.tracks[0].notes;
+        if (!sNotes.length) continue;
+        var sAvg = _avgPitch(sNotes);
+        var d = Math.abs(sAvg - wAvg);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = si;
+        }
+      }
+      var target = survivors[bestIdx];
+      var targetNotes = target.score.tracks[0].notes;
+      var ni;
+      for (ni = 0; ni < wNotes.length; ni++) {
+        targetNotes.push(_cloneNote(wNotes[ni]));
+      }
+      _sortNotes(targetNotes);
+    }
+
+    return survivors;
+  }
+
   /**
    * @param {object} scoreIn - ScoreDoc-like: { version?, tempo_bpm?, bpm?, time_signature?, tracks?: [{ notes? }] }
    * @param {object} [opts]
@@ -144,7 +239,7 @@
    * Order matches source `tracks` (e.g. High, Mid, Low). Skips tracks with no notes.
    * Used after pitch-bucket split to place each bucket on its own clip / timeline track.
    */
-  function explodeNonEmptyTracksToSingleTrackScores(scoreIn) {
+  function explodeNonEmptyTracksToSingleTrackScores(scoreIn, opts) {
     var src = scoreIn && typeof scoreIn === 'object' ? scoreIn : {};
     var tracks = Array.isArray(src.tracks) ? src.tracks : [];
     var tempo =
@@ -175,6 +270,10 @@
       };
       if (typeof src.bpm === 'number' && isFinite(src.bpm)) score.bpm = src.bpm;
       out.push({ score: score, splitIndex: i, trackName: trName });
+    }
+    opts = opts || {};
+    if (opts.suppressWeakFragments) {
+      return _mergeWeakExplodeTracks(out, opts);
     }
     return out;
   }
