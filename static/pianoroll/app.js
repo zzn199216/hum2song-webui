@@ -4616,6 +4616,11 @@ renderTimeline(){
         ? `${done} (${clipCount} clips). Next: click a clip in Library, then Edit.`
         : `${done}. Next: click the clip in Library to edit.`;
     },
+    /** Import success UX timing: keep "what next" guidance visible longer when manual action is needed. */
+    _importSuccessStatusClearMs(opts){
+      opts = opts || {};
+      return opts.autoOpen ? 2500 : 6000;
+    },
 
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
      * @param {Blob|File} f
@@ -4824,7 +4829,7 @@ renderTimeline(){
           } else {
             log('Import: editor not auto-opened (multi-clip).');
           }
-          setTimeout(() => this.setImportStatus('', false), 2500);
+          setTimeout(() => this.setImportStatus('', false), this._importSuccessStatusClearMs({ autoOpen: shouldAutoOpen }));
         } else if (useExplode){
           if (!this.project.tracks) this.project.tracks = [];
           while (this.project.tracks.length < explodeParts.length){
@@ -4901,7 +4906,7 @@ renderTimeline(){
           this.setImportStatus(this._buildImportSuccessStatus({ clipCount: explodeClipCount, autoOpen: false }), false);
           log('Clips added (split explode): ' + explodeClipCount);
           log('Import: editor not auto-opened (multi-clip).');
-          setTimeout(() => this.setImportStatus('', false), 2500);
+          setTimeout(() => this.setImportStatus('', false), this._importSuccessStatusClearMs({ autoOpen: false }));
         } else {
           let placeStartSec = playheadSec;
           let placeTrackIndex = 0;
@@ -4939,7 +4944,7 @@ renderTimeline(){
           if (shouldAutoOpen){
             setTimeout(() => this.openClipEditor(cidNew), 0);
           }
-          setTimeout(() => this.setImportStatus('', false), 2000);
+          setTimeout(() => this.setImportStatus('', false), this._importSuccessStatusClearMs({ autoOpen: shouldAutoOpen }));
         }
       }catch(e){
         if (this.state.importCancelled){
