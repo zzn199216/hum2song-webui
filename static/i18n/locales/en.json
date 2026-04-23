@@ -23,6 +23,7 @@
   "beginnerHint.step1": "In the repo root, run setup once:",
   "beginnerHint.step2a": "Then start Studio/API with:",
   "beginnerHint.step2b": "",
+  "beginnerHint.advancedFallback": "Advanced fallback: python scripts/beginner_preflight.py then python scripts/beginner_launch.py",
   "beginnerHint.checklistNote": "Longer setup doc: docs/BEGINNER_FIRST_RUN_CHECKLIST.md. Advanced path (optional): python scripts/beginner_launch.py",
   "beginnerHint.readinessPrefix": "Local setup may not be ready yet: ",
   "beginnerHint.readinessSoundfont": "SoundFont file missing (assets/piano.sf2)",

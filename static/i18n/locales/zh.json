@@ -23,6 +23,7 @@
   "beginnerHint.step1": "在仓库根目录先运行一次环境准备：",
   "beginnerHint.step2a": "然后用下面命令启动 Studio/API：",
   "beginnerHint.step2b": "",
+  "beginnerHint.advancedFallback": "高级路径：python scripts/beginner_preflight.py，然后 python scripts/beginner_launch.py",
   "beginnerHint.checklistNote": "更完整的安装说明见 docs/BEGINNER_FIRST_RUN_CHECKLIST.md。高级路径（可选）：python scripts/beginner_launch.py",
   "beginnerHint.readinessPrefix": "本机环境可能还未就绪：",
   "beginnerHint.readinessSoundfont": "缺少 SoundFont 文件（assets/piano.sf2）",
