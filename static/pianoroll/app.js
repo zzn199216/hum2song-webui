@@ -4529,6 +4529,78 @@ renderTimeline(){
       } catch (e) {}
     },
 
+    /** Import/generate failures: normalize technical errors into user-actionable buckets. */
+    _classifyImportGenerateFailure(err){
+      const raw = (err && err.message) ? String(err.message) : String(err || '');
+      const msg = raw.toLowerCase();
+      const pick = (arr, fallback) => {
+        for (let i = 0; i < arr.length; i++){
+          const p = arr[i];
+          if (p && msg.indexOf(p) >= 0) return p;
+        }
+        return fallback || '';
+      };
+      const http = (() => {
+        const m = raw.match(/^\s*(\d{3})\b/);
+        if (!m) return null;
+        const n = Number(m[1]);
+        return Number.isFinite(n) ? n : null;
+      })();
+      const out = {
+        bucket: 'unknown',
+        statusText: 'Import failed. Please try again.',
+        alertText: 'Import failed. Please try again.\n\nIf it keeps failing, restart the local server and try another short audio file.',
+      };
+
+      // Task-level failures from /tasks/{id}: backend processed but did not complete successfully.
+      if (err && err.h2sKind === 'task_failed'){
+        out.bucket = 'task_failed';
+        out.statusText = 'Import failed on server. Try again or use another file.';
+        out.alertText = 'The server could not finish this generation task.\n\nTry importing again, or try another short/clear audio file. If this keeps happening, check that the local server is healthy.';
+        return out;
+      }
+      if (err && err.h2sKind === 'task_timeout'){
+        out.bucket = 'server_unreachable';
+        out.statusText = 'Server took too long. Check server and try again.';
+        out.alertText = 'The server took too long to finish.\n\nMake sure the local app/server is still running, then try again with a shorter clip.';
+        return out;
+      }
+
+      // Input/file related issues (client-side or API validation/rejection).
+      if (
+        http === 400 || http === 413 || http === 415 || http === 422 ||
+        msg.indexOf('file too large') >= 0 ||
+        msg.indexOf('empty file') >= 0 ||
+        msg.indexOf('invalid file') >= 0 ||
+        msg.indexOf('unsupported') >= 0
+      ){
+        out.bucket = 'input_issue';
+        out.statusText = 'Audio file was rejected. Try another file.';
+        out.alertText = 'This audio file could not be imported.\n\nTry another file (shorter/clearer, common format like WAV/MP3), then import again.';
+        return out;
+      }
+
+      // Server unavailable / network / startup state.
+      if (
+        http === 500 || http === 502 || http === 503 || http === 504 ||
+        msg.indexOf('failed to fetch') >= 0 ||
+        msg.indexOf('networkerror') >= 0 ||
+        msg.indexOf('network error') >= 0 ||
+        msg.indexOf('err_connection') >= 0 ||
+        msg.indexOf('econnrefused') >= 0 ||
+        msg.indexOf('timed out') >= 0 ||
+        msg.indexOf('timeout') >= 0 ||
+        pick(['fetch', 'network'], '')
+      ){
+        out.bucket = 'server_unreachable';
+        out.statusText = 'Cannot reach server. Check local app and retry.';
+        out.alertText = 'Hum2Song could not reach the local server.\n\nMake sure the local app/server is running, then try importing again.';
+        return out;
+      }
+
+      return out;
+    },
+
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
      * @param {Blob|File} f
      * @param {{ sourceAudioClipId?: string, sourceAudioInstanceId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; optional `sourceAudioInstanceId` pins placement to that timeline instance. Bar-segment / explode paths unchanged.
@@ -4855,17 +4927,12 @@ renderTimeline(){
           this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           log('Import cancelled by user');
         }else{
-          const msg = (e && e.message) ? String(e.message) : String(e);
-          const short = msg.length > 80 ? msg.slice(0, 77) + '...' : msg;
-          this.setImportStatus('Failed: ' + short, false);
-          log('Upload/generate error: ' + msg);
+          const msg = (e && e.message) ? String(e.message) : String(e || '');
+          const cls = this._classifyImportGenerateFailure(e);
+          this.setImportStatus(cls.statusText, false);
+          log('Upload/generate error [' + cls.bucket + ']: ' + msg);
           console.error('[Studio] uploadFileAndGenerate error', e);
-          let userMsg = 'Generate failed. ';
-          if (/timeout/i.test(msg)) userMsg += 'Processing timed out. Try a shorter clip.';
-          else if (/task failed/i.test(msg)) userMsg += 'Backend task failed. Check server logs.';
-          else if (/fetch|network/i.test(msg)) userMsg += 'Network error. Check connection and server.';
-          else userMsg += 'See status bar and console for details.';
-          alert(userMsg);
+          alert(cls.alertText);
         }
       }
     },
@@ -5156,10 +5223,21 @@ renderTimeline(){
           return;
         }
         if (status.includes('failed') || status.includes('error')){
-          throw new Error(`Task failed: ${JSON.stringify(data)}`);
+          const taskErr =
+            (data && data.error && data.error.message) ||
+            (data && data.error && data.error.detail) ||
+            data.detail ||
+            data.message ||
+            '';
+          const err = new Error(taskErr ? `Task failed: ${taskErr}` : `Task failed: ${JSON.stringify(data)}`);
+          err.h2sKind = 'task_failed';
+          err.h2sTask = data;
+          throw err;
         }
         if (performance.now() - start > maxWaitMs){
-          throw new Error('Task timeout');
+          const err = new Error('Task timeout');
+          err.h2sKind = 'task_timeout';
+          throw err;
         }
         await sleep(800);
       }
