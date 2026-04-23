@@ -4601,6 +4601,22 @@ renderTimeline(){
       return out;
     },
 
+    /** Import success UX: short "what next" text for status bar. */
+    _buildImportSuccessStatus(opts){
+      opts = opts || {};
+      const done = (window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done';
+      const clipCount = Number.isFinite(Number(opts.clipCount)) ? Math.max(1, Math.floor(Number(opts.clipCount))) : 1;
+      const autoOpen = !!opts.autoOpen;
+      if (autoOpen){
+        return (clipCount > 1)
+          ? `${done} (${clipCount} clips). Opening editor...`
+          : `${done}. Opening editor...`;
+      }
+      return (clipCount > 1)
+        ? `${done} (${clipCount} clips). Next: click a clip in Library, then Edit.`
+        : `${done}. Next: click the clip in Library to edit.`;
+    },
+
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
      * @param {Blob|File} f
      * @param {{ sourceAudioClipId?: string, sourceAudioInstanceId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; optional `sourceAudioInstanceId` pins placement to that timeline instance. Bar-segment / explode paths unchanged.
@@ -4796,13 +4812,15 @@ renderTimeline(){
           this.render();
           log('Added clip to timeline.');
           const doneMulti = 'Done: ' + explodeClipCount + ' clips (bar segment + explode).';
-          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
-          log('Clips added (bar segment + explode): ' + explodeClipCount);
+          let shouldAutoOpen = false;
           if (explodeClipCount === 1 && lastClipIdForAutoOpen && this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
             const c = this.project.clips.find((x) => x && x.id === lastClipIdForAutoOpen);
-            if (c && !_importTooLargeForAutoOpen(c)){
-              setTimeout(() => this.openClipEditor(lastClipIdForAutoOpen), 0);
-            }
+            shouldAutoOpen = !!(c && !_importTooLargeForAutoOpen(c));
+          }
+          this.setImportStatus(this._buildImportSuccessStatus({ clipCount: explodeClipCount, autoOpen: shouldAutoOpen }), false);
+          log('Clips added (bar segment + explode): ' + explodeClipCount);
+          if (shouldAutoOpen){
+            setTimeout(() => this.openClipEditor(lastClipIdForAutoOpen), 0);
           } else {
             log('Import: editor not auto-opened (multi-clip).');
           }
@@ -4880,7 +4898,7 @@ renderTimeline(){
           this.render();
           log('Added clip to timeline.');
           const doneMulti = 'Done: ' + explodeClipCount + ' clips on ' + explodeParts.length + ' tracks.';
-          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
+          this.setImportStatus(this._buildImportSuccessStatus({ clipCount: explodeClipCount, autoOpen: false }), false);
           log('Clips added (split explode): ' + explodeClipCount);
           log('Import: editor not auto-opened (multi-clip).');
           setTimeout(() => this.setImportStatus('', false), 2500);
@@ -4912,12 +4930,13 @@ renderTimeline(){
           this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
           persist();
           this.render();
-          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
           log(`Clip added: ${clip.name}`);
           const cidNew = clip.id;
           const skipAutoOpenLarge = _importTooLargeForAutoOpen(clip);
+          const shouldAutoOpen = !!(this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function' && !skipAutoOpenLarge);
+          this.setImportStatus(this._buildImportSuccessStatus({ clipCount: 1, autoOpen: shouldAutoOpen }), false);
           if (skipAutoOpenLarge) log('Import: editor not auto-opened (large result).');
-          if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function' && !skipAutoOpenLarge){
+          if (shouldAutoOpen){
             setTimeout(() => this.openClipEditor(cidNew), 0);
           }
           setTimeout(() => this.setImportStatus('', false), 2000);
