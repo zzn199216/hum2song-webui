@@ -1030,19 +1030,20 @@
         </li>
         <li>
           <details class="beginnerHintSetupDetails">
-            <summary data-i18n="beginnerHint.setupSummary">Local run from a git clone (optional troubleshooting)</summary>
+            <summary data-i18n="beginnerHint.setupSummary">Windows first run (recommended)</summary>
             <div class="beginnerHintSetupBody">
               <div class="smallmuted" style="margin-bottom:6px;" data-i18n="beginnerHint.setupPreamble">Skip this section if uploads and playback already work.</div>
-              <span data-i18n="beginnerHint.step1">In the repo root, run preflight (checks FFmpeg, FluidSynth, SoundFont):</span>
+              <span data-i18n="beginnerHint.step1">In the repo root, run setup once:</span>
               <div class="beginnerHintCmdLine">
-                <code>python scripts/beginner_preflight.py</code>
-                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_preflight.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+                <code>beginner_setup.bat</code>
+                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="beginner_setup.bat" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
               </div>
-              <span data-i18n="beginnerHint.step2a">Start the API (or use </span><code>uvicorn app:app</code><span data-i18n="beginnerHint.step2b">):</span>
+              <span data-i18n="beginnerHint.step2a">Then start Studio/API with:</span><span data-i18n="beginnerHint.step2b"></span>
               <div class="beginnerHintCmdLine">
-                <code>python scripts/beginner_launch.py</code>
-                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_launch.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+                <code>beginner_launch.bat</code>
+                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="beginner_launch.bat" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
               </div>
+              <span class="smallmuted" style="display:block;margin-top:4px;">Advanced fallback: <code>python scripts/beginner_preflight.py</code> then <code>python scripts/beginner_launch.py</code></span>
               <span class="smallmuted" style="display:block;margin-top:4px;" data-i18n="beginnerHint.checklistNote">Longer setup doc: docs/BEGINNER_FIRST_RUN_CHECKLIST.md (also summarized in More help).</span>
             </div>
           </details>
@@ -1064,8 +1065,8 @@
       </div>
       <div class="beginnerHintHelpBody">
         <ul>
-          <li data-i18n="beginnerHint.helpL1">Preflight (repo root): python scripts/beginner_preflight.py — checks FFmpeg, FluidSynth, and SoundFont.</li>
-          <li data-i18n="beginnerHint.helpL2">Launch server: python scripts/beginner_launch.py (or uvicorn app:app from repo root).</li>
+          <li data-i18n="beginnerHint.helpL1">Windows first run (repo root): beginner_setup.bat — prepares venv and Python packages.</li>
+          <li data-i18n="beginnerHint.helpL2">Launch Studio/API: beginner_launch.bat (opens Studio when ready).</li>
           <li data-i18n="beginnerHint.helpL3">In Studio: Import as notes, Record, or Import as audio; double-click a clip to edit.</li>
           <li>
             <span data-i18n="beginnerHint.helpL4a">Verify the backend:</span>
