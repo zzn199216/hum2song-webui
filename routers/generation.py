@@ -150,6 +150,10 @@ async def generate_music(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     output_format: str = Query("mp3", pattern="^(mp3|wav)$"),
+    vocal_separation: bool = Query(
+        False,
+        description="Experimental: 2-stem vocal separation before transcription for this upload only.",
+    ),
 ) -> TaskCreateResponse:
     """
     Contract: 202 Accepted -> TaskCreateResponse
@@ -159,7 +163,10 @@ async def generate_music(
 
     original_ext = (Path(file.filename).suffix or ".wav").lower()
 
-    task_id = task_manager.create_task(stage=Stage.preprocessing)
+    task_id = task_manager.create_task(
+        stage=Stage.preprocessing,
+        request_two_stem_separation=bool(vocal_separation),
+    )
 
     upload_dir = _resolve_upload_dir()
     input_path = (upload_dir / f"{task_id}{original_ext}").resolve()
@@ -178,7 +185,13 @@ async def generate_music(
             _safe_unlink(input_path)
             raise HTTPException(status_code=400, detail="File is empty")
 
-        logger.info("Task[%s] uploaded (%d bytes) -> %s", task_id, written, input_path.name)
+        logger.info(
+            "Task[%s] uploaded (%d bytes) -> %s vocal_separation=%s",
+            task_id,
+            written,
+            input_path.name,
+            bool(vocal_separation),
+        )
 
         background_tasks.add_task(
             generation_service.process_task,

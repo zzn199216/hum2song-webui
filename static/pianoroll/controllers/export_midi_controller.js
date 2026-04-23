@@ -6,7 +6,7 @@
 (function(){
   'use strict';
 
-  var LS_V2 = 'hum2song_studio_project_v2';
+  var LS_LEGACY_V2 = 'hum2song_studio_project_v2';
   var LS_V1 = 'hum2song_studio_project_v1';
 
   function safeParse(raw){
@@ -14,7 +14,22 @@
   }
 
   function loadProjectAny(){
-    var rawV2 = localStorage.getItem(LS_V2);
+    var APP = window.H2SApp || window.APP || window.app;
+    if (APP && typeof APP.getProjectV2 === 'function'){
+      var mem = APP.getProjectV2();
+      if (mem) return mem;
+    }
+    if (APP && typeof APP.getActiveProjectDocumentLocalStorageKey === 'function'){
+      var key = APP.getActiveProjectDocumentLocalStorageKey();
+      if (key){
+        var rawA = localStorage.getItem(key);
+        if (rawA){
+          var o = safeParse(rawA);
+          if (o) return o;
+        }
+      }
+    }
+    var rawV2 = localStorage.getItem(LS_LEGACY_V2);
     if (rawV2){
       var p2 = safeParse(rawV2);
       if (p2) return p2;
@@ -74,7 +89,7 @@
     if (btn){
       btn.disabled = true;
     }
-    setStatus('Exporting MIDI...');
+    setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.exportingMidi') : 'Exporting MIDI...');
 
     try {
       var flat = H.flatten(p2);
@@ -114,7 +129,7 @@
       a.click();
       a.remove();
       setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
-      setStatus('MIDI exported.');
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.midiExported') : 'MIDI exported.');
       setTimeout(function(){ setStatus(''); }, 2000);
     } catch(e){
       setStatus('');

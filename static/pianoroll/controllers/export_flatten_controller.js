@@ -7,7 +7,7 @@
 (function(){
   'use strict';
 
-  var LS_V2 = 'hum2song_studio_project_v2';
+  var LS_LEGACY_V2 = 'hum2song_studio_project_v2';
   var LS_V1 = 'hum2song_studio_project_v1';
 
   function downloadText(filename, text){
@@ -27,7 +27,22 @@
   }
 
   function loadProjectAny(){
-    var rawV2 = localStorage.getItem(LS_V2);
+    var APP = window.H2SApp || window.APP || window.app;
+    if (APP && typeof APP.getProjectV2 === 'function'){
+      var mem = APP.getProjectV2();
+      if (mem) return mem;
+    }
+    if (APP && typeof APP.getActiveProjectDocumentLocalStorageKey === 'function'){
+      var key = APP.getActiveProjectDocumentLocalStorageKey();
+      if (key){
+        var rawA = localStorage.getItem(key);
+        if (rawA){
+          var o = safeParse(rawA);
+          if (o) return o;
+        }
+      }
+    }
+    var rawV2 = localStorage.getItem(LS_LEGACY_V2);
     if (rawV2){
       var p2 = safeParse(rawV2);
       if (p2) return p2;
@@ -93,13 +108,19 @@
       var btn = document.createElement('button');
       btn.id = 'btnExportFlatten';
       btn.className = exportProjectBtn.className || 'btn';
-      btn.textContent = 'Export Flatten JSON';
+      btn.setAttribute('data-i18n', 'inspector.exportFlattenJson');
+      btn.textContent = (window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t('inspector.exportFlattenJson') : 'Export Flatten JSON';
 
       // Insert right after Export Project button.
       var parent = exportProjectBtn.parentNode;
       if (!parent) return false;
       parent.insertBefore(btn, exportProjectBtn.nextSibling);
       existing = btn;
+    }
+    // Refresh label on each ensure (handles recreate + language switch)
+    if (existing){
+      existing.setAttribute('data-i18n', 'inspector.exportFlattenJson');
+      existing.textContent = (window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t('inspector.exportFlattenJson') : 'Export Flatten JSON';
     }
 
     bindOnce(existing);

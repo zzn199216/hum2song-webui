@@ -179,12 +179,13 @@
           sel.id = 'selTimelineSnap';
           sel.className = 'sel';
           sel.style.marginLeft = '8px';
+          const _tSnap = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
           const opts = [
-            ['off','Snap: Off'],
-            ['4','1/16'],
-            ['8','1/32'],
-            ['16','1/64'],
-            ['32','1/128'],
+            ['off', _tSnap('snap.labelOff')],
+            ['4', _tSnap('snap.1_16')],
+            ['8', _tSnap('snap.1_32')],
+            ['16', _tSnap('snap.1_64')],
+            ['32', _tSnap('snap.1_128')],
           ];
           for (const [val, label] of opts) {
             const o = document.createElement('option');
@@ -280,6 +281,35 @@
         if (ctrl._bound) return;
         ctrl._bound = true;
 
+        // PR-UX5b: Event delegation for instAct (Edit/Optimize) — stopPropagation so click doesn't trigger drag
+        const tracks = ctrl._tracksEl;
+        if (tracks){
+          tracks.addEventListener('pointerdown', (e)=>{
+            const btn = e.target && e.target.closest ? e.target.closest('.instAct') : null;
+            if (btn){ e.stopPropagation(); e.preventDefault(); }
+          }, true);
+          tracks.addEventListener('click', (e)=>{
+            const btn = e.target && e.target.closest ? e.target.closest('.instAct') : null;
+            if (!btn) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const act = btn.getAttribute('data-act');
+            const instId = btn.getAttribute('data-inst-id');
+            if (!instId) return;
+            const proj = config.getProject();
+            const inst = (proj.instances || []).find(x => x && x.id === instId);
+            if (!inst) return;
+            const el = btn.closest('.instance');
+            if (act === 'instEdit'){
+              config.onSelectInstance(instId, el);
+              if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId);
+            } else if (act === 'instOptimize'){
+              config.onSelectInstance(instId, el);
+              if (config.onOpenInspectorOptimize) config.onOpenInspectorOptimize();
+            }
+          }, true);
+        }
+
         // Global pointer handlers for timeline drag.
         window.addEventListener('pointermove', onPointerMove, {passive:true});
         window.addEventListener('pointerup', onPointerUp, {passive:true});
@@ -325,10 +355,11 @@
           label.className = 'trackLabel';
           // Track header (stacked): name -> volume -> instrument
           const track = (proj.tracks||[])[ti] || {};
-          const trackName = (track && track.name) ? track.name : ('Track ' + (ti+1));
+          const _t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+          const trackName = (track && track.name) ? track.name : (_t('trackpanel.trackN').replace('{n}', String(ti+1)));
 
           label.style.cursor = 'pointer';
-          label.title = 'Set as target track';
+          label.title = _t('trackpanel.setTargetTrack');
           label.style.display = 'flex';
           label.style.flexDirection = 'column';
           label.style.alignItems = 'stretch';
@@ -360,7 +391,7 @@
           muteBtn.className = "trackMuteBtn";
           muteBtn.type = "button";
           muteBtn.textContent = "M";
-          muteBtn.title = "Mute track";
+          muteBtn.title = _t('trackpanel.muteTrack');
           muteBtn.style.position = "absolute";
           muteBtn.style.top = "6px";
           muteBtn.style.right = "6px";
@@ -404,7 +435,7 @@
           volWrap.style.gap = '6px';
 
           const volLab = document.createElement('span');
-          volLab.textContent = 'Vol';
+          volLab.textContent = _t('trackpanel.vol');
           volLab.style.opacity = '0.85';
           volLab.style.fontSize = '12px';
           volWrap.appendChild(volLab);
@@ -416,7 +447,7 @@
           vol.step = '1';
           vol.value = (typeof track.gainDb === 'number') ? String(track.gainDb) : '0';
           vol.style.width = '100%';
-          vol.title = 'Track volume (dB)';
+          vol.title = _t('trackpanel.trackVolumeDb');
           // Show value bubble while dragging (0-100 like Windows volume)
           const volBubble = document.createElement('div');
           volBubble.className = 'trackVolBubble';
@@ -505,11 +536,36 @@
 
           const sel = document.createElement('select');
           sel.className = 'trackInstrumentSelect';
-          sel.innerHTML = [
-            'default','bass','lead','pad','pluck','drum'
-          ].map(x=>`<option value="${x}">${x}</option>`).join('');
+          var builtin = [
+            { v: 'default', l: 'dropdown.default' },
+            { v: 'bass', l: 'dropdown.bass' },
+            { v: 'lead', l: 'dropdown.lead' },
+            { v: 'pad', l: 'dropdown.pad' },
+            { v: 'pluck', l: 'dropdown.pluck' },
+            { v: 'drum', l: 'dropdown.drum' },
+            { v: 'sampler:tonejs:piano', l: 'dropdown.samplerPiano' },
+            { v: 'sampler:tonejs:strings', l: 'dropdown.samplerStrings' },
+            { v: 'sampler:tonejs:bass', l: 'dropdown.samplerBass' },
+            { v: 'sampler:tonejs:guitar-acoustic', l: 'dropdown.samplerGuitarAcoustic' },
+            { v: 'sampler:tonejs:guitar-electric', l: 'dropdown.samplerGuitarElectric' },
+          ];
+          var custom = (typeof window !== 'undefined' && window.__h2s_custom_instruments) ? window.__h2s_custom_instruments : [];
+          var opts = builtin.map(x=>'<option value="' + (x.v) + '">' + (ctrl._escapeHtml(_t(x.l))) + '</option>').join('');
+          if (custom.length){
+            opts += '<optgroup label="' + (ctrl._escapeHtml(_t('inst.myInstruments'))) + '">';
+            for (var i = 0; i < custom.length; i++){
+              var c = custom[i];
+              var val = (c.kind === 'oneshot') ? ('oneshot:' + c.packId) : ('sampler:' + c.packId);
+              var raw = (c.displayName || c.packId || '');
+              var stripped = raw.replace(/^自定义[:：]\s*/i, '').replace(/^Custom:\s*/i, '').trim() || raw;
+              var displayLabel = _t('inst.customPrefix') + stripped;
+              opts += '<option value="' + (ctrl._escapeHtml(val)) + '">' + (ctrl._escapeHtml(displayLabel)) + '</option>';
+            }
+            opts += '</optgroup>';
+          }
+          sel.innerHTML = opts;
           sel.value = (track && typeof track.instrument === 'string' && track.instrument) ? track.instrument : 'default';
-          sel.title = 'Instrument';
+          sel.title = _t('trackpanel.instrument');
           sel.style.width = '100%';
           sel.addEventListener('pointerdown', (e)=>{ e.stopPropagation(); });
           sel.addEventListener('click', (e)=>{ e.stopPropagation(); });
@@ -556,7 +612,10 @@
             const clip = (proj.clips||[]).find(c => c.id === inst.clipId);
             if (!clip) continue;
 
-            const st = (window.H2SProject && window.H2SProject.scoreStats) ? window.H2SProject.scoreStats(clip.score) : {count:0, spanSec:1};
+            const isAudio = (clip.kind === 'audio');
+            const st = isAudio
+              ? { count: 0, spanSec: (clip.meta && typeof clip.meta.spanSec === 'number' && isFinite(clip.meta.spanSec)) ? clip.meta.spanSec : 1 }
+              : ((window.H2SProject && window.H2SProject.scoreStats) ? window.H2SProject.scoreStats(clip.score) : {count:0, spanSec:1});
 
             // v2 beats-only clips carry meta.spanBeat and instances may carry startBeat.
             // Timeline pixels are in seconds (pxPerSec), so convert beats -> seconds via bpm when available.
@@ -565,7 +624,9 @@
               : (window.H2SApp && typeof window.H2SApp.getProjectV2 === 'function' && window.H2SApp.getProjectV2().bpm) ? window.H2SApp.getProjectV2().bpm : 120;
 
             const spanBeat = (clip && clip.meta && typeof clip.meta.spanBeat === 'number' && isFinite(clip.meta.spanBeat)) ? clip.meta.spanBeat : null;
-            const spanSec = (spanBeat != null) ? (spanBeat * 60 / bpm) : (st.spanSec || 1);
+            const spanSec = (isAudio && clip.meta && typeof clip.meta.spanSec === 'number' && isFinite(clip.meta.spanSec))
+              ? clip.meta.spanSec
+              : ((spanBeat != null) ? (spanBeat * 60 / bpm) : (st.spanSec || 1));
 
             const startSec = (typeof inst.startBeat === 'number' && isFinite(inst.startBeat)) ? (inst.startBeat * 60 / bpm) : (inst.startSec || 0);
 
@@ -573,7 +634,7 @@
             const x = ctrl._labelW + (isFinite(startSec) ? startSec : 0) * pxPerSec;
 
             const el = document.createElement('div');
-            el.className = 'instance';
+            el.className = 'instance' + (isAudio ? ' instance--audio' : '');
             if (state && state.selectedInstanceId === inst.id) el.classList.add('selected');
             el.style.left = x + 'px';
             el.style.width = w + 'px';
@@ -583,22 +644,40 @@
             if (window.H2STimelineView && typeof window.H2STimelineView.instanceInnerHTML === 'function'){
               el.innerHTML = window.H2STimelineView.instanceInnerHTML({
                 clipName: clip.name,
-                startSec: (typeof inst.startSec === 'number') ? inst.startSec : 0,
+                startSec: startSec,
                 noteCount: (typeof st.count === 'number') ? st.count : 0,
+                spanSec: spanSec,
+                isAudio: isAudio,
+                instId: inst.id,
                 fmtSec: ctrl._fmtSec.bind(ctrl),
                 escapeHtml: ctrl._escapeHtml.bind(ctrl),
+                notesLabel: _t('trackpanel.notes'),
+                removeLabel: _t('actions.remove'),
+                editLabel: _t('actions.edit'),
+                optimizeLabel: _t('actions.optimize'),
+                audioBadge: _t('cliplib.badgeAudio'),
               });
             } else {
+              const subR = isAudio
+                ? (ctrl._fmtSec(spanSec) + ' · ' + ctrl._escapeHtml(_t('cliplib.badgeAudio')))
+                : (st.count + ' ' + _t('trackpanel.notes'));
+              const actionsHtml = isAudio
+                ? ''
+                : `
+                <div class="instActions">
+                  <button class="instAct" type="button" data-act="instEdit" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.edit'))}</button>
+                  <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${ctrl._escapeHtml(inst.id)}">${ctrl._escapeHtml(_t('actions.optimize'))}</button>
+                </div>`;
               el.innerHTML = `
                 <div class="instBody" data-role="inst-body">
-                  <div class="instTitle">${ctrl._escapeHtml(clip.name)}</div>
-                  <div class="instSub"><span>${ctrl._fmtSec(inst.startSec)}</span><span>${st.count} notes</span></div>
-                </div>
-                <button class="instRemove" type="button" data-act="remove" title="Remove" aria-label="Remove">×</button>
+                  <div class="instTitle">${isAudio ? '<span class="inst-badge">' + ctrl._escapeHtml(_t('cliplib.badgeAudio')) + '</span> ' : ''}${ctrl._escapeHtml(clip.name)}</div>
+                  <div class="instSub"><span>${ctrl._fmtSec(startSec)}</span><span>${subR}</span></div>
+                </div>${actionsHtml}
+                <button class="instRemove" type="button" data-act="remove" title="${ctrl._escapeHtml(_t('actions.remove'))}" aria-label="${ctrl._escapeHtml(_t('actions.remove'))}">×</button>
               `;
             }
 
-            // Remove button should not start drag / change playhead.
+            // Remove button: stopPropagation so it does not trigger selection/drag.
             const btnRemove = el.querySelector('[data-act="remove"], .instRemove');
             if (btnRemove){
               btnRemove.addEventListener('pointerdown', (e)=>{ e.preventDefault(); e.stopPropagation(); });
@@ -610,13 +689,10 @@
               });
             }
 
-            // IMPORTANT: selection is handled in pointerdown to keep DOM stable for drag/dblclick.
-            const hit = el.querySelector('.instBody') || el;
-            hit.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
-            // Stop bubbling so the timeline background handler won't move the playhead.
+            // Full instance block is hit area: left/right/top/bottom all select. Selection in pointerdown for drag/dblclick stability.
+            el.addEventListener('pointerdown', (e)=> instancePointerDown(e, inst.id, el));
             el.addEventListener('click', (e)=>{ e.stopPropagation(); });
-            // Native dblclick is reliable as long as we don't rebuild DOM between clicks.
-            hit.addEventListener('dblclick', (e)=>{ e.stopPropagation(); dbg(ctrl,'dblclick inst', inst.id); if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId); });
+            el.addEventListener('dblclick', (e)=>{ e.stopPropagation(); dbg(ctrl,'dblclick inst', inst.id); if (config.onOpenClipEditor) config.onOpenClipEditor(inst.clipId); });
 
             lane.appendChild(el);
           }
@@ -667,13 +743,17 @@
       // Select without rebuilding whole timeline.
       config.onSelectInstance(instId, el);
 
+      const inst = (proj.instances||[]).find(x => x.id === instId);
+      const originTrackIndex = (inst && (typeof inst.trackIndex === 'number')) ? inst.trackIndex : 0;
       const rect = el.getBoundingClientRect();
       state.dragCandidate = {
         instId,
         el,
         pointerId: ev.pointerId,
         startClientX: ev.clientX,
+        startClientY: ev.clientY,
         offsetX: ev.clientX - rect.left,
+        originTrackIndex,
         started: false,
         _elConnectedAtDown: el.isConnected
       };
@@ -741,6 +821,34 @@
 
       // Update DOM in-place (NO full render!)
       cand.el.style.left = (ctrl._labelW + startSec * pxPerSec) + 'px';
+
+      // Cross-track: only after vertical threshold exceeded; use pickLaneIndexByY for hysteresis.
+      const VERTICAL_THRESHOLD_PX = 16;
+      const LANE_HEIGHT = 96;
+      const trackCount = (proj.tracks||[]).length;
+      const dy = Math.abs(ev.clientY - (cand.startClientY ?? ev.clientY));
+      if (dy >= VERTICAL_THRESHOLD_PX && trackCount > 0){
+        const Rt = (typeof globalThis !== 'undefined' && globalThis.H2STimelineRuntime) || (typeof window !== 'undefined' && window.H2STimelineRuntime);
+        if (Rt && typeof Rt.pickLaneIndexByY === 'function'){
+          const rectT = tracks.getBoundingClientRect();
+          const targetTrackIndex = Rt.pickLaneIndexByY({
+            clientY: ev.clientY,
+            rectTop: rectT.top,
+            scrollTop: (tracks.scrollTop || 0),
+            laneHeight: LANE_HEIGHT,
+            trackCount,
+            currentIndex: (typeof inst.trackIndex === 'number') ? inst.trackIndex : cand.originTrackIndex
+          });
+          if (targetTrackIndex !== (inst.trackIndex ?? cand.originTrackIndex)){
+            inst.trackIndex = targetTrackIndex;
+            const lanes = tracks.querySelectorAll('.trackLane');
+            const targetLane = lanes[targetTrackIndex];
+            if (targetLane && targetLane !== cand.el.parentElement){
+              targetLane.appendChild(cand.el);
+            }
+          }
+        }
+      }
 
       dbgMove(ctrl, 'drag move', cand.instId, startSec.toFixed(3));
     }

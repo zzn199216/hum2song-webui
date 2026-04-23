@@ -7,13 +7,1075 @@
   'use strict';
 
   const API = {
-    generate: (fmt) => `/generate?output_format=${encodeURIComponent(fmt || 'mp3')}`,
+    /** @param {string} fmt */
+    generate: (fmt) => {
+      const q = new URLSearchParams();
+      q.set('output_format', fmt || 'mp3');
+      return `/generate?${q.toString()}`;
+    },
     task: (id) => `/tasks/${encodeURIComponent(id)}`,
     score: (id) => `/tasks/${encodeURIComponent(id)}/score`,
   };
   const LS_KEY_V1 = 'hum2song_studio_project_v1';
-  const LS_KEY_V2 = 'hum2song_studio_project_v2';
+  /** Legacy flat slot; migrated once to per-project storage. */
+  const LS_KEY_LEGACY_V2 = 'hum2song_studio_project_v2';
+  const LS_KEY_CURRENT_PROJECT_ID = 'hum2song_studio_current_project_id';
+  const LS_KEY_PROJECTS_INDEX = 'hum2song_studio_projects_index';
+  const LS_KEY_PROJECT_DATA_PREFIX = 'hum2song_studio_project_data_';
   const LS_KEY_OPT_OPTIONS = 'hum2song_studio_opt_options_by_clip'; // PR-5f: persist per-clip optimize preset across refresh
+  const LS_KEY_LOG_OPEN = 'hum2song_studio_log_open'; // PR-UX3a: persist log drawer open/closed
+  const LS_KEY_AI_DRAWER_OPEN = 'hum2song_studio_ai_drawer_open'; // PR-UX4c: persist AI Settings drawer open/closed
+  const LS_KEY_AI_ASSIST_OPEN = 'hum2song_studio_ai_assist_open'; // PR-UX7a: persist AI Assistant dock open/closed
+  const LS_KEY_SKIP_PROJECT_HOME_AUTO = 'hum2song_studio_skip_project_home_auto'; // Project Home MVP: skip auto-open on load after first Continue
+  /** Dev-only: set localStorage to '1' to run transcription scores through heuristic pitch-bucket multi-track split before clip creation. */
+  const LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT = 'hum2song_studio_dev_transcription_pitch_split';
+  /** Dev-only: set localStorage to '1' to segment each exploded track (after trim) into shorter clips by gap + max duration. */
+  const LS_KEY_DEV_TRANSCRIPTION_EXPLODE_SEGMENT = 'hum2song_studio_dev_transcription_explode_segment';
+  /** Dev-only: set localStorage to '1' to segment the full score on bar boundaries before explode (disables per-track gap/max segmentation for that import). */
+  const LS_KEY_DEV_TRANSCRIPTION_BAR_SEGMENT = 'hum2song_studio_dev_transcription_bar_segment';
+  /** Dev-only: set localStorage to '1' to log [H2S perf] timings (import explode, persist, render; editor modalDraw phase object). */
+  const LS_KEY_DEV_PERF_TIMING = 'hum2song_studio_dev_perf_timing';
+  function _devPerfTimingEnabled(){
+    try{
+      return typeof localStorage !== 'undefined' && String(localStorage.getItem(LS_KEY_DEV_PERF_TIMING) || '') === '1';
+    }catch(e){ return false; }
+  }
+
+  /** Transcription import: skip auto-opening the editor when result exceeds these (notes or span in seconds). */
+  const IMPORT_AUTO_OPEN_MAX_NOTES = 2000;
+  const IMPORT_AUTO_OPEN_MAX_SPAN_SEC = 180;
+  function _importTooLargeForAutoOpen(clip){
+    if (!clip || !clip.meta) return false;
+    const n = typeof clip.meta.notes === 'number' ? clip.meta.notes : 0;
+    const span = (typeof clip.meta.spanSec === 'number' && isFinite(clip.meta.spanSec)) ? clip.meta.spanSec : 0;
+    return n > IMPORT_AUTO_OPEN_MAX_NOTES || span > IMPORT_AUTO_OPEN_MAX_SPAN_SEC;
+  }
+
+  const LS_KEYS_INSP = {
+    project: 'hum2song_studio_insp_project_open',
+    export: 'hum2song_studio_insp_export_open',
+    opt: 'hum2song_studio_insp_opt_open',
+    opt_adv: 'hum2song_studio_insp_opt_adv_open',
+    opt_results: 'hum2song_studio_insp_opt_results_open',
+    history: 'hum2song_studio_insp_history_open',
+  };
+  function getInspectorSectionOpen(key){
+    try{
+      const k = LS_KEYS_INSP[key];
+      if (!k) return false;
+      const v = localStorage.getItem(k);
+      if (v === null && key === 'opt') return true; // Optimize open by default (primary action area)
+      return v === '1';
+    }catch(e){ return false; }
+  }
+  function setInspectorSectionOpen(key, open){
+    try{
+      const k = LS_KEYS_INSP[key];
+      if (k) localStorage.setItem(k, open ? '1' : '0');
+    }catch(e){}
+  }
+
+  // PR-UX2 / INFRA-1a: Inspector Optimize templates — derived from shared registry
+  const INSPECTOR_TEMPLATES = (typeof window !== 'undefined' && window.H2S_OPTIMIZE_TEMPLATES_V1_MAP) ? window.H2S_OPTIMIZE_TEMPLATES_V1_MAP : {};
+
+  /** UX7b: Keyword-based mapping from natural-language text to template/intent. Returns null fields if no match. */
+  function _mapAiAssistTextToTemplate(text){
+    if (!text || typeof text !== 'string') return { templateId: null, templateLabel: '', intent: null };
+    const t = String(text).toLowerCase().trim();
+    const rules = [
+      { id: 'bluesy_v1', keywords: ['blues', 'bluesy', 'more blues', '蓝调'] },
+      { id: 'fix_pitch_v1', keywords: ['pitch', 'out of tune', 'off pitch', '跑调', '音准', '音不准'] },
+      { id: 'tighten_rhythm_v1', keywords: ['rhythm', 'tighter rhythm', 'timing', 'more steady', '节奏', '更稳', '紧一点'] },
+      { id: 'clean_outliers_v1', keywords: ['outlier', 'weird notes', 'stray notes', 'noisy notes', '杂音', '异常音', '怪音'] },
+    ];
+    for (const r of rules){
+      for (const kw of r.keywords){
+        if (t.indexOf(kw) >= 0){
+          const tm = INSPECTOR_TEMPLATES[r.id];
+          if (tm){
+            const intent = tm.intent && typeof tm.intent === 'object'
+              ? { fixPitch: !!tm.intent.fixPitch, tightenRhythm: !!tm.intent.tightenRhythm, reduceOutliers: !!tm.intent.reduceOutliers }
+              : null;
+            return { templateId: r.id, templateLabel: tm.label || r.id, intent };
+          }
+        }
+      }
+    }
+    return { templateId: null, templateLabel: '', intent: null };
+  }
+
+  /**
+   * Narrow Assistant command: add selected library clip to timeline.
+   * Supports plain phrases ({ clipId }), explicit track+beat placement ({ clipId, trackIndex, startBeat }),
+   * explicit track number placement ({ clipId, trackIndex }), and explicit beat placement ({ clipId, startBeat }).
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddClipToTimelineIntentFromText`.
+   */
+  function _resolveAssistantAddClipToTimelineIntentFromText(text){
+    if (!text || typeof text !== 'string') return null;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/\s+please\s*$/g, '').trim();
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const phrases = [
+      'add this clip',
+      'insert this clip',
+      'put this clip on the timeline',
+    ];
+    if (phrases.indexOf(s) >= 0) return { trackIndex: null, trackNumber: null };
+    const mCombo = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
+    if (mCombo){
+      const trackNumber = Number(mCombo[1]);
+      const beat = Number(mCombo[2]);
+      if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+      if (!isFinite(beat) || beat < 0) return { invalidBeat: true };
+      return { trackIndex: trackNumber - 1, trackNumber: trackNumber, startBeat: beat };
+    }
+    const mComboEmptyBeat = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s*$/);
+    if (mComboEmptyBeat) return { invalidBeat: true };
+    const mComboInvalid = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)\s+at\s+beat\s+.+$/);
+    if (mComboInvalid) return { invalidBeat: true };
+    const mb = s.match(/^(?:add|insert|put)\s+this\s+clip\s+at\s+beat\s+([0-9]+(?:\.\d+)?)$/);
+    if (mb){
+      const beat = Number(mb[1]);
+      if (!isFinite(beat) || beat < 0) return { invalidBeat: true };
+      return { startBeat: beat };
+    }
+    const mbInvalid = s.match(/^(?:add|insert|put)\s+this\s+clip\s+at\s+beat\s+.+$/);
+    if (mbInvalid) return { invalidBeat: true };
+    const m = s.match(/^(?:add|insert|put)\s+this\s+clip\s+(?:to|on)\s+track\s+([1-9]\d*)$/);
+    if (!m) return null;
+    const trackNumber = Number(m[1]);
+    if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+    return { trackIndex: trackNumber - 1, trackNumber: trackNumber };
+  }
+
+  /**
+   * Narrow Assistant command: add track (matches `runCommand('add_track')` only).
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantAddTrackIntentFromText`.
+   */
+  function _resolveAssistantAddTrackIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const phrases = [
+      'add a track',
+      'add track',
+      'create a new track',
+      'create new track',
+      'new track',
+    ];
+    return phrases.indexOf(s) >= 0;
+  }
+
+  /**
+   * Narrow Assistant command: move selected timeline instance.
+   * - Horizontal: { direction: 'left'|'right', deltaBeats: number }
+   * - Vertical (explicit 1-based track only): { trackIndex, trackNumber }
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantMoveInstanceIntentFromText`.
+   */
+  function _resolveAssistantMoveInstanceIntentFromText(text){
+    if (!text || typeof text !== 'string') return null;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/\s+please\s*$/g, '').trim();
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const mVert = s.match(/^move this(?:\s+clip|\s+instance)?\s+to track\s+([1-9]\d*)$/);
+    if (mVert){
+      const trackNumber = Number(mVert[1]);
+      if (!isFinite(trackNumber) || trackNumber <= 0) return null;
+      return { trackIndex: trackNumber - 1, trackNumber: trackNumber };
+    }
+    const re = /^move\s+(?:this|(?:the\s+)?selected\s+instance|(?:the\s+)?selected\s+block)\s+(left|right)\s+(\d+(?:\.\d+)?)\s*(?:beat|beats)?$/;
+    const m = s.match(re);
+    if (!m) return null;
+    const dir = m[1];
+    const num = Number(m[2]);
+    if (!isFinite(num) || num <= 0) return null;
+    const MAX_DELTA = 64;
+    if (num > MAX_DELTA) return null;
+    return { direction: (dir === 'left') ? 'left' : 'right', deltaBeats: num };
+  }
+
+  /**
+   * Narrow Assistant command: remove selected timeline instance (matches `runCommand('remove_instance')` only).
+   * Keep in sync with scripts/tests/ai_assist_dock.test.js `resolveAssistantRemoveInstanceIntentFromText`.
+   */
+  function _resolveAssistantRemoveInstanceIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).toLowerCase().trim();
+    s = s.replace(/^please\s+/, '');
+    s = s.replace(/\s+please\s*$/g, '').trim();
+    s = s.replace(/[.!?]+$/g, '').trim();
+    const phrases = [
+      'remove this',
+      'delete this',
+      'remove selected instance',
+      'delete selected instance',
+      'remove selected block',
+      'delete selected block',
+    ];
+    return phrases.indexOf(s) >= 0;
+  }
+
+  function _getInternalSkillRegistry(){
+    return (typeof globalThis !== 'undefined' && globalThis.H2SInternalSkillRegistry) ? globalThis.H2SInternalSkillRegistry : null;
+  }
+  /** When registry is missing, treat bounded assistant skills as enabled (legacy/tests). */
+  function _isAssistantBoundedSkillEnabled(commandId){
+    const R = _getInternalSkillRegistry();
+    if (!R || typeof R.isAssistantSkillEnabled !== 'function') return true;
+    return R.isAssistantSkillEnabled(commandId);
+  }
+  function _assistantSkillDisabledKey(commandId){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill(commandId) : null;
+    return (sk && sk.i18n && sk.i18n.skillDisabled) ? sk.i18n.skillDisabled : 'aiAssist.skillDisabled';
+  }
+  function _assistantSkillI18nAddClipToTimeline(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_clip_to_timeline') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.addClipToTimelineRunning', ok: 'aiAssist.addClipToTimelineOk', fail: 'aiAssist.addClipToTimelineFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+  function _assistantSkillI18nAddTrack(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_track') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.addTrackRunning', ok: 'aiAssist.addTrackOk', fail: 'aiAssist.addTrackFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+  function _assistantSkillI18nMoveInstance(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('move_instance') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.moveInstanceRunning', ok: 'aiAssist.moveInstanceOk', okTrack: 'aiAssist.moveInstanceOkTrack', fail: 'aiAssist.moveInstanceFail', clamp: 'aiAssist.moveInstanceClamped', dirLeft: 'aiAssist.dirLeft', dirRight: 'aiAssist.dirRight', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+  function _assistantSkillI18nRemoveInstance(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
+    return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
+  }
+
+  /** Product precedence for bounded assistant skills (internal slice; matches historical if-chain order). */
+  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
+
+  /**
+   * phraseResolverId → in-code phrase resolver (must match internal_skill_registry SKILLS.*.phraseResolverId).
+   */
+  const _ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_clip_to_timeline_v1: _resolveAssistantAddClipToTimelineIntentFromText,
+    assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText,
+    assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText,
+    assistant_remove_instance_v1: _resolveAssistantRemoveInstanceIntentFromText,
+  });
+
+  /** If a skill row is missing, still resolve using the known phrase ids for this slice. */
+  const _ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_clip_to_timeline: 'assistant_add_clip_to_timeline_v1',
+    add_track: 'assistant_add_track_v1',
+    move_instance: 'assistant_move_instance_v1',
+    remove_instance: 'assistant_remove_instance_v1',
+  });
+
+  /**
+   * Internal bounded assistant skills: ordered dispatch using skill metadata phraseResolverId.
+   * @returns {boolean} true when a skill matched and Send should not fall through to optimize/card path
+   */
+  function _tryAssistantBoundedSkillDispatch(self, text, _t){
+    const R = _getInternalSkillRegistry();
+    for (let si = 0; si < _ASSISTANT_BOUNDED_SKILL_ORDER.length; si++){
+      const skillId = _ASSISTANT_BOUNDED_SKILL_ORDER[si];
+      const sk = R && R.getSkill ? R.getSkill(skillId) : null;
+      const phraseId = (sk && sk.phraseResolverId) ? sk.phraseResolverId : _ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK[skillId];
+      if (!phraseId) continue;
+      const resolveFn = _ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID[phraseId];
+      if (typeof resolveFn !== 'function') continue;
+      let moveIntent = null;
+      let addClipIntent = null;
+      if (skillId === 'move_instance'){
+        moveIntent = resolveFn(text);
+        if (!moveIntent) continue;
+      } else if (skillId === 'add_clip_to_timeline'){
+        addClipIntent = resolveFn(text);
+        if (!addClipIntent) continue;
+      } else {
+        if (!resolveFn(text)) continue;
+      }
+      if (!_isAssistantBoundedSkillEnabled(skillId)){
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
+        self.render();
+        return true;
+      }
+      if (skillId === 'add_clip_to_timeline'){
+        const kiAc = _assistantSkillI18nAddClipToTimeline();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const clipIdSel = self.state && self.state.selectedClipId;
+        if (!clipIdSel){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+          self.render();
+          return true;
+        }
+        const clipOk = (self.project.clips || []).some(function(c){ return c && c.id === clipIdSel; });
+        if (!clipOk){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectedClipStale') });
+          self.render();
+          return true;
+        }
+        const cmdPayload = { clipId: clipIdSel };
+        if (addClipIntent && addClipIntent.invalidBeat){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addClipToTimelineBeatInvalid') });
+          self.render();
+          return true;
+        }
+        if (addClipIntent && addClipIntent.startBeat != null){
+          const sbReq = Number(addClipIntent.startBeat);
+          if (!isFinite(sbReq) || sbReq < 0){
+            self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addClipToTimelineBeatInvalid') });
+            self.render();
+            return true;
+          }
+          cmdPayload.startBeat = sbReq;
+        }
+        if (addClipIntent && addClipIntent.trackIndex != null){
+          const tiReq = Number(addClipIntent.trackIndex);
+          const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
+          if (!isFinite(tiReq) || tiReq < 0 || Math.floor(tiReq) !== tiReq || tiReq >= trackCount){
+            const reqNum = Number.isFinite(Number(addClipIntent.trackNumber)) ? Math.round(Number(addClipIntent.trackNumber)) : (tiReq + 1);
+            const maxNum = Math.max(0, trackCount);
+            self._aiAssistItems.push({
+              type: 'sys',
+              text: _t('aiAssist.addClipToTimelineTrackOutOfRange')
+                .replace(/\{n\}/g, String(reqNum))
+                .replace(/\{max\}/g, String(maxNum)),
+            });
+            self.render();
+            return true;
+          }
+          cmdPayload.trackIndex = tiReq;
+        }
+        const pendingAc = { type: 'sys', text: _t(kiAc.running), _pendingAddClipToTimeline: true };
+        self._aiAssistItems.push(pendingAc);
+        self.render();
+        const selfAc = self;
+        Promise.resolve(selfAc.runCommand('add_clip_to_timeline', cmdPayload)).then(function(res){
+          const idx = (selfAc._aiAssistItems || []).indexOf(pendingAc);
+          if (idx >= 0){
+            if (res && res.ok){
+              selfAc._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.ok) };
+            } else {
+              const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              selfAc._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.fail) + (msg ? ': ' + msg : '') };
+            }
+          }
+          selfAc.render();
+        }).catch(function(err){
+          const idx = (selfAc._aiAssistItems || []).indexOf(pendingAc);
+          if (idx >= 0){
+            const msg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            selfAc._aiAssistItems[idx] = { type: 'sys', text: _t(kiAc.fail) + (msg ? ': ' + msg : '') };
+          }
+          selfAc.render();
+        });
+        return true;
+      }
+      if (skillId === 'add_track'){
+        const kiAdd = _assistantSkillI18nAddTrack();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const pending = { type: 'sys', text: _t(kiAdd.running), _pendingAddTrack: true };
+        self._aiAssistItems.push(pending);
+        self.render();
+        const selfAdd = self;
+        Promise.resolve(selfAdd.runCommand('add_track', {})).then(function(res){
+          const idx = (selfAdd._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            if (res && res.ok){
+              const d = res.data || {};
+              const ti = (typeof d.trackIndex === 'number' && isFinite(d.trackIndex)) ? d.trackIndex : null;
+              const num = (ti != null) ? String(ti + 1) : '?';
+              selfAdd._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.ok).replace(/\{n\}/g, num) };
+            } else {
+              const msg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              selfAdd._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.fail) + (msg ? ': ' + msg : '') };
+            }
+          }
+          selfAdd.render();
+        }).catch(function(err){
+          const idx = (selfAdd._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            const msg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            selfAdd._aiAssistItems[idx] = { type: 'sys', text: _t(kiAdd.fail) + (msg ? ': ' + msg : '') };
+          }
+          selfAdd.render();
+        });
+        return true;
+      }
+      if (skillId === 'move_instance'){
+        const kiMv = _assistantSkillI18nMoveInstance();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const instId = self.state && self.state.selectedInstanceId;
+        if (!instId){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectInstanceFirst') });
+          self.render();
+          return true;
+        }
+        const inst = (self.project.instances || []).find(function(x){ return x && x.id === instId; });
+        if (!inst){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
+          self.render();
+          return true;
+        }
+        const isVerticalTrack = (moveIntent.trackNumber != null && moveIntent.trackIndex != null);
+        if (isVerticalTrack){
+          const tiReq = Number(moveIntent.trackIndex);
+          const trackCount = Array.isArray(self.project && self.project.tracks) ? self.project.tracks.length : 0;
+          if (!isFinite(tiReq) || tiReq < 0 || Math.floor(tiReq) !== tiReq || tiReq >= trackCount){
+            const reqNum = Number.isFinite(Number(moveIntent.trackNumber)) ? Math.round(Number(moveIntent.trackNumber)) : (tiReq + 1);
+            const maxNum = Math.max(0, trackCount);
+            self._aiAssistItems.push({
+              type: 'sys',
+              text: _t('aiAssist.addClipToTimelineTrackOutOfRange')
+                .replace(/\{n\}/g, String(reqNum))
+                .replace(/\{max\}/g, String(maxNum)),
+            });
+            self.render();
+            return true;
+          }
+          const pendingVt = { type: 'sys', text: _t(kiMv.running), _pendingMoveInstance: true };
+          self._aiAssistItems.push(pendingVt);
+          self.render();
+          const selfMvt = self;
+          const trackNumOk = Math.round(Number(moveIntent.trackNumber));
+          const okTrackKey = (kiMv.okTrack != null && String(kiMv.okTrack).trim()) ? kiMv.okTrack : 'aiAssist.moveInstanceOkTrack';
+          Promise.resolve(selfMvt.runCommand('move_instance', { instanceId: instId, trackIndex: tiReq })).then(function(res){
+            const idx = (selfMvt._aiAssistItems || []).indexOf(pendingVt);
+            if (idx >= 0){
+              if (res && res.ok){
+                selfMvt._aiAssistItems[idx] = { type: 'sys', text: _t(okTrackKey).replace(/\{n\}/g, String(trackNumOk)) };
+              } else {
+                const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+                selfMvt._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+              }
+            }
+            selfMvt.render();
+          }).catch(function(err){
+            const idx = (selfMvt._aiAssistItems || []).indexOf(pendingVt);
+            if (idx >= 0){
+              const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+              selfMvt._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+            }
+            selfMvt.render();
+          });
+          return true;
+        }
+        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+        const bpm = (self.project && typeof self.project.bpm === 'number' && isFinite(self.project.bpm)) ? self.project.bpm : 120;
+        const curBeat = (P && typeof P.secToBeat === 'function') ? P.secToBeat(inst.startSec || 0, bpm) : 0;
+        const delta = (moveIntent.direction === 'right') ? moveIntent.deltaBeats : -moveIntent.deltaBeats;
+        const rawNext = curBeat + delta;
+        const clamped = rawNext < 0;
+        let nextBeat = clamped ? 0 : rawNext;
+        if (P && typeof P.normalizeBeat === 'function') nextBeat = P.normalizeBeat(nextBeat);
+        const pending = { type: 'sys', text: _t(kiMv.running), _pendingMoveInstance: true };
+        self._aiAssistItems.push(pending);
+        self.render();
+        const selfMv = self;
+        const dirWord = _t(moveIntent.direction === 'left' ? kiMv.dirLeft : kiMv.dirRight);
+        Promise.resolve(selfMv.runCommand('move_instance', { instanceId: instId, startBeat: nextBeat })).then(function(res){
+          const idx = (selfMv._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            if (res && res.ok){
+              let msg = _t(kiMv.ok)
+                .replace(/\{dir\}/g, dirWord)
+                .replace(/\{delta\}/g, String(moveIntent.deltaBeats));
+              if (clamped) msg += ' ' + _t(kiMv.clamp);
+              selfMv._aiAssistItems[idx] = { type: 'sys', text: msg };
+            } else {
+              const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              selfMv._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+            }
+          }
+          selfMv.render();
+        }).catch(function(err){
+          const idx = (selfMv._aiAssistItems || []).indexOf(pending);
+          if (idx >= 0){
+            const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            selfMv._aiAssistItems[idx] = { type: 'sys', text: _t(kiMv.fail) + (errMsg ? ': ' + errMsg : '') };
+          }
+          selfMv.render();
+        });
+        return true;
+      }
+      if (skillId === 'remove_instance'){
+        self._aiAssistItems = self._aiAssistItems || [];
+        const instIdRm = self.state && self.state.selectedInstanceId;
+        if (!instIdRm){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectInstanceFirst') });
+          self.render();
+          return true;
+        }
+        const instRm = (self.project.instances || []).find(function(x){ return x && x.id === instIdRm; });
+        if (!instRm){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.moveInstanceStale') });
+          self.render();
+          return true;
+        }
+        const clipRm = (self.project.clips || []).find(function(c){ return c && c.id === instRm.clipId; });
+        const confirmLabel = (clipRm && clipRm.name) ? String(clipRm.name).slice(0, 80) : String(instRm.clipId || instIdRm).slice(0, 80);
+        const confirmMsg = _t('aiAssist.removeInstanceConfirm').replace(/\{name\}/g, confirmLabel);
+        const ActReg = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
+        const needAssistantConfirm = (!ActReg || typeof ActReg.requiresAssistantConfirmBeforeRun !== 'function')
+          ? true
+          : ActReg.requiresAssistantConfirmBeforeRun('remove_instance');
+        if (needAssistantConfirm) {
+          const win = (typeof window !== 'undefined') ? window : null;
+          if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
+            self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.removeInstanceCancelled') });
+            self.render();
+            return true;
+          }
+        }
+        const kiRm = _assistantSkillI18nRemoveInstance();
+        const pendingRm = { type: 'sys', text: _t(kiRm.running), _pendingRemoveInstance: true };
+        self._aiAssistItems.push(pendingRm);
+        self.render();
+        const selfRm = self;
+        Promise.resolve(selfRm.runCommand('remove_instance', { instanceId: instIdRm })).then(function(res){
+          const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
+          if (idx >= 0){
+            if (res && res.ok){
+              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.ok) };
+            } else {
+              const errMsg = (res && res.message) ? String(res.message).slice(0, 120) : '';
+              selfRm._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
+            }
+          }
+          selfRm.render();
+        }).catch(function(err){
+          const idx = (selfRm._aiAssistItems || []).indexOf(pendingRm);
+          if (idx >= 0){
+            const errMsg = (err && err.message) ? String(err.message).slice(0, 120) : '';
+            selfRm._aiAssistItems[idx] = { type: 'sys', text: _t(kiRm.fail) + (errMsg ? ': ' + errMsg : '') };
+          }
+          selfRm.render();
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Map Assistant planKind (AI or rule) to execution template + intent. Does not include "generic". */
+  function _templateExecutionFieldsFromPlanKind(planKind){
+    if (planKind == null || typeof planKind !== 'string') return null;
+    const k = String(planKind).trim().toLowerCase();
+    if (k === 'generic' || k === '') return null;
+    const idByKind = {
+      'clean-outliers': 'clean_outliers_v1',
+      'fix-pitch': 'fix_pitch_v1',
+      'tighten-rhythm': 'tighten_rhythm_v1',
+      'bluesy': 'bluesy_v1',
+    };
+    const templateId = idByKind[k];
+    if (!templateId) return null;
+    const tm = INSPECTOR_TEMPLATES[templateId];
+    if (!tm) return null;
+    const intent = tm.intent && typeof tm.intent === 'object'
+      ? { fixPitch: !!tm.intent.fixPitch, tightenRhythm: !!tm.intent.tightenRhythm, reduceOutliers: !!tm.intent.reduceOutliers }
+      : null;
+    if (!intent) return null;
+    return { templateId: templateId, templateLabel: (tm.label != null && String(tm.label).trim()) ? String(tm.label).trim() : templateId, intent: intent };
+  }
+
+  /** When keyword mapping missed but planKind is task-specific, backfill card template for optimize execution. */
+  function _syncAssistantCardTemplateFromPlan(card){
+    if (!card || typeof card !== 'object') return;
+    const plan = card.plan;
+    if (!plan || typeof plan !== 'object') return;
+    const pk = (plan.planKind != null && String(plan.planKind).trim()) ? String(plan.planKind).trim() : '';
+    if (!pk) return;
+    const fields = _templateExecutionFieldsFromPlanKind(plan.planKind);
+    if (!fields || !fields.templateId || !fields.intent) return;
+    if (card.templateId != null && String(card.templateId).trim() !== '') return;
+    card.templateId = fields.templateId;
+    card.templateLabel = fields.templateLabel;
+    card.intent = fields.intent;
+    if (card.reasoningLog && typeof card.reasoningLog === 'object'){
+      card.reasoningLog.templateId = fields.templateId;
+      card.reasoningLog.intent = { fixPitch: !!fields.intent.fixPitch, tightenRhythm: !!fields.intent.tightenRhythm, reduceOutliers: !!fields.intent.reduceOutliers };
+    }
+  }
+
+  /** Normalize card.plan for optimize options (same shape as setOptimizeOptions / agent). */
+  function _normalizeAssistantPlanForExecution(plan){
+    if (!plan || typeof plan !== 'object') return null;
+    if (!Array.isArray(plan.planLines) || plan.planLines.length < 1) return null;
+    if (!plan.planTitle && !plan.planKind) return null;
+    const lines = plan.planLines.slice(0, 6).map(function(l){
+      return (typeof l === 'string') ? l : (l != null ? String(l) : '');
+    }).filter(function(l){ return typeof l === 'string' && l.trim(); });
+    if (lines.length < 1) return null;
+    return {
+      planKind: plan.planKind || null,
+      planTitle: (plan.planTitle != null && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : '',
+      planLines: lines,
+    };
+  }
+
+  /**
+   * Phase-1 Assistant deterministic NL routing. Tries H2SPhase1AssistantNarrow first; if the
+   * bundle is missing, incomplete, or throws, falls back to inline on the API object or a minimal
+   * duplicate (keep in sync with phase1_assistant_narrow.resolvePhase1AssistantIntentFromTextInline).
+   */
+  function _resolvePhase1AssistantIntentForSend(text){
+    const root = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
+    if (!root || text == null || typeof text !== 'string') return null;
+    const api = root.H2SPhase1AssistantNarrow;
+    if (api && typeof api.resolvePhase1AssistantIntentFromText === 'function'){
+      try {
+        return api.resolvePhase1AssistantIntentFromText(text);
+      } catch (_e) { /* fall through */ }
+    }
+    if (api && typeof api.resolvePhase1AssistantIntentFromTextInline === 'function'){
+      try {
+        return api.resolvePhase1AssistantIntentFromTextInline(root, text);
+      } catch (_e) { /* fall through */ }
+    }
+    return _resolvePhase1AssistantIntentAppFallback(root, text);
+  }
+
+  function _resolvePhase1AssistantIntentAppFallback(root, text){
+    const R = root.H2SRhythmTightenLoosen;
+    if (R && typeof R.narrowRhythmIntentFromText === 'function'){
+      const n = R.narrowRhythmIntentFromText(text);
+      if (n && n.mode) return { branch: 'rhythm_tighten_loosen', intent: n };
+    }
+    const LT = root.H2SLocalTranspose;
+    if (LT && typeof LT.narrowLocalTransposeIntentFromText === 'function'){
+      const n = LT.narrowLocalTransposeIntentFromText(text);
+      if (n && isFinite(Number(n.semitone_delta))) return { branch: 'local_transpose', intent: n };
+    }
+    const VS = root.H2SVelocityShape;
+    if (VS && typeof VS.narrowVelocityShapeIntentFromText === 'function'){
+      const n = VS.narrowVelocityShapeIntentFromText(text);
+      if (n && n.mode) return { branch: 'velocity_shape', intent: n };
+    }
+    return null;
+  }
+
+  /**
+   * Single authoritative snapshot for one Assistant Run (after _syncAssistantCardTemplateFromPlan).
+   * Used for setOptimizeOptions, reasoningLog at run start, and executionTrace (not later card mutations).
+   */
+  function _buildAssistantRunExecutionSnapshot(card){
+    if (card && card.rhythmIntent && typeof card.rhythmIntent === 'object' && card.rhythmIntent.mode){
+      const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+      return {
+        usedRequestedPresetId: 'rhythm_tighten_loosen',
+        usedPlan: usedPlan,
+        usedTemplateId: null,
+        usedIntent: null,
+        rhythmIntent: {
+          capability_id: String(card.rhythmIntent.capability_id || 'rhythm_tighten_loosen'),
+          mode: String(card.rhythmIntent.mode),
+          strength: card.rhythmIntent.strength ? String(card.rhythmIntent.strength) : 'medium',
+        },
+      };
+    }
+    if (card && card.localTransposeIntent && typeof card.localTransposeIntent === 'object' && isFinite(Number(card.localTransposeIntent.semitone_delta))){
+      const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+      return {
+        usedRequestedPresetId: 'local_transpose',
+        usedPlan: usedPlan,
+        usedTemplateId: null,
+        usedIntent: null,
+        localTransposeIntent: {
+          capability_id: String(card.localTransposeIntent.capability_id || 'local_transpose'),
+          semitone_delta: Math.round(Number(card.localTransposeIntent.semitone_delta)),
+        },
+      };
+    }
+    if (card && card.velocityShapeIntent && typeof card.velocityShapeIntent === 'object' && card.velocityShapeIntent.mode){
+      const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+      return {
+        usedRequestedPresetId: 'velocity_shape',
+        usedPlan: usedPlan,
+        usedTemplateId: null,
+        usedIntent: null,
+        velocityShapeIntent: {
+          capability_id: String(card.velocityShapeIntent.capability_id || 'velocity_shape'),
+          mode: String(card.velocityShapeIntent.mode),
+          strength: card.velocityShapeIntent.strength ? String(card.velocityShapeIntent.strength) : 'medium',
+        },
+      };
+    }
+    const usedRequestedPresetId = 'llm_v0';
+    const usedPlan = _normalizeAssistantPlanForExecution(card && card.plan && typeof card.plan === 'object' ? card.plan : null);
+    let usedTemplateId = (card && card.templateId != null && String(card.templateId).trim()) ? String(card.templateId).trim() : null;
+    let usedIntent = null;
+    if (card && card.intent && typeof card.intent === 'object'){
+      usedIntent = {
+        fixPitch: !!card.intent.fixPitch,
+        tightenRhythm: !!card.intent.tightenRhythm,
+        reduceOutliers: !!card.intent.reduceOutliers,
+      };
+    }
+    if (!usedTemplateId || !usedIntent){
+      usedTemplateId = null;
+      usedIntent = null;
+    }
+    return {
+      usedRequestedPresetId: usedRequestedPresetId,
+      usedPlan: usedPlan,
+      usedTemplateId: usedTemplateId,
+      usedIntent: usedIntent,
+    };
+  }
+
+  /** PR1: Attempt AI-generated plan. Returns Promise<plan|null>. Falls back to rule-based on any failure. */
+  function _tryGenerateAiPlan(promptText, templateId, intent){
+    const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
+    const client = ROOT.H2S_LLM_CLIENT;
+    const configApi = ROOT.H2S_LLM_CONFIG;
+    if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function') return Promise.resolve(null);
+    if (!configApi || typeof configApi.loadLlmConfig !== 'function') return Promise.resolve(null);
+    let cfg;
+    try { cfg = configApi.loadLlmConfig(); } catch (_) { return Promise.resolve(null); }
+    if (!cfg || typeof cfg.baseUrl !== 'string' || !cfg.baseUrl.trim() || typeof cfg.model !== 'string' || !cfg.model.trim()) return Promise.resolve(null);
+
+    const systemMsg = 'You are a music optimization assistant. Reply with ONLY a JSON object, no other text. Schema: { "planKind": "fix-pitch"|"tighten-rhythm"|"clean-outliers"|"bluesy"|"generic", "planTitle": "short title", "planLines": ["Goal: ...", "Strategy: ...", "Note: ..."] }. planLines must have 2-4 strings. Output valid JSON only.';
+    const hint = templateId ? ' Detected template: ' + String(templateId) + '.' : '';
+    const userMsg = 'User request: ' + (typeof promptText === 'string' ? promptText.slice(0, 200) : '') + hint + '\n\nOutput the plan JSON object only.';
+
+    return client.callChatCompletions(cfg, [{ role: 'system', content: systemMsg }, { role: 'user', content: userMsg }], { temperature: 0.2, timeoutMs: 8000 })
+      .then(function(res){
+        const text = (res && typeof res.text === 'string') ? res.text : '';
+        const obj = client.extractJsonObject(text);
+        if (!obj || typeof obj !== 'object') return null;
+        const kind = (obj.planKind != null && String(obj.planKind).trim()) ? String(obj.planKind).trim() : null;
+        const title = (obj.planTitle != null && String(obj.planTitle).trim()) ? String(obj.planTitle).trim() : null;
+        const lines = Array.isArray(obj.planLines) ? obj.planLines.filter(function(l){ return typeof l === 'string' && l.trim(); }) : [];
+        if (!kind || !title || lines.length < 2) return null;
+        return {
+          planKind: kind,
+          planTitle: title,
+          planLines: lines.slice(0, 6),
+          templateId: templateId || null,
+          intent: intent && typeof intent === 'object' ? { fixPitch: !!intent.fixPitch, tightenRhythm: !!intent.tightenRhythm, reduceOutliers: !!intent.reduceOutliers } : null,
+        };
+      })
+      .catch(function(){ return null; });
+  }
+
+  /** PR2: Enrich reasoning log with execution/result metadata from Run. */
+  function _enrichReasoningLogFromRun(log, patchSummary, accepted, runState, resultKind, rejectionReason){
+    if (!log || typeof log !== 'object') return;
+    log.runState = runState;
+    log.resultKind = resultKind != null ? resultKind : null;
+    log.accepted = !!accepted;
+    if (rejectionReason != null && String(rejectionReason).trim()) log.rejectionReason = String(rejectionReason).trim().slice(0, 120);
+    else log.rejectionReason = null;
+    if (patchSummary && typeof patchSummary === 'object') {
+      log.executedPreset = (patchSummary.executedPreset != null && String(patchSummary.executedPreset).trim()) ? String(patchSummary.executedPreset).trim() : null;
+      log.executedSource = (patchSummary.executedSource != null && String(patchSummary.executedSource).trim()) ? String(patchSummary.executedSource).trim() : null;
+      log.promptVersion = (patchSummary.promptMeta && patchSummary.promptMeta.promptVersion != null && String(patchSummary.promptMeta.promptVersion).trim()) ? String(patchSummary.promptMeta.promptVersion).trim() : null;
+      log.patchSummary = { ops: typeof patchSummary.ops === 'number' ? patchSummary.ops : null, status: (patchSummary.status != null && String(patchSummary.status).trim()) ? String(patchSummary.status).trim() : null, reason: (patchSummary.reason != null && String(patchSummary.reason).trim()) ? String(patchSummary.reason).trim().slice(0, 80) : null };
+    } else {
+      log.executedPreset = null;
+      log.executedSource = null;
+      log.promptVersion = null;
+      log.patchSummary = null;
+    }
+  }
+
+  /** Debug PR3: whitelist final LLM prompt trace (prompt text only; no headers/cfg/secrets). */
+  function _sanitizeLlmPromptTraceForAssistantTrace(raw){
+    if (!raw || typeof raw !== 'object') return null;
+    const MAX = 24000;
+    function trunc(s){
+      if (typeof s !== 'string') return '';
+      return s.length > MAX ? s.slice(0, MAX) + '\n...[truncated]...' : s;
+    }
+    const out = {};
+    if (raw.attemptIndex != null && isFinite(Number(raw.attemptIndex))) out.attemptIndex = Number(raw.attemptIndex);
+    if (typeof raw.finalSystemPrompt === 'string') out.finalSystemPrompt = trunc(raw.finalSystemPrompt);
+    if (typeof raw.finalUserPrompt === 'string') out.finalUserPrompt = trunc(raw.finalUserPrompt);
+    if (raw.blocks && typeof raw.blocks === 'object'){
+      const b = raw.blocks;
+      const bo = {};
+      if (b.resolvedTemplateId != null && String(b.resolvedTemplateId).trim()) bo.resolvedTemplateId = String(b.resolvedTemplateId).trim().slice(0, 80);
+      else bo.resolvedTemplateId = null;
+      if (b.resolvedIntent && typeof b.resolvedIntent === 'object'){
+        bo.resolvedIntent = {
+          fixPitch: !!b.resolvedIntent.fixPitch,
+          tightenRhythm: !!b.resolvedIntent.tightenRhythm,
+          reduceOutliers: !!b.resolvedIntent.reduceOutliers,
+        };
+      }
+      if (b.promptVersion != null && String(b.promptVersion).trim()) bo.promptVersion = String(b.promptVersion).trim().slice(0, 80);
+      if (typeof b.planBlock === 'string') bo.planBlock = trunc(b.planBlock);
+      if (typeof b.directivesBlock === 'string') bo.directivesBlock = trunc(b.directivesBlock);
+      if (typeof b.userBody === 'string') bo.userBody = trunc(b.userBody);
+      out.blocks = bo;
+    }
+    if (!out.finalSystemPrompt && !out.finalUserPrompt && !out.blocks) return null;
+    return out;
+  }
+
+  /** Debug PR1: safe subset of llmDebug for Assistant card executionTrace (no raw model text, no secrets). */
+  function _sanitizeLlmDebugForAssistantTrace(llmDebug){
+    if (!llmDebug || typeof llmDebug !== 'object') return null;
+    const out = {};
+    if (llmDebug.attemptCount != null && isFinite(Number(llmDebug.attemptCount))) out.attemptCount = Number(llmDebug.attemptCount);
+    if (llmDebug.totalAttempts != null && isFinite(Number(llmDebug.totalAttempts))) out.totalAttempts = Number(llmDebug.totalAttempts);
+    if (llmDebug.finalAttemptIndex != null && isFinite(Number(llmDebug.finalAttemptIndex))) out.finalAttemptIndex = Number(llmDebug.finalAttemptIndex);
+    if (llmDebug.preRequestExit === true) out.preRequestExit = true;
+    if (typeof llmDebug.safeModeResolved === 'boolean') out.safeModeResolved = llmDebug.safeModeResolved;
+    if (llmDebug.reason != null && typeof llmDebug.reason === 'string') out.reason = llmDebug.reason.slice(0, 120);
+    if (Array.isArray(llmDebug.errors) && llmDebug.errors.length){
+      const joined = llmDebug.errors.slice(0, 3).map(function(e){ return String(e).slice(0, 80); }).join(' | ');
+      out.errorSummary = joined.length > 200 ? joined.slice(0, 197) + '...' : joined;
+    }
+    if (Array.isArray(llmDebug.attemptSummaries) && llmDebug.attemptSummaries.length){
+      out.attemptSummaries = llmDebug.attemptSummaries.slice(0, 4).map(function(row){
+        if (!row || typeof row !== 'object') return { attemptIndex: null, reason: '', outcome: null };
+        return {
+          attemptIndex: (row.attemptIndex != null && isFinite(Number(row.attemptIndex))) ? Number(row.attemptIndex) : null,
+          reason: (row.reason != null && typeof row.reason === 'string') ? row.reason.slice(0, 120) : '',
+          outcome: (row.outcome != null && typeof row.outcome === 'string') ? row.outcome.slice(0, 48) : null,
+        };
+      });
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  function _compactPatchSummaryForExecutionTrace(ps){
+    if (!ps || typeof ps !== 'object') return null;
+    const out = {};
+    if (typeof ps.ops === 'number' && isFinite(ps.ops)) out.ops = ps.ops;
+    if (ps.status != null && String(ps.status).trim()) out.status = String(ps.status).trim().slice(0, 40);
+    if (ps.reason != null && String(ps.reason).trim()) out.reason = String(ps.reason).trim().slice(0, 80);
+    if (ps.noChanges === true) out.noChanges = true;
+    return Object.keys(out).length ? out : null;
+  }
+
+  /** Debug PR1: structured trace for one Assistant Run (optimizeResult + run snapshot or card context). */
+  function _buildAiAssistExecutionTrace(card, optRes, runSnapshot){
+    const trace = {};
+    const rl = card && card.reasoningLog && typeof card.reasoningLog === 'object' ? card.reasoningLog : null;
+    try {
+      if (optRes && typeof optRes === 'object' && optRes.executionPath != null && String(optRes.executionPath).trim() !== ''){
+        trace.executionPath = String(optRes.executionPath).trim();
+      }
+      if (runSnapshot && typeof runSnapshot === 'object'){
+        if (runSnapshot.usedTemplateId != null && String(runSnapshot.usedTemplateId).trim() !== ''){
+          trace.templateId = String(runSnapshot.usedTemplateId).trim();
+        }
+        if (runSnapshot.usedIntent && typeof runSnapshot.usedIntent === 'object'){
+          trace.intent = {
+            fixPitch: !!runSnapshot.usedIntent.fixPitch,
+            tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+            reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+          };
+        }
+        if (runSnapshot.usedRequestedPresetId != null) trace.requestedPresetId = runSnapshot.usedRequestedPresetId;
+        if (runSnapshot.usedPlan && runSnapshot.usedPlan.planTitle){
+          trace.planSummary = String(runSnapshot.usedPlan.planTitle).slice(0, 200);
+        }
+        trace.executionSnapshot = {
+          usedPlan: runSnapshot.usedPlan,
+          usedTemplateId: runSnapshot.usedTemplateId,
+          usedIntent: runSnapshot.usedIntent ? {
+            fixPitch: !!runSnapshot.usedIntent.fixPitch,
+            tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+            reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+          } : null,
+          usedRequestedPresetId: runSnapshot.usedRequestedPresetId,
+        };
+      } else {
+        if (card && card.templateId != null && String(card.templateId).trim() !== '') trace.templateId = String(card.templateId).trim();
+        if (card && card.intent && typeof card.intent === 'object'){
+          trace.intent = { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers };
+        }
+        if (rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+        if (rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
+      }
+      if (!trace.planSummary && rl && rl.planSummary != null) trace.planSummary = String(rl.planSummary).slice(0, 200);
+      if (!trace.requestedPresetId && rl && rl.requestedPresetId != null) trace.requestedPresetId = rl.requestedPresetId;
+      const ps = (optRes && optRes.patchSummary && typeof optRes.patchSummary === 'object') ? optRes.patchSummary : null;
+      if (ps){
+        if (ps.executedPreset != null) trace.executedPreset = String(ps.executedPreset).trim();
+        if (ps.executedSource != null) trace.executedSource = String(ps.executedSource).trim();
+        if (ps.promptMeta && ps.promptMeta.promptVersion != null) trace.promptVersion = String(ps.promptMeta.promptVersion).trim();
+      }
+      if (!trace.promptVersion && rl && rl.promptVersion != null && String(rl.promptVersion).trim() !== ''){
+        trace.promptVersion = String(rl.promptVersion).trim();
+      }
+      trace.patchSummary = _compactPatchSummaryForExecutionTrace(ps);
+      if (rl && typeof rl.accepted === 'boolean') trace.accepted = rl.accepted;
+      if (rl && rl.runState != null && String(rl.runState).trim() !== '') trace.runState = String(rl.runState).trim();
+      if (rl && rl.resultKind != null) trace.resultKind = rl.resultKind;
+      if (rl && rl.rejectionReason != null && String(rl.rejectionReason).trim()) trace.rejectionReason = String(rl.rejectionReason).trim().slice(0, 120);
+      if (optRes && optRes.llmDebug){
+        const s = _sanitizeLlmDebugForAssistantTrace(optRes.llmDebug);
+        if (s) trace.llmDebugSummary = s;
+      }
+      if (optRes && optRes.executionPath === 'llm' && optRes.llmPromptTrace){
+        const pt = _sanitizeLlmPromptTraceForAssistantTrace(optRes.llmPromptTrace);
+        if (pt) trace.llmPromptTrace = pt;
+      }
+    } catch (_e) { /* keep partial trace */ }
+    return trace;
+  }
+
+  /** Debug PR2: compact safe HTML for Assistant card trace panel (whitelist only; no raw LLM / secrets). */
+  function _buildAiAssistDebugHtml(it, escapeHtml){
+    if (!_dbgEnabled()) return '';
+    const rl = it && it.reasoningLog && typeof it.reasoningLog === 'object' ? it.reasoningLog : null;
+    const et = it && it.executionTrace && typeof it.executionTrace === 'object' ? it.executionTrace : null;
+    if (!rl && !et) return '';
+    const merged = {};
+    function set(k, v){
+      if (v === undefined || v === null) return;
+      if (typeof v === 'boolean') merged[k] = v ? 'true' : 'false';
+      else if (typeof v === 'object') merged[k] = JSON.stringify(v);
+      else merged[k] = String(v);
+    }
+    if (rl){
+      if (rl.templateId != null) set('templateId', rl.templateId);
+      if (rl.intent && typeof rl.intent === 'object') set('intent', rl.intent);
+      if (rl.planSource != null) set('planSource', rl.planSource);
+      if (rl.planSummary != null) set('planSummary', rl.planSummary);
+      if (rl.requestedPresetId != null) set('requestedPresetId', rl.requestedPresetId);
+      if (rl.userPrompt != null) set('userPrompt', rl.userPrompt);
+      if (rl.promptVersion != null) set('promptVersion', rl.promptVersion);
+      if (rl.runState != null) set('runState', rl.runState);
+      if (rl.resultKind != null) set('resultKind', rl.resultKind);
+      if (typeof rl.accepted === 'boolean') set('accepted', rl.accepted);
+      if (rl.rejectionReason != null) set('rejectionReason', rl.rejectionReason);
+      if (rl.patchSummary && typeof rl.patchSummary === 'object'){
+        if (rl.patchSummary.ops != null) set('patchSummary.ops', rl.patchSummary.ops);
+        if (rl.patchSummary.status != null) set('patchSummary.status', rl.patchSummary.status);
+        if (rl.patchSummary.reason != null) set('patchSummary.reason', rl.patchSummary.reason);
+      }
+    }
+    if (et){
+      if (et.executionPath != null) set('executionPath', et.executionPath);
+      if (et.executedPreset != null) set('executedPreset', et.executedPreset);
+      if (et.executedSource != null) set('executedSource', et.executedSource);
+      if (et.promptVersion != null) set('promptVersion', et.promptVersion);
+      if (et.runState != null) set('runState', et.runState);
+      if (et.resultKind != null) set('resultKind', et.resultKind);
+      if (typeof et.accepted === 'boolean') set('accepted', et.accepted);
+      if (et.rejectionReason != null) set('rejectionReason', et.rejectionReason);
+      if (et.patchSummary && typeof et.patchSummary === 'object'){
+        if (et.patchSummary.ops != null) set('patchSummary.ops', et.patchSummary.ops);
+        if (et.patchSummary.status != null) set('patchSummary.status', et.patchSummary.status);
+        if (et.patchSummary.reason != null) set('patchSummary.reason', et.patchSummary.reason);
+      }
+      const lds = et.llmDebugSummary;
+      if (lds && typeof lds === 'object'){
+        if (lds.attemptCount != null) set('llmDebugSummary.attemptCount', lds.attemptCount);
+        if (typeof lds.safeModeResolved === 'boolean') set('llmDebugSummary.safeModeResolved', lds.safeModeResolved);
+        if (lds.reason != null) set('llmDebugSummary.reason', lds.reason);
+        if (lds.errorSummary != null) set('llmDebugSummary.errorSummary', lds.errorSummary);
+      }
+    }
+    const order = [
+      'templateId', 'intent', 'planSource', 'planSummary', 'requestedPresetId', 'userPrompt',
+      'executionPath', 'executedPreset', 'executedSource', 'promptVersion',
+      'runState', 'resultKind', 'accepted', 'rejectionReason',
+      'patchSummary.ops', 'patchSummary.status', 'patchSummary.reason',
+      'llmDebugSummary.attemptCount', 'llmDebugSummary.safeModeResolved', 'llmDebugSummary.reason', 'llmDebugSummary.errorSummary',
+    ];
+    const rows = [];
+    for (let i = 0; i < order.length; i++){
+      const k = order[i];
+      if (!Object.prototype.hasOwnProperty.call(merged, k)) continue;
+      let v = merged[k];
+      if (v.length > 400) v = v.slice(0, 397) + '...';
+      rows.push('<div class="aiAssistDbgRow"><span class="aiAssistDbgK">' + escapeHtml(k) + '</span><span class="aiAssistDbgV">' + escapeHtml(v) + '</span></div>');
+    }
+    if (!rows.length && !(et && et.llmPromptTrace && typeof et.llmPromptTrace === 'object')) return '';
+    let body = rows.length ? '<div class="aiAssistDbgBody">' + rows.join('') + '</div>' : '';
+    const pt = et && et.llmPromptTrace && typeof et.llmPromptTrace === 'object' ? et.llmPromptTrace : null;
+    if (pt){
+      const blk = pt.blocks && typeof pt.blocks === 'object' ? pt.blocks : null;
+      const blkObj = blk ? {
+        resolvedTemplateId: blk.resolvedTemplateId,
+        resolvedIntent: blk.resolvedIntent,
+        promptVersion: blk.promptVersion,
+        planBlock: blk.planBlock,
+        directivesBlock: blk.directivesBlock,
+        userBody: blk.userBody,
+      } : {};
+      let blkJson = '';
+      try { blkJson = JSON.stringify(blkObj, null, 2); } catch (_e) { blkJson = '{}'; }
+      if (blkJson.length > 32000) blkJson = blkJson.slice(0, 32000) + '\n...[truncated]...';
+      const sys = typeof pt.finalSystemPrompt === 'string' ? pt.finalSystemPrompt : '';
+      const usr = typeof pt.finalUserPrompt === 'string' ? pt.finalUserPrompt : '';
+      const preStyle = 'white-space:pre-wrap;word-break:break-word;margin:4px 0;font-size:10px;line-height:1.35;max-height:200px;overflow:auto;';
+      body += '<details class="aiAssistDbgPrompt" style="margin-top:6px;font-size:10px;"><summary style="cursor:pointer;">Final LLM prompt</summary>';
+      if (pt.attemptIndex != null) body += '<div style="margin-top:4px;color:var(--muted);">attemptIndex: ' + escapeHtml(String(pt.attemptIndex)) + '</div>';
+      body += '<div style="margin-top:6px;font-weight:600;">Blocks</div><pre style="' + preStyle + '">' + escapeHtml(blkJson) + '</pre>';
+      body += '<div style="margin-top:6px;font-weight:600;">system</div><pre style="' + preStyle + '">' + escapeHtml(sys.length > 32000 ? sys.slice(0, 32000) + '\n...[truncated]...' : sys) + '</pre>';
+      body += '<div style="margin-top:6px;font-weight:600;">user</div><pre style="' + preStyle + '">' + escapeHtml(usr.length > 32000 ? usr.slice(0, 32000) + '\n...[truncated]...' : usr) + '</pre>';
+      body += '</details>';
+    }
+    return body;
+  }
+
+  /** Rule-based plan for Assistant card (no LLM). Returns { planTitle, planLines, planKind }. */
+  function _buildAiAssistPlan(templateId, intent, promptText){
+    const tid = (templateId != null && String(templateId).trim()) ? String(templateId).trim() : null;
+    const plans = {
+      fix_pitch_v1: {
+        planTitle: 'Fix Pitch',
+        planKind: 'fix-pitch',
+        planLines: [
+          'Goal: correct clearly out-of-tune notes.',
+          'Strategy: prioritize sustained notes; keep rhythm mostly stable.',
+          'Note: if the original humming is unstable, correction may be limited.',
+        ],
+      },
+      tighten_rhythm_v1: {
+        planTitle: 'Tighten Rhythm',
+        planKind: 'tighten-rhythm',
+        planLines: [
+          'Goal: align timing to a steadier groove.',
+          'Strategy: adjust note starts and durations; keep pitches unchanged.',
+          'Note: small timing tweaks preserve the feel.',
+        ],
+      },
+      clean_outliers_v1: {
+        planTitle: 'Clean Outliers',
+        planKind: 'clean-outliers',
+        planLines: [
+          'Goal: smooth extreme values and reduce stray notes.',
+          'Strategy: target velocity and short outliers without rewriting melody.',
+          'Note: preserves overall character while reducing noise.',
+        ],
+      },
+      bluesy_v1: {
+        planTitle: 'Bluesy',
+        planKind: 'bluesy',
+        planLines: [
+          'Goal: add subtle blues inflection to timing and dynamics.',
+          'Strategy: align to groove with blues feel; keep melody recognizable.',
+          'Note: small adjustments for a more expressive result.',
+        ],
+      },
+    };
+    if (tid && plans[tid]) {
+      return plans[tid];
+    }
+    return {
+      planTitle: 'Optimize',
+      planKind: 'generic',
+      planLines: [
+        'Goal: apply optimization based on your description.',
+        'Strategy: use your prompt to guide pitch, timing, or dynamics changes.',
+        'Note: results depend on the clarity of the source material.',
+      ],
+    };
+  }
 
   // --- debug gate (localStorage.h2s_debug === '1') ---
   function _dbgEnabled(){
@@ -92,6 +1154,42 @@
     return !!(obj && obj.version === 2 && obj.timebase === 'beat');
   }
 
+  /** Minimal validation for `hum2song_clip_bundle` (Export Selected Clip JSON). */
+  function _validateHum2songClipBundle(obj){
+    if (!obj || typeof obj !== 'object') return false;
+    if (obj.kind !== 'hum2song_clip_bundle') return false;
+    if (Number(obj.version) !== 1) return false;
+    if (Number(obj.schemaVersion) !== 2) return false;
+    if (obj.timebase !== 'beat') return false;
+    if (typeof obj.bpm !== 'number' || !isFinite(obj.bpm)) return false;
+    const clip = obj.clip;
+    if (!clip || typeof clip !== 'object') return false;
+    const sc = clip.score;
+    if (!sc || typeof sc !== 'object' || !Array.isArray(sc.tracks)) return false;
+    return true;
+  }
+
+  /** Clip entries suitable for "import one clip from full project JSON" (same structural bar as clip bundle). */
+  function _importableClipIdsFromProjectDoc(p2){
+    if (!p2 || !p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) return [];
+    const clips = p2.clips;
+    const order = (Array.isArray(p2.clipOrder) && p2.clipOrder.length) ? p2.clipOrder.slice() : Object.keys(clips);
+    const out = [];
+    const seen = Object.create(null);
+    function tryAdd(cid){
+      if (!cid || seen[cid]) return;
+      const c = clips[cid];
+      if (!c || typeof c !== 'object') return;
+      const sc = c.score;
+      if (!sc || typeof sc !== 'object' || !Array.isArray(sc.tracks)) return;
+      seen[cid] = true;
+      out.push(String(cid));
+    }
+    for (const cid of order) tryAdd(String(cid));
+    for (const cid of Object.keys(clips)) tryAdd(String(cid));
+    return out;
+  }
+
   function _projectV2ToV1View(p2){
     const bpm = (p2 && typeof p2.bpm === 'number') ? p2.bpm : 120;
 
@@ -131,11 +1229,13 @@
       const c = clipsMap[cid];
       if (!c) continue;
 
-      const scoreSec = _scoreBeatToSec(c.score, bpm);
+      const P = window.H2SProject;
+      const isAudio = P && typeof P.clipKind === 'function' && P.clipKind(c) === 'audio';
+      const scoreSec = isAudio ? _scoreBeatToSec({ version: 2, tracks: [] }, bpm) : _scoreBeatToSec(c.score, bpm);
       const meta = c.meta || {};
       const spanBeat = (typeof meta.spanBeat === 'number') ? meta.spanBeat : 0;
 
-      clips.push({
+      const clipV1 = {
         id: c.id || cid,
         name: c.name || 'Clip',
         createdAt: c.createdAt || Date.now(),
@@ -162,7 +1262,14 @@
           spanSec: _beatToSec(spanBeat, bpm),
           sourceTempoBpm: (typeof meta.sourceTempoBpm === 'number') ? meta.sourceTempoBpm : null
         }
-      });
+      };
+      if (isAudio){
+        clipV1.kind = 'audio';
+        clipV1.audio = (c.audio && typeof c.audio === 'object')
+          ? { assetRef: String(c.audio.assetRef || ''), durationSec: (isFinite(Number(c.audio.durationSec)) ? Number(c.audio.durationSec) : 0) }
+          : { assetRef: '', durationSec: 0 };
+      }
+      clips.push(clipV1);
     }
 
     const instances = [];
@@ -207,12 +1314,30 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     return (Math.round(x*100)/100).toFixed(2) + 's';
   }
 
+  let _lastLogLine = '';
+  function updateLogStatusBar(){
+    if (typeof document === 'undefined') return;
+    const bar = document.getElementById('logStatusBar');
+    if (!bar) return;
+    const statusText = (app.state && app.state.statusText != null && String(app.state.statusText).trim()) ? String(app.state.statusText).trim() : '';
+    const txt = statusText || _lastLogLine || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
+    bar.textContent = txt.length > 80 ? txt.slice(0, 77) + '...' : txt;
+    bar.classList.toggle('error', /failed|error/i.test(txt));
+    bar.title = (window.I18N && window.I18N.t) ? window.I18N.t('log.clickToExpand') : 'Click to expand log';
+  }
+  function setLogOpen(open){
+    const panel = document.getElementById('logPanel');
+    if (!panel) return;
+    panel.classList.toggle('collapsed', !open);
+    try{ localStorage.setItem(LS_KEY_LOG_OPEN, open ? '1' : '0'); }catch(e){}
+  }
   function log(msg){
     const el = $('#log');
     const t = new Date();
     const line = `[${t.toLocaleTimeString()}] ${msg}\n`;
     el.textContent = line + el.textContent;
-    // also console (debug-gated)
+    _lastLogLine = String(msg).trim();
+    if (!(app.state && app.state.statusText)) updateLogStatusBar();
     dbg(msg);
   }
 
@@ -238,10 +1363,184 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     // some endpoints may return json without header
     try { return JSON.parse(txt); } catch(e){ return { raw: txt }; }
   }
+
+  function _projectDataKey(id){
+    return LS_KEY_PROJECT_DATA_PREFIX + String(id);
+  }
+
+  /** One-time: legacy flat hum2song_studio_project_v2 -> current id + index + per-project blob. */
+  function _migrateLegacyV2IfNeeded(){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      const legacyRaw = localStorage.getItem(LS_KEY_LEGACY_V2);
+      if (!legacyRaw) return;
+      const hasCurrent = localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID);
+      const hasIndex = localStorage.getItem(LS_KEY_PROJECTS_INDEX);
+      if (hasCurrent && hasIndex){
+        try{ localStorage.removeItem(LS_KEY_LEGACY_V2); }catch(e){}
+        return;
+      }
+      const P = window.H2SProject;
+      const id = (P && typeof P.uid === 'function') ? P.uid('prj_') : ('prj_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+      localStorage.setItem(_projectDataKey(id), legacyRaw);
+      localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, id);
+      localStorage.setItem(LS_KEY_PROJECTS_INDEX, JSON.stringify({
+        version: 1,
+        projects: [{ id, migratedFromLegacyV2: true, migratedAt: Date.now() }]
+      }));
+      localStorage.removeItem(LS_KEY_LEGACY_V2);
+    } catch (e){
+      console.warn('[app] legacy v2 migration failed', e);
+    }
+  }
+
+  function _repairLocalProjectIndex(){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      if (localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID)) return;
+      const ir = localStorage.getItem(LS_KEY_PROJECTS_INDEX);
+      if (!ir) return;
+      const idx = JSON.parse(ir);
+      const list = idx && idx.projects;
+      if (!Array.isArray(list) || !list.length) return;
+      const first = list[0] && list[0].id;
+      if (first) localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, String(first));
+    } catch (e){
+      console.warn('[app] repair project index failed', e);
+    }
+  }
+
+  function _ensureCurrentProjectIdForWrite(){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      if (localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID)) return;
+      const P = window.H2SProject;
+      const id = (P && typeof P.uid === 'function') ? P.uid('prj_') : ('prj_' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+      localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, id);
+      localStorage.setItem(LS_KEY_PROJECTS_INDEX, JSON.stringify({
+        version: 1,
+        projects: [{ id, createdAt: Date.now() }]
+      }));
+    } catch (e){
+      console.warn('[app] ensure current project id failed', e);
+    }
+  }
+
+  /** Active ProjectDoc v2 localStorage key, or null if none yet (no auto-create). */
+  function _getActiveProjectDocStorageKey(){
+    try{
+      if (typeof localStorage === 'undefined') return null;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const id = localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID);
+      if (!id) return null;
+      return _projectDataKey(id);
+    } catch (e){
+      console.warn('[app] active project storage key failed', e);
+      return null;
+    }
+  }
+
+  function _readProjectsIndex(){
+    try{
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(LS_KEY_PROJECTS_INDEX);
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      if (!o || typeof o !== 'object') return null;
+      if (!Array.isArray(o.projects)) o.projects = [];
+      return o;
+    } catch (e){
+      return null;
+    }
+  }
+
+  function _writeProjectsIndex(idx){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(LS_KEY_PROJECTS_INDEX, JSON.stringify(idx));
+    } catch (e){
+      console.warn('[app] write projects index failed', e);
+    }
+  }
+
+  function _clipCountFromP2(p2){
+    if (!p2 || !p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) return 0;
+    return Object.keys(p2.clips).length;
+  }
+
+  function _labelHintFromP2(p2){
+    if (!p2 || !p2.clips || typeof p2.clips !== 'object') return '';
+    const order = (Array.isArray(p2.clipOrder) && p2.clipOrder.length) ? p2.clipOrder : Object.keys(p2.clips);
+    for (const cid of order){
+      const c = p2.clips[cid];
+      if (c && typeof c.name === 'string' && String(c.name).trim()) return String(c.name).trim().slice(0, 64);
+    }
+    return '';
+  }
+
+  /** Keep projects index row in sync with current blob (BPM, clip count, optional label from first clip). */
+  function _touchCurrentProjectIndexFromDoc(p2){
+    try{
+      if (!p2 || typeof localStorage === 'undefined') return;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const id = localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID);
+      if (!id) return;
+      const idx = _readProjectsIndex() || { version: 1, projects: [] };
+      if (!Array.isArray(idx.projects)) idx.projects = [];
+      const bpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      const clipCount = _clipCountFromP2(p2);
+      const labelHint = _labelHintFromP2(p2);
+      const now = Date.now();
+      let found = false;
+      for (let i = 0; i < idx.projects.length; i++){
+        const e = idx.projects[i];
+        if (e && String(e.id) === String(id)){
+          e.updatedAt = now;
+          e.bpm = bpm;
+          e.clipCount = clipCount;
+          if (labelHint) e.label = labelHint;
+          found = true;
+          break;
+        }
+      }
+      if (!found){
+        idx.projects.push({ id, createdAt: now, updatedAt: now, bpm, clipCount, label: labelHint || undefined });
+      }
+      _writeProjectsIndex(idx);
+    } catch (e){
+      console.warn('[app] touch project index failed', e);
+    }
+  }
+
+  function _formatLocalProjectRowLabel(entry, currentId){
+    const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+    const id = entry && entry.id;
+    const isCur = currentId && id && String(currentId) === String(id);
+    const bpm = (typeof entry.bpm === 'number' && isFinite(entry.bpm)) ? Math.round(entry.bpm) : '?';
+    const n = (typeof entry.clipCount === 'number') ? entry.clipCount : '?';
+    const hasLabel = entry && typeof entry.label === 'string' && String(entry.label).trim();
+    const title = hasLabel
+      ? String(entry.label).trim().slice(0, 48)
+      : (_t('projectHome.untitled') + ' · ' + (id ? String(id).slice(-8) : ''));
+    let line = title + ' — ' + bpm + ' ' + _t('projectHome.bpmLabel') + ' · ' + n + ' ' + _t('projectHome.clipsLabel');
+    if (entry.updatedAt) line += ' · ' + new Date(entry.updatedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    return (isCur ? '● ' : '') + line;
+  }
+
   function persist(){
+    const _perf = _devPerfTimingEnabled();
+    const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
+    try{
     // Persist ProjectDoc v2 (beats). UI keeps a v1 (seconds) view until controllers are migrated.
     // IMPORTANT: persist() must NOT clobber v2-only fields (e.g., track.instrument) by migrating from v1.
-    const prevV2 = app._projectV2 || _readLS(LS_KEY_V2);
+    _ensureCurrentProjectIdForWrite();
+    const docKey = _getActiveProjectDocStorageKey();
+    if (!docKey) return;
+    const prevV2 = app._projectV2 || _readLS(docKey);
 
     const p2 = _projectV1ToV2(app.project);
     if (!p2) return;
@@ -303,26 +1602,42 @@ try{
       console.warn('[persist] v2 merge failed', e);
     }
 
-    _writeLS(LS_KEY_V2, p2);
+    _writeLS(docKey, p2);
 
     // IMPORTANT: sync in-memory v2 cache; otherwise later writes (e.g. setTrackInstrument)
     // may read a stale cached project and overwrite newer instances.
     app._projectV2 = p2;
 
+    _touchCurrentProjectIndexFromDoc(p2);
+
     // Ensure beats-only storage after migration.
     try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+    } finally {
+      if (_perf && typeof performance !== 'undefined'){
+        console.log('[H2S perf] persist', (performance.now() - _perfT0).toFixed(2) + 'ms');
+      }
+    }
   }
 
   function restore(){
-    const p2 = _readLS(LS_KEY_V2);
-    if (p2) return p2;
+    if (typeof localStorage === 'undefined') return null;
+    _migrateLegacyV2IfNeeded();
+    _repairLocalProjectIndex();
+
+    const docKey = _getActiveProjectDocStorageKey();
+    if (docKey){
+      const p2 = _readLS(docKey);
+      if (p2) return p2;
+    }
 
     const legacy = _readLS(LS_KEY_V1);
     if (!legacy) return null;
 
     const migrated = _projectV1ToV2(legacy);
     if (migrated){
-      _writeLS(LS_KEY_V2, migrated);
+      _ensureCurrentProjectIdForWrite();
+      const k = _getActiveProjectDocStorageKey();
+      if (k) _writeLS(k, migrated);
       try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
       return migrated;
     }
@@ -335,8 +1650,10 @@ try{
     project: null,
     _projectV2: null,
     _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
+    _lastOptimizeSnapshot: null, // Studio “last optimize” summary (user-facing; refreshed on lang change)
     _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
     _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
+    _pendingClipFromProject: null, // full project doc v2 while "Import clip from project JSON" chooser is open
     // debug helper (gated by localStorage.h2s_debug === '1')
     dbg: function(){ return dbg.apply(null, arguments); },
 
@@ -358,12 +1675,129 @@ try{
 // Controllers (optional)
 agentCtrl: null,
 
+// PR-UX6a: Command layer — runCommand + event bus
+_cmdSubs: [],
+onCommandEvent(fn){ this._cmdSubs = this._cmdSubs || []; this._cmdSubs.push(fn); return () => { this._cmdSubs = this._cmdSubs.filter(x => x !== fn); }; },
+_emitCmd(type, detail){ (this._cmdSubs || []).forEach(fn => { try { fn({ type, ...detail }); } catch (e) {} }); },
+_cmdLabel(cmd){
+  const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+  const R = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
+  if (R && typeof R.labelRunningKey === 'function') {
+    const lk = R.labelRunningKey(cmd);
+    if (lk) return _t(lk);
+  }
+  if (cmd === 'optimize_clip') return _t('cmd.optimizing');
+  if (cmd === 'rollback_clip') return _t('cmd.undoing');
+  if (cmd === 'open_editor') return _t('cmd.openingEditor');
+  return cmd;
+},
+_cmdDoneLabel(cmd){
+  const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+  if (cmd === 'optimize_clip') return _t('cmd.optimized');
+  if (cmd === 'rollback_clip') return _t('cmd.undone');
+  return '';
+},
+async runCommand(command, payload){
+  payload = payload || {};
+  const startedAt = Date.now();
+  this._emitCmd('started', { command, payload, startedAt });
+  try {
+    let result = { ok: true, command, payload, startedAt, finishedAt: null, message: '', data: null };
+    const Reg = (typeof globalThis !== 'undefined' && globalThis.H2SInternalActionRegistry) ? globalThis.H2SInternalActionRegistry : null;
+    if (Reg && typeof Reg.isBounded === 'function' && Reg.isBounded(command) && typeof Reg.executeBounded === 'function') {
+      const hooks = { persist: () => persist(), render: () => this.render() };
+      const out = Reg.executeBounded(this, command, payload, hooks);
+      result.message = out.message;
+      result.data = out.data;
+    } else switch (command) {
+      case 'open_ai_settings':
+        this.openAiSettingsDrawer();
+        result.message = 'opened';
+        break;
+      case 'close_ai_settings':
+        this.closeAiSettingsDrawer();
+        result.message = 'closed';
+        break;
+      case 'open_inspector_optimize':
+        setInspectorSectionOpen('opt', true);
+        this.render();
+        result.message = 'opened';
+        break;
+      case 'select_instance': {
+        const instId = payload.instanceId;
+        if (!instId) throw new Error('instanceId required');
+        const inst = (this.project.instances || []).find(x => x && x.id === instId);
+        if (!inst) throw new Error('instance not found');
+        this.state.selectedInstanceId = instId;
+        if (inst.clipId) this.state.selectedClipId = inst.clipId;
+        if (Number.isFinite(inst.trackIndex) && typeof this.setActiveTrackIndex === 'function') this.setActiveTrackIndex(inst.trackIndex);
+        this.render();
+        result.data = { instanceId: instId, clipId: inst.clipId };
+        break;
+      }
+      case 'select_clip': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        const pc = this.project && this.project.clips;
+        let clipExists = false;
+        if (Array.isArray(pc)) {
+          clipExists = pc.some(c => c && String(c.id) === String(clipId));
+        } else if (pc && typeof pc === 'object') {
+          clipExists = !!pc[clipId];
+        }
+        if (!clipExists) throw new Error('clip not found');
+        this.state.selectedClipId = clipId;
+        this.state.selectedInstanceId = null;
+        this.render();
+        result.data = { clipId };
+        break;
+      }
+      case 'open_editor': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        this.openClipEditor(clipId);
+        result.data = { clipId };
+        break;
+      }
+      case 'optimize_clip': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        const optRes = await this.optimizeClip(clipId);
+        if (optRes && !optRes.ok) throw new Error(optRes.reason || optRes.detail || optRes.message || 'Optimize failed');
+        result.data = { clipId, optimizeResult: optRes };
+        break;
+      }
+      case 'rollback_clip': {
+        const clipId = payload.clipId;
+        if (!clipId) throw new Error('clipId required');
+        const res = this.rollbackClipRevision(clipId);
+        if (res && res.ok) { persist(); this.render(); }
+        result.data = { clipId, rollbackResult: res };
+        break;
+      }
+      default:
+        throw new Error('unknown command: ' + command);
+    }
+    result.finishedAt = Date.now();
+    this._emitCmd('done', { command, payload, result });
+    return result;
+  } catch (err) {
+    const finishedAt = Date.now();
+    const msg = (err && (err.message || String(err))) || 'error';
+    const error = { message: msg.slice(0, 200), finishedAt };
+    this._emitCmd('failed', { command, payload, error });
+    return { ok: false, command, payload, startedAt, finishedAt, message: error.message, data: null };
+  }
+},
+
 // --- v2 hooks: Library/Agent expect these (beats-only truth) ---
 getProjectV2(){
   // v2 beats-only doc is the only source of truth.
   if (this._projectV2) return this._projectV2;
 
-  const raw = _readLS(LS_KEY_V2);
+  const docKey = _getActiveProjectDocStorageKey();
+  if (!docKey) return null;
+  const raw = _readLS(docKey);
   if (!raw) return null;
 
   // Normalize / migrate using project.js helpers if available.
@@ -391,6 +1825,11 @@ getProjectV2(){
   return raw;
 },
 
+/** For export fallbacks: active ProjectDoc v2 localStorage key (no side effects beyond migration/repair). */
+getActiveProjectDocumentLocalStorageKey(){
+  return _getActiveProjectDocStorageKey();
+},
+
 setProjectFromV2(projectV2){
   // Persist v2 beats-only doc, then refresh derived v1 view for UI/controllers.
   if (!projectV2) return {ok:false, error:'no_project_v2'};
@@ -407,7 +1846,11 @@ setProjectFromV2(projectV2){
     }
   }
   this._projectV2 = projectV2;
-  _writeLS(LS_KEY_V2, projectV2);
+  _ensureCurrentProjectIdForWrite();
+  const docKey = _getActiveProjectDocStorageKey();
+  if (!docKey) return { ok: false, error: 'no_project_storage_key' };
+  _writeLS(docKey, projectV2);
+  _touchCurrentProjectIndexFromDoc(projectV2);
   this.project = _projectV2ToV1View(projectV2);
   this.render();
   return {ok:true};
@@ -491,12 +1934,88 @@ setOptimizeOptions(arg0, arg1){
   const templateId = rawTemplateId !== undefined
     ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
     : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
-  const normalizedOpts = opts ? {
-    requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
-    userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
-    intent,
-    templateId: templateId || null
-  } : null;
+  const rawPlan = opts && opts.plan;
+  /** Like templateId: carry forward snapshot unless incoming opts explicitly sets the key (null clears). */
+  let assistantExecutionPlanSnapshot;
+  if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')){
+    assistantExecutionPlanSnapshot = existingOpts && existingOpts._assistantExecutionPlanSnapshot;
+  } else {
+    assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
+  }
+  let plan = null;
+  if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object'){
+    plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
+  } else {
+    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
+      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
+      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+  }
+  let nextVelocityShapeIntent;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'velocityShapeIntent')){
+    nextVelocityShapeIntent = (opts.velocityShapeIntent && typeof opts.velocityShapeIntent === 'object' && opts.velocityShapeIntent.mode)
+      ? {
+        capability_id: String(opts.velocityShapeIntent.capability_id || 'velocity_shape'),
+        mode: String(opts.velocityShapeIntent.mode),
+        strength: opts.velocityShapeIntent.strength ? String(opts.velocityShapeIntent.strength) : 'medium',
+      }
+      : null;
+  } else if (existingOpts && existingOpts.velocityShapeIntent){
+    nextVelocityShapeIntent = existingOpts.velocityShapeIntent;
+  }
+  let nextLocalTransposeIntent;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'localTransposeIntent')){
+    nextLocalTransposeIntent = (opts.localTransposeIntent && typeof opts.localTransposeIntent === 'object' && isFinite(Number(opts.localTransposeIntent.semitone_delta)))
+      ? {
+        capability_id: String(opts.localTransposeIntent.capability_id || 'local_transpose'),
+        semitone_delta: Math.round(Number(opts.localTransposeIntent.semitone_delta)),
+      }
+      : null;
+  } else if (existingOpts && existingOpts.localTransposeIntent){
+    nextLocalTransposeIntent = existingOpts.localTransposeIntent;
+  }
+  let nextRhythmIntent;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'rhythmIntent')){
+    nextRhythmIntent = (opts.rhythmIntent && typeof opts.rhythmIntent === 'object' && opts.rhythmIntent.mode)
+      ? {
+        capability_id: String(opts.rhythmIntent.capability_id || 'rhythm_tighten_loosen'),
+        mode: String(opts.rhythmIntent.mode),
+        strength: opts.rhythmIntent.strength ? String(opts.rhythmIntent.strength) : 'medium',
+      }
+      : null;
+  } else if (existingOpts && existingOpts.rhythmIntent){
+    nextRhythmIntent = existingOpts.rhythmIntent;
+  }
+  const normalizedOpts = opts ? (function(){
+    const base = {
+      requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
+      userPrompt: opts.userPrompt != null ? opts.userPrompt : null,
+      intent,
+      templateId: templateId || null,
+      plan: plan || null,
+    };
+    if (assistantExecutionPlanSnapshot !== undefined){
+      base._assistantExecutionPlanSnapshot = assistantExecutionPlanSnapshot;
+    }
+    if (nextVelocityShapeIntent !== undefined){
+      base.velocityShapeIntent = nextVelocityShapeIntent;
+    }
+    if (nextLocalTransposeIntent !== undefined){
+      base.localTransposeIntent = nextLocalTransposeIntent;
+    }
+    if (nextRhythmIntent !== undefined){
+      base.rhythmIntent = nextRhythmIntent;
+    }
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'velocityShapeNoteIds')){
+      base.velocityShapeNoteIds = Array.isArray(opts.velocityShapeNoteIds) ? opts.velocityShapeNoteIds.slice() : null;
+    }
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'localTransposeNoteIds')){
+      base.localTransposeNoteIds = Array.isArray(opts.localTransposeNoteIds) ? opts.localTransposeNoteIds.slice() : null;
+    }
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'rhythmNoteIds')){
+      base.rhythmNoteIds = Array.isArray(opts.rhythmNoteIds) ? opts.rhythmNoteIds.slice() : null;
+    }
+    return base;
+  })() : null;
   this._lastOptimizeOptions = normalizedOpts;
   if (cid) {
     this._optPresetByClipId[cid] = normalizedOpts ? normalizedOpts.requestedPresetId : null;
@@ -504,7 +2023,17 @@ setOptimizeOptions(arg0, arg1){
     if (typeof localStorage !== 'undefined') {
       try {
         const map = _readLS(LS_KEY_OPT_OPTIONS) || {};
-        map[cid] = normalizedOpts;
+        const persisted = normalizedOpts ? Object.assign({}, normalizedOpts) : null;
+        if (persisted && Object.prototype.hasOwnProperty.call(persisted, 'velocityShapeNoteIds')){
+          delete persisted.velocityShapeNoteIds;
+        }
+        if (persisted && Object.prototype.hasOwnProperty.call(persisted, 'localTransposeNoteIds')){
+          delete persisted.localTransposeNoteIds;
+        }
+        if (persisted && Object.prototype.hasOwnProperty.call(persisted, 'rhythmNoteIds')){
+          delete persisted.rhythmNoteIds;
+        }
+        map[cid] = persisted;
         _writeLS(LS_KEY_OPT_OPTIONS, map);
       } catch (e) { console.warn('[App] persist opt options failed', e); }
     }
@@ -534,22 +2063,350 @@ async optimizeClip(clipId, optOverride){
   if (!this.agentCtrl || typeof this.agentCtrl.optimizeClip !== 'function'){
     console.warn('[App] optimizeClip called but agent controller is not available');
     try{ alert('Optimize unavailable: agent controller not initialized. Check console for details.'); }catch(_){}
-    return {ok:false, error:'no_agent_controller'};
+    const bad = { ok: false, error: 'no_agent_controller' };
+    try { this._updateLastOptimizeSummary(bad, clipId); } catch (e) { /* ignore */ }
+    return bad;
   }
   let options = optOverride;
   if (options && typeof options === 'object') {
-    const preset = options.requestedPresetId != null ? options.requestedPresetId : options.presetId != null ? options.presetId : options.preset;
+    const stored = (clipId && this.getOptimizeOptions) ? this.getOptimizeOptions(clipId) : null;
+    const merged = {};
+    if (stored && typeof stored === 'object'){
+      for (const k in stored){
+        if (Object.prototype.hasOwnProperty.call(stored, k)) merged[k] = stored[k];
+      }
+    }
+    for (const k in options){
+      if (Object.prototype.hasOwnProperty.call(options, k) && options[k] !== undefined){
+        merged[k] = options[k];
+      }
+    }
+    const preset = merged.requestedPresetId != null ? merged.requestedPresetId : merged.presetId != null ? merged.presetId : merged.preset;
     const intent = options.intent && typeof options.intent === 'object'
       ? { fixPitch: !!options.intent.fixPitch, tightenRhythm: !!options.intent.tightenRhythm, reduceOutliers: !!options.intent.reduceOutliers }
       : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
     options = {
       requestedPresetId: (preset != null && preset !== '') ? String(preset) : null,
-      userPrompt: options.userPrompt != null ? options.userPrompt : null,
-      intent
+      userPrompt: merged.userPrompt != null ? merged.userPrompt : null,
+      intent,
     };
+    if (merged.templateId != null && String(merged.templateId).trim()){
+      options.templateId = String(merged.templateId).trim();
+    }
+    if (merged.plan && typeof merged.plan === 'object'){
+      options.plan = merged.plan;
+    }
+    if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')){
+      options._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
+    }
+    if (merged.velocityShapeIntent && typeof merged.velocityShapeIntent === 'object' && merged.velocityShapeIntent.mode){
+      options.velocityShapeIntent = merged.velocityShapeIntent;
+    }
+    if (merged.localTransposeIntent && typeof merged.localTransposeIntent === 'object' && isFinite(Number(merged.localTransposeIntent.semitone_delta))){
+      options.localTransposeIntent = merged.localTransposeIntent;
+    }
+    if (Array.isArray(merged.velocityShapeNoteIds) && merged.velocityShapeNoteIds.length > 0){
+      options.velocityShapeNoteIds = merged.velocityShapeNoteIds.slice();
+    }
+    if (Array.isArray(merged.localTransposeNoteIds) && merged.localTransposeNoteIds.length > 0){
+      options.localTransposeNoteIds = merged.localTransposeNoteIds.slice();
+    }
+    if (merged.rhythmIntent && typeof merged.rhythmIntent === 'object' && merged.rhythmIntent.mode){
+      options.rhythmIntent = merged.rhythmIntent;
+    }
+    if (Array.isArray(merged.rhythmNoteIds) && merged.rhythmNoteIds.length > 0){
+      options.rhythmNoteIds = merged.rhythmNoteIds.slice();
+    }
   }
-  return await this.agentCtrl.optimizeClip(clipId, options);
+  const out = await this.agentCtrl.optimizeClip(clipId, options);
+  try { this._updateLastOptimizeSummary(out, clipId); } catch (e) { /* ignore */ }
+  return out;
 },
+
+  _lastOptPathLabel(pathRaw, t){
+    const p = String(pathRaw || '').trim();
+    const keyBy = {
+      'llm': 'lastOpt.path.llm',
+      'velocity_shape': 'lastOpt.path.velocityShape',
+      'local_transpose': 'lastOpt.path.localTranspose',
+      'rhythm_tighten_loosen': 'lastOpt.path.rhythm',
+      'pseudo': 'lastOpt.path.pseudo',
+      'preset': 'lastOpt.path.preset',
+    };
+    if (keyBy[p]) return t(keyBy[p]);
+    return t('lastOpt.path.other').replace('{id}', p ? p.slice(0, 28) : '?');
+  },
+
+  _lastOptLlmOutcomeLabel(lo, t){
+    const x = String(lo || '').trim().toLowerCase();
+    if (x === 'applied') return t('lastOpt.llm.applied');
+    if (x === 'no_op') return t('lastOpt.llm.noOp');
+    if (x.indexOf('rejected') === 0) return t('lastOpt.llm.rejected');
+    if (x === 'failed_config' || x === 'failed_client') return t('lastOpt.llm.configProblem');
+    if (x === 'failed_apply' || x === 'apply_failed') return t('lastOpt.llm.failedApply');
+    if (x === 'failed_revision' || x.indexOf('beginnewcliprevision') === 0) return t('lastOpt.llm.failedRevision');
+    if (x.indexOf('failed') === 0) return t('lastOpt.llm.failed');
+    return t('lastOpt.llm.other');
+  },
+
+  _lastOptDeterministicOutcome(ps, ops, noCh, t){
+    if (noCh || ops === 0) return t('lastOpt.change.noChange');
+    if (ps && ps.isVelocityOnly === true) return t('lastOpt.change.velocityOnly');
+    if (ps && (ps.hasPitchChange === true || ps.hasTimingChange === true)) return t('lastOpt.change.pitchTiming');
+    if (ps && ps.hasStructuralChange === true) return t('lastOpt.change.structure');
+    return t('lastOpt.change.updated');
+  },
+
+  _lastOptFailureDetail(res, t){
+    const r = (res && res.reason != null) ? String(res.reason)
+      : (res && res.error != null) ? String(res.error) : '';
+    const key = 'lastOpt.fail.' + r;
+    const localized = t(key);
+    if (localized !== key) return localized;
+    return t('lastOpt.fail.generic').replace('{reason}', r ? r.slice(0, 56) : t('lastOpt.fail.unknownReason'));
+  },
+
+  _formatLastOptimizeLine(res, clipId){
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    if (!res) return t('lastOpt.none');
+    const p2 = this.getProjectV2 && this.getProjectV2();
+    const clip = clipId && p2 && p2.clips && p2.clips[clipId] ? p2.clips[clipId] : null;
+    const ps = (res.patchSummary && typeof res.patchSummary === 'object') ? res.patchSummary
+      : (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) ? clip.meta.agent.patchSummary : null;
+    const pathRaw = (res.executionPath != null && String(res.executionPath).trim() !== '') ? String(res.executionPath).trim()
+      : (ps && ps.executionPath) ? String(ps.executionPath) : '';
+    const pathLabel = this._lastOptPathLabel(pathRaw || 'unknown', t);
+
+    if (!res.ok) {
+      const detail = this._lastOptFailureDetail(res, t);
+      return t('lastOpt.lineFailed').replace('{path}', pathLabel).replace('{detail}', detail);
+    }
+
+    const ops = (res.ops != null) ? Number(res.ops) : 0;
+    const noCh = (ps && ps.noChanges === true) || ops === 0;
+    const pathStr = String(pathRaw || '');
+    let outcomeLine = '';
+    if (pathStr === 'llm') {
+      const lo = res.llmOutcome || (ps && ps.llm && ps.llm.outcome) || '';
+      outcomeLine = this._lastOptLlmOutcomeLabel(lo, t);
+    } else {
+      outcomeLine = this._lastOptDeterministicOutcome(ps, ops, noCh, t);
+    }
+
+    const revNew = !noCh && ops > 0;
+    const revText = revNew ? t('lastOpt.rev.newVersion') : t('lastOpt.rev.noChange');
+    return t('lastOpt.lineOk').replace('{path}', pathLabel).replace('{outcome}', outcomeLine).replace('{revision}', revText);
+  },
+
+  _updateLastOptimizeSummary(res, clipId){
+    const p2 = this.getProjectV2 && this.getProjectV2();
+    const cid = clipId || null;
+    const clip = cid && p2 && p2.clips && p2.clips[cid] ? p2.clips[cid] : null;
+    const revisionIdAtRun = (clip && clip.revisionId != null) ? String(clip.revisionId) : '';
+    let docKeyAtRun = null;
+    try { docKeyAtRun = _getActiveProjectDocStorageKey(); } catch (e) { docKeyAtRun = null; }
+    this._lastOptimizeSnapshot = {
+      res: res || null,
+      clipId: cid,
+      revisionIdAtRun,
+      docKeyAtRun,
+    };
+    this._applyLastOptimizeSummaryI18n();
+  },
+
+  /** True when stored summary no longer matches current project doc or clip head revision. */
+  _isLastOptimizeSnapshotStale(){
+    const s = this._lastOptimizeSnapshot;
+    if (!s) return false;
+    if (!s.clipId) return true;
+    let curKey = null;
+    try { curKey = _getActiveProjectDocStorageKey(); } catch (e) { curKey = null; }
+    if (s.docKeyAtRun != null && curKey != null && s.docKeyAtRun !== curKey) return true;
+    const p2 = this.getProjectV2 && this.getProjectV2();
+    if (!p2 || !p2.clips || !p2.clips[s.clipId]) return true;
+    const clip = p2.clips[s.clipId];
+    const curRev = (clip && clip.revisionId != null) ? String(clip.revisionId) : '';
+    if (s.revisionIdAtRun === undefined || s.revisionIdAtRun === null) return true;
+    return curRev !== String(s.revisionIdAtRun);
+  },
+
+  _applyLastOptimizeSummaryI18n(){
+    const el = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeSummary') : null;
+    if (!el) return;
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    if (!this._lastOptimizeSnapshot){
+      el.textContent = t('lastOpt.none');
+      return;
+    }
+    if (typeof this._isLastOptimizeSnapshotStale === 'function' && this._isLastOptimizeSnapshotStale()){
+      el.textContent = t('lastOpt.stale');
+      return;
+    }
+    const s = this._lastOptimizeSnapshot;
+    el.textContent = this._formatLastOptimizeLine(s.res, s.clipId);
+  },
+
+  _lastOptIntentDetailLine(ps, pathRaw, t){
+    if (!ps || !pathRaw) return '';
+    const p = String(pathRaw);
+    if (p === 'llm' && ps.promptMeta && ps.promptMeta.templateId != null && String(ps.promptMeta.templateId).trim()){
+      return String(ps.promptMeta.templateId).trim().slice(0, 48);
+    }
+    if (p === 'velocity_shape' && ps.velocityShape && typeof ps.velocityShape === 'object'){
+      const m = ps.velocityShape.mode;
+      if (m != null && String(m).trim()) return t('lastOpt.detail.intentFmt').replace('{n}', String(m).slice(0, 48));
+    }
+    if (p === 'local_transpose' && ps.localTranspose && typeof ps.localTranspose === 'object'){
+      const n = ps.localTranspose.semitone_delta;
+      if (Number.isFinite(Number(n))) return t('lastOpt.detail.intentTranspose').replace('{n}', String(n));
+    }
+    if (p === 'rhythm_tighten_loosen' && ps.rhythm && typeof ps.rhythm === 'object'){
+      const m = ps.rhythm.mode;
+      if (m != null && String(m).trim()) return t('lastOpt.detail.intentFmt').replace('{n}', String(m).slice(0, 48));
+    }
+    return '';
+  },
+
+  _renderLastOptimizeDetailsBody(){
+    const body = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetailsBody') : null;
+    if (!body) return;
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    while (body.firstChild) body.removeChild(body.firstChild);
+    const addRow = (labelKey, valueStr) => {
+      const row = document.createElement('div');
+      row.className = 'lastOptDetailRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t(labelKey);
+      const val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = valueStr;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      body.appendChild(row);
+    };
+    const s = this._lastOptimizeSnapshot;
+    if (!s || !s.res){
+      const p = document.createElement('div');
+      p.style.opacity = '0.9';
+      p.textContent = t('lastOpt.detail.empty');
+      body.appendChild(p);
+      return;
+    }
+    const res = s.res;
+    const ps = (res.patchSummary && typeof res.patchSummary === 'object') ? res.patchSummary : null;
+    const pathRaw = (res.executionPath != null && String(res.executionPath).trim() !== '') ? String(res.executionPath).trim()
+      : (ps && ps.executionPath) ? String(ps.executionPath) : '';
+    const pathStr = String(pathRaw || '');
+    addRow('lastOpt.detail.lblPath', this._lastOptPathLabel(pathRaw || 'unknown', t));
+    if (!res.ok){
+      addRow('lastOpt.detail.lblOutcome', this._lastOptFailureDetail(res, t));
+    } else {
+      const ops = (res.ops != null) ? Number(res.ops) : 0;
+      const noCh = (ps && ps.noChanges === true) || ops === 0;
+      let outcomeLine = '';
+      if (pathStr === 'llm'){
+        const lo = res.llmOutcome || (ps && ps.llm && ps.llm.outcome) || '';
+        outcomeLine = this._lastOptLlmOutcomeLabel(lo, t);
+      } else {
+        outcomeLine = this._lastOptDeterministicOutcome(ps, ops, noCh, t);
+      }
+      addRow('lastOpt.detail.lblOutcome', outcomeLine);
+      addRow('lastOpt.detail.lblOps', String(ops));
+      const revNew = !noCh && ops > 0;
+      addRow('lastOpt.detail.lblRevision', revNew ? t('lastOpt.rev.newVersion') : t('lastOpt.rev.noChange'));
+    }
+    const stale = (typeof this._isLastOptimizeSnapshotStale === 'function') && this._isLastOptimizeSnapshotStale();
+    addRow('lastOpt.detail.lblStale', stale ? t('lastOpt.detail.valStale') : t('lastOpt.detail.valCurrent'));
+    if (s.clipId) addRow('lastOpt.detail.lblClip', String(s.clipId).slice(0, 28));
+    if (ps && ps.executedPreset != null && String(ps.executedPreset).trim()){
+      addRow('lastOpt.detail.lblPreset', String(ps.executedPreset).slice(0, 48));
+    }
+    const intentLine = this._lastOptIntentDetailLine(ps, pathRaw, t);
+    if (intentLine) addRow('lastOpt.detail.lblIntent', intentLine);
+    if (pathStr === 'llm' && ps && ps.llm && typeof ps.llm === 'object' && ps.llm.preRequestExit === true){
+      addRow('lastOpt.detail.lblNote', t('lastOpt.detail.preRequest'));
+    }
+    if (pathStr === 'llm'){
+      const llmB = ps && ps.llm && typeof ps.llm === 'object' ? ps.llm : null;
+      const total = llmB && (llmB.totalAttempts != null) ? Number(llmB.totalAttempts)
+        : (res.llmDebug && res.llmDebug.totalAttempts != null) ? Number(res.llmDebug.totalAttempts) : null;
+      const finalIdx = llmB && (llmB.finalAttemptIndex != null) ? Number(llmB.finalAttemptIndex)
+        : (res.llmDebug && res.llmDebug.finalAttemptIndex != null) ? Number(res.llmDebug.finalAttemptIndex) : null;
+      if (total != null && Number.isFinite(total) && total >= 1){
+        addRow('lastOpt.detail.lblRetries', t('lastOpt.detail.retryFmt')
+          .replace('{total}', String(Math.min(Math.floor(total), 99)))
+          .replace('{final}', (finalIdx != null && Number.isFinite(finalIdx)) ? String(Math.floor(finalIdx)) : '—'));
+      }
+    }
+  },
+
+  _renderLastOptimizeDetailsBodyIfOpen(){
+    if (!this._lastOptimizeDetailsOpen) return;
+    this._renderLastOptimizeDetailsBody();
+  },
+
+  _closeLastOptimizeDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetails') : null;
+    const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
+    if (panel) panel.classList.add('hidden');
+    if (panel) panel.setAttribute('aria-hidden', 'true');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    this._lastOptimizeDetailsOpen = false;
+    if (this._lastOptimizeDetailsOnDocDown){
+      document.removeEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
+      this._lastOptimizeDetailsOnDocDown = null;
+    }
+    if (this._lastOptimizeDetailsOnKey){
+      document.removeEventListener('keydown', this._lastOptimizeDetailsOnKey);
+      this._lastOptimizeDetailsOnKey = null;
+    }
+  },
+
+  _openLastOptimizeDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetails') : null;
+    const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
+    if (!panel) return;
+    this._closeLastOptimizeDetails();
+    this._renderLastOptimizeDetailsBody();
+    panel.classList.remove('hidden');
+    panel.setAttribute('aria-hidden', 'false');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    this._lastOptimizeDetailsOpen = true;
+    const app = this;
+    this._lastOptimizeDetailsOnDocDown = function(ev){
+      const raw = ev.target;
+      const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
+      if (!node || typeof node.closest !== 'function') return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails')) return;
+      app._closeLastOptimizeDetails();
+    };
+    document.addEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
+    this._lastOptimizeDetailsOnKey = function(ev){
+      if (ev.key === 'Escape') app._closeLastOptimizeDetails();
+    };
+    document.addEventListener('keydown', this._lastOptimizeDetailsOnKey);
+  },
+
+  _toggleLastOptimizeDetails(){
+    if (this._lastOptimizeDetailsOpen) this._closeLastOptimizeDetails();
+    else this._openLastOptimizeDetails();
+  },
+
+  _initLastOptimizeDetails(){
+    try{
+      if (typeof document === 'undefined') return;
+      if (this._lastOptimizeDetailsInitialized) return;
+      const btn = document.getElementById('btnLastOptimizeDetails');
+      const closeBtn = document.getElementById('btnLastOptimizeDetailsClose');
+      if (!btn) return;
+      this._lastOptimizeDetailsInitialized = true;
+      this._lastOptimizeDetailsOpen = false;
+      btn.setAttribute('aria-expanded', 'false');
+      btn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._toggleLastOptimizeDetails(); });
+      if (closeBtn) closeBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._closeLastOptimizeDetails(); });
+    }catch(e){ console.warn('[lastOpt] _initLastOptimizeDetails failed', e); }
+  },
 
 // PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
 rollbackClipRevision(clipId){
@@ -577,6 +2434,9 @@ rollbackClipRevision(clipId){
       lastRecordedFile: null,
       importCancelled: false,
       autoOpenAfterImport: true,
+      statusText: '', // PR-UX3a: central status for log status bar (set by setImportStatus, etc.)
+      aiSettingsOpen: false, // PR-UX4c: AI Settings drawer visibility
+      aiAssistOpen: true, // PR-UX7a1: default open on first use; persisted in LS
       modal: {
         show: false,
         clipId: null,
@@ -592,7 +2452,7 @@ rollbackClipRevision(clipId){
         rowH: 16,
         padL: 60,
         padT: 20,
-        mode: 'none', // drag_note | resize_note
+        mode: 'none', // drag_note | resize_note | drag_velocity | resize_velocity_lane
         drag: {
           noteId: null,
           startX: 0,
@@ -600,7 +2460,10 @@ rollbackClipRevision(clipId){
           origStart: 0,
           origPitch: 60,
           origDur: 0.3,
+          origVelocity: 80,
         },
+        velocityLaneHeight: 80,
+        velocityLaneCollapsed: false,
         isPlaying: false,
         snapLastNonOff: '16',
         synth: null,
@@ -660,9 +2523,49 @@ if (typeof localStorage !== 'undefined') {
       if (!Array.isArray(this.project.instances)) this.project.instances = [];
 
       // Bind UI
-      $('#btnUpload').addEventListener('click', () => this.pickWavAndGenerate());
+      const btnImportAudio = $('#btnImportAudio');
+      if (btnImportAudio) btnImportAudio.addEventListener('click', () => { this.runTopBarImportAudio(); });
       $('#btnClear').addEventListener('click', () => this.clearProject());
-      $('#btnClearLog').addEventListener('click', () => $('#log').textContent = '');
+      $('#btnClearLog').addEventListener('click', () => { $('#log').textContent = ''; _lastLogLine = ''; if (typeof this.updateLogStatusBar === 'function') this.updateLogStatusBar(); });
+      // PR-UX3a: Log panel — restore open state from localStorage, bind status bar click to toggle
+      const logOpen = (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_LOG_OPEN) === '1');
+      this.setLogOpen(logOpen);
+      const logBar = $('#logStatusBar');
+      if (logBar) logBar.addEventListener('click', () => { const open = !$('#logPanel').classList.contains('collapsed'); this.setLogOpen(!open); });
+
+      // PR-UX3b: persist Inspector section collapse state when user toggles
+      const inspProject = $('#inspProject');
+      const inspExport = $('#inspExport');
+      if (inspProject) inspProject.addEventListener('toggle', () => { setInspectorSectionOpen('project', inspProject.open); });
+      if (inspExport) inspExport.addEventListener('toggle', () => { setInspectorSectionOpen('export', inspExport.open); });
+
+      // PR-UX4c: AI Settings drawer — restore open state, bind open/close
+      if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_DRAWER_OPEN) === '1') this.state.aiSettingsOpen = true;
+      // PR-UX7a1: AI Assistant dock — default open on first use; persist once user toggles
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(LS_KEY_AI_ASSIST_OPEN);
+        this.state.aiAssistOpen = (stored === null) ? true : (stored === '1');
+      }
+      this._initAiSettingsDrawer();
+      this._initAiAssistDock();
+
+      // PR-UX6b: Status bar integrates with runCommand events
+      this.onCommandEvent((ev) => {
+        const cmd = ev.command;
+        if (cmd === 'open_ai_settings' || cmd === 'close_ai_settings') return;
+        if (ev.type === 'started') {
+          const text = this._cmdLabel(cmd);
+          if (text) this.setImportStatus(text, false);
+        } else if (ev.type === 'done') {
+          const text = this._cmdDoneLabel ? this._cmdDoneLabel(cmd) : '';
+          if (text) this.setImportStatus(text, false);
+          if (text) setTimeout(() => { if (this.state.statusText === text) this.setImportStatus('', false); }, 1500);
+        } else if (ev.type === 'failed') {
+          const msg = (ev.error && ev.error.message) ? ev.error.message : 'error';
+          const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+          this.setImportStatus(_t('cmd.failedPrefix') + ': ' + cmd + ': ' + msg, false);
+        }
+      });
 
       $('#inpBpm').addEventListener('change', () => {
         // Safety: changing BPM while the clip editor is open can corrupt
@@ -684,26 +2587,118 @@ if (typeof localStorage !== 'undefined') {
         downloadText(fname, JSON.stringify(payload, null, 2));
       });
 
+      $('#btnExportSelectedClip').addEventListener('click', () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        let clipId = this.state && this.state.selectedClipId;
+        if (!clipId && this.state && this.state.selectedInstanceId){
+          const inst = (this.project.instances || []).find((x) => x && x.id === this.state.selectedInstanceId);
+          if (inst && inst.clipId) clipId = inst.clipId;
+        }
+        if (!clipId){
+          alert(_t('inspector.exportSelectedClipNoSelection'));
+          return;
+        }
+        const p2 = _projectV1ToV2(this.project);
+        if (!p2 || !_isProjectV2(p2) || !p2.clips || typeof p2.clips !== 'object'){
+          alert(_t('inspector.exportSelectedClipNotFound'));
+          return;
+        }
+        const clip = p2.clips[clipId];
+        if (!clip){
+          alert(_t('inspector.exportSelectedClipNotFound'));
+          return;
+        }
+        const P = window.H2SProject;
+        const clipCopy = (P && typeof P.deepClone === 'function') ? P.deepClone(clip) : JSON.parse(JSON.stringify(clip));
+        const bpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+        const bundle = {
+          kind: 'hum2song_clip_bundle',
+          version: 1,
+          exportedAt: Date.now(),
+          schemaVersion: 2,
+          timebase: 'beat',
+          bpm,
+          clipId: String(clipId),
+          clip: clipCopy,
+        };
+        downloadText(`hum2song_clip_${Date.now()}.json`, JSON.stringify(bundle, null, 2));
+      });
+
       $('#btnImportProject').addEventListener('click', async () => {
+        await this.importProjectJsonFromFile();
+      });
+
+      $('#btnImportClip').addEventListener('click', async () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
         const f = await this.pickFile('.json');
         if (!f) return;
-        const txt = await f.text();
-        try{
-          const obj = JSON.parse(txt);
-          if (_isProjectV2(obj)){
-            _writeLS(LS_KEY_V2, obj);
-            try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
-            this.project = _projectV2ToV1View(obj);
-          } else {
-            this.project = obj;
-          }
-          this.project = H2SProject.ensureProjectIds(this.project);
-          persist();
-          this.render();
-          log('Imported project json.');
-        }catch(e){
-          alert('Invalid JSON.');
+        let obj;
+        try {
+          obj = JSON.parse(await f.text());
+        } catch (_e) {
+          alert(_t('inspector.importClipInvalid'));
+          return;
         }
+        if (!_validateHum2songClipBundle(obj)) {
+          alert(_t('inspector.importClipInvalid'));
+          return;
+        }
+        const P = window.H2SProject;
+        if (!P || typeof P.uid !== 'function' || typeof P.deepClone !== 'function') {
+          alert(_t('inspector.importClipInvalid'));
+          return;
+        }
+        this.importClipAsNewIntoCurrentProjectV2(obj.clip, obj.bpm);
+      });
+
+      $('#btnImportClipFromProject').addEventListener('click', async () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        const f = await this.pickFile('.json');
+        if (!f) return;
+        let obj;
+        try {
+          obj = JSON.parse(await f.text());
+        } catch (_e) {
+          alert(_t('inspector.importClipFromProjectInvalidJson'));
+          return;
+        }
+        let p2;
+        try {
+          p2 = H2SProject.loadProjectDocV2(obj);
+        } catch (_e) {
+          alert(_t('inspector.importClipFromProjectInvalidProject'));
+          return;
+        }
+        if (!_isProjectV2(p2)) {
+          alert(_t('inspector.importClipFromProjectInvalidProject'));
+          return;
+        }
+        const ids = _importableClipIdsFromProjectDoc(p2);
+        if (!ids.length) {
+          alert(_t('inspector.importClipFromProjectNoClips'));
+          return;
+        }
+        this._pendingClipFromProject = p2;
+        this._populateClipFromProjectChooser(ids);
+        this._openClipFromProjectModal();
+      });
+
+      const cfpBackdrop = $('#clipFromProjectBackdrop');
+      if (cfpBackdrop) cfpBackdrop.addEventListener('click', () => { this._closeClipFromProjectModal(); });
+      const btnCfpCancel = $('#btnClipFromProjectCancel');
+      if (btnCfpCancel) btnCfpCancel.addEventListener('click', () => { this._closeClipFromProjectModal(); });
+      const btnCfpImport = $('#btnClipFromProjectImport');
+      if (btnCfpImport) btnCfpImport.addEventListener('click', () => {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        const sel = $('#selClipFromProject');
+        const doc = this._pendingClipFromProject;
+        const cid = sel && sel.value;
+        if (!doc || !cid || !doc.clips || !doc.clips[cid]) {
+          alert(_t('inspector.importClipFromProjectInvalidProject'));
+          return;
+        }
+        this.importClipAsNewIntoCurrentProjectV2(doc.clips[cid], doc.bpm);
+        this._closeClipFromProjectModal();
       });
 
       // Transport buttons
@@ -715,6 +2710,9 @@ if (typeof localStorage !== 'undefined') {
         else this.startRecording();
       });
       $('#btnUseLast').addEventListener('click', () => this.useLastRecording());
+      $('#btnPlayLast').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} this.playLastRecording(); });
+      const btnAddLastAsAudio = $('#btnAddLastAsAudio');
+      if (btnAddLastAsAudio) btnAddLastAsAudio.addEventListener('click', () => { this.addLastRecordingAsNativeAudioClip(); });
       const chkAutoOpen = $('#chkAutoOpenAfterImport');
       if (chkAutoOpen) {
         chkAutoOpen.checked = !!this.state.autoOpenAfterImport;
@@ -724,6 +2722,15 @@ if (typeof localStorage !== 'undefined') {
       if (btnCancelImport) btnCancelImport.addEventListener('click', () => { this.state.importCancelled = true; });
       this._initMasterVolumeUI();
       $('#btnPlayheadToStart').addEventListener('click', () => { this.project.ui.playheadSec = 0; persist(); this.render(); });
+
+      // PR-INS2c: Instrument Library (sampler baseUrl)
+      this._initInstrumentLibraryUI();
+
+      // PR-G1b: Language switch (Inspector dropdown)
+      this._initLangDropdown();
+      this._initBeginnerHintBar();
+      this._fetchBackendReadinessOnce();
+      this._initLastOptimizeDetails();
 
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
@@ -744,13 +2751,39 @@ $('#rngPitchCenter').addEventListener('input', () => {
         this.modalRequestDraw();
       });
 
-      // Canvas interactions
+      // Canvas interactions (grid + velocity lane + splitter)
       const canvas = $('#canvas');
-      canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      const velocityCanvas = $('#velocityCanvas');
+      const velocitySplitter = $('#velocitySplitter');
+      if (canvas) canvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      if (velocityCanvas && !velocityCanvas.__h2s_vel_bound) {
+        velocityCanvas.__h2s_vel_bound = true;
+        velocityCanvas.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      }
+      if (velocitySplitter && !velocitySplitter.__h2s_vel_bound) {
+        velocitySplitter.__h2s_vel_bound = true;
+        velocitySplitter.addEventListener('pointerdown', (ev) => this.modalPointerDown(ev));
+      }
       window.addEventListener('pointermove', (ev) => this.modalPointerMove(ev));
       window.addEventListener('pointerup', (ev) => this.modalPointerUp(ev));
 
       window.addEventListener('keydown', (ev) => {
+        const cfp = $('#clipFromProjectModal');
+        if (cfp && !cfp.classList.contains('hidden')){
+          if (ev.key === 'Escape'){
+            this._closeClipFromProjectModal();
+            ev.preventDefault();
+            return;
+          }
+        }
+        const ph = $('#projectHomeModal');
+        if (ph && !ph.classList.contains('hidden')){
+          if (ev.key === 'Escape'){
+            this._dismissProjectHomeAuto();
+            ev.preventDefault();
+            return;
+          }
+        }
         const path = (ev.composedPath && ev.composedPath()) || (ev.target ? [ev.target] : []);
         const inInput = path.some((el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
         if (inInput) return;
@@ -783,7 +2816,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onEdit: (clipId) => this.openClipEditor(clipId),
             onRemove: (clipId) => this.deleteClip(clipId),
             onOptimize: (clipId) => this.optimizeClip(clipId),
-            onSelectClip: (clipId) => { this.state.selectedClipId = clipId; this.render(); },
+            onSelectClip: (clipId) => { this.state.selectedClipId = clipId; this.state.selectedInstanceId = null; this.render(); },
           });
         }
       }catch(e){
@@ -823,6 +2856,12 @@ $('#rngPitchCenter').addEventListener('input', () => {
             onEditClip: (clipId) => this.openClipEditor(clipId),
             onDuplicateInstance: (instId) => this.duplicateInstance(instId),
             onRemoveInstance: (instId) => this.deleteInstance(instId),
+            getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
+            onConvertAudioToEditable: (clipId, instId) => {
+              Promise.resolve(this.convertAudioClipToEditable(clipId, { sourceAudioInstanceId: instId })).catch(function(err){
+                console.warn('[App] convertAudioClipToEditable (instance) failed', err);
+              });
+            },
             onLog: log,
           });
         }
@@ -872,7 +2911,7 @@ H2SProject: (typeof window !== 'undefined') ? window.H2SProject : null,
               this.project.ui.playheadSec = sec;
               const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
               const beat = (sec * bpm) / 60;
-              $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+              $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
               if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
                 this.timelineCtrl.setPlayheadSec(sec);
               } else {
@@ -902,16 +2941,12 @@ try{
     getProject: () => this.project,
     getState: () => this.state,
     onSelectInstance: (instId, el) => {
-      // Soft-select: update state + DOM class + inspector, WITHOUT full re-render.
-      const prev = this.state.selectedInstanceId;
       this.state.selectedInstanceId = instId;
-      // If we can resolve the instance, update active track highlight.
-      try{
-        const inst = (this.project.instances||[]).find(x => x && x.id === instId);
-        if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
-      }catch(e){}
+      const inst = (this.project.instances || []).find(x => x && x.id === instId);
+      if (inst && inst.clipId) this.state.selectedClipId = inst.clipId; // Do NOT clear; keep previous if inst has no clipId
+      if (inst && Number.isFinite(inst.trackIndex)) this.setActiveTrackIndex(inst.trackIndex);
 
-      // Toggle selected class in-place
+      // Toggle selected class in-place (no timeline rebuild — preserves dblclick + live drag)
       if (this._selectedInstEl && this._selectedInstEl !== el){
         try{ this._selectedInstEl.classList.remove('selected'); }catch(e){}
       }
@@ -919,12 +2954,16 @@ try{
         el.classList.add('selected');
         this._selectedInstEl = el;
       }
+      // Targeted updates only: inspector, selection UI, library highlight, AI target. Do NOT render timeline.
+      this.renderInspector();
       this.renderSelection();
-    
-      // Keep dynamic master volume UI alive across renders.
-      this._initMasterVolumeUI();
+      this.renderSelectedClip();
+      if (this.libraryCtrl && this.libraryCtrl.render) this.libraryCtrl.render();
+      this._renderAiAssistDock();
+      try{ this._initMasterVolumeUI(); }catch(e){}
     },
     onOpenClipEditor: (clipId) => this.openClipEditor(clipId),
+    onOpenInspectorOptimize: () => this.runCommand('open_inspector_optimize'),
     onAddClipToTimeline: (clipId, startSec, trackIndex) => this.addClipToTimeline(clipId, startSec, trackIndex),
     onSetActiveTrackIndex: (ti) => this.setActiveTrackIndex(ti),
     onSetTrackInstrument: (trackId, instrument) => this.setTrackInstrument(trackId, instrument),
@@ -938,7 +2977,7 @@ try{
       this.project.ui.playheadSec = sec;
       const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
       const beat = (sec * bpm) / 60;
-      $('#lblPlayhead').textContent = `Playhead: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+      $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
 
       if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
         this.timelineCtrl.setPlayheadSec(sec);
@@ -964,6 +3003,35 @@ try{
 
       this.render();
       log('UI ready.');
+
+      // Project Home MVP: toolbar entry + rare auto-open (avoid covering first-run beginner hint)
+      const phModal = $('#projectHomeModal');
+      if (phModal){
+        const btnPh = $('#btnProjectHome');
+        if (btnPh) btnPh.addEventListener('click', () => { this.openProjectHome(); });
+        const bd = $('#projectHomeBackdrop');
+        if (bd) bd.addEventListener('click', () => { this._dismissProjectHomeAuto(); });
+        const btnCont = $('#btnProjectHomeContinue');
+        if (btnCont) btnCont.addEventListener('click', () => { this._dismissProjectHomeAuto(); });
+        const btnNew = $('#btnProjectHomeNew');
+        if (btnNew) btnNew.addEventListener('click', () => {
+          this.createNewLocalProject();
+          this._dismissProjectHomeAuto();
+        });
+        const btnImp = $('#btnProjectHomeImport');
+        if (btnImp) btnImp.addEventListener('click', async () => {
+          const ok = await this.importProjectJsonFromFile({ asNewLocalProject: true });
+          if (ok) this._dismissProjectHomeAuto();
+        });
+        try{
+          if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_SKIP_PROJECT_HOME_AUTO) !== '1'){
+            const idx = _readProjectsIndex();
+            const nProj = (idx && Array.isArray(idx.projects)) ? idx.projects.length : 0;
+            // First visit / single project: leave Project Home closed so beginner hint + top bar are visible.
+            if (nProj >= 2) this.openProjectHome();
+          }
+        }catch(e){}
+      }
     },
 
     // Ensure the Timeline Snap dropdown exists in the DOM.
@@ -977,23 +3045,25 @@ try{
         if (!bpmInp) return;
 
         const label = document.createElement('span');
-        label.textContent = 'Snap:';
+        label.setAttribute('data-i18n', 'timeline.snapLabel');
+        label.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('timeline.snapLabel') : 'Snap:';
         label.className = 'miniLabel';
 
         const sel = document.createElement('select');
         sel.id = 'selTimelineSnap';
         sel.className = 'mini';
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
         const opts = [
-          {v:'off', t:'Off'},
-          {v:'4', t:'1/4'},
-          {v:'8', t:'1/8'},
-          {v:'16', t:'1/16'},
-          {v:'32', t:'1/32'},
+          {v:'off', k:'snap.off'},
+          {v:'4', k:'snap.1_4'},
+          {v:'8', k:'snap.1_8'},
+          {v:'16', k:'snap.1_16'},
+          {v:'32', k:'snap.1_32'},
         ];
         for (const o of opts){
           const op = document.createElement('option');
           op.value = o.v;
-          op.textContent = o.t;
+          op.textContent = _t(o.k);
           sel.appendChild(op);
         }
         sel.value = '16';
@@ -1037,7 +3107,13 @@ try{
         p2.ui = p2.ui || {};
         // Preserve beat position for playhead.
         p2.ui.playheadBeat = Math.max(0, curBeat);
-        _writeLS(LS_KEY_V2, p2);
+        _ensureCurrentProjectIdForWrite();
+        const bpmKey = _getActiveProjectDocStorageKey();
+        if (bpmKey){
+          _writeLS(bpmKey, p2);
+          this._projectV2 = p2;
+          _touchCurrentProjectIndexFromDoc(p2);
+        }
         try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
         this.project = _projectV2ToV1View(p2);
       } else {
@@ -1153,9 +3229,579 @@ ensureTrackButtons(){
   btnDel.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); this.removeActiveTrack(); });
 },
 
+    // PR-UX7a: AI Assistant dock — init bindings (guard against double bind)
+    _initAiAssistDock(){
+      if (this._aiAssistBound) return;
+      this._aiAssistBound = true;
+      this._aiAssistItems = this._aiAssistItems || [];
+      this._aiAssistDebugExpanded = this._aiAssistDebugExpanded || {};
+      const header = document.getElementById('aiAssistHeader');
+      const sendBtn = document.getElementById('aiAssistSend');
+      const inp = document.getElementById('aiAssistInput');
+      const body = document.getElementById('aiAssistBody');
+      if (inp) inp.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); this._aiAssistSend(); }
+      });
+      if (header) header.addEventListener('click', () => {
+        this.state.aiAssistOpen = !this.state.aiAssistOpen;
+        try { localStorage.setItem(LS_KEY_AI_ASSIST_OPEN, this.state.aiAssistOpen ? '1' : '0'); } catch (e) {}
+        this.render();
+      });
+      if (sendBtn) sendBtn.addEventListener('click', () => this._aiAssistSend());
+      if (body) body.addEventListener('click', (ev) => {
+        const t = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+        const act = t && t.getAttribute && t.getAttribute('data-act');
+        const clipId = t && t.getAttribute && t.getAttribute('data-clip-id');
+        if (!act || !clipId) return;
+        if (act === 'aiRun') this._aiAssistRun(clipId, t);
+        else if (act === 'aiOpenOptimize') this.runCommand('open_inspector_optimize');
+        else if (act === 'aiUndo') this._aiAssistUndo(clipId);
+        else if (act === 'aiDebugToggle'){
+          ev.preventDefault();
+          const created = t.getAttribute('data-card-created');
+          if (created == null) return;
+          this._aiAssistDebugExpanded = this._aiAssistDebugExpanded || {};
+          const k = String(clipId) + '\0' + String(created);
+          this._aiAssistDebugExpanded[k] = !this._aiAssistDebugExpanded[k];
+          this.render();
+        }
+      });
+      const handle = document.getElementById('aiAssistResizeHandle');
+      if (handle) {
+        handle.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); ev.preventDefault(); this._aiAssistStartResize(ev); });
+      }
+    },
+    _syncStudioAiDockRightPanelSafeBottom(){
+      try {
+        const dock = document.getElementById('aiAssistDock');
+        if (!dock || typeof document === 'undefined' || !document.documentElement) return;
+        const breathing = 16;
+        const h = dock.offsetHeight || 28;
+        document.documentElement.style.setProperty('--studio-ai-dock-safe-bottom', (h + breathing) + 'px');
+      } catch (_e) {}
+    },
+    _aiAssistStartResize(ev){
+      const dock = document.getElementById('aiAssistDock');
+      if (!dock || !dock.classList.contains('open')) return;
+      ev.preventDefault();
+      const MIN_W = 260; const MIN_H = 220; const MAX_W = Math.min(600, (typeof window !== 'undefined' && window.innerWidth) ? Math.floor(window.innerWidth * 0.9) : 600);
+      const MAX_H = Math.min(700, (typeof window !== 'undefined' && window.innerHeight) ? Math.floor(window.innerHeight * 0.9) : 700);
+      let prevX = ev.clientX; let prevY = ev.clientY;
+      let w = dock.offsetWidth; let h = dock.offsetHeight;
+      const onMove = (e) => {
+        e.preventDefault();
+        const dx = e.clientX - prevX; const dy = e.clientY - prevY;
+        prevX = e.clientX; prevY = e.clientY;
+        w = Math.max(MIN_W, Math.min(MAX_W, w - dx));
+        h = Math.max(MIN_H, Math.min(MAX_H, h - dy));
+        dock.style.width = w + 'px'; dock.style.height = h + 'px';
+        this._aiAssistDockWidth = w; this._aiAssistDockHeight = h;
+        this._syncStudioAiDockRightPanelSafeBottom();
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove, true);
+        document.removeEventListener('pointerup', onUp, true);
+        document.removeEventListener('pointercancel', onUp, true);
+        this._syncStudioAiDockRightPanelSafeBottom();
+      };
+      document.addEventListener('pointermove', onMove, { capture: true });
+      document.addEventListener('pointerup', onUp, { capture: true });
+      document.addEventListener('pointercancel', onUp, { capture: true });
+    },
+    _aiAssistSend(){
+      const inp = document.getElementById('aiAssistInput');
+      if (!inp) return;
+      const text = String(inp.value || '').trim();
+      if (!text) return;
+      inp.value = '';
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      if (_tryAssistantBoundedSkillDispatch(this, text, _t)) return;
+      const clipId = this.state.selectedClipId;
+      if (!clipId) {
+        this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+      } else {
+        const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
+        const narrow = _resolvePhase1AssistantIntentForSend(text);
+        if (narrow && narrow.branch === 'rhythm_tighten_loosen') {
+          card.rhythmIntent = narrow.intent;
+        } else if (narrow && narrow.branch === 'local_transpose') {
+          card.localTransposeIntent = narrow.intent;
+        } else if (narrow && narrow.branch === 'velocity_shape') {
+          card.velocityShapeIntent = narrow.intent;
+        } else {
+          const mapped = _mapAiAssistTextToTemplate(text);
+          if (mapped.templateId && mapped.intent) {
+            card.templateId = mapped.templateId;
+            card.templateLabel = mapped.templateLabel;
+            card.intent = mapped.intent;
+          }
+        }
+        card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+        card.reasoningLog = {
+          userPrompt: text.slice(0, 200),
+          templateId: card.templateId || null,
+          intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+          planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+          requestedPresetId: card.rhythmIntent ? 'rhythm_tighten_loosen' : (card.localTransposeIntent ? 'local_transpose' : (card.velocityShapeIntent ? 'velocity_shape' : 'llm_v0')),
+          planSource: 'rule',
+          createdAt: card.createdAt,
+        };
+        this._aiAssistItems.push(card);
+        _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+          if (plan) {
+            card.plan = plan;
+            if (card.reasoningLog) {
+              card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+              card.reasoningLog.planSource = 'ai';
+            }
+            _syncAssistantCardTemplateFromPlan(card);
+            this.render();
+          }
+        }).catch(function(){ /* keep rule-based plan */ });
+      }
+      this.render();
+    },
+    async _aiAssistRun(clipId, btnEl){
+      if (!clipId) return;
+      const promptText = (btnEl && btnEl.getAttribute && btnEl.getAttribute('data-prompt')) || '';
+      const card = (this._aiAssistItems || []).find(x => x.type === 'card' && String(x.clipId) === String(clipId) && (!promptText || x.promptText === promptText));
+      if (!card) return;
+      _syncAssistantCardTemplateFromPlan(card);
+      const text = (promptText !== '' && promptText !== null) ? promptText : (card.promptText || '');
+      const runSnapshot = _buildAssistantRunExecutionSnapshot(card);
+      card._assistantRunSnapshot = runSnapshot;
+      if (card.reasoningLog && typeof card.reasoningLog === 'object'){
+        card.reasoningLog.templateId = runSnapshot.usedTemplateId;
+        card.reasoningLog.intent = runSnapshot.usedIntent ? {
+          fixPitch: !!runSnapshot.usedIntent.fixPitch,
+          tightenRhythm: !!runSnapshot.usedIntent.tightenRhythm,
+          reduceOutliers: !!runSnapshot.usedIntent.reduceOutliers,
+        } : null;
+        if (runSnapshot.usedPlan && runSnapshot.usedPlan.planTitle){
+          card.reasoningLog.planSummary = String(runSnapshot.usedPlan.planTitle).slice(0, 200);
+        }
+      }
+      const opts = { userPrompt: text, requestedPresetId: runSnapshot.usedRequestedPresetId };
+      if (runSnapshot.rhythmIntent && typeof runSnapshot.rhythmIntent === 'object'){
+        opts.rhythmIntent = runSnapshot.rhythmIntent;
+      }
+      if (runSnapshot.localTransposeIntent && typeof runSnapshot.localTransposeIntent === 'object'){
+        opts.localTransposeIntent = runSnapshot.localTransposeIntent;
+      }
+      if (runSnapshot.velocityShapeIntent && typeof runSnapshot.velocityShapeIntent === 'object'){
+        opts.velocityShapeIntent = runSnapshot.velocityShapeIntent;
+      }
+      if (runSnapshot.usedTemplateId && runSnapshot.usedIntent) {
+        opts.templateId = runSnapshot.usedTemplateId;
+        opts.intent = runSnapshot.usedIntent;
+      }
+      if (runSnapshot.usedPlan) {
+        opts.plan = runSnapshot.usedPlan;
+      }
+      opts._assistantExecutionPlanSnapshot = runSnapshot.usedPlan;
+      this.setOptimizeOptions(clipId, opts);
+      card.runState = 'running';
+      card.resultKind = null;
+      card.usedPresetId = null;
+      card.lastError = null;
+      card.executionTrace = null;
+      if (btnEl) btnEl.disabled = true;
+      this.render();
+      try {
+        const res = await this.runCommand('optimize_clip', { clipId });
+        if (btnEl) btnEl.disabled = false;
+        if (!res || !res.ok) {
+          card.runState = 'failed';
+          card.lastError = (res && res.message) ? String(res.message).slice(0, 80) : 'Optimize failed';
+          if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
+          try { card.executionTrace = _buildAiAssistExecutionTrace(card, null, runSnapshot); } catch (_e) {}
+          this.render();
+          return;
+        }
+        const optRes = (res.data && res.data.optimizeResult) ? res.data.optimizeResult : null;
+        if (!optRes || !optRes.ok) {
+          card.runState = 'failed';
+          card.lastError = (optRes && (optRes.reason || optRes.detail || optRes.message)) ? String(optRes.reason || optRes.detail || optRes.message).slice(0, 80) : 'Optimize failed';
+          if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, optRes && optRes.patchSummary ? optRes.patchSummary : null, false, card.runState, card.resultKind, card.lastError);
+          try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes, runSnapshot); } catch (_e) {}
+          this.render();
+          return;
+        }
+        let ps = (optRes && optRes.patchSummary) ? optRes.patchSummary : null;
+        if (!ps && optRes.ok && optRes.ops > 0) {
+          const p2 = this.getProjectV2();
+          const c = p2 && p2.clips && p2.clips[clipId];
+          ps = (c && c.meta && c.meta.agent && c.meta.agent.patchSummary) ? c.meta.agent.patchSummary : null;
+        }
+        card.usedPresetId = (ps && ps.executedPreset) ? String(ps.executedPreset) : 'llm_v0';
+        if (optRes.ops === 0 || (ps && ps.noChanges === true)) card.resultKind = 'no-op';
+        else if (ps && ps.isVelocityOnly === true) card.resultKind = 'velocity-only';
+        else if (ps && (ps.hasPitchChange === true || ps.hasTimingChange === true)) card.resultKind = 'pitch/timing';
+        else if (ps && ps.hasStructuralChange === true) card.resultKind = 'structure';
+        else card.resultKind = 'updated';
+        card.runState = 'done';
+        if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, ps, true, card.runState, card.resultKind, null);
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, optRes, runSnapshot); } catch (_e) {}
+      } catch (err) {
+        if (btnEl) btnEl.disabled = false;
+        card.runState = 'failed';
+        card.lastError = (err && err.message) ? String(err.message).slice(0, 80) : 'Optimize failed';
+        if (card.reasoningLog) _enrichReasoningLogFromRun(card.reasoningLog, null, false, card.runState, card.resultKind, card.lastError);
+        try { card.executionTrace = _buildAiAssistExecutionTrace(card, null, runSnapshot); } catch (_e) {}
+      }
+      this.render();
+    },
+    async _aiAssistUndo(clipId){
+      if (!clipId) return;
+      const res = await this.runCommand('rollback_clip', { clipId });
+      const rb = (res && res.data && res.data.rollbackResult) ? res.data.rollbackResult : null;
+      if (rb && rb.ok && rb.changed) {
+        const items = this._aiAssistItems || [];
+        for (const it of items) {
+          if (it.type === 'card' && String(it.clipId) === String(clipId) && it.runState === 'done') it.runState = 'undone';
+        }
+      }
+      this.render();
+    },
 
+    _getAiAssistTargetSummary(){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const instId = this.state.selectedInstanceId;
+      const clipId = this.state.selectedClipId;
+      const clip = clipId ? (this.project.clips || []).find(c => c && String(c.id) === String(clipId)) : null;
+      const clipName = clip ? (clip.name || clipId) : (clipId || '');
+      const prefix = _t('aiAssist.clipPrefix');
+      if (!clipId) return _t('aiAssist.noClip');
+      if (instId) {
+        const inst = (this.project.instances || []).find(i => i && String(i.id) === String(instId));
+        if (inst && String(inst.clipId || '') === String(clipId || '')) {
+          const trackNum = (typeof inst.trackIndex === 'number' ? inst.trackIndex : 0) + 1;
+          const startStr = fmtSec(inst.startSec);
+          const trackPrefix = _t('aiAssist.trackPrefix');
+          return prefix + clipName + ' · ' + trackPrefix + trackNum + ' · ' + startStr;
+        }
+      }
+      return prefix + clipName;
+    },
+    _renderAiAssistDock(){
+      const dock = document.getElementById('aiAssistDock');
+      const headerTarget = document.getElementById('aiAssistHeaderTarget');
+      const headerChevron = document.getElementById('aiAssistHeaderChevron');
+      const messagesEl = document.getElementById('aiAssistMessages');
+      if (!dock) return;
+      dock.classList.toggle('open', !!this.state.aiAssistOpen);
+      if (!this.state.aiAssistOpen) dock.style.height = '28px';
+      else if (this._aiAssistDockWidth != null || this._aiAssistDockHeight != null) {
+        if (this._aiAssistDockWidth != null) dock.style.width = this._aiAssistDockWidth + 'px';
+        if (this._aiAssistDockHeight != null) dock.style.height = this._aiAssistDockHeight + 'px';
+      } else { dock.style.width = ''; dock.style.height = ''; }
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      if (headerTarget) headerTarget.textContent = this._getAiAssistTargetSummary();
+      if (headerChevron) headerChevron.textContent = this.state.aiAssistOpen ? '\u25BE' : '\u25B8';
+      if (messagesEl) {
+        const items = this._aiAssistItems || [];
+        let html = '';
+        for (const it of items) {
+          if (it.type === 'sys') {
+            html += '<div class="aiAssistSys">' + escapeHtml(it.text) + '</div>';
+          } else if (it.type === 'card') {
+            const p2 = this.getProjectV2();
+            const c = p2 && p2.clips && p2.clips[it.clipId];
+            const canUndo = !!(c && c.parentRevisionId != null && String(c.parentRevisionId).trim());
+            const runState = it.runState || 'idle';
+            const tl = (it.templateLabel && String(it.templateLabel).trim()) ? String(it.templateLabel).trim() : null;
+            const up = (it.usedPresetId && String(it.usedPresetId).trim()) ? String(it.usedPresetId).trim() : null;
+            const dataRunState = runState !== 'idle' ? (' data-run-state="' + escapeHtml(runState) + '"') : '';
+            html += '<div class="aiAssistCard" data-clip-id="' + escapeHtml(String(it.clipId)) + '"' + dataRunState + '>';
+            html += '<div class="aiAssistCardPrompt">' + escapeHtml(it.promptText) + '</div>';
+            const plan = it.plan && Array.isArray(it.plan.planLines) && it.plan.planLines.length > 0 ? it.plan : null;
+            if (plan) {
+              html += '<div class="aiAssistCardPlan" data-plan-kind="' + escapeHtml(plan.planKind || 'generic') + '" style="font-size:10px; color:var(--muted); margin-bottom:6px; line-height:1.35;">';
+              if (plan.planTitle) html += '<div class="aiAssistCardPlanTitle" style="font-weight:600; margin-bottom:2px;">' + escapeHtml(plan.planTitle) + '</div>';
+              for (let i = 0; i < plan.planLines.length; i++) html += '<div class="aiAssistCardPlanLine">' + escapeHtml(plan.planLines[i]) + '</div>';
+              html += '</div>';
+            }
+            if (tl || up){
+              const metaText = (tl && up) ? (escapeHtml(tl) + ' · ' + escapeHtml(up)) : (tl ? escapeHtml(tl) : escapeHtml(up));
+              html += '<div class="aiAssistCardMeta">' + metaText + '</div>';
+            }
+            if (runState !== 'idle'){
+              let statusLine = '';
+              if (runState === 'running') statusLine = _t('aiAssist.statusRunning');
+              else if (runState === 'done') statusLine = (it.resultKind === 'no-op') ? _t('aiAssist.resultNoOp') : (it.resultKind === 'velocity-only') ? _t('aiAssist.resultVelocityOnly') : (it.resultKind === 'pitch/timing') ? _t('aiAssist.resultPitchTiming') : (it.resultKind === 'structure') ? _t('aiAssist.resultStructure') : _t('aiAssist.resultUpdated');
+              else if (runState === 'failed') statusLine = _t('aiAssist.statusFailed') + ': ' + escapeHtml((it.lastError || 'error').slice(0, 80));
+              else if (runState === 'undone') statusLine = _t('aiAssist.statusUndone');
+              html += '<div class="aiAssistCardStatus">' + statusLine + '</div>';
+            }
+            const dbgHtml = _buildAiAssistDebugHtml(it, escapeHtml);
+            if (dbgHtml){
+              const dbgKey = String(it.clipId) + '\0' + String(it.createdAt);
+              const dbgOpen = !!(this._aiAssistDebugExpanded && this._aiAssistDebugExpanded[dbgKey]);
+              html += '<div class="aiAssistDbg">';
+              html += '<button type="button" class="btn mini aiAssistDbgToggle" data-act="aiDebugToggle" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-card-created="' + escapeHtml(String(it.createdAt)) + '">' + escapeHtml(dbgOpen ? 'Trace \u25BE' : 'Trace \u25B8') + '</button>';
+              html += '<div class="aiAssistDbgPanel' + (dbgOpen ? ' open' : '') + '">' + dbgHtml + '</div>';
+              html += '</div>';
+            }
+            html += '<div class="aiAssistCardBtns">';
+            html += '<button type="button" class="btn primary mini" data-act="aiRun" data-clip-id="' + escapeHtml(String(it.clipId)) + '" data-prompt="' + escapeHtml(it.promptText) + '">' + escapeHtml(_t('aiAssist.run')) + '</button>';
+            html += '<button type="button" class="btn mini" data-act="aiOpenOptimize" data-clip-id="' + escapeHtml(String(it.clipId)) + '">' + escapeHtml(_t('aiAssist.openOptimize')) + '</button>';
+            if (canUndo) html += '<button type="button" class="btn mini" data-act="aiUndo" data-clip-id="' + escapeHtml(String(it.clipId)) + '">' + escapeHtml(_t('aiAssist.undo')) + '</button>';
+            html += '</div></div>';
+          }
+        }
+        messagesEl.innerHTML = html || '';
+      }
+      const inp = document.getElementById('aiAssistInput');
+      if (inp && window.I18N && window.I18N.t) {
+        const ph = _t('aiAssist.promptPlaceholder');
+        if (inp.getAttribute('data-i18n-placeholder')) inp.placeholder = ph;
+      }
+      this._syncStudioAiDockRightPanelSafeBottom();
+    },
+
+    // PR-UX4c: AI Settings drawer — init bindings (guard against double bind)
+    _initAiSettingsDrawer(){
+      if (this._aiDrawerBound) return;
+      this._aiDrawerBound = true;
+      const btnOpen = $('#btnAiSettings');
+      const btnClose = $('#btnAiSettingsClose');
+      const backdrop = $('#aiSettingsBackdrop');
+      if (btnOpen) btnOpen.addEventListener('click', () => this.openAiSettingsDrawer());
+      if (btnClose) btnClose.addEventListener('click', () => this.closeAiSettingsDrawer());
+      if (backdrop) backdrop.addEventListener('click', () => this.closeAiSettingsDrawer());
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && this.state.aiSettingsOpen) this.closeAiSettingsDrawer();
+      });
+    },
+    openAiSettingsDrawer(){
+      this.state.aiSettingsOpen = true;
+      try{ localStorage.setItem(LS_KEY_AI_DRAWER_OPEN, '1'); }catch(e){}
+      this.render();
+    },
+    closeAiSettingsDrawer(){
+      this.state.aiSettingsOpen = false;
+      try{ localStorage.setItem(LS_KEY_AI_DRAWER_OPEN, '0'); }catch(e){}
+      this.render();
+    },
+
+    // PR-UX5a: Set inline status in AI drawer (kind = 'ok'|'err'|'info'); textContent only, no innerHTML
+    _setAiInlineStatus(kind, text){
+      const el = document.getElementById('aiSettingsInlineStatus');
+      if (!el) return;
+      el.textContent = text || '';
+      el.classList.remove('ok', 'err', 'info');
+      if (kind === 'ok' || kind === 'err' || kind === 'info') el.classList.add(kind);
+    },
+
+    // PR-UX5a: Update validation hints and Save disabled state from current input values
+    _updateAiValidation(baseEl, modelEl, btnSave, hintBase, hintModel){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const baseUrlOk = baseEl && String(baseEl.value || '').trim().length > 0;
+      const modelOk = modelEl && String(modelEl.value || '').trim().length > 0;
+      if (btnSave){ btnSave.disabled = !(baseUrlOk && modelOk); }
+      if (hintBase){ hintBase.textContent = baseUrlOk ? '' : _t('common.required'); }
+      if (hintModel){ hintModel.textContent = modelOk ? '' : _t('common.required'); }
+    },
+
+    // PR-UX4d: Returns true when AI config is incomplete (missing baseUrl/model, or token for non-local)
+    _aiConfigNeedsAttention(){
+      try{
+        const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+        if (!api || typeof api.loadLlmConfig !== 'function') return false;
+        const cfg = api.loadLlmConfig();
+        const missingBaseUrl = !(cfg && cfg.baseUrl && String(cfg.baseUrl).trim());
+        const missingModel = !(cfg && cfg.model && String(cfg.model).trim());
+        const tokenMissing = !(cfg && cfg.authToken && String(cfg.authToken).trim());
+        const baseUrl = (cfg && cfg.baseUrl) ? String(cfg.baseUrl) : '';
+        const localEndpoint = /localhost|127\.0\.0\.1/i.test(baseUrl);
+        const needsToken = !localEndpoint;
+        return missingBaseUrl || missingModel || (needsToken && tokenMissing);
+      }catch(e){ return false; }
+    },
+
+    // PR-UX4c: AI Settings panel — renders into given container (drawer body)
+    renderAiSettingsPanel(container){
+      if (!container) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const DEEPSEEK_URL = 'https://api.deepseek.com/v1';
+      const OLLAMA_URL = 'http://localhost:11434/v1';
+      const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
+      let baseVal = ''; let modelVal = ''; let presetVal = 'custom'; let tokenVal = ''; let velocityOnly = true;
+      if (api && typeof api.loadLlmConfig === 'function'){
+        const cfg = api.loadLlmConfig();
+        baseVal = (cfg && typeof cfg.baseUrl === 'string') ? cfg.baseUrl : '';
+        modelVal = (cfg && typeof cfg.model === 'string') ? cfg.model : '';
+        tokenVal = (cfg && typeof cfg.authToken === 'string') ? cfg.authToken : '';
+        velocityOnly = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+        if (baseVal === DEEPSEEK_URL) presetVal = 'deepseek';
+        else if (baseVal === OLLAMA_URL) presetVal = 'ollama';
+      }
+      container.innerHTML = (
+        '<div class="col" style="gap:6px;">' +
+        '<label class="muted" style="margin:0;" data-i18n="editor.gatewayPreset">' + escapeHtml(_t('editor.gatewayPreset')) + '</label>' +
+        '<select id="inspAi_gatewayPreset" class="btn" style="width:100%; padding:6px; font-size:12px;">' +
+        '<option value="custom">' + escapeHtml(_t('editor.gatewayCustom')) + '</option>' +
+        '<option value="deepseek">' + escapeHtml(_t('editor.gatewayDeepseek')) + '</option>' +
+        '<option value="ollama">' + escapeHtml(_t('editor.gatewayOllama')) + '</option>' +
+        '</select>' +
+        '<div class="muted" style="font-size:11px; margin-top:-2px;" data-i18n="editor.deepseekOllamaHint">' + escapeHtml(_t('editor.deepseekOllamaHint')) + '</div>' +
+        '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.baseUrl')) + '</label>' +
+        '<input id="inspAi_baseUrl" type="text" placeholder="' + escapeHtml(_t('editor.baseUrlPlaceholder')) + '" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<div class="aiHint aiHintErr" data-ai-hint="baseUrl"></div>' +
+        '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.model')) + '</label>' +
+        '<div class="row" style="gap:6px; align-items:center;">' +
+        '<input id="inspAi_model" type="text" list="inspAi_modelList" placeholder="' + escapeHtml(_t('editor.modelPlaceholder')) + '" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<button id="inspAi_btnLoadModels" type="button" class="btn mini">' + escapeHtml(_t('editor.loadModels')) + '</button>' +
+        '</div>' +
+        '<datalist id="inspAi_modelList"></datalist>' +
+        '<div class="aiHint aiHintErr" data-ai-hint="model"></div>' +
+        '<div id="inspAi_modelLoadStatus" class="muted" style="min-height:1em; font-size:11px;"></div>' +
+        '<label class="muted" style="margin:0;">' + escapeHtml(_t('editor.authToken')) + '</label>' +
+        '<input id="inspAi_authToken" type="password" placeholder="' + escapeHtml(_t('editor.authOptional')) + '" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />' +
+        '<label style="display:flex; align-items:center; gap:8px; cursor:pointer;">' +
+        '<input id="inspAi_velocityOnly" type="checkbox" />' +
+        '<span>' + escapeHtml(_t('editor.velocityOnlySafe')) + '</span>' +
+        '</label>' +
+        '<div class="row" style="gap:6px;">' +
+        '<button id="inspAi_btnSave" type="button" class="btn mini">' + escapeHtml(_t('inst.save')) + '</button>' +
+        '<button id="inspAi_btnReset" type="button" class="btn mini">' + escapeHtml(_t('common.reset')) + '</button>' +
+        '<button id="inspAi_btnTest" type="button" class="btn mini">' + escapeHtml(_t('editor.testConnection')) + '</button>' +
+        '</div>' +
+        '<div id="aiSettingsInlineStatus" class="aiInlineStatus"></div>' +
+        '</div>'
+      );
+      const presetEl = document.getElementById('inspAi_gatewayPreset');
+      const baseEl = document.getElementById('inspAi_baseUrl');
+      const modelEl = document.getElementById('inspAi_model');
+      const tokenEl = document.getElementById('inspAi_authToken');
+      const velocityOnlyEl = document.getElementById('inspAi_velocityOnly');
+      const btnSave = document.getElementById('inspAi_btnSave');
+      const hintBase = container.querySelector('[data-ai-hint="baseUrl"]');
+      const hintModel = container.querySelector('[data-ai-hint="model"]');
+      if (presetEl) presetEl.value = presetVal;
+      if (baseEl) baseEl.value = baseVal;
+      if (modelEl) modelEl.value = modelVal;
+      if (tokenEl) tokenEl.value = tokenVal;
+      if (velocityOnlyEl) velocityOnlyEl.checked = velocityOnly;
+      const self = this;
+      const updateValidation = function(){ self._updateAiValidation(baseEl, modelEl, btnSave, hintBase, hintModel); };
+      self._updateAiValidation(baseEl, modelEl, btnSave, hintBase, hintModel);
+      if (baseEl) baseEl.addEventListener('input', updateValidation);
+      if (baseEl) baseEl.addEventListener('change', updateValidation);
+      if (modelEl) modelEl.addEventListener('input', updateValidation);
+      if (modelEl) modelEl.addEventListener('change', updateValidation);
+      const applyPresetFill = function(pv){
+        if (pv === 'deepseek'){ if (baseEl) baseEl.value = DEEPSEEK_URL; if (modelEl && !modelEl.value.trim()) modelEl.value = 'deepseek-chat'; }
+        else if (pv === 'ollama'){ if (baseEl) baseEl.value = OLLAMA_URL; }
+      };
+      if (presetEl) presetEl.addEventListener('change', function(){ applyPresetFill(this.value || 'custom'); updateValidation(); });
+      document.getElementById('inspAi_btnSave').addEventListener('click', function(){
+        if (btnSave && btnSave.disabled) return;
+        if (!api || typeof api.saveLlmConfig !== 'function') return;
+        try {
+          const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+          const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+          const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+          api.saveLlmConfig({ baseUrl: base, model: model, authToken: token, velocityOnly: velocityOnlyEl ? velocityOnlyEl.checked : true });
+          self._setAiInlineStatus('ok', _t('ai.saved'));
+          if (typeof self.setImportStatus === 'function') self.setImportStatus(_t('ai.saved'), false);
+          self.render();
+        } catch (err) {
+          const msg = (err && (err.message || String(err))).slice(0, 200);
+          self._setAiInlineStatus('err', _t('ai.saveFailed') + ': ' + msg);
+          if (typeof self.setImportStatus === 'function') self.setImportStatus(_t('ai.saveFailed') + ': ' + msg, false);
+        }
+      });
+      document.getElementById('inspAi_btnReset').addEventListener('click', function(){
+        if (!api || typeof api.resetLlmConfig !== 'function') return;
+        const def = api.resetLlmConfig();
+        if (baseEl) baseEl.value = (def && typeof def.baseUrl === 'string') ? def.baseUrl : '';
+        if (modelEl) modelEl.value = (def && typeof def.model === 'string') ? def.model : '';
+        if (tokenEl) tokenEl.value = '';
+        if (velocityOnlyEl) velocityOnlyEl.checked = (def && typeof def.velocityOnly === 'boolean') ? def.velocityOnly : true;
+        if (presetEl) presetEl.value = 'custom';
+        self._setAiInlineStatus('ok', _t('inspector.aiReset'));
+        updateValidation();
+        self.render();
+      });
+      document.getElementById('inspAi_btnTest').addEventListener('click', function(){
+        const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+        if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){ self._setAiInlineStatus('err', _t('editor.llmConfigNotLoaded')); return; }
+        const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+        const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
+        const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+        if (!base || !model){ self._setAiInlineStatus('err', _t('editor.pleaseSetBaseUrlAndModel')); return; }
+        self._setAiInlineStatus('info', _t('ai.testing'));
+        client.callChatCompletions({ baseUrl: base, model: model, authToken: token }, [{ role: 'system', content: 'Reply with exactly: ok' }, { role: 'user', content: 'ping' }], { timeoutMs: 8000 })
+          .then(function(){ self._setAiInlineStatus('ok', _t('ai.testOk')); })
+          .catch(function(err){
+            const msg = (err && (err.message || String(err))).slice(0, 200);
+            let shortMsg = msg;
+            if (/401|403|Unauthorized/i.test(msg)) shortMsg = _t('editor.unauthorized');
+            else if (/404|not found/i.test(msg)) shortMsg = _t('editor.endpointNotFound');
+            else if (/timeout|request timeout/i.test(msg)) shortMsg = _t('editor.timeout');
+            else shortMsg = msg || _t('ai.testFailed');
+            self._setAiInlineStatus('err', _t('ai.testFailed') + ': ' + shortMsg);
+          });
+      });
+      document.getElementById('inspAi_btnLoadModels').addEventListener('click', function(){
+        const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
+        const loadSt = document.getElementById('inspAi_modelLoadStatus');
+        const setLoadSt = function(t){ if (loadSt) loadSt.textContent = t || ''; };
+        if (!client || typeof client.listModels !== 'function'){ self._setAiInlineStatus('err', _t('editor.llmConfigNotLoaded')); return; }
+        const base = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
+        const token = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
+        if (!base){ self._setAiInlineStatus('err', _t('editor.pleaseSetBaseUrl')); return; }
+        self._setAiInlineStatus('info', _t('ai.loadingModels'));
+        setLoadSt(_t('common.loading'));
+        client.listModels({ baseUrl: base, authToken: token }, { timeoutMs: 8000 })
+          .then(function(res){
+            const ids = (res && Array.isArray(res.ids)) ? res.ids : [];
+            const listEl = document.getElementById('inspAi_modelList');
+            if (listEl){ listEl.innerHTML = ''; for (var i = 0; i < ids.length && i < 200; i++){ var o = document.createElement('option'); o.value = ids[i]; listEl.appendChild(o); } }
+            const loadedMsg = (_t('editor.loadedModels') || 'Loaded {n} models').replace('{n}', String(ids.length));
+            setLoadSt(loadedMsg);
+            self._setAiInlineStatus('ok', _t('ai.modelsLoaded'));
+          })
+          .catch(function(err){
+            const msg = (err && (err.message || String(err))).slice(0, 200);
+            let shortMsg = msg;
+            if (/401|403|Unauthorized/i.test(msg)) shortMsg = _t('editor.unauthorized');
+            else if (/404|not found/i.test(msg)) shortMsg = _t('editor.endpointNotFound');
+            else if (/timeout|request timeout/i.test(msg)) shortMsg = _t('editor.timeout');
+            else shortMsg = msg || _t('editor.failedLoadModels');
+            setLoadSt(shortMsg);
+            self._setAiInlineStatus('err', _t('ai.modelsLoadFailed') + ': ' + shortMsg);
+          });
+      });
+    },
+
+    renderInspector(){
+      const emptyEl = $('#inspectorEmptyState');
+      const contentEl = $('#inspectorContent');
+      const timelineEl = $('#inspectorTimelineSection');
+      const projectEl = $('#inspProject');
+      const exportEl = $('#inspExport');
+      const projectSummary = $('#inspProjectSummary');
+      const hasSelection = !!(this.state.selectedClipId || this.state.selectedInstanceId);
+      const hasInstance = !!this.state.selectedInstanceId;
+      if (emptyEl) emptyEl.style.display = hasSelection ? 'none' : '';
+      // Keep #inspectorContent visible without selection so Project summary + Export & Import stay usable.
+      if (contentEl) contentEl.style.display = '';
+      if (timelineEl) timelineEl.style.display = hasInstance ? '' : 'none';
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const tracks = this.project.tracks.length;
+      const clips = this.project.clips.length;
+      const inst = this.project.instances.length;
+      if (projectSummary) projectSummary.textContent = `${_t('inspector.project')}: ${tracks} ${_t('inspector.tracks').toLowerCase()} · ${clips} ${_t('inspector.clips').toLowerCase()} · ${inst} ${_t('inspector.instances').toLowerCase()}`;
+      if (projectEl) projectEl.open = getInspectorSectionOpen('project');
+      if (exportEl) exportEl.open = getInspectorSectionOpen('export');
+    },
 
     render(){
+      const _perf = _devPerfTimingEnabled();
+      const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
+      try{
       try{ this.ensureTrackButtons(); }catch(e){}
       // Inspector stats
       $('#kvTracks').textContent = String(this.project.tracks.length);
@@ -1163,11 +3809,49 @@ ensureTrackButtons(){
       $('#kvInst').textContent = String(this.project.instances.length);
       $('#inpBpm').value = this.project.bpm;
 
+      // PR-UX3b: Inspector progressive disclosure
+      this.renderInspector();
+
       this.renderClipList();
       this.renderTimeline();
       this.renderSelection();
       this.renderSelectedClip();
+      // PR-UX4c: AI Settings drawer — show/hide and render form when open
+      const aiModal = $('#aiSettingsModal');
+      const aiBody = $('#aiSettingsModalBody');
+      if (aiModal && aiBody){
+        if (this.state.aiSettingsOpen){
+          aiModal.classList.remove('hidden');
+          aiModal.setAttribute('aria-hidden', 'false');
+          this.renderAiSettingsPanel(aiBody);
+        } else {
+          aiModal.classList.add('hidden');
+          aiModal.setAttribute('aria-hidden', 'true');
+          aiBody.innerHTML = '';
+        }
+      }
+      // PR-UX4d: AI Settings button — active when drawer open, needsAttention when config incomplete
+      const btnAi = $('#btnAiSettings');
+      if (btnAi){
+        if (this.state.aiSettingsOpen) btnAi.classList.add('active'); else btnAi.classList.remove('active');
+        if (this._aiConfigNeedsAttention()) btnAi.classList.add('needsAttention'); else btnAi.classList.remove('needsAttention');
+      }
+      // PR-UX7a: AI Assistant dock — header, messages, open state
+      this._renderAiAssistDock();
       try{ this.updateRecordButtonStates(); }catch(e){}
+      try{ this._updateI18nLabels(); }catch(e){}
+      // Clip editor: ghost overlay must track current head's parent after optimize / revision changes (same session).
+      try{
+        if (this.state.modal && this.state.modal.show && this.editorRt){
+          if (typeof this.editorRt.modalSyncGhostFromClipParent === 'function') this.editorRt.modalSyncGhostFromClipParent();
+          if (typeof this.editorRt.modalRequestDraw === 'function') this.editorRt.modalRequestDraw();
+        }
+      }catch(e){}
+      } finally {
+        if (_perf && typeof performance !== 'undefined'){
+          console.log('[H2S perf] render', (performance.now() - _perfT0).toFixed(2) + 'ms');
+        }
+      }
     },
 
     renderClipList(){
@@ -1182,7 +3866,7 @@ ensureTrackButtons(){
       if (this.project.clips.length === 0){
         const d = document.createElement('div');
         d.className = 'muted';
-        d.textContent = 'No clips yet. Upload WAV to generate one.';
+        d.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('cliplib.noClips') : 'No clips yet. Import audio to generate one.';
         root.appendChild(d);
         return;
       }
@@ -1197,12 +3881,12 @@ ensureTrackButtons(){
         });
 el.innerHTML = `
           <div class="clipTitle">${escapeHtml(clip.name)}</div>
-          <div class="clipMeta"><span>${st.count} notes</span><span>${fmtSec(st.spanSec)}</span></div>
+          <div class="clipMeta"><span>${st.count} ${(window.I18N && window.I18N.t) ? window.I18N.t('cliplib.notes') : 'notes'}</span><span>${fmtSec(st.spanSec)}</span></div>
           <div class="miniBtns">
-            <button class="btn mini" data-act="play">Play</button>
-            <button class="btn mini" data-act="add">Add</button>
-            <button class="btn mini" data-act="edit">Edit</button>
-            <button class="btn mini danger" data-act="remove">Remove</button>
+            <button class="btn mini" data-act="play">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.play') : 'Play')}</button>
+            <button class="btn mini" data-act="add">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.addToSong') : 'Add to Song')}</button>
+            <button class="btn mini" data-act="edit">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.edit') : 'Edit')}</button>
+            <button class="btn mini danger" data-act="remove">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.remove') : 'Remove')}</button>
           </div>
         `;
 
@@ -1235,7 +3919,8 @@ renderTimeline(){
       const clipId = this.state.selectedClipId;
       if (!clipId){
         box.className = 'muted';
-        box.textContent = 'Click a clip in the library to view History.';
+        box.setAttribute('data-i18n', 'inspector.clickClipHint');
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.clickClipHint') : 'Click a clip in the library to view History.';
         return;
       }
       const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
@@ -1245,33 +3930,28 @@ renderTimeline(){
       if (!clip){
         this.state.selectedClipId = null;
         box.className = 'muted';
-        box.textContent = 'Click a clip in the library to view History.';
+        box.setAttribute('data-i18n', 'inspector.clickClipHint');
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.clickClipHint') : 'Click a clip in the library to view History.';
         return;
       }
       const revInfo = (P && typeof P.listClipRevisions === 'function') ? P.listClipRevisions(clip) : null;
       const view = (typeof window !== 'undefined' && window.H2SLibraryView && window.H2SLibraryView.historyControlsHTML) ? window.H2SLibraryView : null;
       let historyHtml = '';
       if (view) historyHtml = view.historyControlsHTML(clipId, revInfo, escapeHtml);
-      // PR-D2c: Sync button when Clip Details (library) vs Timeline Selection differ
-      let syncHtml = '';
-      const timelineInst = this.state.selectedInstanceId && (this.project.instances || []).find(x => x.id === this.state.selectedInstanceId);
-      const timelineClipId = timelineInst ? timelineInst.clipId : null;
-      if (clipId && timelineClipId && clipId !== timelineClipId){
-        syncHtml = `<div style="margin-bottom:6px;"><a href="#" data-act="inspSyncClip" data-id="${escapeHtml(timelineClipId)}" style="font-size:12px; opacity:0.9;">Sync to timeline clip</a></div>`;
-      }
       const ps = (clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) ||
         (clip.meta && clip.meta.patchSummary) ||
         (clip.meta && clip.meta.agent && clip.meta.agent.lastResult && clip.meta.agent.lastResult.patchSummary) ||
         null;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
       let resultsHtml = '';
       if (ps && typeof ps === 'object'){
         const parts = [];
         if (typeof ps.ops === 'number') parts.push(`ops: ${ps.ops}`);
-        if (ps.isVelocityOnly === true) parts.push('velocity only');
+        if (ps.isVelocityOnly === true) parts.push(_t('opt.velocityOnly'));
         else {
-          if (ps.hasPitchChange === true) parts.push('pitch ✓');
-          if (ps.hasTimingChange === true) parts.push('timing ✓');
-          if (ps.hasStructuralChange === true) parts.push('structure ✓');
+          if (ps.hasPitchChange === true) parts.push(_t('opt.pitch'));
+          if (ps.hasTimingChange === true) parts.push(_t('opt.timing'));
+          if (ps.hasStructuralChange === true) parts.push(_t('opt.structure'));
         }
         if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
         if (ps.promptMeta && typeof ps.promptMeta === 'object') {
@@ -1284,32 +3964,72 @@ renderTimeline(){
         resultsHtml = 'No patch summary yet.';
       }
       const storedPreset = this.getOptimizePresetForClip ? this.getOptimizePresetForClip(clipId) : null;
+      const storedOpts = this.getOptimizeOptions ? this.getOptimizeOptions(clipId) : null;
+      const storedTemplateId = (storedOpts && storedOpts.templateId) ? String(storedOpts.templateId).trim() : null;
       const presetSelVal = (storedPreset != null && storedPreset !== '') ? String(storedPreset) : '';
-      const optimizeSettingsHtml = (
-        `<details class="clipOptimizeSettings" style="margin-top:6px;">` +
-          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Optimize Settings</summary>` +
-          `<div style="margin-top:6px;">` +
-            `<label style="font-size:12px; opacity:0.8;">Preset</label>` +
-            `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
-              `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
-              `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
-              `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
-              `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
-            `</select>` +
+      const running = !!this.state._inspectorOptRunning;
+      const optError = (this.state._inspectorOptError != null && this.state._inspectorOptError !== '') ? String(this.state._inspectorOptError) : '';
+      let llmMode = '';
+      let llmModel = '';
+      try {
+        const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
+        if (api) {
+          const cfg = api.loadLlmConfig();
+          const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+          llmMode = safeMode ? _t('opt.safe') : _t('opt.full');
+          llmModel = (cfg && cfg.model != null && String(cfg.model).trim()) ? String(cfg.model).trim() : '';
+        }
+      } catch (_) {}
+      const canUndo = !!(clip.parentRevisionId != null && String(clip.parentRevisionId).trim());
+      const templateChipsHtml = Object.keys(INSPECTOR_TEMPLATES).map(function(tid){
+        const tm = INSPECTOR_TEMPLATES[tid];
+        const label = (tm.labelKey && _t(tm.labelKey)) ? _t(tm.labelKey) : (tm.label || tid);
+        const sel = storedTemplateId === tid ? ' style="border-color:var(--accent); opacity:1;"' : '';
+        return `<button type="button" class="btn mini" data-act="inspTemplateChip" data-template-id="${escapeHtml(tid)}" data-id="${escapeHtml(clipId)}"${sel}>${escapeHtml(label)}</button>`;
+      }).join(' ');
+      const optimizeBlockHtml = (
+        `<details class="inspectorOptimize" data-insp-section="opt" style="margin-top:6px;"${getInspectorSectionOpen('opt') ? ' open' : ''}>` +
+          `<summary style="cursor:pointer; user-select:none; opacity:0.9; font-weight:600;">${escapeHtml(_t('opt.optimize'))}</summary>` +
+          `<div style="margin-top:8px;">` +
+            `<div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:8px;">${templateChipsHtml}</div>` +
+            (llmMode || llmModel ? `<div class="muted" style="font-size:11px; margin-bottom:6px;">${escapeHtml(llmMode ? llmMode + (llmModel ? ' · ' + llmModel : '') : llmModel)}</div>` : '') +
+            `<div class="row" style="gap:6px; margin-bottom:6px;">` +
+              `<button type="button" class="btn primary mini" data-act="inspRunOptimize" data-id="${escapeHtml(clipId)}"${running ? ' disabled' : ''}>${escapeHtml(_t('opt.run'))}</button>` +
+              (canUndo ? `<button type="button" class="btn mini" data-act="inspUndoOptimize" data-id="${escapeHtml(clipId)}"${running ? ' disabled' : ''}>${escapeHtml(_t('opt.undoOptimize'))}</button>` : '') +
+            `</div>` +
+            (running ? `<div class="muted" style="font-size:12px;">Running…</div>` : optError ? `<div class="muted" style="font-size:12px; color:var(--danger, #e55);">${escapeHtml(optError)}</div>` : '') +
+            `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="font-size:11px; opacity:0.8;">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inspector.openEditor') : 'Open Editor')}</a>` +
+            `<details class="optAdvanced" data-insp-section="opt_adv" style="margin-top:10px;"${getInspectorSectionOpen('opt_adv') ? ' open' : ''}>` +
+              `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.advanced'))}</summary>` +
+              `<div style="margin-top:6px;">` +
+                `<label style="font-size:12px; opacity:0.8;">${escapeHtml(_t('opt.preset'))}</label>` +
+                `<select data-act="inspOptimizePreset" data-id="${escapeHtml(clipId)}" style="display:block; margin-top:4px; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; min-width:140px;">` +
+                  `<option value=""${presetSelVal === '' ? ' selected' : ''}>Default</option>` +
+                  `<option value="llm_v0"${presetSelVal === 'llm_v0' ? ' selected' : ''}>${escapeHtml(_t('opt.llmV0'))}</option>` +
+                  `<option value="dynamics_accent"${presetSelVal === 'dynamics_accent' ? ' selected' : ''}>Dynamics Accent</option>` +
+                  `<option value="dynamics_level"${presetSelVal === 'dynamics_level' ? ' selected' : ''}>Dynamics Level</option>` +
+                  `<option value="duration_gentle"${presetSelVal === 'duration_gentle' ? ' selected' : ''}>Duration Gentle</option>` +
+                  `<option value="velocity_shape"${presetSelVal === 'velocity_shape' ? ' selected' : ''}>Velocity shape</option>` +
+                  `<option value="local_transpose"${presetSelVal === 'local_transpose' ? ' selected' : ''}>Local transpose</option>` +
+                  `<option value="rhythm_tighten_loosen"${presetSelVal === 'rhythm_tighten_loosen' ? ' selected' : ''}>Rhythm tighten/loosen</option>` +
+                `</select>` +
+              `</div>` +
+            `</details>` +
+            `<details class="optResults" data-insp-section="opt_results" style="margin-top:6px;"${getInspectorSectionOpen('opt_results') ? ' open' : ''}>` +
+              `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.resultSummary'))}</summary>` +
+              `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
+            `</details>` +
           `</div>` +
         `</details>`
       );
+      const clipDisplayName = clip.name || clipId || 'Untitled';
+      box.removeAttribute('data-i18n');
       box.className = '';
       box.innerHTML = (
-        syncHtml +
-        `<div class="kv"><b>Clip</b><span>${escapeHtml(clip.name || clipId)}</span></div>` +
-        optimizeSettingsHtml +
-        `<details class="selectedClipResults" style="margin-top:6px;">` +
-          `<summary style="cursor:pointer; user-select:none; opacity:0.8;">Results</summary>` +
-          `<div id="selectedClipPatchSummary" class="muted" style="font-size:12px; margin-top:6px; line-height:1.4;">${escapeHtml(resultsHtml)}</div>` +
-        `</details>` +
+        `<div class="kv"><b>Clip</b><input type="text" data-act="inspClipName" data-id="${escapeHtml(clipId)}" data-initial-value="${escapeHtml(clipDisplayName)}" value="${escapeHtml(clipDisplayName)}" style="flex:1; min-width:0; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; box-sizing:border-box;" /></div>` +
+        optimizeBlockHtml +
         (historyHtml ? (
-          `<details class="clipAdvanced" style="margin-top:6px;">` +
+          `<details class="clipAdvanced" data-insp-section="history" style="margin-top:6px;"${getInspectorSectionOpen('history') ? ' open' : ''}>` +
             `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
             `<div style="margin-top:6px;">${historyHtml}</div>` +
           `</details>`
@@ -1320,11 +4040,54 @@ renderTimeline(){
         const self = this;
         box.__h2sSelectedClipBound = true;
         box.__h2sClickHandler = function(ev){
-          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+          const btn = ev.target && ev.target.closest ? ev.target.closest('[data-act],[data-template-id]') : null;
           if (!btn) return;
-          const act = btn.getAttribute('data-act');
-          const cid = btn.getAttribute('data-id');
+          const act = btn.getAttribute('data-act') || (btn.getAttribute('data-template-id') ? 'inspTemplateChip' : null);
+          const cid = btn.getAttribute('data-id') || self.state.selectedClipId;
           if (!cid) return;
+          if (act === 'inspTemplateChip'){
+            const tid = btn.getAttribute('data-template-id');
+            const tmpl = tid && INSPECTOR_TEMPLATES[tid] ? INSPECTOR_TEMPLATES[tid] : null;
+            if (tmpl && self.setOptimizeOptions){
+              self.setOptimizeOptions({ templateId: tid, intent: tmpl.intent, requestedPresetId: 'llm_v0', userPrompt: tmpl.seed || null }, cid);
+            }
+            self.renderSelectedClip();
+            return;
+          }
+          if (act === 'inspRunOptimize'){
+            if (self.state._inspectorOptRunning) return;
+            self.state._inspectorOptRunning = true;
+            self.state._inspectorOptError = '';
+            self.renderSelectedClip();
+            self.runCommand('optimize_clip', { clipId: cid }).then(function(res){
+              self.state._inspectorOptRunning = false;
+              self.state._inspectorOptError = '';
+              if (res && !res.ok && res.message) self.state._inspectorOptError = res.message;
+              if (res && res.ok) {
+                setInspectorSectionOpen('opt', true);
+                setInspectorSectionOpen('opt_results', true);
+              }
+              persist();
+              self.render();
+            }).catch(function(err){
+              self.state._inspectorOptRunning = false;
+              self.state._inspectorOptError = (err && err.message) ? String(err.message) : 'Optimize failed';
+              self.renderSelectedClip();
+            });
+            return;
+          }
+          if (act === 'inspUndoOptimize'){
+            if (self.state._inspectorOptRunning) return;
+            self.runCommand('rollback_clip', { clipId: cid }).then(function(res){
+              if (res && res.ok){ persist(); self.render(); }
+            });
+            return;
+          }
+          if (act === 'inspOpenEditor'){
+            ev.preventDefault();
+            self.openClipEditor(cid);
+            return;
+          }
           const p2 = self.getProjectV2();
           if (!P) return;
           if (act === 'inspRollbackRev' && P.rollbackClipRevision){
@@ -1347,12 +4110,9 @@ renderTimeline(){
             const target = p2 || self.project;
             const res = P.setClipActiveRevision(target, cid, revId);
             if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
-            self.render();
-            return;
-          }
-          if (act === 'inspSyncClip'){
-            ev.preventDefault();
-            if (cid) self.state.selectedClipId = cid;
+            if (res && res.ok && self.state.modal && self.state.modal.show && self.state.modal.clipId === cid && !self.state.modal.dirty && self.editorRt && typeof self.editorRt.modalRefreshDraftFromClip === 'function'){
+              try { self.editorRt.modalRefreshDraftFromClip(); } catch (e) {}
+            }
             self.render();
             return;
           }
@@ -1371,6 +4131,17 @@ renderTimeline(){
             self.render();
             return;
           }
+          if (act === 'inspClipName'){
+            if (!cid || !self) return;
+            const newName = String(el.value || '').trim() || 'Untitled';
+            const p2 = self.getProjectV2();
+            const clip = p2 && p2.clips && p2.clips[cid];
+            if (!clip) return;
+            if (newName === (clip.name || '')) return;
+            clip.name = newName;
+            self.setProjectFromV2(p2);
+            return;
+          }
           if (act !== 'inspRevSelect') return;
           if (!cid || !P || !P.setClipActiveRevision) return;
           const revId = el.value;
@@ -1378,10 +4149,38 @@ renderTimeline(){
           const target = p2 || self.project;
           const res = P.setClipActiveRevision(target, cid, revId);
           if (res && res.ok && p2 && self.setProjectFromV2) self.setProjectFromV2(p2);
+          if (res && res.ok && self.state.modal && self.state.modal.show && self.state.modal.clipId === cid && !self.state.modal.dirty && self.editorRt && typeof self.editorRt.modalRefreshDraftFromClip === 'function'){
+            try { self.editorRt.modalRefreshDraftFromClip(); } catch (e) {}
+          }
           self.render();
+        };
+        box.__h2sKeydownHandler = function(ev){
+          const el = ev.target;
+          if (!el || el.getAttribute('data-act') !== 'inspClipName') return;
+          const self = box.__h2sApp;
+          if (ev.key === 'Enter'){
+            ev.preventDefault();
+            el.blur();
+            return;
+          }
+          if (ev.key === 'Escape'){
+            ev.preventDefault();
+            const initial = el.getAttribute('data-initial-value') || '';
+            el.value = initial;
+            el.blur();
+            return;
+          }
         };
         box.addEventListener('click', box.__h2sClickHandler, true);
         box.addEventListener('change', box.__h2sChangeHandler);
+        box.addEventListener('keydown', box.__h2sKeydownHandler);
+        box.__h2sToggleHandler = function(ev){
+          const d = ev.target;
+          if (!d || d.tagName !== 'DETAILS') return;
+          const key = d.getAttribute && d.getAttribute('data-insp-section');
+          if (key === 'opt' || key === 'opt_adv' || key === 'opt_results' || key === 'history') setInspectorSectionOpen(key, d.open);
+        };
+        box.addEventListener('toggle', box.__h2sToggleHandler);
       }
     },
 
@@ -1396,28 +4195,44 @@ renderTimeline(){
       const id = this.state.selectedInstanceId;
       if (!id){
         box.className = 'muted';
-        box.textContent = 'Select a clip instance on timeline.';
+        box.setAttribute('data-i18n', 'inspector.selectInstanceHint');
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.selectInstanceHint') : 'Select a clip instance on timeline.';
         return;
       }
       const inst = this.project.instances.find(x => x.id === id);
       if (!inst){
         box.className = 'muted';
-        box.textContent = 'Select a clip instance on timeline.';
+        box.setAttribute('data-i18n', 'inspector.selectInstanceHint');
+        box.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('inspector.selectInstanceHint') : 'Select a clip instance on timeline.';
         return;
       }
       const clip = this.project.clips.find(c => c.id === inst.clipId);
+      box.removeAttribute('data-i18n');
       box.className = '';
+      const _t2 = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+      const P = window.H2SProject;
+      const isAudio = !!(clip && P && typeof P.clipKind === 'function' && P.clipKind(clip) === 'audio');
+      const editOrConv = isAudio
+        ? `<button id="btnSelConvertAudio" class="btn mini primary" type="button">${escapeHtml(_t2('cliplib.convertToEditable'))}</button>`
+        : `<button id="btnSelEdit" class="btn mini">${escapeHtml(_t2('actions.edit'))}</button>`;
       box.innerHTML = `
         <div class="kv"><b>Clip</b><span>${escapeHtml(clip ? clip.name : inst.clipId)}</span></div>
         <div class="kv"><b>Start</b><span>${fmtSec(inst.startSec)}</span></div>
         <div class="kv"><b>Transpose</b><span>${inst.transpose || 0}</span></div>
         <div class="row" style="margin-top:10px;">
-          <button id="btnSelEdit" class="btn mini">Edit</button>
-          <button id="btnSelDup" class="btn mini">Duplicate</button>
-          <button id="btnSelDel" class="btn mini danger">Remove</button>
+          ${editOrConv}
+          <button id="btnSelDup" class="btn mini">${escapeHtml(_t2('actions.duplicate'))}</button>
+          <button id="btnSelDel" class="btn mini danger">${escapeHtml(_t2('actions.remove'))}</button>
         </div>
       `;
-      box.querySelector('#btnSelEdit').addEventListener('click', () => this.openClipEditor(inst.clipId));
+      if (isAudio){
+        const b = box.querySelector('#btnSelConvertAudio');
+        if (b) b.addEventListener('click', () => {
+          Promise.resolve(this.convertAudioClipToEditable(inst.clipId, { sourceAudioInstanceId: inst.id })).catch((err) => console.warn('[App] convertAudioClipToEditable (fallback) failed', err));
+        });
+      } else {
+        box.querySelector('#btnSelEdit').addEventListener('click', () => this.openClipEditor(inst.clipId));
+      }
       box.querySelector('#btnSelDup').addEventListener('click', () => this.duplicateInstance(inst.id));
       box.querySelector('#btnSelDel').addEventListener('click', () => this.deleteInstance(inst.id));
     },
@@ -1502,14 +4317,18 @@ renderTimeline(){
       return {ok:true, trackIndex: ti, trackId: this.state.activeTrackId};
     },
 
-    addClipToTimeline(clipId, startSec, trackIndex){
+    addClipToTimeline(clipId, startSec, trackIndex, opts){
+      const skipPersistRender = opts && opts.skipPersistRender === true;
       const ti = (trackIndex == null) ? (Number.isFinite(this.state.activeTrackIndex) ? this.state.activeTrackIndex : 0) : trackIndex;
       const inst = H2SProject.createInstance(clipId, startSec || (this.project.ui.playheadSec || 0), ti);
       this.project.instances.push(inst);
       this.state.selectedInstanceId = inst.id;
-      persist();
-      log('Added clip to timeline.');
-      this.render();
+      if (inst.clipId) this.state.selectedClipId = inst.clipId;
+      if (!skipPersistRender){
+        persist();
+        log('Added clip to timeline.');
+        this.render();
+      }
     },
 
     instancePointerDown(ev, instId){
@@ -1532,10 +4351,149 @@ renderTimeline(){
       // handled in pointerup on window
     },
 
+    /** Top bar: one Import audio control + “Make editable notes” checkbox (default on). */
+    async runTopBarImportAudio(){
+      const chk = (typeof document !== 'undefined') ? document.getElementById('chkImportAudioToNotes') : null;
+      const toNotes = !chk || !!chk.checked;
+      if (toNotes) await this.pickWavAndGenerate();
+      else await this.importAudioFileAsNativeClip();
+    },
+
     async pickWavAndGenerate(){
       const f = await this.pickFile('.wav,.mp3,.m4a,.flac,.ogg');
       if (!f) return;
       await this.uploadFileAndGenerate(f);
+    },
+
+    /**
+     * Slice D/E: import a local audio file as a native `kind: 'audio'` clip.
+     * Slice E: audio bytes are stored in IndexedDB; assetRef is `localidb:<id>` (durable across reload in this browser).
+     */
+    async _decodeAudioFileDurationSec(file){
+      if (!file || !(file instanceof Blob)) return 1e-6;
+      const Ctx = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
+      if (!Ctx) return 1;
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try{
+            const ctx = new Ctx();
+            const ab = reader.result;
+            const buf = await ctx.decodeAudioData(ab instanceof ArrayBuffer ? ab.slice(0) : ab);
+            const d = buf.duration;
+            try { await ctx.close(); } catch (_e) {}
+            resolve((isFinite(d) && d > 0) ? d : 1e-6);
+          } catch (e){
+            reject(e);
+          }
+        };
+        reader.onerror = () => reject(reader.error || new Error('file read failed'));
+        reader.readAsArrayBuffer(file);
+      });
+    },
+
+    /**
+     * Shared path for native audio clips: decode duration, IndexedDB store, create clip + instance, persist.
+     * @param {File|Blob} file
+     * @param {{ baseName?: string, statusDoneKey?: string }} opts - baseName overrides stem from file.name; optional i18n key for final status (default io.importAudioStoredLocal)
+     * @returns {Promise<{ ok: boolean, reason?: string, clipId?: string }>}
+     */
+    async _commitNativeAudioFile(file, opts){
+      opts = opts || {};
+      const P = window.H2SProject;
+      if (!P || typeof P.createClipFromAudio !== 'function' || typeof P.createInstanceV2 !== 'function'){
+        try { alert('Audio import is unavailable (project helpers missing).'); } catch (_e) {}
+        return { ok: false, reason: 'no_project_helpers' };
+      }
+      if (!file || !(file instanceof Blob)){
+        return { ok: false, reason: 'no_file' };
+      }
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      this.setImportStatus(_t('io.importAudioDecoding'), false);
+      let durationSec = 1;
+      try{
+        durationSec = await this._decodeAudioFileDurationSec(file);
+      } catch (e){
+        console.warn('[App] audio duration decode failed', e);
+        durationSec = 1;
+      }
+      if (!isFinite(durationSec) || durationSec <= 0) durationSec = 1e-6;
+      const LAS = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
+      if (!LAS || typeof LAS.storeImportedAudioFile !== 'function'){
+        try { alert(_t('io.importAudioNoStore') || 'Local audio storage is not available in this environment.'); } catch (_e) {}
+        return { ok: false, reason: 'no_local_store' };
+      }
+      let assetRef;
+      try{
+        const st = await LAS.storeImportedAudioFile(file);
+        assetRef = st && st.assetRef ? String(st.assetRef) : '';
+      } catch (e){
+        console.warn('[App] storeImportedAudioFile failed', e);
+        try { alert(_t('io.importAudioStoreFailed') || 'Could not save imported audio locally (storage full or blocked).'); } catch (_e) {}
+        return { ok: false, reason: 'store_failed' };
+      }
+      if (!assetRef){
+        try { alert(_t('io.importAudioStoreFailed') || 'Could not save imported audio locally.'); } catch (_e) {}
+        return { ok: false, reason: 'no_asset_ref' };
+      }
+      const nameFromFile = (file.name && /\.[^/.]+$/.test(String(file.name)))
+        ? String(file.name).replace(/\.[^/.]+$/, '')
+        : '';
+      const baseName = (typeof opts.baseName === 'string' && String(opts.baseName).trim())
+        ? String(opts.baseName).trim()
+        : (nameFromFile || 'Imported audio');
+      let p2 = this.getProjectV2();
+      if (!p2) p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)){
+        return { ok: false, reason: 'no_project_v2' };
+      }
+      const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      const clip = P.createClipFromAudio({
+        assetRef,
+        durationSec,
+        name: baseName,
+        bpm: projBpm,
+      });
+      if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+      p2.clips[clip.id] = clip;
+      if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+      p2.clipOrder.unshift(clip.id);
+      if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+      const ti = Number.isFinite(this.state.activeTrackIndex) ? Math.max(0, Math.floor(this.state.activeTrackIndex)) : 0;
+      const tr = (p2.tracks && p2.tracks.length) ? p2.tracks[Math.min(ti, p2.tracks.length - 1)] : null;
+      const trackId = (tr && (tr.trackId || tr.id)) ? String(tr.trackId || tr.id) : (P.SCHEMA_V2 && P.SCHEMA_V2.DEFAULT_TRACK_ID) ? P.SCHEMA_V2.DEFAULT_TRACK_ID : 'trk_0';
+      const startBeat = (p2.ui && typeof p2.ui.playheadBeat === 'number' && isFinite(p2.ui.playheadBeat)) ? Math.max(0, p2.ui.playheadBeat) : 0;
+      const inst = P.createInstanceV2(clip.id, startBeat, trackId);
+      if (!Array.isArray(p2.instances)) p2.instances = [];
+      p2.instances.push(inst);
+      if (typeof P.normalizeProjectV2 === 'function') P.normalizeProjectV2(p2);
+      this.state.selectedClipId = clip.id;
+      this.state.selectedInstanceId = inst.id;
+      this.setProjectFromV2(p2);
+      const doneKey = (typeof opts.statusDoneKey === 'string' && opts.statusDoneKey.trim()) ? opts.statusDoneKey.trim() : 'io.importAudioStoredLocal';
+      this.setImportStatus(_t(doneKey), false);
+      log('Committed native audio clip: ' + clip.id);
+      return { ok: true, clipId: clip.id };
+    },
+
+    async importAudioFileAsNativeClip(){
+      let file;
+      try{
+        file = await this.pickFile('audio/*');
+      } catch (e){
+        return;
+      }
+      if (!file) return;
+      await this._commitNativeAudioFile(file, {});
+    },
+
+    /** Record → native audio: uses same pipeline as direct import (`_commitNativeAudioFile`). */
+    async addLastRecordingAsNativeAudioClip(){
+      const f = this.state && this.state.lastRecordedFile;
+      if (!f) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const baseName = _t('cliplib.recordingClipName') || 'Recording';
+      await this._commitNativeAudioFile(f, { baseName, statusDoneKey: 'io.addRecordingAsAudioDone' });
     },
 
     /** PR-C2: Set import status (upload/generate progress). showCancel: only during active import. */
@@ -1545,14 +4503,42 @@ renderTimeline(){
       if (el) el.textContent = text || '';
       const btn = $('#btnCancelImport');
       if (btn) btn.style.display = (text && showCancel) ? 'inline-block' : 'none';
+      this.state.statusText = text || '';
+      if (typeof this.updateLogStatusBar === 'function') this.updateLogStatusBar();
+      const t = String(text || '');
+      if (/Failed|Error/i.test(t) && typeof this.setLogOpen === 'function') this.setLogOpen(true);
+    },
+    /** PR-UX3a: Update log status bar text from statusText or last log line or Ready. */
+    updateLogStatusBar(){
+      if (typeof document === 'undefined') return;
+      const bar = $('#logStatusBar');
+      if (!bar) return;
+      const status = (this.state && this.state.statusText) || _lastLogLine || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
+      const txt = String(status || '');
+      bar.textContent = txt.length > 80 ? txt.slice(0, 77) + '...' : txt;
+      bar.classList.toggle('error', /Failed|Error/i.test(String(status)));
+      bar.title = (window.I18N && window.I18N.t) ? window.I18N.t('log.clickToExpand') : 'Click to expand log';
+    },
+    /** PR-UX3a: Set log drawer open/closed and persist. */
+    setLogOpen(open){
+      const panel = $('#logPanel');
+      if (!panel) return;
+      panel.classList.toggle('collapsed', !open);
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_LOG_OPEN, open ? '1' : '0');
+      } catch (e) {}
     },
 
-    /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording. */
-    async uploadFileAndGenerate(f){
+    /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
+     * @param {Blob|File} f
+     * @param {{ sourceAudioClipId?: string, sourceAudioInstanceId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; optional `sourceAudioInstanceId` pins placement to that timeline instance. Bar-segment / explode paths unchanged.
+     */
+    async uploadFileAndGenerate(f, opts){
+      opts = opts || {};
       if (!f || !(f instanceof Blob)) return;
       const file = f instanceof File ? f : new File([f], (f.name || 'recording.webm'), { type: (f.type || 'audio/webm') });
       this.state.importCancelled = false;
-      this.setImportStatus('Uploading audio...', true);
+      this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.uploading') : 'Uploading audio...', true);
       log(`Uploading ${file.name} ...`);
       try{
         const fd = new FormData();
@@ -1567,23 +4553,37 @@ renderTimeline(){
         }
         this.state.lastUploadTaskId = tid;
         log(`Generate queued: ${tid}`);
-        this.setImportStatus('Processing... (task: ' + String(tid).slice(0, 8) + '...)', true);
+        this.setImportStatus(((window.I18N && window.I18N.t) ? window.I18N.t('io.processing') : 'Processing...') + ' (task: ' + String(tid).slice(0, 8) + '...)', true);
         await this.pollTaskUntilDone(tid);
         if (this.state.importCancelled){
-          this.setImportStatus('Cancelled.', false);
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           log('Import cancelled by user');
           return;
         }
-        this.setImportStatus('Fetching result...', true);
+        this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.fetching') : 'Fetching...', true);
         const score = await fetchJson(API.score(tid));
         if (this.state.importCancelled){
-          this.setImportStatus('Cancelled.', false);
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           return;
         }
-        this.setImportStatus('Creating clip...', true);
+        let splitRes = { score, applied: false };
+        try{
+          const flagOn = (typeof localStorage !== 'undefined') && String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_PITCH_SPLIT) || '') === '1';
+          const S = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
+          if (flagOn && S && typeof S.applyTranscriptionPitchSplitIfEnabled === 'function'){
+            splitRes = S.applyTranscriptionPitchSplitIfEnabled(score, true);
+            if (splitRes.applied) log('Transcription: heuristic pitch-bucket split applied (dev flag).');
+          }
+        }catch(e){
+          console.warn('[app] transcription pitch split skipped', e);
+          splitRes = { score, applied: false };
+        }
+        const scoreForClip = splitRes.score;
+
+        this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creatingClip') : 'Creating clip...', true);
 
         if ((this.project.clips || []).length === 0){
-          const srcBpm = (typeof score.tempo_bpm === 'number') ? score.tempo_bpm : ((typeof score.bpm === 'number') ? score.bpm : null);
+          const srcBpm = (typeof scoreForClip.tempo_bpm === 'number') ? scoreForClip.tempo_bpm : ((typeof scoreForClip.bpm === 'number') ? scoreForClip.bpm : null);
           if (typeof srcBpm === 'number' && isFinite(srcBpm) && srcBpm >= 30 && srcBpm <= 300){
             this.project.bpm = srcBpm;
             const el = $('#bpm');
@@ -1591,24 +4591,268 @@ renderTimeline(){
           }
         }
 
-        const clip = H2SProject.createClipFromScore(score, { name: file.name.replace(/\.[^/.]+$/, ''), sourceTaskId: tid });
-        if (!clip.meta) clip.meta = {};
-        if (typeof score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = score.tempo_bpm;
-        else if (typeof score.bpm === 'number') clip.meta.sourceTempoBpm = score.bpm;
-        this.project.clips.unshift(clip);
-        this.addClipToTimeline(clip.id, this.project.ui.playheadSec || 0, 0);
-        persist();
-        this.render();
-        this.setImportStatus('Done', false);
-        log(`Clip added: ${clip.name}`);
-        const cidNew = clip.id;
-        if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
-          setTimeout(() => this.openClipEditor(cidNew), 0);
+        const importBaseName = file.name.replace(/\.[^/.]+$/, '');
+        const playheadSec = this.project.ui.playheadSec || 0;
+        const SplitApi = (typeof globalThis !== 'undefined' && globalThis.H2SScoreHeuristicSplit) || (typeof window !== 'undefined' && window.H2SScoreHeuristicSplit);
+        const explodeSegmentDev =
+          (typeof localStorage !== 'undefined') &&
+          String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_EXPLODE_SEGMENT) || '') === '1';
+        const barSegDev =
+          (typeof localStorage !== 'undefined') &&
+          String(localStorage.getItem(LS_KEY_DEV_TRANSCRIPTION_BAR_SEGMENT) || '') === '1';
+        const barSegActive =
+          barSegDev &&
+          SplitApi &&
+          typeof SplitApi.segmentScoreDocByBarBoundaries === 'function';
+        let barScoreSegments = null;
+        if (barSegActive){
+          try{
+            barScoreSegments = SplitApi.segmentScoreDocByBarBoundaries(scoreForClip, { maxBars: 2 });
+            log('Transcription: bar-aware full-score segmentation (dev flag).');
+          }catch(e){
+            console.warn('[app] bar-aware segmentation skipped', e);
+            barScoreSegments = null;
+          }
         }
-        setTimeout(() => this.setImportStatus('', false), 2000);
+        const useGapSeg = explodeSegmentDev && !barSegActive;
+        const explodeWeakGuardOpts = splitRes.applied
+          ? {
+              suppressWeakFragments: true,
+            }
+          : null;
+
+        let explodeParts = null;
+        if (SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
+          if (splitRes.applied){
+            explodeParts = SplitApi.explodeNonEmptyTracksToSingleTrackScores(scoreForClip, explodeWeakGuardOpts || undefined);
+          }
+        }
+        const useExplode = Array.isArray(explodeParts) && explodeParts.length >= 2;
+
+        if (barSegActive && Array.isArray(barScoreSegments) && barScoreSegments.length > 0){
+          let maxExplodeParts = 0;
+          for (let bx = 0; bx < barScoreSegments.length; bx++){
+            const segSc = barScoreSegments[bx] && barScoreSegments[bx].score;
+            if (!SplitApi || typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores !== 'function') continue;
+            const ep = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segSc, explodeWeakGuardOpts || undefined);
+            if (Array.isArray(ep) && ep.length > maxExplodeParts) maxExplodeParts = ep.length;
+          }
+          if (!this.project.tracks) this.project.tracks = [];
+          while (this.project.tracks.length < maxExplodeParts){
+            const n = this.project.tracks.length + 1;
+            this.project.tracks.push({ id: H2SProject.uid('trk_'), name: 'Track ' + n });
+          }
+          const _perfImp = _devPerfTimingEnabled();
+          const _perfLoopT0 = _perfImp && typeof performance !== 'undefined' ? performance.now() : 0;
+          let explodeClipCount = 0;
+          let lastClipIdForAutoOpen = null;
+          for (let bi = 0; bi < barScoreSegments.length; bi++){
+            const barSeg = barScoreSegments[bi];
+            const segScore = barSeg && barSeg.score;
+            const segTMinAbs = (typeof barSeg.tMin === 'number' && isFinite(barSeg.tMin)) ? barSeg.tMin : 0;
+            if (!segScore) continue;
+            let explodePartsSeg = null;
+            if (SplitApi && typeof SplitApi.explodeNonEmptyTracksToSingleTrackScores === 'function'){
+              explodePartsSeg = SplitApi.explodeNonEmptyTracksToSingleTrackScores(segScore, explodeWeakGuardOpts || undefined);
+            }
+            if (!Array.isArray(explodePartsSeg) || explodePartsSeg.length === 0) continue;
+            const barLabel = barScoreSegments.length > 1 ? (' · ' + (bi + 1)) : '';
+            for (let k = explodePartsSeg.length - 1; k >= 0; k--){
+              const part = explodePartsSeg[k];
+              let scoreForPart = part.score;
+              let tMinForPart = 0;
+              if (SplitApi && typeof SplitApi.trimScoreDocToNoteExtent === 'function'){
+                const trimmed = SplitApi.trimScoreDocToNoteExtent(part.score);
+                scoreForPart = trimmed.score;
+                tMinForPart = (typeof trimmed.tMin === 'number' && isFinite(trimmed.tMin)) ? trimmed.tMin : 0;
+              }
+              let segmentBlocks;
+              if (useGapSeg && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
+                segmentBlocks = SplitApi.segmentScoreDocByGapAndMaxDuration(scoreForPart, {
+                  minGapSec: 1.15,
+                  maxDurationSec: 24,
+                });
+              } else {
+                segmentBlocks = [{ score: scoreForPart, tMin: 0, tMax: 0 }];
+              }
+              explodeClipCount += segmentBlocks.length;
+              for (let si = segmentBlocks.length - 1; si >= 0; si--){
+                const seg = segmentBlocks[si];
+                const segTMin = (typeof seg.tMin === 'number' && isFinite(seg.tMin)) ? seg.tMin : 0;
+                const instanceStartSec = playheadSec + segTMinAbs + tMinForPart + segTMin;
+                const segLabel = segmentBlocks.length > 1 ? (' · ' + (si + 1)) : '';
+                let _tCreate = 0;
+                if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
+                const clip = H2SProject.createClipFromScore(seg.score, {
+                  name: importBaseName + barLabel + ' — ' + part.trackName + segLabel,
+                  sourceTaskId: tid,
+                });
+                lastClipIdForAutoOpen = clip.id;
+                if (_perfImp && typeof performance !== 'undefined'){
+                  console.log('[H2S perf] import bar-seg explode createClipFromScore bi=' + bi + ' k=' + k + ' si=' + si, (performance.now() - _tCreate).toFixed(2) + 'ms');
+                }
+                if (!clip.meta) clip.meta = {};
+                const srcMeta = seg.score;
+                if (typeof srcMeta.tempo_bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.tempo_bpm;
+                else if (typeof srcMeta.bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.bpm;
+                if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+                clip.meta.splitExploded = explodePartsSeg.length >= 2;
+                clip.meta.splitExplodeIndex = part.splitIndex;
+                clip.meta.splitTrackName = part.trackName;
+                if (barScoreSegments.length > 1){
+                  clip.meta.splitBarSegmentIndex = bi;
+                  clip.meta.splitBarSegmentCount = barScoreSegments.length;
+                }
+                if (segmentBlocks.length > 1){
+                  clip.meta.splitSegmentIndex = si;
+                  clip.meta.splitSegmentCount = segmentBlocks.length;
+                }
+                this.project.clips.unshift(clip);
+                let _tAdd = 0;
+                if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
+                this.addClipToTimeline(clip.id, instanceStartSec, k, { skipPersistRender: true });
+                if (_perfImp && typeof performance !== 'undefined'){
+                  console.log('[H2S perf] import bar-seg addClipToTimeline bi=' + bi + ' k=' + k + ' si=' + si, (performance.now() - _tAdd).toFixed(2) + 'ms');
+                }
+              }
+            }
+          }
+          if (_perfImp && typeof performance !== 'undefined'){
+            console.log('[H2S perf] import bar-segment explode loop total', (performance.now() - _perfLoopT0).toFixed(2) + 'ms');
+          }
+          persist();
+          this.render();
+          log('Added clip to timeline.');
+          const doneMulti = 'Done: ' + explodeClipCount + ' clips (bar segment + explode).';
+          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
+          log('Clips added (bar segment + explode): ' + explodeClipCount);
+          if (explodeClipCount === 1 && lastClipIdForAutoOpen && this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
+            const c = this.project.clips.find((x) => x && x.id === lastClipIdForAutoOpen);
+            if (c && !_importTooLargeForAutoOpen(c)){
+              setTimeout(() => this.openClipEditor(lastClipIdForAutoOpen), 0);
+            }
+          } else {
+            log('Import: editor not auto-opened (multi-clip).');
+          }
+          setTimeout(() => this.setImportStatus('', false), 2500);
+        } else if (useExplode){
+          if (!this.project.tracks) this.project.tracks = [];
+          while (this.project.tracks.length < explodeParts.length){
+            const n = this.project.tracks.length + 1;
+            this.project.tracks.push({ id: H2SProject.uid('trk_'), name: 'Track ' + n });
+          }
+          const _perfImp = _devPerfTimingEnabled();
+          const _perfLoopT0 = _perfImp && typeof performance !== 'undefined' ? performance.now() : 0;
+          if (explodeSegmentDev) log('Transcription: explode time segmentation (dev flag).');
+          let explodeClipCount = 0;
+          for (let k = explodeParts.length - 1; k >= 0; k--){
+            const part = explodeParts[k];
+            let scoreForPart = part.score;
+            let tMinForPart = 0;
+            if (SplitApi && typeof SplitApi.trimScoreDocToNoteExtent === 'function'){
+              const trimmed = SplitApi.trimScoreDocToNoteExtent(part.score);
+              scoreForPart = trimmed.score;
+              tMinForPart = (typeof trimmed.tMin === 'number' && isFinite(trimmed.tMin)) ? trimmed.tMin : 0;
+            }
+            let segmentBlocks;
+            if (useGapSeg && SplitApi && typeof SplitApi.segmentScoreDocByGapAndMaxDuration === 'function'){
+              segmentBlocks = SplitApi.segmentScoreDocByGapAndMaxDuration(scoreForPart, {
+                minGapSec: 1.15,
+                maxDurationSec: 24,
+              });
+            } else {
+              segmentBlocks = [{ score: scoreForPart, tMin: 0, tMax: 0 }];
+            }
+            explodeClipCount += segmentBlocks.length;
+            // Unshift in reverse segment order so clips array keeps increasing time per track (seg si=0 first).
+            for (let si = segmentBlocks.length - 1; si >= 0; si--){
+              const seg = segmentBlocks[si];
+              const segTMin = (typeof seg.tMin === 'number' && isFinite(seg.tMin)) ? seg.tMin : 0;
+              // Absolute: playhead + trim offset (full score) + segment offset (trimmed score, rebased notes).
+              const instanceStartSec = playheadSec + tMinForPart + segTMin;
+              const segLabel = segmentBlocks.length > 1 ? (' · ' + (si + 1)) : '';
+              let _tCreate = 0;
+              if (_perfImp && typeof performance !== 'undefined') _tCreate = performance.now();
+              const clip = H2SProject.createClipFromScore(seg.score, {
+                name: importBaseName + ' — ' + part.trackName + segLabel,
+                sourceTaskId: tid,
+              });
+              if (_perfImp && typeof performance !== 'undefined'){
+                console.log('[H2S perf] import explode createClipFromScore k=' + k + ' si=' + si, (performance.now() - _tCreate).toFixed(2) + 'ms');
+              }
+              if (!clip.meta) clip.meta = {};
+              const srcMeta = seg.score;
+              if (typeof srcMeta.tempo_bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.tempo_bpm;
+              else if (typeof srcMeta.bpm === 'number') clip.meta.sourceTempoBpm = srcMeta.bpm;
+              if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+              clip.meta.splitExploded = true;
+              clip.meta.splitExplodeIndex = part.splitIndex;
+              clip.meta.splitTrackName = part.trackName;
+              if (segmentBlocks.length > 1){
+                clip.meta.splitSegmentIndex = si;
+                clip.meta.splitSegmentCount = segmentBlocks.length;
+              }
+              this.project.clips.unshift(clip);
+              let _tAdd = 0;
+              if (_perfImp && typeof performance !== 'undefined') _tAdd = performance.now();
+              this.addClipToTimeline(clip.id, instanceStartSec, k, { skipPersistRender: true });
+              if (_perfImp && typeof performance !== 'undefined'){
+                console.log('[H2S perf] import explode addClipToTimeline k=' + k + ' si=' + si, (performance.now() - _tAdd).toFixed(2) + 'ms');
+              }
+            }
+          }
+          if (_perfImp && typeof performance !== 'undefined'){
+            console.log('[H2S perf] import explode loop total', (performance.now() - _perfLoopT0).toFixed(2) + 'ms');
+          }
+          persist();
+          this.render();
+          log('Added clip to timeline.');
+          const doneMulti = 'Done: ' + explodeClipCount + ' clips on ' + explodeParts.length + ' tracks.';
+          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
+          log('Clips added (split explode): ' + explodeClipCount);
+          log('Import: editor not auto-opened (multi-clip).');
+          setTimeout(() => this.setImportStatus('', false), 2500);
+        } else {
+          let placeStartSec = playheadSec;
+          let placeTrackIndex = 0;
+          const Pproj = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+          if (opts.sourceAudioClipId && Pproj && typeof Pproj.resolveAudioConvertPlacementV1 === 'function'){
+            const pl = Pproj.resolveAudioConvertPlacementV1(
+              this.project,
+              String(opts.sourceAudioClipId),
+              playheadSec,
+              0,
+              opts.sourceAudioInstanceId ? String(opts.sourceAudioInstanceId) : undefined
+            );
+            placeStartSec = pl.startSec;
+            placeTrackIndex = pl.trackIndex;
+          }
+          const maxTi = Math.max(0, ((this.project.tracks || []).length) - 1);
+          placeTrackIndex = Math.max(0, Math.min(maxTi, Math.floor(placeTrackIndex)));
+          const clip = H2SProject.createClipFromScore(scoreForClip, { name: importBaseName, sourceTaskId: tid });
+          if (!clip.meta) clip.meta = {};
+          if (typeof scoreForClip.tempo_bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.tempo_bpm;
+          else if (typeof scoreForClip.bpm === 'number') clip.meta.sourceTempoBpm = scoreForClip.bpm;
+          if (splitRes.applied) clip.meta.heuristicPitchSplit = true;
+          if (opts.sourceAudioClipId) clip.meta.sourceAudioClipId = String(opts.sourceAudioClipId);
+          if (opts.sourceAudioInstanceId) clip.meta.sourceAudioInstanceId = String(opts.sourceAudioInstanceId);
+          this.project.clips.unshift(clip);
+          this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
+          persist();
+          this.render();
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
+          log(`Clip added: ${clip.name}`);
+          const cidNew = clip.id;
+          const skipAutoOpenLarge = _importTooLargeForAutoOpen(clip);
+          if (skipAutoOpenLarge) log('Import: editor not auto-opened (large result).');
+          if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function' && !skipAutoOpenLarge){
+            setTimeout(() => this.openClipEditor(cidNew), 0);
+          }
+          setTimeout(() => this.setImportStatus('', false), 2000);
+        }
       }catch(e){
         if (this.state.importCancelled){
-          this.setImportStatus('Cancelled.', false);
+          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           log('Import cancelled by user');
         }else{
           const msg = (e && e.message) ? String(e.message) : String(e);
@@ -1624,6 +4868,46 @@ renderTimeline(){
           alert(userMsg);
         }
       }
+    },
+
+    /**
+     * Original audio clip → new editable note clip via the same /generate → poll → /score path as Import as notes.
+     * Does not remove or modify the source audio clip.
+     */
+    /**
+     * @param {string} clipId
+     * @param {{ sourceAudioInstanceId?: string }} [opts] When set, placement aligns to that timeline instance (inspector / instance-scoped conversion).
+     */
+    async convertAudioClipToEditable(clipId, opts){
+      opts = opts || {};
+      const P = window.H2SProject;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      if (!clipId || !P || typeof P.clipKind !== 'function') return { ok: false, reason: 'bad_args' };
+      const p2 = (typeof this.getProjectV2 === 'function') ? this.getProjectV2() : null;
+      const c = p2 && p2.clips && p2.clips[clipId];
+      if (!c || P.clipKind(c) !== 'audio'){
+        try { alert(_t('cliplib.convertToEditableNeedAudio')); } catch (_e) {}
+        return { ok: false, reason: 'not_audio' };
+      }
+      const assetRef = (c.audio && typeof c.audio.assetRef === 'string') ? c.audio.assetRef.trim() : '';
+      const LAS = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
+      if (!LAS || typeof LAS.getFileForLocalAssetRef !== 'function'){
+        try { alert(_t('io.convertAudioBlobMissing')); } catch (_e) {}
+        return { ok: false, reason: 'no_local_assets_api' };
+      }
+      if (typeof LAS.isLocalImportedAudioRef !== 'function' || !LAS.isLocalImportedAudioRef(assetRef)){
+        try { alert(_t('io.convertAudioOnlyLocal')); } catch (_e) {}
+        return { ok: false, reason: 'not_localidb' };
+      }
+      const file = await LAS.getFileForLocalAssetRef(assetRef);
+      if (!file){
+        try { alert(_t('io.convertAudioBlobMissing')); } catch (_e) {}
+        return { ok: false, reason: 'no_file' };
+      }
+      const uploadOpts = { sourceAudioClipId: clipId };
+      if (opts.sourceAudioInstanceId) uploadOpts.sourceAudioInstanceId = String(opts.sourceAudioInstanceId);
+      await this.uploadFileAndGenerate(file, uploadOpts);
+      return { ok: true };
     },
 
     /** PR-C5.3b: Reliable isPlaying for S button visibility. */
@@ -1647,7 +4931,7 @@ renderTimeline(){
       const statusEl = $('#studioRecordStatus');
       const active = !!this.state.recordingActive;
       if (rec) {
-        rec.textContent = active ? '\u23F9 Stop' : '\u{1F534} Record';
+        rec.textContent = active ? ('\u23F9 ' + ((window.I18N && window.I18N.t) ? window.I18N.t('top.stop') : 'Stop')) : ('\u{1F534} ' + ((window.I18N && window.I18N.t) ? window.I18N.t('top.record') : 'Record'));
         rec.title = active ? 'Stop recording' : 'Record mic (R)';
         rec.disabled = false;
       }
@@ -1660,6 +4944,16 @@ renderTimeline(){
       if (useLast) {
         useLast.disabled = !this.state.lastRecordedFile;
         useLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
+      }
+      const playLast = document.getElementById('btnPlayLast');
+      if (playLast) {
+        playLast.disabled = !this.state.lastRecordedFile;
+        playLast.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
+      }
+      const addLastAsAudio = document.getElementById('btnAddLastAsAudio');
+      if (addLastAsAudio) {
+        addLastAsAudio.disabled = !this.state.lastRecordedFile;
+        addLastAsAudio.style.opacity = this.state.lastRecordedFile ? '1' : '.6';
       }
       if (timerEl) timerEl.style.display = active ? '' : 'none';
       if (waveEl) waveEl.style.display = active ? '' : 'none';
@@ -1837,6 +5131,19 @@ renderTimeline(){
       this.uploadFileAndGenerate(this.state.lastRecordedFile);
     },
 
+    /** UX: Preview last recorded raw audio before generation. Safe no-op if no recording. */
+    playLastRecording(){
+      if (!this.state.lastRecordedFile) return;
+      try{
+        const url = URL.createObjectURL(this.state.lastRecordedFile);
+        const audio = new Audio(url);
+        const revoke = () => { try{ URL.revokeObjectURL(url); }catch(e){} };
+        audio.onended = revoke;
+        audio.onerror = revoke;
+        audio.play().catch(() => revoke());
+      }catch(e){ /* minimal safe failure: do not break recording or generation flow */ }
+    },
+
     async pollTaskUntilDone(taskId){
       const maxWaitMs = 180000;
       const start = performance.now();
@@ -1858,12 +5165,277 @@ renderTimeline(){
       }
     },
 
-    clearProject(){
-      if (!confirm('Clear local project (clips + timeline)?')) return;
+    clearProject(opts){
+      const skipConfirm = opts && opts.skipConfirm;
+      if (!skipConfirm && !confirm('Clear local project (clips + timeline)?')) return;
       this.project = H2SProject.defaultProject();
       persist();
       this.render();
       log('Cleared project.');
+    },
+
+    /**
+     * Inspector: replace current local project blob.
+     * Project Home: pass { asNewLocalProject: true } to add a new local entry and switch to it.
+     */
+    async importProjectJsonFromFile(opts){
+      opts = opts || {};
+      const f = await this.pickFile('.json');
+      if (!f) return false;
+      const txt = await f.text();
+      try{
+        const obj = JSON.parse(txt);
+        const loaded = H2SProject.loadProjectDocV2(obj);
+        if (opts.asNewLocalProject){
+          const base = String(f.name || 'import').replace(/\.json$/i, '').trim() || 'import';
+          this._createLocalProjectEntryAndSwitch(loaded, { importLabel: base.slice(0, 64) });
+        } else {
+          this.setProjectFromV2(loaded);
+        }
+        try{ localStorage.removeItem(LS_KEY_V1); }catch(e){}
+        log('Imported project json.');
+        return true;
+      }catch(e){
+        alert('Invalid JSON.');
+        return false;
+      }
+    },
+
+    /** New blank local project entry; does not clear other stored projects. */
+    createNewLocalProject(){
+      const P = window.H2SProject;
+      if (!P || typeof P.defaultProjectV2 !== 'function' || typeof P.uid !== 'function'){
+        console.error('[App] createNewLocalProject: H2SProject missing');
+        return;
+      }
+      const p2 = P.defaultProjectV2();
+      this._createLocalProjectEntryAndSwitch(p2, {});
+      this.state.selectedClipId = null;
+      this.state.selectedInstanceId = null;
+      log('New local project.');
+    },
+
+    /**
+     * Append a new index row, set current id, persist v2 blob via setProjectFromV2.
+     * @param {object} p2 - ProjectDoc v2
+     * @param {{ importLabel?: string }} meta
+     */
+    _createLocalProjectEntryAndSwitch(p2, meta){
+      const P = window.H2SProject;
+      if (!P || typeof P.uid !== 'function' || !p2) return;
+      meta = meta || {};
+      const id = P.uid('prj_');
+      const idx = _readProjectsIndex() || { version: 1, projects: [] };
+      if (!Array.isArray(idx.projects)) idx.projects = [];
+      const now = Date.now();
+      const bpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      const clipCount = _clipCountFromP2(p2);
+      const label = (meta.importLabel && String(meta.importLabel).trim()) ? String(meta.importLabel).trim().slice(0, 64) : '';
+      idx.projects.push({
+        id,
+        createdAt: now,
+        updatedAt: now,
+        bpm,
+        clipCount,
+        ...(label ? { label } : {}),
+      });
+      _writeProjectsIndex(idx);
+      try{
+        if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, id);
+      }catch(e){}
+      this._projectV2 = null;
+      this.setProjectFromV2(p2);
+    },
+
+    _switchToLocalProjectId(projectId){
+      if (!projectId) return;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const cur = (typeof localStorage !== 'undefined') ? localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID) : null;
+      if (cur && String(cur) === String(projectId)){
+        this.closeProjectHome();
+        return;
+      }
+      const raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(_projectDataKey(projectId)) : null;
+      if (!raw){
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        alert(_t('projectHome.missingBlob'));
+        return;
+      }
+      try{
+        const obj = JSON.parse(raw);
+        const loaded = H2SProject.loadProjectDocV2(obj);
+        try{
+          if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_CURRENT_PROJECT_ID, String(projectId));
+        }catch(e){}
+        this._projectV2 = null;
+        this.setProjectFromV2(loaded);
+        this.state.selectedClipId = null;
+        this.state.selectedInstanceId = null;
+        this.closeProjectHome();
+        log('Opened local project: ' + projectId);
+      }catch(e){
+        console.warn('[App] switch local project failed', e);
+        alert('Invalid project data.');
+      }
+    },
+
+    /**
+     * Add a deep-cloned clip as a NEW clip (new id) into the current project v2 doc.
+     * Shared by Import Clip JSON (bundle) and Import Clip from Project JSON.
+     * sourceBpmForMeta: BPM from the source file (bundle or project); stored on clip.meta.importedBundleBpm for mismatch UX.
+     */
+    importClipAsNewIntoCurrentProjectV2(sourceClip, sourceBpmForMeta){
+      const P = window.H2SProject;
+      if (!P || typeof P.uid !== 'function' || typeof P.deepClone !== 'function') return null;
+      let p2 = this.getProjectV2();
+      if (!p2) p2 = _projectV1ToV2(this.project);
+      if (!p2 || !_isProjectV2(p2)) return null;
+      const newId = P.uid('clip_');
+      const clip = P.deepClone(sourceClip);
+      clip.id = newId;
+      if (typeof clip.name !== 'string' || !String(clip.name).trim()) clip.name = 'Imported clip';
+      const isAudio = (typeof P.clipKind === 'function' && P.clipKind(clip) === 'audio');
+      if (isAudio && 'score' in clip) delete clip.score;
+      if (typeof P.normalizeClipRevisionChain === 'function') P.normalizeClipRevisionChain(clip);
+      if (isAudio){
+        const bpmMeta = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+        if (typeof P.recomputeClipMetaFromAudio === 'function') P.recomputeClipMetaFromAudio(clip, bpmMeta);
+      } else {
+        if (clip.score && typeof P.ensureScoreBeatIds === 'function') P.ensureScoreBeatIds(clip.score);
+        if (typeof P.recomputeClipMetaFromScoreBeat === 'function') P.recomputeClipMetaFromScoreBeat(clip);
+      }
+      const bundleBpm = (typeof sourceBpmForMeta === 'number' && isFinite(sourceBpmForMeta)) ? sourceBpmForMeta : null;
+      if (bundleBpm != null) {
+        if (!clip.meta || typeof clip.meta !== 'object') clip.meta = {};
+        clip.meta.importedBundleBpm = bundleBpm;
+      }
+      if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+      p2.clips[newId] = clip;
+      if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+      p2.clipOrder.unshift(newId);
+      if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+      const projBpm = (typeof p2.bpm === 'number' && isFinite(p2.bpm)) ? p2.bpm : 120;
+      this.setProjectFromV2(p2);
+      this.state.selectedClipId = newId;
+      this.state.selectedInstanceId = null;
+      log('Imported clip JSON: ' + newId);
+      if (bundleBpm != null && Math.round(bundleBpm) !== Math.round(projBpm)) {
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        alert(_t('inspector.importClipBpmNote', { exportBpm: String(Math.round(bundleBpm)), projectBpm: String(Math.round(projBpm)) }));
+      }
+      return newId;
+    },
+
+    _populateClipFromProjectChooser(ids){
+      const doc = this._pendingClipFromProject;
+      const sel = $('#selClipFromProject');
+      const lbl = $('#lblClipFromProjectBpm');
+      if (!sel || !doc) return;
+      const bpm = (typeof doc.bpm === 'number' && isFinite(doc.bpm)) ? doc.bpm : 120;
+      const cur = this.getProjectV2();
+      const curBpm = (cur && typeof cur.bpm === 'number' && isFinite(cur.bpm)) ? cur.bpm : 120;
+      if (lbl){
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+        lbl.textContent = _t('inspector.importClipFromProjectBpmHint', { sourceBpm: String(Math.round(bpm)), projectBpm: String(Math.round(curBpm)) });
+      }
+      sel.innerHTML = '';
+      for (let i = 0; i < ids.length; i++){
+        const id = ids[i];
+        const c = doc.clips[id];
+        const name = (c && typeof c.name === 'string' && String(c.name).trim()) ? String(c.name).trim() : id;
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = name + ' — ' + id;
+        sel.appendChild(opt);
+      }
+    },
+
+    _openClipFromProjectModal(){
+      const el = $('#clipFromProjectModal');
+      if (!el) return;
+      if (typeof this._updateI18nLabels === 'function') this._updateI18nLabels();
+      el.classList.remove('hidden');
+      el.setAttribute('aria-hidden', 'false');
+    },
+
+    _closeClipFromProjectModal(){
+      const el = $('#clipFromProjectModal');
+      if (!el) return;
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+      this._pendingClipFromProject = null;
+    },
+
+    _refreshProjectHomeSummary(){
+      const bpmEl = $('#projectHomeBpm');
+      const clEl = $('#projectHomeClips');
+      if (!bpmEl || !clEl) return;
+      const bpm = (this.project && typeof this.project.bpm === 'number' && isFinite(this.project.bpm)) ? Math.round(this.project.bpm) : 120;
+      bpmEl.textContent = String(bpm);
+      const clips = (this.project && Array.isArray(this.project.clips)) ? this.project.clips : [];
+      clEl.textContent = String(clips.length);
+    },
+
+    _refreshProjectHomeLocalList(){
+      const ul = $('#projectHomeLocalList');
+      if (!ul) return;
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      _migrateLegacyV2IfNeeded();
+      _repairLocalProjectIndex();
+      const idx = _readProjectsIndex();
+      const cur = (typeof localStorage !== 'undefined') ? localStorage.getItem(LS_KEY_CURRENT_PROJECT_ID) : null;
+      ul.innerHTML = '';
+      const projects = (idx && Array.isArray(idx.projects)) ? idx.projects : [];
+      if (!projects.length){
+        const li = document.createElement('li');
+        li.className = 'muted';
+        li.style.padding = '8px 10px';
+        li.style.fontSize = '12px';
+        li.textContent = _t('projectHome.emptyLocalList');
+        ul.appendChild(li);
+        return;
+      }
+      for (let i = 0; i < projects.length; i++){
+        const entry = projects[i];
+        if (!entry || !entry.id) continue;
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn projectHomeLocalBtn';
+        btn.setAttribute('data-project-id', String(entry.id));
+        if (cur && String(cur) === String(entry.id)) btn.classList.add('current');
+        btn.textContent = _formatLocalProjectRowLabel(entry, cur);
+        btn.title = String(entry.id);
+        const pid = entry.id;
+        btn.addEventListener('click', () => { this._switchToLocalProjectId(pid); });
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    },
+
+    openProjectHome(){
+      const el = $('#projectHomeModal');
+      if (!el) return;
+      if (typeof this._updateI18nLabels === 'function') this._updateI18nLabels();
+      this._refreshProjectHomeSummary();
+      this._refreshProjectHomeLocalList();
+      el.classList.remove('hidden');
+      el.setAttribute('aria-hidden', 'false');
+    },
+
+    closeProjectHome(){
+      const el = $('#projectHomeModal');
+      if (!el) return;
+      el.classList.add('hidden');
+      el.setAttribute('aria-hidden', 'true');
+    },
+
+    _dismissProjectHomeAuto(){
+      try{
+        if (typeof localStorage !== 'undefined') localStorage.setItem(LS_KEY_SKIP_PROJECT_HOME_AUTO, '1');
+      }catch(e){}
+      this.closeProjectHome();
     },
 
     pickFile(accept){
@@ -1908,6 +5480,245 @@ renderTimeline(){
         }
       }catch(e){}
     },
+    _initLangDropdown(){
+      try{
+        if (typeof document === 'undefined' || typeof window.I18N === 'undefined') return;
+        const sel = document.getElementById('selLang');
+        if (!sel) return;
+        const I18N = window.I18N;
+        I18N.init();
+
+        const populate = () => {
+          const list = I18N.availableLanguages();
+          sel.innerHTML = '';
+          for (const it of list){
+            const opt = document.createElement('option');
+            opt.value = (it && it.code) ? String(it.code) : '';
+            opt.textContent = (it && it.label) ? String(it.label) : opt.value;
+            sel.appendChild(opt);
+          }
+          const cur = I18N.getLang();
+          if (list.some(it => (it && it.code) === cur)) sel.value = cur;
+          else sel.value = (list[0] && list[0].code) || 'en';
+        };
+
+        const onLangChange = async () => {
+          const lang = sel.value;
+          if (!lang) return;
+          try{
+            await I18N.load(lang);
+            I18N.setLang(lang);
+            this._updateI18nLabels();
+            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
+            this.render();
+          }catch(e){ console.warn('[i18n] load locale failed', e); }
+        };
+
+        sel.addEventListener('change', onLangChange);
+
+        Promise.all([
+          I18N.loadManifest ? I18N.loadManifest().catch(() => {}) : Promise.resolve(),
+          I18N.load(I18N.getLang()).catch(() => {})
+        ]).then(() => { populate(); this._updateI18nLabels(); if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip(); this.render(); }).catch(() => { populate(); this._updateI18nLabels(); if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip(); this.render(); });
+      }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
+    },
+
+    _initBeginnerHintBar(){
+      try{
+        if (this._beginnerHintBarWired) return;
+        this._beginnerHintBarWired = true;
+
+        const KEY = 'h2s_beginner_hint_dismissed';
+        const panel = document.getElementById('beginnerHintHelpPanel');
+        const backdrop = document.getElementById('beginnerHintHelpBackdrop');
+        const btnMore = document.getElementById('btnBeginnerHintMoreHelp');
+        const btnClose = document.getElementById('btnBeginnerHintHelpClose');
+        const btnEntry = document.getElementById('btnBeginnerHelpEntry');
+        const bar = document.getElementById('beginnerHintBar');
+
+        const openHelp = () => {
+          if (!panel) return;
+          panel.classList.remove('hidden');
+          panel.setAttribute('aria-hidden', 'false');
+        };
+        const closeHelp = () => {
+          if (!panel) return;
+          panel.classList.add('hidden');
+          panel.setAttribute('aria-hidden', 'true');
+        };
+
+        const btnRestore = document.getElementById('btnBeginnerHintRestore');
+        if (btnRestore && bar){
+          btnRestore.addEventListener('click', (e) => {
+            e.stopPropagation();
+            try{ if (typeof localStorage !== 'undefined') localStorage.removeItem(KEY); }catch(err){}
+            bar.classList.remove('hidden');
+            closeHelp();
+          });
+        }
+
+        if (btnEntry) btnEntry.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
+        if (btnMore) btnMore.addEventListener('click', (e) => { e.stopPropagation(); openHelp(); });
+        if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
+        if (backdrop) backdrop.addEventListener('click', closeHelp);
+        document.addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Escape') return;
+          if (!panel || panel.classList.contains('hidden')) return;
+          closeHelp();
+        });
+
+        const btnDismiss = document.getElementById('btnBeginnerHintDismiss');
+        if (!bar || !btnDismiss) return;
+
+        const applyDismissed = () => {
+          try{ if (typeof localStorage !== 'undefined' && localStorage.getItem(KEY) === '1') bar.classList.add('hidden'); }catch(e){}
+        };
+        applyDismissed();
+
+        const copyFallback = (text) => {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          try{ document.execCommand('copy'); }catch(err){}
+          document.body.removeChild(ta);
+        };
+
+        const copyToClipboard = (text, el) => {
+          const I18N = window.I18N;
+          const i18nKey = el.getAttribute('data-i18n');
+          const copiedLabel = (I18N && I18N.t) ? I18N.t('beginnerHint.copied') : 'Copied';
+          const orig = el.textContent;
+          const restore = () => {
+            if (I18N && I18N.t && i18nKey) el.textContent = I18N.t(i18nKey);
+            else el.textContent = orig;
+          };
+          const flash = () => {
+            el.textContent = copiedLabel;
+            setTimeout(restore, 1400);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(text).then(flash).catch(() => { copyFallback(text); flash(); });
+          } else {
+            copyFallback(text);
+            flash();
+          }
+        };
+
+        bar.addEventListener('click', (ev) => {
+          const raw = ev.target;
+          const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
+          if (!node || typeof node.closest !== 'function') return;
+          const t = node.closest('[data-copy-cmd]');
+          if (!t || !bar.contains(t)) return;
+          const cmd = t.getAttribute('data-copy-cmd');
+          if (!cmd) return;
+          ev.preventDefault();
+          copyToClipboard(cmd, t);
+        });
+
+        btnDismiss.addEventListener('click', () => {
+          bar.classList.add('hidden');
+          try{ if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, '1'); }catch(e){}
+        });
+      }catch(e){ console.warn('[beginnerHint] _initBeginnerHintBar failed', e); }
+    },
+
+    /** One GET /api/v1/health; caches booleans for a compact beginner readiness strip. */
+    _fetchBackendReadinessOnce(){
+      try{
+        if (this._backendReadinessFetched) return;
+        this._backendReadinessFetched = true;
+        if (typeof fetch !== 'function') return;
+        fetch('/api/v1/health', { method: 'GET', headers: { Accept: 'application/json' } })
+          .then((r) => {
+            if (!r.ok) throw new Error('http ' + r.status);
+            return r.json();
+          })
+          .then((data) => {
+            const ch = (data && data.checks && typeof data.checks === 'object') ? data.checks : {};
+            // Only treat explicit false as a problem (missing keys => assume OK).
+            this._backendReadinessState = {
+              fetchFailed: false,
+              soundfontOk: ch.soundfont_exists !== false,
+              fluidsynthOk: ch.fluidsynth !== false,
+              ffmpegOk: ch.ffmpeg !== false,
+            };
+            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
+          })
+          .catch(() => {
+            this._backendReadinessState = { fetchFailed: true };
+            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
+          });
+      }catch(e){
+        console.warn('[readiness] _fetchBackendReadinessOnce failed', e);
+      }
+    },
+
+    _renderBackendReadinessStrip(){
+      try{
+        const wrap = document.getElementById('studioBackendReadiness');
+        const msgEl = document.getElementById('studioBackendReadinessMsg');
+        const linkEl = document.getElementById('studioBackendReadinessLink');
+        if (!wrap || !msgEl) return;
+        const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+        if (linkEl){
+          linkEl.textContent = _t('beginnerHint.readinessHealthLink');
+        }
+        const st = this._backendReadinessState;
+        if (!st){
+          wrap.classList.add('hidden');
+          msgEl.textContent = '';
+          return;
+        }
+        if (st.fetchFailed){
+          wrap.classList.remove('hidden');
+          msgEl.textContent = _t('beginnerHint.readinessFetchFailed');
+          return;
+        }
+        const parts = [];
+        if (!st.soundfontOk) parts.push(_t('beginnerHint.readinessSoundfont'));
+        if (!st.fluidsynthOk) parts.push(_t('beginnerHint.readinessFluidsynth'));
+        if (!st.ffmpegOk) parts.push(_t('beginnerHint.readinessFfmpeg'));
+        if (!parts.length){
+          wrap.classList.add('hidden');
+          msgEl.textContent = '';
+          return;
+        }
+        wrap.classList.remove('hidden');
+        msgEl.textContent = _t('beginnerHint.readinessPrefix') + parts.join(' · ');
+      }catch(e){
+        console.warn('[readiness] _renderBackendReadinessStrip failed', e);
+      }
+    },
+
+    _updateI18nLabels(){
+      try{
+        if (typeof document === 'undefined' || !window.I18N || typeof window.I18N.t !== 'function') return;
+        const I18N = window.I18N;
+        document.querySelectorAll('[data-i18n]').forEach(function(el){
+          const k = el.getAttribute('data-i18n');
+          if (k) el.textContent = I18N.t(k);
+        });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){
+          const k = el.getAttribute('data-i18n-placeholder');
+          if (k && el.placeholder !== undefined) el.placeholder = I18N.t(k);
+        });
+        document.querySelectorAll('[data-i18n-title]').forEach(function(el){
+          const k = el.getAttribute('data-i18n-title');
+          if (k) el.title = I18N.t(k);
+        });
+        document.querySelectorAll('[data-i18n-aria-label]').forEach(function(el){
+          const k = el.getAttribute('data-i18n-aria-label');
+          if (k) el.setAttribute('aria-label', I18N.t(k));
+        });
+        if (typeof this._applyLastOptimizeSummaryI18n === 'function') this._applyLastOptimizeSummaryI18n();
+        if (typeof this._renderLastOptimizeDetailsBodyIfOpen === 'function') this._renderLastOptimizeDetailsBodyIfOpen();
+      }catch(e){}
+    },
     _initMasterVolumeUI(){
       // Browser-only, safe if called multiple times.
       try{
@@ -1926,7 +5737,8 @@ renderTimeline(){
         wrap.style.marginLeft = '10px';
 
         const lab = document.createElement('span');
-        lab.textContent = 'Vol';
+        lab.setAttribute('data-i18n', 'top.vol');
+        lab.textContent = (window.I18N && window.I18N.t) ? window.I18N.t('top.vol') : 'Vol';
         lab.style.fontSize = '12px';
         lab.style.opacity = '0.85';
 
@@ -1967,6 +5779,246 @@ renderTimeline(){
         wrap.appendChild(input);
         wrap.appendChild(val);
         row.appendChild(wrap);
+      }catch(e){}
+    },
+    _initInstrumentLibraryUI(){
+      try{
+        if (typeof document === 'undefined' || !window.H2SProject) return;
+        const inp = document.getElementById('inpSamplerBaseUrl');
+        const btnSave = document.getElementById('btnSaveSamplerBaseUrl');
+        const btnTest = document.getElementById('btnTestSampler');
+        const status = document.getElementById('samplerBaseUrlStatus');
+        const selPack = document.getElementById('selSamplerPack');
+        const inpUpload = document.getElementById('inpSamplerUpload');
+        const btnUpload = document.getElementById('btnSamplerUpload');
+        const btnClear = document.getElementById('btnClearSamplerPack');
+        const uploadStatus = document.getElementById('samplerUploadStatus');
+        if (!inp || !btnSave) return;
+
+        const setStatus = (msg) => { if (status) status.textContent = msg || ''; };
+        const setUploadStatus = (msg) => { if (uploadStatus) uploadStatus.textContent = msg || ''; };
+        const renderInput = () => {
+          const v = (window.H2SProject.getSamplerBaseUrl && window.H2SProject.getSamplerBaseUrl()) || '';
+          inp.value = v;
+        };
+        renderInput();
+
+        if (btnSave.__h2sInstrumentLibBound) return;
+        btnSave.__h2sInstrumentLibBound = true;
+
+        btnSave.addEventListener('click', () => {
+          const v = inp.value.trim();
+          if (window.H2SProject.setSamplerBaseUrl) window.H2SProject.setSamplerBaseUrl(v);
+          setStatus(v ? 'Saved. Base URL: ' + v : 'Cleared. Using default path.');
+        });
+        if (btnTest){
+          btnTest.addEventListener('click', () => {
+            setStatus('Testing...');
+            const P = window.H2SProject;
+            const packId = selPack && selPack.value;
+            const pack = (packId && P && P.SAMPLER_PACKS && P.SAMPLER_PACKS[packId]) || (P && P.SAMPLER_PACKS && P.SAMPLER_PACKS['tonejs:piano']) || null;
+            const baseUrl = (P && P.getResolvedSamplerBaseUrl && pack) ? P.getResolvedSamplerBaseUrl(pack) : null;
+            const firstKey = (pack && pack.requiredKeys && pack.requiredKeys[0]) || (pack && pack.urls && Object.keys(pack.urls)[0]) || 'A1';
+            const filename = (pack && pack.urls && pack.urls[firstKey]) || (firstKey + '.mp3');
+            const testUrl = baseUrl ? (baseUrl.replace(/\/+$/, '') + '/' + filename) : null;
+            if (!testUrl){
+              setStatus('No base URL configured.');
+              return;
+            }
+            fetch(testUrl, { method: 'HEAD' })
+              .then(r => { setStatus(r.ok ? 'Test OK: samples reachable.' : 'Test failed: ' + r.status); })
+              .catch(() => { setStatus('Test failed: network error.'); });
+          });
+        }
+
+        function refreshPackDropdown(){
+          if (!selPack || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
+          const packs = window.H2SProject.SAMPLER_PACKS;
+          let html = Object.keys(packs).map(k => `<option value="${k}">${(packs[k].label || k).replace(/</g,'&lt;')}</option>`).join('');
+          const custom = window.__h2s_custom_instruments || [];
+          if (custom.length){
+            html += '<optgroup label="' + escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inst.myInstruments') : 'My Instruments') + '">';
+            custom.forEach(c => { html += '<option value="' + (c.packId || '').replace(/"/g,'&quot;') + '">' + (c.displayName || c.packId || '').replace(/</g,'&lt;') + '</option>'; });
+            html += '</optgroup>';
+          }
+          selPack.innerHTML = html;
+        }
+        if (selPack && window.H2SProject && window.H2SProject.SAMPLER_PACKS) refreshPackDropdown();
+
+        function updateUploadButtonLabel(){
+          if (!btnUpload) return;
+          btnUpload.textContent = 'Upload samples (creates new instrument)';
+        }
+
+        function refreshUploadStatus(){
+          if (!uploadStatus || !selPack) return;
+          const packId = selPack.value;
+          if (!packId){
+            refreshAllPacksStatus();
+            return;
+          }
+          const isCustom = packId.indexOf('user:') === 0;
+          if (isCustom && window.H2SInstrumentLibraryStore){
+            window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
+              const have = keys || [];
+              if (have.length === 0) setUploadStatus('No samples in this custom instrument.');
+              else if (have.length === 1) setUploadStatus('Available (local): ' + have[0] + ' (oneshot).');
+              else setUploadStatus('Available (local): ' + have.sort().join(', ') + ' (sampler).');
+            });
+            return;
+          }
+          const probe = (window.H2SProject && window.H2SProject.probeSamplerAvailability) ? window.H2SProject.probeSamplerAvailability : null;
+          if (!probe){
+            if (window.H2SInstrumentLibraryStore){
+              const packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) || {};
+              const pack = packs[packId];
+              const required = (pack && pack.requiredKeys) ? pack.requiredKeys : (window.H2SInstrumentLibraryStore.VALID_NOTE_KEYS || ['A1','A2','A3','A4','A5','A6']).slice();
+              window.H2SInstrumentLibraryStore.listSamples(packId).then(keys => {
+                const have = keys || [];
+                const missing = required.filter(k => have.indexOf(k) < 0);
+                if (have.length === 0) setUploadStatus('No local samples.');
+                else if (have.length === 1) setUploadStatus('Available (local): ' + have[0] + ' (needs >=2 to enable sampler).');
+                else setUploadStatus('Local: ' + have.sort().join(', ') + (missing.length ? ' | Missing: ' + missing.join(', ') : ' (complete)'));
+              });
+            } else setUploadStatus('');
+            return;
+          }
+          probe(packId).then(info => {
+            const av = info.availableKeys || [];
+            const miss = info.missingKeys || [];
+            const src = info.source || '';
+            if (av.length === 0) setUploadStatus('No samples. Use baseUrl or upload (e.g. A4.mp3 or C4.wav).');
+            else if (av.length === 1) setUploadStatus('Available (' + (src === 'local' ? 'local' : 'remote') + '): ' + av[0] + ' (needs >=2 to enable sampler).');
+            else setUploadStatus('Available (' + (src === 'local' ? 'local' : 'remote') + '): ' + av.sort().join(', ') + (miss.length ? ' | Missing: ' + miss.join(', ') : ' (complete)'));
+          }).catch(() => setUploadStatus(''));
+        }
+
+        function refreshAllPacksStatus(){
+          if (!uploadStatus || !window.H2SInstrumentLibraryStore || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
+          const packs = window.H2SProject.SAMPLER_PACKS;
+          Promise.all(Object.keys(packs).map(packId => window.H2SInstrumentLibraryStore.listSamples(packId))).then(results => {
+            const parts = [];
+            Object.keys(packs).forEach((packId, i) => {
+              const keys = results[i] || [];
+              const pack = packs[packId];
+              const required = (pack && pack.requiredKeys) ? pack.requiredKeys.length : 6;
+              const label = (pack && pack.label || packId).split(' ')[0];
+              parts.push(label + ': ' + keys.length + '/' + required);
+            });
+            setUploadStatus(parts.length ? parts.join(' | ') : 'No packs.');
+          });
+        }
+
+        if (selPack){
+          selPack.addEventListener('change', refreshUploadStatus);
+          updateUploadButtonLabel();
+        }
+
+        if (btnUpload && inpUpload){
+          btnUpload.addEventListener('click', () => { inpUpload.click(); });
+          inpUpload.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = '';
+            if (!files.length || !window.H2SInstrumentLibraryStore) return;
+            const store = window.H2SInstrumentLibraryStore;
+            const toUpload = [];
+            let skipped = 0;
+            for (let i = 0; i < files.length; i++){
+              const key = store.parseNoteKeyFromFilename(files[i].name);
+              if (key) toUpload.push({ file: files[i], key });
+              else skipped++;
+            }
+            if (!toUpload.length){ setUploadStatus(skipped ? skipped + ' file(s) skipped. Tips: use names like A4.mp3 or C4.wav.' : 'No recognizable samples. Tips: A1..A6 or C3/Ds4/F#2/Bb3.'); return; }
+            const uniqueKeys = [...new Set(toUpload.map(x => x.key))];
+            const baseName = (files[0] && files[0].name) ? files[0].name.replace(/\.[^/.]+$/, '').trim().slice(0, 32) || 'Uploaded' : 'Uploaded';
+            const kind = uniqueKeys.length >= 2 ? 'sampler' : 'oneshot';
+            setUploadStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creating') : 'Creating custom instrument...');
+            store.createCustomInstrument(baseName, kind).then(({ packId, displayName }) => {
+              setUploadStatus('Uploading ' + toUpload.length + ' sample(s)...');
+              return Promise.all(toUpload.map(x => store.putSample(packId, x.key, x.file, x.file.name))).then(() => {
+                let msg = 'Created ' + displayName + ' and uploaded ' + toUpload.length + '.';
+                if (skipped) msg += ' Skipped: ' + skipped + '.';
+                msg += ' To use: select it in the track instrument dropdown.';
+                setUploadStatus(msg);
+                return store.listCustomInstruments().then(list => {
+                  window.__h2s_custom_instruments = list;
+                  if (window.H2SApp && typeof window.H2SApp.renderTimeline === 'function') window.H2SApp.renderTimeline();
+                });
+              });
+            }).then(() => refreshUploadStatus()).catch(() => { setUploadStatus('Upload failed.'); });
+          });
+        }
+
+        if (btnClear && selPack){
+          btnClear.addEventListener('click', () => {
+            const packId = selPack.value;
+            if (!packId){ setUploadStatus('Select a pack first.'); return; }
+            const store = window.H2SInstrumentLibraryStore;
+            if (!store) return;
+            const isCustom = packId.indexOf('user:') === 0;
+            setUploadStatus(isCustom ? 'Deleting instrument...' : 'Clearing...');
+            (isCustom ? store.deleteCustomInstrument(packId) : store.clearPack(packId)).then(() => {
+              setUploadStatus(isCustom ? 'Deleted.' : 'Cleared.');
+              if (isCustom && store.listCustomInstruments){
+                return store.listCustomInstruments().then(list => {
+                  window.__h2s_custom_instruments = list;
+                  refreshPackDropdown();
+                  if (window.H2SApp && typeof window.H2SApp.renderTimeline === 'function') window.H2SApp.renderTimeline();
+                });
+              }
+            }).then(() => refreshUploadStatus()).catch(() => setUploadStatus('Failed.'));
+          });
+        }
+
+        const inpFolder = document.getElementById('inpSamplerFolder');
+        const btnFolder = document.getElementById('btnSamplerFolder');
+        if (inpFolder && btnFolder && window.H2SInstrumentLibraryStore){
+          btnFolder.addEventListener('click', () => inpFolder.click());
+          inpFolder.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files || []);
+            e.target.value = '';
+            if (!files.length){ refreshUploadStatus(); return; }
+            const store = window.H2SInstrumentLibraryStore;
+            const toImport = [];
+            let skipped = 0;
+            for (let i = 0; i < files.length; i++){
+              const noteKey = store.parseNoteKeyFromFilename(files[i].name);
+              if (noteKey) toImport.push({ file: files[i], noteKey });
+              else skipped++;
+            }
+            const uniqueKeys = [...new Set(toImport.map(x => x.noteKey))];
+            if (uniqueKeys.length === 0){
+              setUploadStatus('No recognizable samples found. Tips: sample files must be named like A4.mp3 or C4.wav.');
+              return;
+            }
+            const baseName = (files[0] && files[0].webkitRelativePath) ? files[0].webkitRelativePath.split(/[/\\]/)[0] || 'Imported' : 'Imported';
+            const kind = uniqueKeys.length >= 2 ? 'sampler' : 'oneshot';
+            setUploadStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.creating') : 'Creating custom instrument...');
+            store.createCustomInstrument(baseName, kind).then(({ packId, displayName }) => {
+              setUploadStatus('Importing ' + toImport.length + ' sample(s)...');
+              return Promise.all(toImport.map(x => store.putSample(packId, x.noteKey, x.file, x.file.name))).then(() => {
+                const recognized = [...new Set(toImport.map(x => x.noteKey))].sort();
+                let msg = 'Created ' + displayName + ' and imported ' + toImport.length + ' sample(s). Recognized: ' + recognized.join(', ');
+                if (skipped) msg += '. Skipped: ' + skipped + ' (unknown names).';
+                msg += ' To use: select it in the track instrument dropdown.';
+                setUploadStatus(msg);
+                return store.listCustomInstruments().then(list => {
+                  window.__h2s_custom_instruments = list;
+                  if (window.H2SApp && typeof window.H2SApp.renderTimeline === 'function') window.H2SApp.renderTimeline();
+                });
+              });
+            }).then(() => refreshUploadStatus()).catch(() => setUploadStatus('Import failed.'));
+          });
+        }
+
+        refreshUploadStatus();
+        if (window.H2SInstrumentLibraryStore && window.H2SInstrumentLibraryStore.listCustomInstruments){
+          window.H2SInstrumentLibraryStore.listCustomInstruments().then(list => {
+            window.__h2s_custom_instruments = list;
+            refreshPackDropdown();
+            if (typeof this.renderTimeline === 'function') this.renderTimeline();
+          });
+        }
       }catch(e){}
     },
 	async playProject(){

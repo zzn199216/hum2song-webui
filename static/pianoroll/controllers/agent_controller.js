@@ -4,6 +4,10 @@
 (function(ROOT){
   'use strict';
 
+  if (typeof require === 'function' && !ROOT.H2S_OPTIMIZE_TEMPLATES_V1_MAP) {
+    try { require('../core/optimize_templates_v1.js'); } catch(e) {}
+  }
+
   const H2SAgentPatch = ROOT.H2SAgentPatch;
   const H2SProject = ROOT.H2SProject;
 
@@ -14,41 +18,8 @@
   const DEFAULT_OPT_SOURCE = 'safe_stub_v0';
   const SAFE_STUB_PRESET = 'alt_110_80';
 
-  /** PR-E1: TemplateSpec v1 registry — static data only; no DOM, no localStorage. */
-  const LLM_TEMPLATES_V1 = {
-    fix_pitch_v1: {
-      id: 'fix_pitch_v1',
-      label: 'Fix Pitch',
-      promptVersion: 'tmpl_v1.fix_pitch.r1',
-      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
-      seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.',
-      directives: {},
-    },
-    tighten_rhythm_v1: {
-      id: 'tighten_rhythm_v1',
-      label: 'Tighten Rhythm',
-      promptVersion: 'tmpl_v1.tighten_rhythm.r1',
-      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
-      seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.',
-      directives: {},
-    },
-    clean_outliers_v1: {
-      id: 'clean_outliers_v1',
-      label: 'Clean Outliers',
-      promptVersion: 'tmpl_v1.clean_outliers',
-      intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
-      seed: 'Smooth extreme values; reduce outliers.',
-      directives: {},
-    },
-    bluesy_v1: {
-      id: 'bluesy_v1',
-      label: 'Bluesy',
-      promptVersion: 'tmpl_v1.bluesy',
-      intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
-      seed: 'Add subtle blues inflection to timing and dynamics.',
-      directives: {},
-    },
-  };
+  /** PR-E1 / INFRA-1a: TemplateSpec v1 registry — derived from shared optimize_templates_v1.js */
+  const LLM_TEMPLATES_V1 = (ROOT.H2S_OPTIMIZE_TEMPLATES_V1_MAP || {});
 
   /** PR-E1: Resolve promptMeta from optsIn for patchSummary trace. */
   function resolvePromptMeta(optsIn){
@@ -65,6 +36,107 @@
 
   /** PR-6a: default user prompt when none provided (frontend-only, node-safe). */
   const DEFAULT_OPTIMIZE_USER_PROMPT = 'Apply safe dynamics and timing improvements.';
+
+  /** llm_v0: bounded outcome marker for patchSummary (never merged into phase1Deterministic). */
+  function _llmOutcomeExtra(outcome, extra){
+    const o = { outcome: String(outcome || 'unknown') };
+    if (extra && typeof extra === 'object'){
+      for (const k in extra){
+        if (Object.prototype.hasOwnProperty.call(extra, k)) o[k] = extra[k];
+      }
+    }
+    return { llm: o };
+  }
+
+  function _mapFailReasonToLlmOutcome(reason){
+    const r = String(reason || '');
+    if (r === 'llm_config_missing') return 'failed_config';
+    if (r === 'llm_client_not_loaded') return 'failed_client';
+    if (r === 'apply_failed') return 'failed_apply';
+    if (r === 'beginNewClipRevision_failed') return 'failed_revision';
+    return 'failed_request';
+  }
+
+  function _attachLlmOutcomeToReturn(out){
+    if (out && out.patchSummary && out.patchSummary.llm && out.patchSummary.llm.outcome){
+      out.llmOutcome = String(out.patchSummary.llm.outcome);
+    }
+    return out;
+  }
+
+  /** Semantic sanity gate failures from applyPatchToClip set semanticReject; error codes use the semantic_* prefix. */
+  function _isSemanticApplyFailure(applied, firstError){
+    if (applied && applied.semanticReject === true) return true;
+    const e = firstError != null ? String(firstError) : '';
+    return e.length > 0 && e.indexOf('semantic_') === 0;
+  }
+
+  /** Bounded snapshot for one llm_v0 attempt (no raw prompts). */
+  function _llmAttemptSnapshot(attemptIndex, res){
+    if (!res || typeof res !== 'object'){
+      return { attemptIndex: attemptIndex, reason: '', outcome: null };
+    }
+    let outcome = null;
+    if (res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome){
+      outcome = String(res.patchSummary.llm.outcome);
+    } else if (res.llmOutcome){
+      outcome = String(res.llmOutcome);
+    }
+    const reason = (res.reason != null) ? String(res.reason) : '';
+    return { attemptIndex: attemptIndex, reason: reason, outcome: outcome };
+  }
+
+  /** Merge retry/attempt observability into llmDebug and patchSummary.llm (bounded; max 8 rows). */
+  function _attachLlmRetryFields(out, attemptLog){
+    if (!out || !Array.isArray(attemptLog) || attemptLog.length < 1) return;
+    const total = attemptLog.length;
+    const last = attemptLog[total - 1];
+    const summaries = attemptLog.slice(0, 8);
+    const block = {
+      totalAttempts: total,
+      finalAttemptIndex: last.attemptIndex,
+      attemptSummaries: summaries,
+    };
+    if (!out.llmDebug) out.llmDebug = {};
+    out.llmDebug.attemptCount = total;
+    out.llmDebug.totalAttempts = total;
+    out.llmDebug.finalAttemptIndex = last.attemptIndex;
+    out.llmDebug.attemptSummaries = summaries;
+    if (out.patchSummary && out.patchSummary.llm){
+      Object.assign(out.patchSummary.llm, block);
+    }
+  }
+
+  /** Config / client fail-fast before any chat-completions attempt: zero attempts, explicit flag. */
+  function _attachLlmPreRequestFields(o){
+    if (!o || !o.patchSummary || !o.patchSummary.llm) return;
+    const block = {
+      totalAttempts: 0,
+      finalAttemptIndex: 0,
+      attemptSummaries: [],
+      preRequestExit: true,
+    };
+    Object.assign(o.patchSummary.llm, block);
+    o.llmDebug = {
+      totalAttempts: 0,
+      attemptCount: 0,
+      finalAttemptIndex: 0,
+      attemptSummaries: [],
+      preRequestExit: true,
+      reason: (o.reason != null) ? String(o.reason) : '',
+    };
+  }
+
+  /** PR3: Build compact PLAN block from structured plan for llm_v0 prompt. Returns '' if plan invalid. */
+  function buildPlanBlock(plan){
+    if (!plan || typeof plan !== 'object') return '';
+    const lines = Array.isArray(plan.planLines) ? plan.planLines.filter(function(l){ return typeof l === 'string' && l.trim(); }) : [];
+    if (lines.length < 1) return '';
+    const kind = (plan.planKind != null && String(plan.planKind).trim()) ? String(plan.planKind).trim() : '';
+    const title = (plan.planTitle != null && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : '';
+    const header = (kind || title) ? ('PLAN: ' + (title || kind)) : 'PLAN:';
+    return header + '\n' + lines.slice(0, 6).map(function(l){ return '- ' + String(l).trim().slice(0, 120); }).join('\n');
+  }
 
   /** PR-E3: Build structured Directives block from template + intent for llm_v0 prompt. */
   function buildDirectivesBlock(template, intent){
@@ -109,6 +181,51 @@
     return lines.join('\n');
   }
 
+  /**
+   * LLM Context PR1: deterministic per-note rows for optimize prompt (beats-only).
+   * Order: score track index, then startBeat ascending, then noteId string.
+   */
+  function collectClipNoteRowsForLlm(scoreTracks){
+    const rows = [];
+    if (!Array.isArray(scoreTracks)) return rows;
+    for (let ti = 0; ti < scoreTracks.length; ti++){
+      const tr = scoreTracks[ti];
+      const trackId = (tr && tr.id != null && String(tr.id).trim())
+        ? String(tr.id).trim()
+        : (tr && tr.trackId != null && String(tr.trackId).trim())
+          ? String(tr.trackId).trim()
+          : ('track_' + ti);
+      const notes = Array.isArray(tr.notes) ? tr.notes.slice() : [];
+      notes.sort(function(a, b){
+        const sa = Number(a && a.startBeat);
+        const sb = Number(b && b.startBeat);
+        const fa = isFinite(sa) ? sa : 0;
+        const fb = isFinite(sb) ? sb : 0;
+        if (fa !== fb) return fa - fb;
+        const ida = (a && a.id) ? String(a.id) : '';
+        const idb = (b && b.id) ? String(b.id) : '';
+        return ida < idb ? -1 : ida > idb ? 1 : 0;
+      });
+      for (let j = 0; j < notes.length; j++){
+        const n = notes[j];
+        if (!n || !n.id) continue;
+        const pitch = Number(n.pitch);
+        const sb = Number(n.startBeat);
+        const db = Number(n.durationBeat);
+        const vel = Number(n.velocity);
+        rows.push({
+          trackId: trackId,
+          noteId: String(n.id),
+          pitch: isFinite(pitch) ? pitch : 0,
+          startBeat: isFinite(sb) ? sb : 0,
+          durationBeat: (isFinite(db) && db > 0) ? db : 0,
+          velocity: (isFinite(vel) && vel >= 0 && vel <= 127) ? Math.round(vel) : 0,
+        });
+      }
+    }
+    return rows;
+  }
+
   /** PR-6a: resolve executed prompt and source for patchSummary trace. */
   function resolveOptimizeUserPrompt(opts){
     const raw = (opts && opts.userPrompt != null && typeof opts.userPrompt === 'string') ? String(opts.userPrompt).trim() : '';
@@ -130,6 +247,12 @@
     NOOP: 'noop',
     /** PR-7b-2: LLM gateway; returns patch from OpenAI-compatible chat completions. */
     LLM_V0: 'llm_v0',
+    /** Phase-1: deterministic velocity-only shaping (no LLM). */
+    VELOCITY_SHAPE: 'velocity_shape',
+    /** Phase-1: deterministic pitch-only local transpose (no LLM). */
+    LOCAL_TRANSPOSE: 'local_transpose',
+    /** Phase-1: deterministic timing-only rhythm tighten/loosen/even (no LLM). */
+    RHYTHM_TIGHTEN_LOOSEN: 'rhythm_tighten_loosen',
   };
   /** Allowlist: only these preset IDs may run; unknown → fallback to safe_stub_v0. */
   const SAFE_PRESET_ALLOWLIST = {
@@ -138,7 +261,122 @@
     [PRESET_IDS.DURATION_GENTLE]: true,
     [PRESET_IDS.NOOP]: true,
     [PRESET_IDS.LLM_V0]: true,
+    [PRESET_IDS.VELOCITY_SHAPE]: true,
+    [PRESET_IDS.LOCAL_TRANSPOSE]: true,
+    [PRESET_IDS.RHYTHM_TIGHTEN_LOOSEN]: true,
   };
+
+  /** @returns {{ intent: object, intentSource: string }} — intentSource aligns with H2SPhase1DeterministicMeta.PHASE1_INTENT_SOURCE */
+  function _resolveVelocityShapeIntent(optsIn){
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const SRC = (P1 && P1.PHASE1_INTENT_SOURCE) ? P1.PHASE1_INTENT_SOURCE : { EXPLICIT_OPTIONS: 'explicit_options', NARROWED_FROM_PROMPT: 'narrowed_from_prompt', PRESET_DEFAULT: 'preset_default' };
+    if (optsIn && optsIn.velocityShapeIntent && typeof optsIn.velocityShapeIntent === 'object' && optsIn.velocityShapeIntent.mode){
+      return {
+        intent: {
+          capability_id: 'velocity_shape',
+          mode: String(optsIn.velocityShapeIntent.mode),
+          strength: optsIn.velocityShapeIntent.strength ? String(optsIn.velocityShapeIntent.strength) : 'medium',
+        },
+        intentSource: SRC.EXPLICIT_OPTIONS,
+      };
+    }
+    const VS = ROOT.H2SVelocityShape;
+    if (VS && typeof VS.narrowVelocityShapeIntentFromText === 'function' && optsIn && optsIn.userPrompt){
+      const n = VS.narrowVelocityShapeIntentFromText(optsIn.userPrompt);
+      if (n) return { intent: n, intentSource: SRC.NARROWED_FROM_PROMPT };
+    }
+    return {
+      intent: { capability_id: 'velocity_shape', mode: 'more_even', strength: 'medium' },
+      intentSource: SRC.PRESET_DEFAULT,
+    };
+  }
+
+  /** @returns {{ intent: object, intentSource: string }} */
+  function _resolveLocalTransposeIntent(optsIn){
+    const LT = ROOT.H2SLocalTranspose;
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const SRC = (P1 && P1.PHASE1_INTENT_SOURCE) ? P1.PHASE1_INTENT_SOURCE : { EXPLICIT_OPTIONS: 'explicit_options', NARROWED_FROM_PROMPT: 'narrowed_from_prompt', PRESET_DEFAULT: 'preset_default' };
+    const clampD = (LT && typeof LT.clampDelta === 'function')
+      ? LT.clampDelta.bind(LT)
+      : function(d){ const n = Math.round(Number(d)); return isFinite(n) ? Math.max(-12, Math.min(12, n)) : 0; };
+    if (optsIn && optsIn.localTransposeIntent && typeof optsIn.localTransposeIntent === 'object' && isFinite(Number(optsIn.localTransposeIntent.semitone_delta))){
+      return {
+        intent: { capability_id: 'local_transpose', semitone_delta: clampD(optsIn.localTransposeIntent.semitone_delta) },
+        intentSource: SRC.EXPLICIT_OPTIONS,
+      };
+    }
+    if (LT && typeof LT.narrowLocalTransposeIntentFromText === 'function' && optsIn && optsIn.userPrompt){
+      const n = LT.narrowLocalTransposeIntentFromText(optsIn.userPrompt);
+      if (n && isFinite(Number(n.semitone_delta))){
+        return { intent: { capability_id: 'local_transpose', semitone_delta: clampD(n.semitone_delta) }, intentSource: SRC.NARROWED_FROM_PROMPT };
+      }
+    }
+    return {
+      intent: { capability_id: 'local_transpose', semitone_delta: clampD(1) },
+      intentSource: SRC.PRESET_DEFAULT,
+    };
+  }
+
+  /** @returns {{ intent: object, intentSource: string }} */
+  function _resolveRhythmIntent(optsIn){
+    const R = ROOT.H2SRhythmTightenLoosen;
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const SRC = (P1 && P1.PHASE1_INTENT_SOURCE) ? P1.PHASE1_INTENT_SOURCE : { EXPLICIT_OPTIONS: 'explicit_options', NARROWED_FROM_PROMPT: 'narrowed_from_prompt', PRESET_DEFAULT: 'preset_default' };
+    const validMode = function(m){
+      const s = String(m || '');
+      return (s === 'tighten' || s === 'loosen' || s === 'even') ? s : 'tighten';
+    };
+    if (optsIn && optsIn.rhythmIntent && typeof optsIn.rhythmIntent === 'object' && optsIn.rhythmIntent.mode){
+      return {
+        intent: {
+          capability_id: 'rhythm_tighten_loosen',
+          mode: validMode(optsIn.rhythmIntent.mode),
+          strength: optsIn.rhythmIntent.strength ? String(optsIn.rhythmIntent.strength) : 'medium',
+        },
+        intentSource: SRC.EXPLICIT_OPTIONS,
+      };
+    }
+    if (R && typeof R.narrowRhythmIntentFromText === 'function' && optsIn && optsIn.userPrompt){
+      const n = R.narrowRhythmIntentFromText(optsIn.userPrompt);
+      if (n && n.mode){
+        return {
+          intent: { capability_id: 'rhythm_tighten_loosen', mode: validMode(n.mode), strength: n.strength ? String(n.strength) : 'medium' },
+          intentSource: SRC.NARROWED_FROM_PROMPT,
+        };
+      }
+    }
+    return {
+      intent: { capability_id: 'rhythm_tighten_loosen', mode: 'tighten', strength: 'medium' },
+      intentSource: SRC.PRESET_DEFAULT,
+    };
+  }
+
+  function _mergePhase1ResolvedSlot(optsIn, capabilityId, intent, intentSource, noteFilter, built, legacySlotName){
+    const P1 = ROOT.H2SPhase1DeterministicMeta;
+    const metaBase = (P1 && typeof P1.buildPhase1DeterministicResolvedMeta === 'function')
+      ? P1.buildPhase1DeterministicResolvedMeta({
+        capabilityId: capabilityId,
+        intentResolved: intent,
+        noteIdsFilter: noteFilter,
+        targetNoteCount: built.targetNoteCount,
+        effectiveNoteCount: built.effectiveNoteCount,
+        intentSource: intentSource,
+      })
+      : {
+        capabilityId: capabilityId,
+        intentResolved: intent,
+        targetScope: (Array.isArray(noteFilter) && noteFilter.length > 0) ? 'note_ids' : 'whole_clip',
+        targetNoteCount: built.targetNoteCount,
+        effectiveNoteCount: built.effectiveNoteCount,
+        intentSource: intentSource,
+        executionPath: capabilityId,
+      };
+    const legacy = Object.assign({}, metaBase, { intent: intent });
+    if (legacySlotName === 'velocity') optsIn._velocityShapeResolved = legacy;
+    else if (legacySlotName === 'transpose') optsIn._localTransposeResolved = legacy;
+    else if (legacySlotName === 'rhythm') optsIn._rhythmResolved = legacy;
+    optsIn._phase1DeterministicResolved = metaBase;
+  }
 
   function _opsByOp(ops){
     const out = {};
@@ -344,6 +582,8 @@
   function create(opts){
     /** PR-7b-2: Run optimize with llm_v0 preset (async). Returns Promise<result>. */
     function _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId){
+      /** Debug PR3: last messages sent to chat-completions (prompt text only; no cfg/headers/secrets). */
+      const promptTraceCapture = { lastAttempt: null };
       const templateId = (optsIn.templateId != null && String(optsIn.templateId).trim()) ? String(optsIn.templateId).trim() : null;
       const template = templateId && LLM_TEMPLATES_V1[templateId] ? LLM_TEMPLATES_V1[templateId] : null;
       const userPromptEmpty = !(optsIn.userPrompt != null && String(optsIn.userPrompt).trim());
@@ -369,57 +609,66 @@
       }
       patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
 
-      function fail(reason, summaryExtras){
-        return {
+      function fail(reason, summaryExtras, llmOutcomeOverride, failOpts){
+        const oc = llmOutcomeOverride || _mapFailReasonToLlmOutcome(reason);
+        const o = {
           ok: false,
           reason: reason,
+          executionPath: 'llm',
           patchSummary: Object.assign({}, patchSummaryBase, {
             status: 'failed',
             reason: String(reason),
             ops: 0,
             byOp: {},
             examples: [],
-          }, summaryExtras || {}),
+          }, _llmOutcomeExtra(oc, { reasonCode: String(reason) }), summaryExtras || {}),
         };
+        if (o.patchSummary && o.patchSummary.llm) o.llmOutcome = String(o.patchSummary.llm.outcome);
+        if (promptTraceCapture.lastAttempt) o.llmPromptTrace = promptTraceCapture.lastAttempt;
+        if (failOpts && failOpts.preRequest){
+          _attachLlmPreRequestFields(o);
+        }
+        return o;
       }
 
       const cfg = (ROOT.H2S_LLM_CONFIG && typeof ROOT.H2S_LLM_CONFIG.loadLlmConfig === 'function')
         ? ROOT.H2S_LLM_CONFIG.loadLlmConfig()
         : null;
       if (!cfg || typeof cfg.baseUrl !== 'string' || !cfg.baseUrl.trim() || typeof cfg.model !== 'string' || !cfg.model.trim()){
-        return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }));
+        return Promise.resolve(fail('llm_config_missing', { reason: 'llm_config_missing' }, undefined, { preRequest: true }));
       }
 
-      // PR-8D: Determine safe mode (velocity-only) - default ON if missing
-      const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+      // Intent for prompt/directives and safe-mode override (extract once)
+      const intent = (optsIn.intent && typeof optsIn.intent === 'object')
+        ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
+        : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
 
-      // PR-8B-1: Extract clip metadata and noteIds for structured hint
+      // PR-8D: Determine safe mode (velocity-only) - default ON if missing
+      // Quality fix: fixPitch/tightenRhythm require pitch/timing edits; override so those intents are not blocked
+      let safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
+      if (intent.fixPitch || intent.tightenRhythm) safeMode = false;
+
+      // PR-8B-1 / LLM Context PR1: clip metadata, noteIds, and full per-note table (beats-only)
       const score = clip && clip.score;
       const tracks = (score && Array.isArray(score.tracks)) ? score.tracks : [];
-      let noteCount = 0;
-      let noteIds = [];
+      const noteRows = collectClipNoteRowsForLlm(tracks);
+      let noteCount = noteRows.length;
+      const noteIds = [];
+      for (let ni = 0; ni < noteRows.length && noteIds.length < 80; ni++){
+        noteIds.push(noteRows[ni].noteId);
+      }
       let pitchMin = null;
       let pitchMax = null;
       let maxSpanBeat = 0;
-      for (const tr of tracks){
-        const notes = Array.isArray(tr.notes) ? tr.notes : [];
-        for (const n of notes){
-          if (n && n.id){
-            if (noteIds.length < 80) noteIds.push(String(n.id));
-            noteCount += 1;
-            const p = Number(n.pitch);
-            if (isFinite(p) && p >= 0 && p <= 127){
-              if (pitchMin == null || p < pitchMin) pitchMin = p;
-              if (pitchMax == null || p > pitchMax) pitchMax = p;
-            }
-            const sb = Number(n.startBeat);
-            const db = Number(n.durationBeat);
-            if (isFinite(sb) && isFinite(db) && db > 0){
-              const end = sb + db;
-              if (end > maxSpanBeat) maxSpanBeat = end;
-            }
-          }
+      for (let ri = 0; ri < noteRows.length; ri++){
+        const r = noteRows[ri];
+        const p = r.pitch;
+        if (isFinite(p) && p >= 0 && p <= 127){
+          if (pitchMin == null || p < pitchMin) pitchMin = p;
+          if (pitchMax == null || p > pitchMax) pitchMax = p;
         }
+        const end = r.startBeat + r.durationBeat;
+        if (isFinite(end) && end > maxSpanBeat) maxSpanBeat = end;
       }
       const meta = clip && clip.meta;
       const finalNoteCount = (meta && typeof meta.notes === 'number') ? meta.notes : noteCount;
@@ -518,11 +767,22 @@
         clipHint += '- span: unknown\n';
       }
       clipHint += '- bpm: ' + String(bpm) + '\n';
+      clipHint += '\nNOTE TABLE (beats-only, all editable notes):\n';
+      if (noteRows.length === 0){
+        clipHint += '(none)\n';
+      } else {
+        for (let ri = 0; ri < noteRows.length; ri++){
+          const r = noteRows[ri];
+          clipHint += '- trackId=' + r.trackId + ' noteId=' + r.noteId +
+            ' pitch=' + String(r.pitch) + ' startBeat=' + String(r.startBeat) +
+            ' durationBeat=' + String(r.durationBeat) + ' velocity=' + String(r.velocity) + '\n';
+        }
+      }
       if (noteIds.length > 0){
         clipHint += '\nAllowed noteIds (use ONLY these for setNote/moveNote/deleteNote):\n';
         clipHint += noteIds.slice(0, 80).join(', ') + '\n';
         if (finalNoteCount > 80){
-          clipHint += '\n(Clip has ' + String(finalNoteCount) + ' notes total; only modify noteIds from the allowed list above. Do not invent ids.)\n';
+          clipHint += '\n(Clip has ' + String(finalNoteCount) + ' notes total; NOTE TABLE above lists every note. Allowed noteIds line shows first 80 only; do not invent ids.)\n';
         } else {
           clipHint += '\nIf you use setNote/moveNote/deleteNote, noteId MUST be chosen from the Allowed noteIds list above.\n';
         }
@@ -532,15 +792,18 @@
       clipHint += '\nOutput only the patch JSON in a ```json ... ``` block.';
 
       // PR-B2-min / PR-E3: Goals and Directives from intent + template
-      const intent = (optsIn.intent && typeof optsIn.intent === 'object')
-        ? { fixPitch: !!optsIn.intent.fixPitch, tightenRhythm: !!optsIn.intent.tightenRhythm, reduceOutliers: !!optsIn.intent.reduceOutliers }
-        : { fixPitch: false, tightenRhythm: false, reduceOutliers: false };
       const hasGoals = intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers || !!template;
       const directivesBlock = hasGoals ? buildDirectivesBlock(template, intent) : '';
       const goalsPrefix = !directivesBlock && (intent.fixPitch || intent.tightenRhythm || intent.reduceOutliers)
         ? ('Goals: ' + [intent.fixPitch ? 'fix pitch (correct wrong notes)' : null, intent.tightenRhythm ? 'tighten rhythm (align timing)' : null, intent.reduceOutliers ? 'reduce outliers (smooth extreme values)' : null].filter(Boolean).join('; ') + '.\n\n')
         : '';
-      const promptBody = (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
+      // PR3: Optional PLAN block from structured plan (extra execution constraint)
+      // Assistant Run: _assistantExecutionPlanSnapshot is authoritative (avoids stale generic plan in opts.plan).
+      const planForLlmBlock = (optsIn._assistantExecutionPlanSnapshot != null && typeof optsIn._assistantExecutionPlanSnapshot === 'object')
+        ? optsIn._assistantExecutionPlanSnapshot
+        : optsIn.plan;
+      const planBlock = buildPlanBlock(planForLlmBlock);
+      const promptBody = (planBlock ? planBlock + '\n\n' : '') + (directivesBlock ? directivesBlock + '\n\n' : '') + (goalsPrefix || '') + effectivePromptInfo.prompt;
 
       let baseUserContent = promptBody + clipHint;
       if (!safeMode){
@@ -548,7 +811,7 @@
       }
       const client = ROOT.H2S_LLM_CLIENT;
       if (!client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
-        return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }));
+        return Promise.resolve(fail('llm_client_not_loaded', { reason: 'llm_client_not_loaded' }, undefined, { preRequest: true }));
       }
 
       // PR-8B-2: Inner async function for one attempt (with optional fix hint for retry)
@@ -565,13 +828,39 @@
         ];
 
         try {
+          const pm = patchSummaryBase.promptMeta && typeof patchSummaryBase.promptMeta === 'object' ? patchSummaryBase.promptMeta : null;
+          promptTraceCapture.lastAttempt = {
+            attemptIndex: attemptIndex,
+            finalSystemPrompt: systemMsg,
+            finalUserPrompt: userContent,
+            blocks: {
+              resolvedTemplateId: template ? template.id : null,
+              resolvedIntent: { fixPitch: !!intent.fixPitch, tightenRhythm: !!intent.tightenRhythm, reduceOutliers: !!intent.reduceOutliers },
+              promptVersion: (pm && pm.promptVersion != null && String(pm.promptVersion).trim()) ? String(pm.promptVersion).trim() : 'manual_v0',
+              planBlock: planBlock || '',
+              directivesBlock: directivesBlock || '',
+              userBody: (effectivePromptInfo && typeof effectivePromptInfo.prompt === 'string') ? effectivePromptInfo.prompt : '',
+            },
+          };
           const res = await client.callChatCompletions(cfg, messages, { temperature: 0.2, timeoutMs: 20000 });
           const text = (res && typeof res.text === 'string') ? res.text : '';
           if (debugCapture) debugCapture.rawText = text;
           const patchObj = client.extractJsonObject(text);
           if (!patchObj || typeof patchObj !== 'object'){
             if (debugCapture) debugCapture.extractedJson = null;
-            return { ok: false, reason: 'llm_no_valid_json', detail: 'no_json' };
+            return {
+              ok: false,
+              reason: 'llm_no_valid_json',
+              detail: 'no_json',
+              patchSummary: Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: 'llm_no_valid_json',
+                ops: 0,
+                byOp: {},
+                examples: [],
+                detail: 'no_json',
+              }, _llmOutcomeExtra('failed_extract', { detail: 'no_json' })),
+            };
           }
           if (debugCapture) debugCapture.extractedJson = JSON.stringify(patchObj, null, 2);
           if (!Array.isArray(patchObj.ops)) patchObj.ops = [];
@@ -584,6 +873,7 @@
             return {
               ok: true,
               ops: 0,
+              llmOutcome: 'no_op',
               patchSummary: Object.assign({}, patchSummaryBase, {
                 status: 'ok',
                 noChanges: true,
@@ -591,7 +881,7 @@
                 ops: 0,
                 byOp: {},
                 examples: [],
-              }, _computePatchTypeSummary([])),
+              }, _llmOutcomeExtra('no_op', { reason: 'empty_ops' }), _computePatchTypeSummary([])),
             };
           }
 
@@ -625,6 +915,14 @@
                 detail: errorCodes,
                 patchObj: patchObj,
                 opsN: opsN,
+                patchSummary: Object.assign({}, patchSummaryBase, {
+                  status: 'failed',
+                  reason: 'patch_rejected',
+                  ops: opsN,
+                  byOp: _opsByOp(patchObj.ops),
+                  examples: [],
+                  detail: errorCodes,
+                }, _llmOutcomeExtra('rejected_safe_mode', { detail: errorCodes })),
               };
             }
           }
@@ -640,6 +938,14 @@
               detail: errorCodes,
               patchObj: patchObj,
               opsN: opsN,
+              patchSummary: Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: 'patch_rejected',
+                ops: opsN,
+                byOp: _opsByOp(patchObj.ops),
+                examples: [],
+                detail: errorCodes,
+              }, _llmOutcomeExtra('rejected_validation', { detail: errorCodes })),
             };
           }
           if (debugCapture) debugCapture.validateErrors = [];
@@ -655,7 +961,7 @@
                 ops: opsN,
                 byOp: _opsByOp(patchObj.ops),
                 examples: [],
-              }, ps);
+              }, ps, _llmOutcomeExtra('rejected_quality', { detail: 'quality_velocity_only' }));
               return {
                 ok: false,
                 reason: 'patch_rejected',
@@ -666,8 +972,11 @@
           }
 
           const applied = H2SAgentPatch.applyPatchToClip(clip, patchObj, { project: project });
-          if (!applied || !applied.clip){
-            return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops) });
+          if (!applied || !applied.ok || !applied.clip){
+            const errs = (applied && applied.errors && Array.isArray(applied.errors)) ? applied.errors : [];
+            const err0 = errs[0] ? String(errs[0]) : '';
+            const applyOc = _isSemanticApplyFailure(applied, err0) ? 'rejected_semantic' : 'failed_apply';
+            return fail('apply_failed', { ops: opsN, byOp: _opsByOp(patchObj.ops), detail: err0 }, applyOc);
           }
 
           const resNew = H2SProject.beginNewClipRevision(project, cid, { name: clip.name });
@@ -680,21 +989,22 @@
           if (typeof H2SProject.recomputeClipMetaFromScoreBeat === 'function') H2SProject.recomputeClipMetaFromScoreBeat(head);
 
           head.meta = head.meta || {};
+          const appliedLlmSummary = Object.assign({}, patchSummaryBase, {
+            status: 'ok',
+            ops: opsN,
+            byOp: _opsByOp(patchObj.ops),
+            examples: [],
+          }, _computePatchTypeSummary(patchObj.ops), _llmOutcomeExtra('applied'));
           head.meta.agent = {
             optimizedFromRevisionId: beforeRevisionId,
             appliedAt: _now(),
             patchOps: opsN,
-            patchSummary: Object.assign({}, patchSummaryBase, {
-              status: 'ok',
-              ops: opsN,
-              byOp: _opsByOp(patchObj.ops),
-              examples: [],
-            }, _computePatchTypeSummary(patchObj.ops)),
+            patchSummary: appliedLlmSummary,
           };
 
           opts.setProjectFromV2(project);
           if (typeof opts.commitV2 === 'function') opts.commitV2('agent_optimize');
-          return { ok: true, ops: opsN };
+          return { ok: true, ops: opsN, executionPath: 'llm', patchSummary: appliedLlmSummary, llmOutcome: 'applied' };
         } catch(err){
           const msg = (err && err.message) ? String(err.message) : 'llm_request_failed';
           // PR-8C: Capture error in debug if available
@@ -710,18 +1020,22 @@
       // PR-8B-2: Retry logic - only retry for JSON extraction or validation failures
       // PR-8C: Capture debug data for final attempt (incl. safeModeResolved for console-friendly verification)
       const debugCapture = { rawText: '', extractedJson: null, validateErrors: [] };
+      const attemptLog = [];
       return attemptOnce(1, null, debugCapture).then(function(res1){
         if (res1.ok){
+          attemptLog.push(_llmAttemptSnapshot(1, res1));
           const out = Object.assign({}, res1);
+          out.executionPath = 'llm';
           out.llmDebug = {
-            attemptCount: 1,
             reason: res1.reason || 'ok',
             rawText: debugCapture.rawText || '',
             extractedJson: debugCapture.extractedJson || null,
             errors: debugCapture.validateErrors || [],
             safeModeResolved: safeMode,
           };
-          return out;
+          _attachLlmRetryFields(out, attemptLog);
+          if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
+          return _attachLlmOutcomeToReturn(out);
         }
         if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
           let fixDetail = '';
@@ -740,30 +1054,37 @@
           debugCapture.rawText = '';
           debugCapture.extractedJson = null;
           debugCapture.validateErrors = [];
+          attemptLog.push(_llmAttemptSnapshot(1, res1));
           return attemptOnce(2, fixDetail, debugCapture).then(function(res2){
+            attemptLog.push(_llmAttemptSnapshot(2, res2));
             const out = Object.assign({}, res2);
+            out.executionPath = 'llm';
             out.llmDebug = {
-              attemptCount: 2,
               reason: res2.reason || 'ok',
               rawText: debugCapture.rawText || '',
               extractedJson: debugCapture.extractedJson || null,
               errors: debugCapture.validateErrors || [],
               safeModeResolved: safeMode,
             };
-            return out;
+            _attachLlmRetryFields(out, attemptLog);
+            if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
+            return _attachLlmOutcomeToReturn(out);
           });
         }
         // No retry - return first attempt with debug
+        attemptLog.push(_llmAttemptSnapshot(1, res1));
         const out = Object.assign({}, res1);
+        out.executionPath = 'llm';
         out.llmDebug = {
-          attemptCount: 1,
           reason: res1.reason || 'unknown',
           rawText: debugCapture.rawText || '',
           extractedJson: debugCapture.extractedJson || null,
           errors: debugCapture.validateErrors || [],
           safeModeResolved: safeMode,
         };
-        return out;
+        _attachLlmRetryFields(out, attemptLog);
+        if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
+        return _attachLlmOutcomeToReturn(out);
       });
     }
 
@@ -784,6 +1105,9 @@
       const cid = String(clipId||'');
       const clip = project && project.clips && project.clips[cid];
       if (!clip) return { ok:false, reason:'clip_not_found' };
+      if (H2SProject && typeof H2SProject.clipKind === 'function' && H2SProject.clipKind(clip) === 'audio'){
+        return { ok:false, reason:'audio_clip_not_supported' };
+      }
 
       const optsIn = (options && typeof options === 'object') ? options : {};
       const requestedPresetId = (optsIn.requestedPresetId != null && optsIn.requestedPresetId !== '') ? String(optsIn.requestedPresetId) : null;
@@ -795,29 +1119,90 @@
 
       const beforeRevisionId = clip.revisionId || null;
 
-      // ALWAYS run pseudo agent first (semantic priority)
-      const pseudoPatch = buildPseudoAgentPatch(clip);
       let patch = null;
       let examples = [];
       let executedSource = 'pseudo_v0';
       let executedPreset = 'pseudo_v0';
+      let usedPseudoPath = false;
 
-      if (pseudoPatch.ops && pseudoPatch.ops.length > 0){
-        patch = pseudoPatch;
-      } else {
-        const inAllowlist = requestedPresetId && SAFE_PRESET_ALLOWLIST[requestedPresetId];
-        const effectivePresetId = inAllowlist ? requestedPresetId : SAFE_STUB_PRESET;
-        if (effectivePresetId === PRESET_IDS.LLM_V0){
-          return _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId);
+      // Phase-1 velocity_shape: deterministic, beats-only, velocity-only — takes priority over pseudo/presets.
+      if (requestedPresetId === PRESET_IDS.VELOCITY_SHAPE && SAFE_PRESET_ALLOWLIST[requestedPresetId]){
+        const VS = ROOT.H2SVelocityShape;
+        if (!VS || typeof VS.buildVelocityShapePatch !== 'function'){
+          return { ok: false, reason: 'velocity_shape_unavailable', executionPath: 'velocity_shape' };
         }
-        const res = _buildPatchFromPreset(clip, effectivePresetId);
-        patch = res.patch;
-        examples = res.examples || [];
-        executedSource = inAllowlist ? 'safe_preset' : DEFAULT_OPT_SOURCE;
-        executedPreset = effectivePresetId;
+        const vsRes = _resolveVelocityShapeIntent(optsIn);
+        const vsIntent = vsRes.intent;
+        const noteFilter = (Array.isArray(optsIn.velocityShapeNoteIds) && optsIn.velocityShapeNoteIds.length > 0)
+          ? optsIn.velocityShapeNoteIds.map(function(x){ return String(x); })
+          : null;
+        const built = VS.buildVelocityShapePatch(clip, vsIntent, noteFilter);
+        _mergePhase1ResolvedSlot(optsIn, 'velocity_shape', vsIntent, vsRes.intentSource, noteFilter, built, 'velocity');
+        patch = built.patch;
+        examples = built.examples || [];
+        executedSource = 'velocity_shape';
+        executedPreset = 'velocity_shape';
+        usedPseudoPath = false;
+      } else if (requestedPresetId === PRESET_IDS.LOCAL_TRANSPOSE && SAFE_PRESET_ALLOWLIST[requestedPresetId]){
+        const LT = ROOT.H2SLocalTranspose;
+        if (!LT || typeof LT.buildLocalTransposePatch !== 'function'){
+          return { ok: false, reason: 'local_transpose_unavailable', executionPath: 'local_transpose' };
+        }
+        const ltRes = _resolveLocalTransposeIntent(optsIn);
+        const ltIntent = ltRes.intent;
+        const noteFilterLt = (Array.isArray(optsIn.localTransposeNoteIds) && optsIn.localTransposeNoteIds.length > 0)
+          ? optsIn.localTransposeNoteIds.map(function(x){ return String(x); })
+          : null;
+        const builtLt = LT.buildLocalTransposePatch(clip, ltIntent, noteFilterLt);
+        _mergePhase1ResolvedSlot(optsIn, 'local_transpose', ltIntent, ltRes.intentSource, noteFilterLt, builtLt, 'transpose');
+        patch = builtLt.patch;
+        examples = builtLt.examples || [];
+        executedSource = 'local_transpose';
+        executedPreset = 'local_transpose';
+        usedPseudoPath = false;
+      } else if (requestedPresetId === PRESET_IDS.RHYTHM_TIGHTEN_LOOSEN && SAFE_PRESET_ALLOWLIST[requestedPresetId]){
+        const R = ROOT.H2SRhythmTightenLoosen;
+        if (!R || typeof R.buildRhythmPatch !== 'function'){
+          return { ok: false, reason: 'rhythm_tighten_loosen_unavailable', executionPath: 'rhythm_tighten_loosen' };
+        }
+        const rRes = _resolveRhythmIntent(optsIn);
+        const rIntent = rRes.intent;
+        const noteFilterR = (Array.isArray(optsIn.rhythmNoteIds) && optsIn.rhythmNoteIds.length > 0)
+          ? optsIn.rhythmNoteIds.map(function(x){ return String(x); })
+          : null;
+        const builtR = R.buildRhythmPatch(clip, rIntent, noteFilterR);
+        _mergePhase1ResolvedSlot(optsIn, 'rhythm_tighten_loosen', rIntent, rRes.intentSource, noteFilterR, builtR, 'rhythm');
+        patch = builtR.patch;
+        examples = builtR.examples || [];
+        executedSource = 'rhythm_tighten_loosen';
+        executedPreset = 'rhythm_tighten_loosen';
+        usedPseudoPath = false;
+      } else {
+        // ALWAYS run pseudo agent first (semantic priority)
+        const pseudoPatch = buildPseudoAgentPatch(clip);
+
+        if (pseudoPatch.ops && pseudoPatch.ops.length > 0){
+          patch = pseudoPatch;
+          usedPseudoPath = true;
+        } else {
+          const inAllowlist = requestedPresetId && SAFE_PRESET_ALLOWLIST[requestedPresetId];
+          const effectivePresetId = inAllowlist ? requestedPresetId : SAFE_STUB_PRESET;
+          if (effectivePresetId === PRESET_IDS.LLM_V0){
+            return _runLlmV0Optimize(project, cid, clip, optsIn, promptInfo, beforeRevisionId, requestedPresetId);
+          }
+          const res = _buildPatchFromPreset(clip, effectivePresetId);
+          patch = res.patch;
+          examples = res.examples || [];
+          executedSource = inAllowlist ? 'safe_preset' : DEFAULT_OPT_SOURCE;
+          executedPreset = effectivePresetId;
+        }
       }
 
       const opsN = patch.ops.length;
+      const execPathOut = (executedPreset === PRESET_IDS.VELOCITY_SHAPE) ? 'velocity_shape'
+        : (executedPreset === PRESET_IDS.LOCAL_TRANSPOSE) ? 'local_transpose'
+        : (executedPreset === PRESET_IDS.RHYTHM_TIGHTEN_LOOSEN) ? 'rhythm_tighten_loosen'
+        : (usedPseudoPath ? 'pseudo' : 'preset');
       const requestedUserPrompt = (optsIn.userPrompt != null && typeof optsIn.userPrompt === 'string') ? optsIn.userPrompt : null;
       const patchSummaryBase = {
         requestedSource: requestedPresetId,
@@ -833,11 +1218,24 @@
       if (optsIn._promptLen != null) patchSummaryBase.promptLen = optsIn._promptLen;
       if (requestedPresetId && !SAFE_PRESET_ALLOWLIST[requestedPresetId]) patchSummaryBase.reason = 'unknown_preset_fallback';
       patchSummaryBase.promptMeta = resolvePromptMeta(optsIn);
+      if (optsIn._velocityShapeResolved && typeof optsIn._velocityShapeResolved === 'object'){
+        patchSummaryBase.velocityShape = optsIn._velocityShapeResolved;
+      }
+      if (optsIn._localTransposeResolved && typeof optsIn._localTransposeResolved === 'object'){
+        patchSummaryBase.localTranspose = optsIn._localTransposeResolved;
+      }
+      if (optsIn._rhythmResolved && typeof optsIn._rhythmResolved === 'object'){
+        patchSummaryBase.rhythm = optsIn._rhythmResolved;
+      }
+      if (optsIn._phase1DeterministicResolved && typeof optsIn._phase1DeterministicResolved === 'object'){
+        patchSummaryBase.phase1Deterministic = optsIn._phase1DeterministicResolved;
+      }
 
       if (opsN === 0){
         return {
           ok:true,
           ops:0,
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'ok',
             noChanges:true,
@@ -857,6 +1255,7 @@
         return {
           ok:false,
           reason,
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:String(reason),
@@ -872,6 +1271,7 @@
         return {
           ok:false,
           reason:'apply_failed',
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:'apply_failed',
@@ -887,6 +1287,7 @@
         return {
           ok:false,
           reason:'beginNewClipRevision_failed',
+          executionPath: execPathOut,
           patchSummary: Object.assign({}, patchSummaryBase, {
             status:'failed',
             reason:'beginNewClipRevision_failed',
@@ -902,22 +1303,23 @@
       H2SProject.recomputeClipMetaFromScoreBeat?.(head);
 
       head.meta = head.meta || {};
+      const appliedPatchSummary = Object.assign({}, patchSummaryBase, {
+        status:'ok',
+        ops:opsN,
+        byOp:_opsByOp(patch.ops),
+        examples
+      }, _computePatchTypeSummary(patch.ops));
       head.meta.agent = {
         optimizedFromRevisionId: beforeRevisionId,
         appliedAt: _now(),
         patchOps: opsN,
-        patchSummary: Object.assign({}, patchSummaryBase, {
-          status:'ok',
-          ops:opsN,
-          byOp:_opsByOp(patch.ops),
-          examples
-        }, _computePatchTypeSummary(patch.ops))
+        patchSummary: appliedPatchSummary,
       };
 
       opts.setProjectFromV2(project);
       opts.commitV2?.('agent_optimize');
 
-      return { ok:true, ops:opsN };
+      return { ok:true, ops:opsN, executionPath: execPathOut, patchSummary: appliedPatchSummary };
     }
     return { optimizeClip };
   }

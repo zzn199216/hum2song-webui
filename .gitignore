@@ -48,3 +48,6 @@ assets/**
 /uploads/
 /outputs/
 
+# --- Local tooling (not versioned) ---
+.workbuddy/
+

@@ -51,22 +51,22 @@ p.clipOrder = [clip.id];
 const clipId = clip.id;
 const rev0 = p.clips[clipId].revisionId;
 assert(!!rev0, 'baseline clip must have revisionId');
-assert((p.clips[clipId].revisions || []).length === 0, 'baseline revisions must be empty');
+assert(Object.keys(p.clips[clipId].revisions || {}).length === 0, 'baseline revisions must be empty');
 
 // Act: create new revision and change pitch (visible diff)
 H2SProject.beginNewClipRevision(p, clipId);
 const rev1 = p.clips[clipId].revisionId;
 assert(rev1 && rev1 !== rev0, 'beginNewClipRevision must create new revisionId');
 assert(p.clips[clipId].parentRevisionId === rev0, 'new head parentRevisionId must point to old rev');
-assert((p.clips[clipId].revisions || []).length === 1, 'beginNewClipRevision must snapshot old head');
+assert(Object.keys(p.clips[clipId].revisions || {}).length === 2, 'beginNewClipRevision must snapshot old head and add new head');
 
 p.clips[clipId].score.tracks[0].notes[0].pitch = 72;
 H2SProject.recomputeClipMetaFromScoreBeat(p.clips[clipId]);
 assert(headPitch0(p, clipId) === 72, 'head pitch should reflect edit on new revision');
 
-// listClipRevisions must show 2 items
+// listClipRevisions must show 3 items (head + 2 in revision map: old head + new head)
 const info1 = H2SProject.listClipRevisions(p.clips[clipId]);
-assert(info1.items && info1.items.length === 2, 'listClipRevisions must show 2 items after 1 revision');
+assert(info1.items && info1.items.length === 3, 'listClipRevisions must show 3 items after 1 revision');
 assert(info1.activeRevisionId === rev1, 'activeRevisionId must match current head');
 
 // Act: switch to original via setClipActiveRevision
@@ -77,7 +77,7 @@ assert(headPitch0(p, clipId) === 60, 'after switching to rev0, pitch must match 
 
 // Switching should not "lose" the other revision.
 const info2 = H2SProject.listClipRevisions(p.clips[clipId]);
-assert(info2.items && info2.items.length === 2, 'switching revisions must keep 2 items');
+assert(info2.items && info2.items.length === 3, 'switching revisions must keep 3 items');
 
 // Act: switch back to rev1
 const sw1 = H2SProject.setClipActiveRevision(p, clipId, rev1);

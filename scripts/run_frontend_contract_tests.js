@@ -9,6 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const assert = (cond, msg) => {
   if (!cond) throw new Error(msg || 'assertion failed');
@@ -74,12 +75,20 @@ const libView = require('../static/pianoroll/ui/library_view.js');
 })();
 
 (function testTimelineControllerSourceContract(){
-  // Source-level contract: controller should bind events to instBody if present.
   const p = path.join(__dirname, '..', 'static', 'pianoroll', 'timeline_controller.js');
   const src = fs.readFileSync(p, 'utf8');
-  assert(src.includes("querySelector('.instBody')") || src.includes('querySelector(\".instBody\")'), 'timeline_controller must query .instBody');
+  assert(src.includes('instancePointerDown'), 'timeline_controller must handle instance pointerdown');
   assert(src.includes('data-act=\"remove\"') || src.includes('[data-act=\"remove\"]'), 'timeline_controller must handle [data-act="remove"]');
   pass('timeline controller binds to instBody + data-act remove');
 })();
+
+require(path.join(__dirname, 'tests', 'ui_audio_clip_slice.test.js'));
+pass('ui audio clip slice (library/timeline/guards/mixed)');
+
+require(path.join(__dirname, 'tests', 'audio_direct_import_slice.test.js'));
+pass('audio direct import slice (createClipFromAudio + migrate)');
+
+execFileSync(process.execPath, [path.join(__dirname, 'tests', 'audio_local_asset_persistence.test.js')], { stdio: 'inherit' });
+pass('audio local asset persistence (localidb ref + resolve)');
 
 console.log('\nAll frontend contract tests passed.');

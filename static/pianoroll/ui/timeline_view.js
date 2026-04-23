@@ -34,19 +34,39 @@
     args = args || {};
     const escapeHtml = args.escapeHtml || _defaultEscapeHtml;
     const fmtSec = args.fmtSec || ((x)=> (Number(x||0).toFixed(2) + 's'));
+    const notesLabel = (args.notesLabel != null && String(args.notesLabel)) ? String(args.notesLabel) : 'notes';
+    const removeLabel = (args.removeLabel != null && String(args.removeLabel)) ? String(args.removeLabel) : 'Remove';
 
     const clipName = escapeHtml(args.clipName || '');
     const startSec = (typeof args.startSec === 'number') ? args.startSec : 0;
     const noteCount = (typeof args.noteCount === 'number') ? args.noteCount : 0;
+    const spanSec = (typeof args.spanSec === 'number' && isFinite(args.spanSec)) ? args.spanSec : 0;
+    const isAudio = !!args.isAudio;
+    const instId = (args.instId != null && String(args.instId)) ? escapeHtml(String(args.instId)) : '';
+    const editLabel = (args.editLabel != null && String(args.editLabel)) ? String(args.editLabel) : 'Edit';
+    const optimizeLabel = (args.optimizeLabel != null && String(args.optimizeLabel)) ? String(args.optimizeLabel) : 'Optimize';
+    const audioBadge = (args.audioBadge != null && String(args.audioBadge)) ? String(args.audioBadge) : 'Original audio';
+    const subRight = isAudio
+      ? (fmtSec(spanSec) + ' · ' + escapeHtml(audioBadge))
+      : (noteCount + ' ' + escapeHtml(notesLabel));
 
     // NOTE: instBody is the intended hit area for drag + dblclick.
     // Keep legacy class names for compatibility.
+    // Audio instances: no Edit/Optimize (note-only); note clips keep overlay actions.
+    const instActionsHtml = isAudio
+      ? ''
+      : `
+      <div class="instActions">
+        <button class="instAct" type="button" data-act="instEdit" data-inst-id="${instId}">${escapeHtml(editLabel)}</button>
+        <button class="instAct" type="button" data-act="instOptimize" data-inst-id="${instId}">${escapeHtml(optimizeLabel)}</button>
+      </div>`;
+
     return `
       <div class="instBody inst-body" data-role="inst-body">
-        <div class="instTitle inst-title">${clipName}</div>
-        <div class="instSub inst-sub"><span>${fmtSec(startSec)}</span><span>${noteCount} notes</span></div>
-      </div>
-      <button class="instRemove btn-inst-remove" type="button" data-act="remove" title="Remove" aria-label="Remove">×</button>
+        <div class="instTitle inst-title">${isAudio ? ('<span class="inst-badge">' + escapeHtml(audioBadge) + '</span> ') : ''}${clipName}</div>
+        <div class="instSub inst-sub"><span>${fmtSec(startSec)}</span><span>${subRight}</span></div>
+      </div>${instActionsHtml}
+      <button class="instRemove btn-inst-remove" type="button" data-act="remove" title="${escapeHtml(removeLabel)}" aria-label="${escapeHtml(removeLabel)}">×</button>
     `;
   }
 

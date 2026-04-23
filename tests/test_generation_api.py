@@ -33,6 +33,26 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
+def test_generate_vocal_separation_query_sets_task_flag(client):
+    r = client.post(
+        "/generate?output_format=mp3&vocal_separation=true",
+        files={"file": ("a.wav", b"fake-wav", "audio/wav")},
+    )
+    assert r.status_code == 202
+    tid = r.json()["task_id"]
+    assert gen_module.task_manager.get_request_two_stem_separation(tid) is True
+
+
+def test_generate_without_vocal_separation_query_default_false(client):
+    r = client.post(
+        "/generate?output_format=mp3",
+        files={"file": ("b.wav", b"fake-wav", "audio/wav")},
+    )
+    assert r.status_code == 202
+    tid = r.json()["task_id"]
+    assert gen_module.task_manager.get_request_two_stem_separation(tid) is False
+
+
 def test_generate_returns_task_id_and_finishes(client):
     r = client.post(
         "/generate?output_format=mp3",

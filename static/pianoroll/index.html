@@ -24,6 +24,8 @@
       --shadow: 0 10px 30px rgba(0,0,0,.35);
       --radius:14px;
       --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      /* Synced from app.js from #aiAssistDock height + bottom offset + breathing room */
+      --studio-ai-dock-safe-bottom: 44px;
     }
     *{ box-sizing:border-box; }
     html,body{ height:100%; }
@@ -33,6 +35,8 @@
       background:linear-gradient(180deg, #0e1116 0%, var(--bg) 100%);
       color:var(--text);
       overflow:hidden;
+      display:flex;
+      flex-direction:column;
     }
     .topbar{
       height:54px;
@@ -56,9 +60,266 @@
     }
     .spacer{ flex:1; }
     .smallmuted{ font-size:12px; color:var(--muted); }
+    .hidden{ display:none; }
+    .h2sModal{ position:fixed; inset:0; z-index:9999; pointer-events:none; }
+    .h2sModal:not(.hidden){ pointer-events:auto; }
+    /* Project Home MVP — above AI drawer, below nothing else critical */
+    #projectHomeModal{ z-index:10000; }
+    #projectHomeModal .projectHomeCenter{
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; pointer-events:none;
+    }
+    #projectHomeModal .projectHomeCard{
+      pointer-events:auto;
+      width:min(420px, 100%);
+      max-width:420px;
+      padding:22px 22px 18px;
+      border-radius:var(--radius);
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(32,39,52,.98), rgba(18,22,28,.98));
+      box-shadow:var(--shadow);
+    }
+    #projectHomeModal .projectHomeTitle{ margin:0 0 4px; font-size:18px; font-weight:800; letter-spacing:.2px; }
+    #projectHomeModal .projectHomeSub{ margin:0 0 14px; font-size:13px; color:var(--muted); line-height:1.45; }
+    #projectHomeModal .projectHomeStats{ display:flex; flex-wrap:wrap; gap:10px 18px; margin-bottom:14px; font-size:13px; }
+    #projectHomeModal .projectHomeLocalHeading{ font-size:12px; color:var(--muted); margin:0 0 6px; }
+    #projectHomeModal .projectHomeLocalList{ list-style:none; margin:0 0 14px; padding:0; max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.12); }
+    #projectHomeModal .projectHomeLocalList li{ margin:0; border-bottom:1px solid var(--border); }
+    #projectHomeModal .projectHomeLocalList li:last-child{ border-bottom:none; }
+    #projectHomeModal .projectHomeLocalList .projectHomeLocalBtn{ width:100%; text-align:left; padding:8px 10px; border:none; border-radius:0; background:transparent; cursor:pointer; font:inherit; color:inherit; }
+    #projectHomeModal .projectHomeLocalList .projectHomeLocalBtn:hover{ background:rgba(255,255,255,.06); }
+    #projectHomeModal .projectHomeLocalList .projectHomeLocalBtn.current{ font-weight:700; background:rgba(255,255,255,.04); }
+    #projectHomeModal .projectHomeActions{ display:flex; flex-wrap:wrap; gap:8px; }
+    #projectHomeModal .projectHomeActions .btn{ flex:1 1 auto; min-width:min(140px, 100%); }
+    #clipFromProjectModal{ z-index:10001; }
+    #clipFromProjectModal .clipFromProjectCenter{
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; pointer-events:none;
+    }
+    #clipFromProjectModal .clipFromProjectCard{
+      pointer-events:auto;
+      width:min(440px, 100%);
+      max-width:440px;
+      padding:20px 20px 16px;
+      border-radius:var(--radius);
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(32,39,52,.98), rgba(18,22,28,.98));
+      box-shadow:var(--shadow);
+    }
+    #clipFromProjectModal .clipFromProjectTitle{ margin:0 0 8px; font-size:16px; font-weight:800; }
+    #clipFromProjectModal .clipFromProjectHint{ margin:0 0 10px; font-size:12px; color:var(--muted); line-height:1.45; }
+    #clipFromProjectModal #lblClipFromProjectBpm{ display:block; margin-bottom:10px; font-size:12px; color:var(--muted); }
+    #clipFromProjectModal #selClipFromProject{ width:100%; margin-bottom:14px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:rgba(0,0,0,.2); color:var(--text); font-size:13px; }
+    #clipFromProjectModal .clipFromProjectActions{ display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+    .h2sModalBackdrop{ position:absolute; inset:0; background:rgba(0,0,0,.45); pointer-events:auto; }
+    .h2sDrawer{ position:absolute; top:0; right:0; width:min(420px, 92vw); height:100%; background:#0f141b; border-left:1px solid rgba(255,255,255,.08); box-shadow:-12px 0 32px rgba(0,0,0,.5); overflow:auto; pointer-events:auto; }
+    .h2sDrawerHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:rgba(0,0,0,.2); }
+    .h2sDrawerTitle{ font-weight:600; font-size:14px; }
+    .h2sDrawerBody{ padding:16px; overflow:auto; }
+    .btnClose{ appearance:none; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; }
+    .btnClose:hover{ background:rgba(255,255,255,.08); }
+    .topbarBtn.aiSettingsBtn{ display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); cursor:pointer; font-size:13px; font-weight:600; transition:.15s ease; }
+    .topbarBtn.aiSettingsBtn:hover{ background:rgba(255,255,255,.07); }
+    .topbarBtn.aiSettingsBtn.active{ background:rgba(59,130,246,.2); border-color:rgba(59,130,246,.4); }
+    .topbarBtn.aiSettingsBtn.needsAttention{ position:relative; }
+    .topbarBtn.aiSettingsBtn.needsAttention::after{ content:''; position:absolute; top:6px; right:6px; width:6px; height:6px; border-radius:50%; background:var(--danger,#ef4444); }
+    @media (max-width: 900px){ .topbarBtn.aiSettingsBtn .aiSuffix{ display:none; } }
+    .aiHintErr{ opacity:.85; font-size:12px; margin-top:4px; color:var(--muted); }
+    .aiInlineStatus{ margin-top:8px; font-size:12px; min-height:1.2em; }
+    .aiInlineStatus.ok{ color:var(--accent2,#60a5fa); }
+    .aiInlineStatus.err{ color:var(--danger,#ef4444); }
+    .aiInlineStatus.info{ color:var(--muted); }
+
+    /* PR-UX7a: AI Assistant dock */
+    #aiAssistDock{
+      position:fixed;
+      bottom:12px;
+      right:12px;
+      width:340px;
+      height:28px;
+      z-index:800;
+      background:linear-gradient(180deg, rgba(27,32,40,.98), rgba(18,22,28,.98));
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:0 8px 24px rgba(0,0,0,.4);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    #aiAssistDock.open{ height:400px; width:340px; }
+    #aiAssistResizeHandle{ position:absolute; top:0; left:0; width:20px; height:20px; cursor:nwse-resize; z-index:10; user-select:none; background:linear-gradient(135deg, rgba(255,255,255,.15) 0%, transparent 50%); border-radius:var(--radius) 0 6px 0; }
+    #aiAssistResizeHandle:hover{ background:linear-gradient(135deg, rgba(255,255,255,.25) 0%, transparent 50%); }
+    #aiAssistHeader{
+      height:28px;
+      min-height:28px;
+      display:flex;
+      align-items:center;
+      padding:0 12px;
+      background:rgba(0,0,0,.25);
+      border-bottom:1px solid var(--border);
+      cursor:pointer;
+      user-select:none;
+      font-size:12px;
+      font-weight:600;
+      flex:1;
+      min-width:0;
+    }
+    #aiAssistHeader:hover{ background:rgba(0,0,0,.35); }
+    #aiAssistDock:not(.open) #aiAssistHeader{ border-bottom:none; }
+    #aiAssistHeaderTarget{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:6px; }
+    .aiAssistChevron{ margin-left:6px; color:var(--muted); font-size:10px; flex-shrink:0; }
+    #aiAssistBody{ flex:1; min-height:0; display:flex; flex-direction:column; padding:8px; gap:8px; overflow:hidden; }
+    #aiAssistDock:not(.open) #aiAssistBody{ display:none; }
+    #aiAssistMessages{ flex:1; overflow-y:auto; font-size:12px; min-height:120px; }
+    #aiAssistMessages .aiAssistSys{ color:var(--muted); padding:6px 0; }
+    #aiAssistMessages .aiAssistCard{ border:1px solid var(--border); border-radius:10px; padding:8px; margin-bottom:8px; background:rgba(0,0,0,.2); }
+    #aiAssistMessages .aiAssistCardPrompt{ margin-bottom:8px; font-size:11px; }
+    #aiAssistMessages .aiAssistCardMeta{ font-size:10px; color:var(--muted); margin-bottom:6px; }
+    #aiAssistMessages .aiAssistCardStatus{ font-size:11px; opacity:0.9; margin-bottom:6px; color:var(--muted); }
+    #aiAssistMessages .aiAssistCard[data-run-state="done"] .aiAssistCardStatus{ color:var(--accent2,#60a5fa); }
+    #aiAssistMessages .aiAssistCard[data-run-state="failed"] .aiAssistCardStatus{ color:var(--danger,#ef4444); }
+    #aiAssistMessages .aiAssistCardBtns{ display:flex; gap:6px; flex-wrap:wrap; }
+    /* Debug PR2: Assistant card trace (h2s_debug=1 only; whitelist-rendered) */
+    #aiAssistMessages .aiAssistDbg{ margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.08); }
+    #aiAssistMessages .aiAssistDbgToggle{ font-size:10px !important; padding:2px 8px !important; opacity:0.88; }
+    #aiAssistMessages .aiAssistDbgPanel:not(.open){ display:none; }
+    #aiAssistMessages .aiAssistDbgPanel.open{ display:block; margin-top:6px; }
+    #aiAssistMessages .aiAssistDbgBody{ font-size:10px; color:var(--muted); line-height:1.35; }
+    #aiAssistMessages .aiAssistDbgRow{ display:flex; gap:6px; margin-bottom:3px; }
+    #aiAssistMessages .aiAssistDbgK{ flex:0 0 38%; opacity:0.88; word-break:break-all; }
+    #aiAssistMessages .aiAssistDbgV{ flex:1; min-width:0; word-break:break-word; }
+    #aiAssistInput{ width:100%; min-height:52px; resize:vertical; padding:6px; font-size:12px; font-family:inherit; color:var(--text); background:rgba(0,0,0,.2); border:1px solid var(--border); border-radius:8px; box-sizing:border-box; }
+    #aiAssistSend{ align-self:flex-end; }
+
+    /* Beginner first-open hint (dismissible; local dev) */
+    .beginnerHintBar{
+      flex-shrink:0;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 14px;
+      border-bottom:1px solid var(--border);
+      background:rgba(59,130,246,.09);
+      font-size:12px;
+      line-height:1.45;
+      color:var(--text);
+    }
+    .beginnerHintBar .beginnerHintBody{ flex:1; min-width:0; }
+    .beginnerHintBar .beginnerHintTitle{ font-weight:700; margin:0 0 4px; letter-spacing:.02em; }
+    .beginnerHintBar ol{ margin:4px 0 0 18px; padding:0; color:var(--muted); }
+    .beginnerHintBar li{ margin-bottom:8px; }
+    .beginnerHintBar li:last-child{ margin-bottom:2px; }
+    .beginnerHintBar details.beginnerHintSetupDetails{
+      margin-top:2px; margin-left:-18px; padding-left:18px;
+    }
+    .beginnerHintBar details.beginnerHintSetupDetails > summary{
+      cursor:pointer;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:600;
+      list-style:none;
+    }
+    .beginnerHintBar details.beginnerHintSetupDetails > summary::-webkit-details-marker{ display:none; }
+    .beginnerHintBar details.beginnerHintSetupDetails .beginnerHintSetupBody{
+      margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,.08);
+      font-size:11px; color:var(--muted);
+    }
+    .beginnerHintCmdLine{
+      display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+      margin-top:4px; margin-left:-18px; padding-left:18px;
+    }
+    .beginnerHintBar .btn.beginnerHintMini{
+      font-size:11px; font-weight:600; padding:2px 8px; border-radius:8px;
+      flex-shrink:0;
+    }
+    .beginnerHintBar code{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:11px;
+      padding:1px 5px;
+      border-radius:6px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.22);
+      color:rgba(255,255,255,.9);
+    }
+    .beginnerHintBar a{ color:var(--accent2); }
+    /* Must win over .beginnerHintBar { display:flex } so Dismiss can hide the bar */
+    .beginnerHintBar.hidden{ display:none !important; }
+    .beginnerHintActions{
+      flex-shrink:0; align-self:flex-start;
+      display:flex; flex-direction:column; align-items:stretch; gap:6px;
+    }
+    #btnBeginnerHintDismiss{ align-self:flex-end; }
+
+    /* Beginner "More help" compact dialog (above layout, below topbar strip) */
+    .beginnerHintHelpPanel{
+      position:fixed; inset:0; z-index:10002;
+      display:flex; align-items:center; justify-content:center; padding:16px;
+      box-sizing:border-box;
+    }
+    .beginnerHintHelpPanel.hidden{ display:none !important; }
+    .beginnerHintHelpBackdrop{
+      position:absolute; inset:0; background:rgba(0,0,0,.52); cursor:pointer;
+    }
+    .beginnerHintHelpCard{
+      position:relative; z-index:1; width:min(420px, 100%);
+      max-height:min(78vh, 460px); overflow:auto;
+      border-radius:var(--radius); border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(32,39,52,.98), rgba(18,22,28,.98));
+      box-shadow:var(--shadow);
+      padding:14px 16px 16px;
+      pointer-events:auto;
+    }
+    .beginnerHintHelpHeader{
+      display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+      margin-bottom:10px;
+    }
+    .beginnerHintHelpHeader h3{
+      margin:0; font-size:15px; font-weight:800; letter-spacing:.02em; color:var(--text);
+    }
+    .beginnerHintHelpBody{ font-size:12px; line-height:1.45; color:var(--muted); }
+    .beginnerHintHelpBody ul{ margin:0 0 8px; padding-left:18px; }
+    .beginnerHintHelpBody li{ margin-bottom:6px; }
+    .beginnerHintHelpBody a{ color:var(--accent2); word-break:break-all; }
+    .beginnerHintHelpFailTitle{
+      margin:10px 0 4px; font-size:11px; font-weight:700; letter-spacing:.06em;
+      text-transform:uppercase; color:rgba(255,255,255,.55);
+    }
+    .beginnerHintHelpDocNote{ margin:10px 0 0; font-size:11px; line-height:1.4; opacity:.92; }
+    .beginnerHintRestoreWrap{ margin-top:12px; }
+    .beginnerHintRestoreBtn{ font-size:11px !important; padding:4px 10px !important; }
+
+    /* One-shot backend readiness (from GET /api/v1/health); hidden when checks OK */
+    .studioBackendReadiness{
+      flex-shrink:0;
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:6px 10px;
+      padding:6px 14px;
+      border-bottom:1px solid var(--border);
+      background:rgba(245,158,11,.14);
+      font-size:11px;
+      line-height:1.45;
+      color:var(--text);
+    }
+    .studioBackendReadiness.hidden{ display:none !important; }
+    .studioBackendReadinessMsg{ color:rgba(231,237,246,.95); min-width:0; flex:1 1 200px; }
+    .studioBackendReadinessLink{
+      flex-shrink:0;
+      color:var(--accent2);
+      font-weight:600;
+      white-space:nowrap;
+    }
+
+    /* Persistent entry: reopen same help overlay after hint strip is dismissed */
+    .beginnerHelpEntryBtn{
+      font-size:11px !important; font-weight:600; padding:4px 8px !important;
+      opacity:.78;
+    }
+    .beginnerHelpEntryBtn:hover{ opacity:1; }
 
     .layout{
-      height: calc(100% - 54px);
+      flex:1;
+      min-height:0;
       display:grid;
       grid-template-columns: 280px 1fr 320px;
       gap:12px;
@@ -91,6 +352,11 @@
       flex:1;
     }
     .panelBody{ padding:12px; overflow:auto; min-height:0; }
+    /* Right inspector: scroll last items above fixed AI Assistant dock */
+    #inspectorPanelBody.panelBody{
+      padding-bottom: var(--studio-ai-dock-safe-bottom);
+      scroll-padding-bottom: var(--studio-ai-dock-safe-bottom);
+    }
     .btn{
       appearance:none;
       border:1px solid var(--border);
@@ -143,6 +409,26 @@
     }
     .clipCard:hover{ border-color: rgba(59,130,246,.45); }
     .clipCard.clipSelected{ border-color: rgba(80,140,255,0.8); background: rgba(80,140,255,0.08); }
+    .clip-card-audio{
+      border-color: rgba(16,185,129,.55);
+      background: rgba(16,185,129,.10);
+    }
+    .clip-card-audio:hover{ border-color: rgba(52,211,153,.75); }
+    .clip-card-audio.clipSelected{
+      border-color: rgba(52,211,153,.85);
+      background: rgba(16,185,129,.14);
+    }
+    .clip-badge{
+      display:inline-block;
+      font-size:10px;
+      font-weight:800;
+      padding:1px 6px;
+      border-radius:6px;
+      margin-right:6px;
+      background:rgba(16,185,129,.35);
+      border:1px solid rgba(52,211,153,.45);
+      vertical-align:middle;
+    }
     .clipAdvanced summary{ font-size:11px; }
     .clipTitle{ font-weight:800; font-size:13px; }
     .clipMeta{ display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
@@ -208,6 +494,60 @@
       border-radius:10px;
     }
     .transport .hint{ color:var(--muted); font-size:12px; margin-left:auto; }
+
+    .studioLastOptimizeRow{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:11px;
+      line-height:1.35;
+      padding:5px 10px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:rgba(255,255,255,.02);
+      color:rgba(255,255,255,.72);
+    }
+    .studioLastOptimizeRow .studioLastOptimizeLabel{ flex-shrink:0; opacity:.85; }
+    .studioLastOptimizeRow .studioLastOptimizeText{
+      flex:1;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .studioLastOptimizeRow .lastOptDetailsBtn{ flex-shrink:0; font-size:10px !important; padding:2px 8px !important; }
+    .lastOptDetailsPop{
+      position:absolute;
+      right:0;
+      top:100%;
+      margin-top:6px;
+      z-index:60;
+      min-width:268px;
+      max-width:min(360px, 94vw);
+      padding:10px 12px 12px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:rgba(18,20,26,.98);
+      box-shadow:var(--shadow);
+      text-align:left;
+    }
+    .lastOptDetailsPop.hidden{ display:none !important; }
+    .lastOptDetailsHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:8px;
+      font-size:12px;
+      font-weight:700;
+      color:var(--text);
+    }
+    .lastOptDetailsHeader .btn{ font-size:14px !important; line-height:1; padding:2px 8px !important; min-width:auto; }
+    .lastOptDetailsBody{ font-size:11px; line-height:1.45; color:rgba(255,255,255,.78); }
+    .lastOptDetailRow{ display:flex; gap:10px; margin-bottom:6px; align-items:flex-start; }
+    .lastOptDetailRow:last-child{ margin-bottom:0; }
+    .lastOptDetailRow .lbl{ flex:0 0 42%; max-width:11em; opacity:.88; }
+    .lastOptDetailRow .val{ flex:1; min-width:0; word-break:break-word; }
 
     .timeline{
       flex:1;
@@ -292,6 +632,32 @@
       background: rgba(59,130,246,.35);
       box-shadow: 0 0 0 2px rgba(59,130,246,.35), 0 10px 25px rgba(0,0,0,.35);
     }
+    .instance--audio{
+      border-color: rgba(16,185,129,.72);
+      background: rgba(16,185,129,.16);
+    }
+    .instance--audio:hover{ border-color: rgba(52,211,153,.92); }
+    .instance--audio.selected{
+      border-color: rgba(255,255,255,.85);
+      background: rgba(16,185,129,.26);
+      box-shadow: 0 0 0 2px rgba(16,185,129,.35), 0 10px 25px rgba(0,0,0,.35);
+    }
+    .inst-badge{
+      display:inline-block;
+      font-size:10px;
+      font-weight:800;
+      padding:1px 6px;
+      border-radius:6px;
+      margin-right:4px;
+      background:rgba(16,185,129,.35);
+      border:1px solid rgba(52,211,153,.45);
+      vertical-align:middle;
+    }
+    .instActions{ position:absolute; top:4px; right:28px; display:none; gap:4px; flex-direction:row; align-items:center; z-index:2; }
+    .instance:hover .instActions{ display:flex; }
+    .instance.selected .instActions{ display:flex; }
+    .instAct{ padding:2px 6px; font-size:10px; font-weight:600; border-radius:6px; border:1px solid rgba(255,255,255,.25); background:rgba(0,0,0,.3); color:inherit; cursor:pointer; opacity:.9; }
+    .instAct:hover{ background:rgba(255,255,255,.12); }
     .instTitle{ font-weight:900; font-size:13px; }
     .instSub{ font-size:12px; color:rgba(255,255,255,.72); display:flex; justify-content:space-between; }
 
@@ -356,6 +722,37 @@
       white-space:pre-wrap;
       min-height:120px;
     }
+    /* PR-UX3a: Log status bar + collapsible drawer */
+    #logPanel{
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+    #logStatusBar{
+      height:24px;
+      min-height:24px;
+      padding:0 12px;
+      display:flex;
+      align-items:center;
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(0,0,0,.25);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      cursor:pointer;
+      user-select:none;
+    }
+    #logStatusBar:hover{ background:rgba(0,0,0,.35); color:rgba(255,255,255,.85); }
+    #logStatusBar.error{ color:var(--danger); }
+    #logDrawer{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+    #logPanel.collapsed #logDrawer{ display:none; }
+    #logPanel.collapsed{ height:auto !important; min-height:24px; }
 
     /* Modal editor */
     .modal{
@@ -428,7 +825,75 @@
       background:
         linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
       position:relative;
+      display:flex;
+      flex-direction:column;
     }
+    .editorCanvasStack{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      position:relative;
+    }
+    .editorGridWrap{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+    }
+    .editorGridInner{
+      position:relative;
+      display:inline-block;
+    }
+    .editorPlayhead{
+      position:absolute;
+      top:0;
+      bottom:0;
+      width:2px;
+      background: var(--playhead);
+      pointer-events:none;
+      z-index:4;
+      display:none;
+    }
+    .editorVelocitySplitter{
+      flex-shrink:0;
+      height:6px;
+      background:rgba(255,255,255,.08);
+      cursor:ns-resize;
+      border-top:1px solid var(--border);
+      position:relative;
+    }
+    .editorVelocitySplitter:hover{ background:rgba(96,165,250,.25); }
+    .editorVelocitySplitter.collapsed{ height:4px; }
+    .editorVelocityLaneWrap{
+      flex-shrink:0;
+      min-height:0;
+      overflow:hidden;
+      background:rgba(0,0,0,.25);
+      border-top:1px solid rgba(255,255,255,.06);
+      display:flex;
+      flex-direction:column;
+    }
+    .editorVelocityLaneWrap.collapsed{ display:none; }
+    .editorVelocityLaneHeader{
+      height:22px;
+      flex-shrink:0;
+      display:flex;
+      align-items:center;
+      padding:0 8px;
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(0,0,0,.2);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .editorVelocityLaneHeader span#velocityLaneLabel{ font-weight:700; }
+    .editorVelocityLaneCanvasWrap{
+      flex:1;
+      min-height:48px;
+      overflow-x:auto;
+      overflow-y:hidden;
+      position:relative;
+    }
+    #velocityCanvas{ display:block; }
     canvas{ display:block; }
     .editorRight{
       width: 280px;
@@ -448,6 +913,8 @@
       overflow-y:auto;
       overflow-x:hidden;
       padding-right:6px;
+      padding-bottom: var(--studio-ai-dock-safe-bottom);
+      scroll-padding-bottom: var(--studio-ai-dock-safe-bottom);
       display:flex;
       flex-direction:column;
       gap:10px;
@@ -517,38 +984,127 @@
       <span style="opacity:.8;">Studio</span>
       <span class="badge">MVP</span>
     </div>
+    <button type="button" id="btnProjectHome" class="btn ghost" data-i18n="top.projectHomeBtn" data-i18n-title="top.projectHomeBtnTitle">Project</button>
     <div class="row" style="align-items:center; gap:8px;">
-      <button id="btnRecord" class="btn" title="Record mic (R)">&#128308; Record</button>
+      <button id="btnRecord" class="btn" title="Record mic (R)" data-i18n="top.record">&#128308; Record</button>
       <span id="studioRecordTimer" class="smallmuted" style="display:none; min-width:42px; font-variant-numeric:tabular-nums;">00:00</span>
       <canvas id="studioRecordWaveform" width="160" height="28" style="display:none; vertical-align:middle; background:rgba(0,0,0,.25); border-radius:6px;" title="Recording waveform"></canvas>
       <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
       <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
       <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
-      <button id="btnUpload" class="btn">Upload WAV</button>
+      <span style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <button type="button" id="btnImportAudio" class="btn" data-i18n="top.importAudio" data-i18n-title="top.importAudioTitle">Import audio</button>
+        <label class="row" style="align-items:center; gap:6px; margin:0; font-size:11px; cursor:pointer; user-select:none;">
+          <input type="checkbox" id="chkImportAudioToNotes" checked />
+          <span data-i18n="top.importAudioMakeNotesLabel" data-i18n-title="top.importAudioMakeNotesTitle">Make editable notes</span>
+        </label>
+      </span>
     </div>
     <div class="spacer"></div>
+    <button type="button" id="btnBeginnerHelpEntry" class="btn ghost beginnerHelpEntryBtn" data-i18n="beginnerHint.entryHelp" data-i18n-title="beginnerHint.entryHelpTitle">Beginner help</button>
+    <button id="btnAiSettings" class="topbarBtn aiSettingsBtn" data-i18n-title="top.aiSettingsTitle">
+        <span class="aiIcon">⚙</span>
+        <span class="aiWord">AI</span>
+        <span class="aiSuffix" data-i18n="top.aiSettingsSuffix">Settings</span>
+      </button>
     <div id="studioImportStatus" class="smallmuted" style="min-width:120px;"></div>
-    <button id="btnCancelImport" class="btn ghost" style="display:none;">Cancel</button>
-    <div class="smallmuted">Local clips + timeline. Double-click a clip to edit.</div>
+    <button id="btnCancelImport" class="btn ghost" style="display:none;" data-i18n="common.cancel">Cancel</button>
+    <div class="smallmuted" data-i18n="top.localClipsHint">Local clips + timeline. Double-click a clip to edit.</div>
+  </div>
+
+  <div id="studioBackendReadiness" class="studioBackendReadiness hidden" role="status" aria-live="polite">
+    <span id="studioBackendReadinessMsg" class="studioBackendReadinessMsg"></span>
+    <a id="studioBackendReadinessLink" class="studioBackendReadinessLink" href="/api/v1/health" target="_blank" rel="noopener">Open health JSON</a>
+  </div>
+
+  <div id="beginnerHintBar" class="beginnerHintBar" role="region" data-i18n-aria-label="beginnerHint.region" aria-label="First steps in Studio">
+    <div class="beginnerHintBody">
+      <div class="beginnerHintTitle" data-i18n="beginnerHint.title">First steps in Studio</div>
+      <ol>
+        <li>
+          <span data-i18n="beginnerHint.stepStudio1a">In the top bar, use </span><strong data-i18n="top.importAudio">Import audio</strong><span data-i18n="beginnerHint.stepStudio1b"> or </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.stepStudio1c">. Turn off “Make editable notes” beside Import audio if you want original audio only. Double-click a note clip in the library to edit.</span>
+        </li>
+        <li>
+          <span data-i18n="beginnerHint.step4a">If something looks wrong: open </span><a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a><span data-i18n="beginnerHint.step4b"> in a new tab.</span>
+        </li>
+        <li>
+          <details class="beginnerHintSetupDetails">
+            <summary data-i18n="beginnerHint.setupSummary">Local run from a git clone (optional troubleshooting)</summary>
+            <div class="beginnerHintSetupBody">
+              <div class="smallmuted" style="margin-bottom:6px;" data-i18n="beginnerHint.setupPreamble">Skip this section if uploads and playback already work.</div>
+              <span data-i18n="beginnerHint.step1">In the repo root, run preflight (checks FFmpeg, FluidSynth, SoundFont):</span>
+              <div class="beginnerHintCmdLine">
+                <code>python scripts/beginner_preflight.py</code>
+                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_preflight.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+              </div>
+              <span data-i18n="beginnerHint.step2a">Start the API (or use </span><code>uvicorn app:app</code><span data-i18n="beginnerHint.step2b">):</span>
+              <div class="beginnerHintCmdLine">
+                <code>python scripts/beginner_launch.py</code>
+                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_launch.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+              </div>
+              <span class="smallmuted" style="display:block;margin-top:4px;" data-i18n="beginnerHint.checklistNote">Longer setup doc: docs/BEGINNER_FIRST_RUN_CHECKLIST.md (also summarized in More help).</span>
+            </div>
+          </details>
+        </li>
+      </ol>
+    </div>
+    <div class="beginnerHintActions">
+      <button type="button" id="btnBeginnerHintMoreHelp" class="btn ghost" style="padding:4px 10px;font-size:11px;" data-i18n="beginnerHint.moreHelp">More help</button>
+      <button type="button" id="btnBeginnerHintDismiss" class="btn ghost" style="padding:4px 10px;font-size:11px;" data-i18n="beginnerHint.dismiss">Dismiss</button>
+    </div>
+  </div>
+
+  <div id="beginnerHintHelpPanel" class="beginnerHintHelpPanel hidden" role="dialog" aria-modal="true" aria-hidden="true" data-i18n-aria-label="beginnerHint.helpTitle">
+    <div class="beginnerHintHelpBackdrop" id="beginnerHintHelpBackdrop" aria-hidden="true"></div>
+    <div class="beginnerHintHelpCard" role="document">
+      <div class="beginnerHintHelpHeader">
+        <h3 id="beginnerHintHelpHeading" data-i18n="beginnerHint.helpTitle">Quick checklist (local)</h3>
+        <button type="button" id="btnBeginnerHintHelpClose" class="btnClose" data-i18n="beginnerHint.helpClose">Close</button>
+      </div>
+      <div class="beginnerHintHelpBody">
+        <ul>
+          <li data-i18n="beginnerHint.helpL1">Preflight (repo root): python scripts/beginner_preflight.py — checks FFmpeg, FluidSynth, and SoundFont.</li>
+          <li data-i18n="beginnerHint.helpL2">Launch server: python scripts/beginner_launch.py (or uvicorn app:app from repo root).</li>
+          <li data-i18n="beginnerHint.helpL3">In Studio: Import as notes, Record, or Import as audio; double-click a clip to edit.</li>
+          <li>
+            <span data-i18n="beginnerHint.helpL4a">Verify the backend:</span>
+            <a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a>
+            <span data-i18n="beginnerHint.helpL4b">— JSON shows checks (soundfont, ffmpeg, fluidsynth).</span>
+          </li>
+        </ul>
+        <div class="beginnerHintHelpFailTitle" data-i18n="beginnerHint.helpFailuresTitle">Common issues</div>
+        <ul>
+          <li data-i18n="beginnerHint.helpF1">Missing SoundFont: add a .sf2 under assets/ (default assets/piano.sf2).</li>
+          <li data-i18n="beginnerHint.helpF2">Port in use or bind error: stop other servers or change PORT in .env.</li>
+          <li data-i18n="beginnerHint.helpF3">First pip install is slow: large ML/audio dependencies are expected.</li>
+        </ul>
+        <p class="beginnerHintHelpDocNote smallmuted" data-i18n="beginnerHint.helpDocNote">The full checklist file lives in your repo clone: docs/BEGINNER_FIRST_RUN_CHECKLIST.md</p>
+        <div class="beginnerHintRestoreWrap">
+          <button type="button" id="btnBeginnerHintRestore" class="btn ghost beginnerHintRestoreBtn" data-i18n="beginnerHint.showAgain">Show getting started bar again</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="layout">
     <!-- Left -->
     <div class="panel">
       <div class="panelHeader">
-        <h3>Clip Library</h3>
+        <h3 data-i18n="cliplib.title">Clip Library</h3>
         <button id="btnNewTrack" class="btn icon" title="Add track (MVP: 1 track only)" disabled>+</button>
       </div>
       <div class="panelBody">
         <div class="col">
-          <div class="pill">Generate: upload WAV -> backend -> clip auto-added</div>
+          <div class="pill" data-i18n="cliplib.generatePill">Generate: upload WAV -> backend -> clip auto-added</div>
           <div class="row">
-            <button id="btnUseLast" class="btn primary" style="opacity:.6" disabled title="Generate clip from last recording">Use last recording</button>
-            <button id="btnClear" class="btn ghost">Clear</button>
+            <button id="btnUseLast" class="btn primary" style="opacity:.6" disabled title="Generate clip from last recording" data-i18n="cliplib.useLastRecording">Use last recording</button>
+            <button id="btnPlayLast" class="btn" style="opacity:.6" disabled title="Preview last recording" data-i18n="cliplib.playLastRecording">Play last recording</button>
+            <button id="btnAddLastAsAudio" type="button" class="btn" style="opacity:.6" disabled title="Add last recording as original audio" data-i18n="cliplib.addLastAsAudio" data-i18n-title="cliplib.addLastAsAudioTitle">Add as audio</button>
+            <button id="btnClear" class="btn ghost" data-i18n="cliplib.clear">Clear</button>
           </div>
           <label class="row" style="align-items:center; gap:6px; margin-top:4px; font-size:11px; cursor:pointer;">
             <input type="checkbox" id="chkAutoOpenAfterImport" checked />
-            <span>Auto-open editor after import</span>
+            <span data-i18n="cliplib.autoOpenAfterImport">Auto-open editor after import</span>
           </label>
           <div class="hr"></div>
           <div id="clipList" class="col"></div>
@@ -561,11 +1117,24 @@
       <div class="transport">
         <button id="btnPlayheadToStart" class="btn icon" title="Go to start">|&lt;</button>
         <div class="bpmBox">
-          <span class="muted">BPM</span>
+          <span class="muted" data-i18n="timeline.bpm">BPM</span>
           <input id="inpBpm" type="number" min="30" max="260" value="120" />
         </div>
         <div class="pill" id="lblPlayhead">Playhead: 0.00s</div>
-        <div class="hint">Tip: drag clip blocks; double-click to open editor.</div>
+        <div class="hint" data-i18n="timeline.tipDrag">Tip: drag clip blocks; double-click to open editor.</div>
+      </div>
+
+      <div id="studioLastOptimizeRow" class="studioLastOptimizeRow" style="position:relative;" aria-live="polite">
+        <span class="studioLastOptimizeLabel muted" data-i18n="lastOpt.label">Last optimize</span>
+        <span id="studioLastOptimizeSummary" class="studioLastOptimizeText">—</span>
+        <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details">Details</button>
+        <div id="studioLastOptimizeDetails" class="lastOptDetailsPop hidden" role="dialog" aria-hidden="true" aria-labelledby="lastOptDetailsHeading">
+          <div class="lastOptDetailsHeader">
+            <span id="lastOptDetailsHeading" data-i18n="lastOpt.detailTitle">Last optimize — details</span>
+            <button type="button" id="btnLastOptimizeDetailsClose" class="btn mini ghost" data-i18n-aria-label="lastOpt.detailsCloseAria">×</button>
+          </div>
+          <div id="studioLastOptimizeDetailsBody" class="lastOptDetailsBody"></div>
+        </div>
       </div>
 
       <div class="timeline">
@@ -573,13 +1142,16 @@
         <div id="tracks" class="tracks"></div>
       </div>
 
-      <div class="panel" style="height:180px;">
-        <div class="panelHeader">
-          <h3>Log</h3>
-          <button id="btnClearLog" class="btn mini">Clear</button>
-        </div>
-        <div class="panelBody">
-          <div id="log" class="log"></div>
+      <div id="logPanel" class="panel collapsed" style="height:180px;">
+        <div id="logStatusBar" title="">Ready</div>
+        <div id="logDrawer">
+          <div class="panelHeader">
+            <h3 data-i18n="timeline.log">Log</h3>
+            <button id="btnClearLog" class="btn mini" data-i18n="actions.clear">Clear</button>
+          </div>
+          <div class="panelBody">
+            <div id="log" class="log"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -587,45 +1159,142 @@
     <!-- Right -->
     <div class="panel">
       <div class="panelHeader">
-        <h3>Inspector</h3>
-        <span class="badge" style="margin-left:auto;">MVP</span>
+        <h3 data-i18n="inspector.title">Inspector</h3>
+        <select id="selLang" class="btn mini" title="Language" style="margin-left:auto; min-width:90px;"></select>
+        <span class="badge">MVP</span>
       </div>
-      <div class="panelBody">
-        <div class="insSection">
-          <h4>Project</h4>
-          <div class="kv"><b>Tracks</b><span id="kvTracks">1</span></div>
-          <div class="kv"><b>Clips</b><span id="kvClips">0</span></div>
-          <div class="kv"><b>Instances</b><span id="kvInst">0</span></div>
-        </div>
-
+      <div class="panelBody" id="inspectorPanelBody">
+        <div id="inspectorEmptyState" class="insSection muted" style="padding:16px; text-align:center; font-size:13px; line-height:1.5;" data-i18n="inspector.emptyState">Select a clip from the library or a clip instance on the timeline to get started.</div>
+        <div id="inspectorContent">
+        <details id="inspProject" class="insSection">
+          <summary id="inspProjectSummary" style="cursor:pointer; user-select:none; font-weight:600;">Project</summary>
+          <div style="margin-top:8px;">
+            <div class="kv"><b data-i18n="inspector.tracks">Tracks</b><span id="kvTracks">1</span></div>
+            <div class="kv"><b data-i18n="inspector.clips">Clips</b><span id="kvClips">0</span></div>
+            <div class="kv"><b data-i18n="inspector.instances">Instances</b><span id="kvInst">0</span></div>
+          </div>
+        </details>
         <div class="hr"></div>
-
-        <div class="insSection">
-          <h4>Clip Details</h4>
-          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected from Clip Library (shows History & Results).</div>
+        <div class="insSection" id="inspectorClipSection">
+          <h4 data-i18n="inspector.clipDetails">Clip Details</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.clipDetailsHint">Selected from Clip Library or Timeline (shows History & Results).</div>
           <div id="selectedClipBox" class="muted">Click a clip in the library to view History.</div>
         </div>
-
         <div class="hr"></div>
-
-        <div class="insSection">
-          <h4>Timeline Selection</h4>
-          <div class="muted" style="font-size:11px; margin-bottom:4px;">Selected instance on timeline (start/transpose/edit).</div>
+        <div class="insSection" id="inspectorTimelineSection" style="display:none;">
+          <h4 data-i18n="inspector.timelineSelection">Timeline Selection</h4>
+          <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.timelineSelectionHint">Selected instance on timeline (start/transpose/edit).</div>
           <div id="selectionBox" class="muted">Select a clip instance on timeline.</div>
         </div>
-
         <div class="hr"></div>
-
-        <div class="insSection">
-          <h4>Actions</h4>
-          <div class="col">
-            <button id="btnExportProject" class="btn">Export Project JSON</button>
-            <button id="btnExportMidi" class="btn">Export MIDI</button>
-            <button id="btnExportWav" class="btn">Export WAV</button>
-            <button id="btnImportProject" class="btn">Import Project JSON</button>
+        <details id="inspExport" class="insSection">
+          <summary style="cursor:pointer; user-select:none; font-weight:600;" data-i18n="inspector.actions">Export & Import</summary>
+          <div class="col" style="margin-top:8px;">
+            <button id="btnExportProject" class="btn" data-i18n="inspector.exportProjectJson">Export Project JSON</button>
+            <button id="btnExportSelectedClip" class="btn" data-i18n="inspector.exportSelectedClipJson">Export Selected Clip JSON</button>
+            <button id="btnExportMidi" class="btn" data-i18n="export.exportMIDI">Export MIDI</button>
+            <button id="btnExportWav" class="btn" data-i18n="export.exportWAV">Export WAV</button>
+            <button id="btnImportProject" class="btn" data-i18n="inspector.importProjectJson">Import Project JSON</button>
+            <button id="btnImportClip" class="btn" data-i18n="inspector.importClipJson">Import Clip JSON</button>
+            <button id="btnImportClipFromProject" class="btn" data-i18n="inspector.importClipFromProject">Import Clip from Project JSON</button>
           </div>
+        </details>
+        <div class="hr"></div>
+        <details id="instrumentLibraryBox" class="insSection">
+          <summary style="cursor:pointer; font-weight:700;" data-i18n="inst.instrumentLibrary">Instrument Library</summary>
+          <div style="margin-top:8px;">
+            <label style="font-size:11px; color:var(--muted);" data-i18n="inst.baseUrl">Base URL</label>
+            <input id="inpSamplerBaseUrl" type="text" placeholder="(default)" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;" />
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button id="btnSaveSamplerBaseUrl" class="btn mini" data-i18n="inst.save">Save</button>
+              <button id="btnTestSampler" class="btn mini" data-i18n="inst.testLoad">Test Load</button>
+            </div>
+            <div id="samplerBaseUrlStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
+
+            <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border);">
+              <label style="font-size:11px; color:var(--muted);" data-i18n="inst.builtinAndMyInstruments">Built-in packs & My Instruments</label>
+              <select id="selSamplerPack" class="btn" style="width:100%; margin-top:4px; padding:6px 8px;" title="Select to view status or Clear/Delete"></select>
+              <p id="samplerUploadHelp" class="muted" style="font-size:10px; margin:6px 0 0 0; line-height:1.4;" data-i18n="inst.samplerUploadHelp">Minimum: &gt;=2 samples. Recommended: 6+. Supported names: A1..A6 or C3/Ds4/F#2/Bb3 (case-insensitive). Missing keys pitch-shifted from nearest.</p>
+              <input type="file" id="inpSamplerUpload" multiple accept="audio/*" style="display:none;" />
+              <div style="display:flex; gap:6px; margin-top:6px;">
+                <button id="btnSamplerUpload" class="btn mini" data-i18n="inst.upload">Upload samples</button>
+                <button id="btnClearSamplerPack" class="btn mini danger" data-i18n="inst.clearLocalSamples">Clear local samples</button>
+              </div>
+              <p id="samplerImportFolderHelp" class="muted" style="font-size:10px; margin:6px 0 0 0;" data-i18n="inst.importFolderHelp">Import Folder: creates a new instrument (name from folder). Add to track dropdown → My Instruments.</p>
+              <input type="file" id="inpSamplerFolder" webkitdirectory directory multiple style="display:none;" />
+              <button id="btnSamplerFolder" class="btn mini" style="margin-top:6px;" data-i18n="inst.importFolder">Import Folder</button>
+              <div id="samplerUploadStatus" class="muted" style="font-size:11px; margin-top:6px;"></div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- PR-UX7a: AI Assistant dock -->
+  <div id="aiAssistDock" class="" aria-label="AI Assistant">
+    <div id="aiAssistResizeHandle" title="Drag to resize" aria-hidden="true"></div>
+    <div id="aiAssistHeader" title="">
+      <span id="aiAssistHeaderTitle" data-i18n="aiAssist.title">AI Assistant</span>
+      <span id="aiAssistHeaderTarget" class="muted" style="margin-left:6px;"></span>
+      <span id="aiAssistHeaderChevron" class="aiAssistChevron" aria-hidden="true"></span>
+    </div>
+    <div id="aiAssistBody">
+      <div id="aiAssistMessages"></div>
+      <textarea id="aiAssistInput" rows="2" data-i18n-placeholder="aiAssist.promptPlaceholder"></textarea>
+      <button id="aiAssistSend" class="btn primary" data-i18n="aiAssist.send">Send</button>
+    </div>
+  </div>
+
+  <!-- Project Home MVP: entry layer (back to Studio / New / Import) -->
+  <div id="projectHomeModal" class="h2sModal hidden" aria-hidden="true">
+    <div id="projectHomeBackdrop" class="h2sModalBackdrop" aria-hidden="true"></div>
+    <div class="projectHomeCenter">
+      <div class="projectHomeCard" role="dialog" aria-modal="true" aria-labelledby="projectHomeTitle">
+        <h2 id="projectHomeTitle" class="projectHomeTitle" data-i18n="projectHome.title">Project</h2>
+        <p id="projectHomeSub" class="projectHomeSub" data-i18n="projectHome.subtitle">Turn humming or audio into note clips: use Import as notes or Record in the top bar. Here you can switch saved projects, start new, or import project JSON.</p>
+        <div class="projectHomeStats" aria-live="polite">
+          <span><span data-i18n="projectHome.bpmLabel">BPM</span>: <strong id="projectHomeBpm">120</strong></span>
+          <span><span data-i18n="projectHome.clipsLabel">Clips</span>: <strong id="projectHomeClips">0</strong></span>
+        </div>
+        <p id="projectHomeLocalHeading" class="projectHomeLocalHeading" data-i18n="projectHome.localProjects">Local projects</p>
+        <ul id="projectHomeLocalList" class="projectHomeLocalList" aria-label="Local projects"></ul>
+        <div class="projectHomeActions">
+          <button type="button" id="btnProjectHomeContinue" class="btn primary" data-i18n="projectHome.continue">Back to Studio</button>
+          <button type="button" id="btnProjectHomeNew" class="btn" data-i18n="projectHome.newProject">New Project</button>
+          <button type="button" id="btnProjectHomeImport" class="btn" data-i18n="projectHome.importJson">Import Project JSON</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Import one clip from a full project JSON (chooser) -->
+  <div id="clipFromProjectModal" class="h2sModal hidden" aria-hidden="true">
+    <div id="clipFromProjectBackdrop" class="h2sModalBackdrop" aria-hidden="true"></div>
+    <div class="clipFromProjectCenter">
+      <div class="clipFromProjectCard" role="dialog" aria-modal="true" aria-labelledby="clipFromProjectTitle">
+        <h2 id="clipFromProjectTitle" class="clipFromProjectTitle" data-i18n="inspector.importClipFromProjectTitle">Import clip from project file</h2>
+        <p class="clipFromProjectHint" data-i18n="inspector.importClipFromProjectHint">Choose one clip from the selected project. It will be added as a new clip; your current project stays open.</p>
+        <span id="lblClipFromProjectBpm"></span>
+        <label for="selClipFromProject" class="muted" style="font-size:12px; display:block; margin-bottom:4px;" data-i18n="inspector.importClipFromProjectPickLabel">Clip</label>
+        <select id="selClipFromProject" aria-label="Clip"></select>
+        <div class="clipFromProjectActions">
+          <button type="button" id="btnClipFromProjectCancel" class="btn" data-i18n="common.cancel">Cancel</button>
+          <button type="button" id="btnClipFromProjectImport" class="btn primary" data-i18n="inspector.importClipFromProjectImport">Import selected clip</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Settings Drawer (PR-UX4c) -->
+  <div id="aiSettingsModal" class="h2sModal hidden" aria-hidden="true">
+    <div id="aiSettingsBackdrop" class="h2sModalBackdrop"></div>
+    <div class="h2sDrawer" role="dialog" aria-modal="true" aria-label="AI Settings">
+      <div class="h2sDrawerHeader">
+        <div class="h2sDrawerTitle" data-i18n="inspector.aiSettings">AI Settings</div>
+        <button id="btnAiSettingsClose" class="btnClose" data-i18n="common.close">Close</button>
+      </div>
+      <div id="aiSettingsModalBody" class="h2sDrawerBody"></div>
     </div>
   </div>
 
@@ -636,180 +1305,213 @@
         <div class="title" id="modalTitle">Editing Clip</div>
         <div class="sub" id="modalSub"></div>
         <div class="spacer"></div>
-        <button id="btnModalCancel" class="btn">Cancel</button>
-        <button id="btnModalSave" class="btn primary">Save</button>
-        <button id="btnModalClose" class="btn">Close</button>
+        <button id="btnModalCancel" class="btn" data-i18n="common.cancel">Cancel</button>
+        <button id="btnModalSave" class="btn primary" data-i18n="editor.save">Save</button>
+        <button id="btnModalClose" class="btn" data-i18n="editor.close">Close</button>
       </div>
       <div class="modalBody">
         <div class="editorLeft">
           <div class="editorTools">
             <button id="btnClipPlay" class="btn icon primary" title="Play">P</button>
             <button id="btnClipStop" class="btn icon" title="Stop">S</button>
-            <button id="btnInsertNote" class="btn">Insert Note</button>
-            <button id="btnDeleteNote" class="btn danger">Delete Note</button>
+            <button id="btnInsertNote" class="btn" data-i18n="editor.insertNote">Insert Note</button>
+            <button id="btnDeleteNote" class="btn danger" data-i18n="editor.deleteNote">Delete Note</button>
             <span class="pill" id="pillCursor">Cursor: 0.00s</span>
-            <span class="pill" id="pillSnap">Snap</span>
+            <span class="pill" id="pillSnap" data-i18n="editor.snap">Snap</span>
             <select id="selSnap" class="btn" style="padding:8px 10px;">
-              <option value="off">Snap: Off</option>
-              <option value="64">Snap: 1/64</option>
-              <option value="32">Snap: 1/32</option>
-              <option value="16" selected>Snap: 1/16</option>
-              <option value="8">Snap: 1/8</option>
-              <option value="4">Snap: 1/4</option>
+              <option value="off" data-i18n="snap.labelOff">Snap: Off</option>
+              <option value="64" data-i18n="snap.label1_64">Snap: 1/64</option>
+              <option value="32" data-i18n="snap.label1_32">Snap: 1/32</option>
+              <option value="16" selected data-i18n="snap.label1_16">Snap: 1/16</option>
+              <option value="8" data-i18n="snap.label1_8">Snap: 1/8</option>
+              <option value="4" data-i18n="snap.label1_4">Snap: 1/4</option>
             </select>
-            <span class="pill">Pitch view</span>
+            <span class="pill" data-i18n="editor.pitchView">Pitch view</span>
             <input id="rngPitchCenter" type="range" min="0" max="127" value="60" style="width:160px;" />
-            <span class="pill" style="margin-left:8px;">Preset</span>
+            <span class="pill" style="margin-left:8px;" data-i18n="opt.preset">Preset</span>
             <select id="editorOptimizePreset" class="btn" style="padding:6px 8px; font-size:13px;">
-              <option value="">Default</option>
-              <option value="noop">No-op</option>
-              <option value="dynamics_accent">Dynamics Accent</option>
-              <option value="dynamics_level">Dynamics Level</option>
-              <option value="duration_gentle">Duration Gentle</option>
-              <option value="llm_v0">LLM v0</option>
+              <option value="" data-i18n="cliplib.default">Default</option>
+              <option value="noop" data-i18n="opt.noop">No-op</option>
+              <option value="dynamics_accent" data-i18n="opt.dynamicsAccent">Dynamics Accent</option>
+              <option value="dynamics_level" data-i18n="opt.dynamicsLevel">Dynamics Level</option>
+              <option value="duration_gentle" data-i18n="opt.durationGentle">Duration Gentle</option>
+              <option value="velocity_shape">Velocity shape</option>
+              <option value="local_transpose">Local transpose</option>
+              <option value="rhythm_tighten_loosen">Rhythm tighten/loosen</option>
+              <option value="llm_v0" data-i18n="opt.llmV0">LLM v0</option>
             </select>
-            <button id="btnEditorOptimize" class="btn" type="button">Optimize</button>
+            <button id="btnEditorOptimize" class="btn" type="button" data-i18n="opt.optimize">Optimize</button>
           </div>
           <div id="canvasWrap" class="editorCanvasWrap">
-            <canvas id="canvas" width="1400" height="540"></canvas>
+            <div class="editorCanvasStack">
+              <div class="editorGridWrap">
+                <div class="editorGridInner">
+                  <canvas id="canvas" width="1400" height="540"></canvas>
+                  <div id="editorPlayhead" class="editorPlayhead"></div>
+                </div>
+              </div>
+              <div id="velocitySplitter" class="editorVelocitySplitter" title="Drag to resize velocity lane"></div>
+              <div id="velocityLaneWrap" class="editorVelocityLaneWrap">
+                <div class="editorVelocityLaneHeader">
+                  <span id="velocityLaneLabel">Vel: —</span>
+                </div>
+                <div class="editorVelocityLaneCanvasWrap">
+                  <canvas id="velocityCanvas" width="1400" height="64"></canvas>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="editorRight">
           <div id="editorRightScroll" class="editor-right-scroll">
-            <div class="kv"><b>Notes</b><span id="kvClipNotes">0</span></div>
-            <div class="kv"><b>Pitch</b><span id="kvClipPitch">-</span></div>
-            <div class="kv"><b>Span</b><span id="kvClipSpan">-</span></div>
+            <div class="kv"><b data-i18n="editor.notes">Notes</b><span id="kvClipNotes">0</span></div>
+            <div class="kv"><b data-i18n="editor.pitch">Pitch</b><span id="kvClipPitch">-</span></div>
+            <div class="kv"><b data-i18n="editor.span">Span</b><span id="kvClipSpan">-</span></div>
             <details class="help" style="margin-bottom:8px;">
-              <summary style="cursor:pointer; font-weight:700;">Help</summary>
+              <summary style="cursor:pointer; font-weight:700;" data-i18n="editor.help">Help</summary>
               <div style="margin-top:6px; padding-left:4px;">
-                <div style="font-weight:900; margin-bottom:6px;">How to edit (MVP)</div>
-                <div>1) Click empty grid: set cursor and choose a cell.</div>
-                <div>2) Press <span class="kbd">Insert Note</span>: add a default note at the selected cell.</div>
-                <div>3) Click a note: select; drag to move; drag the right edge to resize.</div>
-                <div>4) Press <span class="kbd">Delete</span>: delete selected note.</div>
-                <div style="margin-top:8px; color:rgba(255,255,255,.62);">
+                <div style="font-weight:900; margin-bottom:6px;" data-i18n="editor.howToEdit">How to edit (MVP)</div>
+                <div data-i18n="editor.helpStep1">1) Click empty grid: set cursor and choose a cell.</div>
+                <div data-i18n="editor.helpStep2">2) Press Insert Note: add a default note at the selected cell.</div>
+                <div data-i18n="editor.helpStep3">3) Click a note: select; drag to move; drag the right edge to resize.</div>
+                <div data-i18n="editor.helpStep4">4) Press Delete: delete selected note.</div>
+                <div>5) Velocity lane (below grid): drag bars to set velocity (1-127); Shift for fine adjustment.</div>
+                <div style="margin-top:8px; color:rgba(255,255,255,.62);" data-i18n="editor.helpCancelSave">
                   Cancel discards changes; Save writes back into the clip.
                 </div>
               </div>
             </details>
             <div class="hr"></div>
             <div style="margin-bottom:10px; padding:8px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.15);">
-              <div style="font-weight:700; margin-bottom:6px;">Quick Optimize</div>
+              <div style="font-weight:700; margin-bottom:6px;" data-i18n="opt.quickOptimize">Quick Optimize</div>
               <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
                 <select id="editorQuickOptimizePreset" class="btn" style="padding:6px 8px; font-size:12px;">
-                  <option value="">Default</option>
-                  <option value="noop">No-op</option>
-                  <option value="dynamics_accent">Dynamics Accent</option>
-                  <option value="dynamics_level">Dynamics Level</option>
-                  <option value="duration_gentle">Duration Gentle</option>
-                  <option value="llm_v0" selected>LLM v0</option>
+                  <option value="" data-i18n="cliplib.default">Default</option>
+                  <option value="noop" data-i18n="opt.noop">No-op</option>
+                  <option value="dynamics_accent" data-i18n="opt.dynamicsAccent">Dynamics Accent</option>
+                  <option value="dynamics_level" data-i18n="opt.dynamicsLevel">Dynamics Level</option>
+                  <option value="duration_gentle" data-i18n="opt.durationGentle">Duration Gentle</option>
+                  <option value="velocity_shape">Velocity shape</option>
+                  <option value="local_transpose">Local transpose</option>
+                  <option value="rhythm_tighten_loosen">Rhythm tighten/loosen</option>
+                  <option value="llm_v0" selected data-i18n="opt.llmV0">LLM v0</option>
                 </select>
-                <button id="btnEditorQuickOptimize" class="btn primary" type="button">Run Optimize</button>
+                <button id="btnEditorQuickOptimize" class="btn primary" type="button" data-i18n="opt.run">Run Optimize</button>
               </div>
               <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
                 <span id="editorQuickOptimizeTemplateLabel" class="muted">Template: Custom</span>
                 <div id="editorQuickOptimizeTemplates" style="display:flex; gap:4px; flex-wrap:wrap;">
-                  <button type="button" class="btn mini" data-template-id="fix_pitch_v1">Fix Pitch</button>
-                  <button type="button" class="btn mini" data-template-id="tighten_rhythm_v1">Tighten Rhythm</button>
-                  <button type="button" class="btn mini" data-template-id="clean_outliers_v1">Clean Outliers</button>
-                  <button type="button" class="btn mini" data-template-id="bluesy_v1">Bluesy</button>
+                  <button type="button" class="btn mini" data-template-id="fix_pitch_v1" data-i18n="editor.fixPitch">Fix Pitch</button>
+                  <button type="button" class="btn mini" data-template-id="tighten_rhythm_v1" data-i18n="editor.tightenRhythm">Tighten Rhythm</button>
+                  <button type="button" class="btn mini" data-template-id="clean_outliers_v1" data-i18n="editor.cleanOutliers">Clean Outliers</button>
+                  <button type="button" class="btn mini" data-template-id="bluesy_v1" data-i18n="editor.bluesy">Bluesy</button>
                 </div>
               </div>
               <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /> Fix Pitch</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /> Tighten Rhythm</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /> Reduce Outliers</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /><span data-i18n="editor.fixPitch">Fix Pitch</span></label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /><span data-i18n="editor.tightenRhythm">Tighten Rhythm</span></label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /><span data-i18n="editor.reduceOutliers">Reduce Outliers</span></label>
               </div>
               <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-                <span id="editorQuickOptimizeMode" class="badge">Safe mode</span>
-                <span id="editorQuickOptimizeModel" class="muted">Model: (unset)</span>
+                <span id="editorQuickOptimizeMode" class="badge" data-i18n="opt.safe">Safe mode</span>
+                <span id="editorQuickOptimizeModel" class="muted" data-i18n="editor.modelUnset">Model: (unset)</span>
               </div>
               <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
             </div>
             <details class="help" style="margin-top:8px;">
-              <summary style="cursor:pointer; font-weight:700;">Advanced</summary>
+              <summary style="cursor:pointer; font-weight:700;" data-i18n="opt.advanced">Advanced</summary>
               <div style="font-size:12px; opacity:0.85; margin-top:6px; padding-left:4px;">
-                <span>Rev: <span id="editorRevId">-</span></span>
-                <span style="margin-left:8px;">Parent: <span id="editorParentRevId">-</span></span>
-                <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;">Prompt (blank = default)</div>
-                <textarea id="editorOptimizePrompt" rows="5" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
+                <span><span data-i18n="editor.rev">Rev</span>: <span id="editorRevId">-</span></span>
+                <span style="margin-left:8px;"><span data-i18n="editor.parent">Parent</span>: <span id="editorParentRevId">-</span></span>
+                <div class="help" style="font-size:11px; opacity:0.85; margin-top:8px; margin-bottom:2px;" data-i18n="editor.promptLabel">Prompt (blank = default)</div>
+                <textarea id="editorOptimizePrompt" rows="5" data-i18n-placeholder="editor.promptPlaceholder" placeholder="Apply safe dynamics and timing improvements. (blank = use this default)"></textarea>
                 <div style="margin-top:6px;">
-                  <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;">Regenerate</button>
-                  <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;">Undo Optimize</button>
-                  <button id="btnEditorResetOptimizePrompt" class="btn" type="button">Reset to default prompt</button>
+                  <button id="btnEditorRegenerateOptimize" class="btn" type="button" style="margin-right:6px;" data-i18n="opt.regenerate">Regenerate</button>
+                  <button id="btnEditorUndoOptimize" class="btn" type="button" style="margin-right:6px;" data-i18n="opt.undoOptimize">Undo Optimize</button>
+                  <button id="btnEditorResetOptimizePrompt" class="btn" type="button" data-i18n="opt.resetPrompt">Reset to default prompt</button>
                 </div>
                 <div class="help" id="editorUndoStatus" style="font-size:11px; opacity:0.7; margin-top:4px; margin-bottom:4px;"></div>
                 <div class="help" id="editorOptStatus" style="margin-top:4px; font-size:12px; opacity:0.78;"></div>
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
-                  <div style="font-weight:700; margin-bottom:6px;">LLM Settings (Scaffold)</div>
+                  <div style="font-weight:700; margin-bottom:6px;" data-i18n="editor.llmSettings">LLM Settings (Scaffold)</div>
                   <div class="col" style="gap:6px;">
-                    <label class="muted" style="margin:0;">Gateway Preset</label>
+                    <label class="muted" style="margin:0;" data-i18n="editor.gatewayPreset">Gateway Preset</label>
                     <select id="editorLlmGatewayPreset" class="btn" style="width:100%; padding:6px; font-size:12px;">
-                      <option value="custom">Custom</option>
-                      <option value="deepseek">DeepSeek (Cloud)</option>
-                      <option value="ollama">Ollama (Local)</option>
+                      <option value="custom" data-i18n="editor.gatewayCustom">Custom</option>
+                      <option value="deepseek" data-i18n="editor.gatewayDeepseek">DeepSeek (Cloud)</option>
+                      <option value="ollama" data-i18n="editor.gatewayOllama">Ollama (Local)</option>
                     </select>
-                    <div class="muted" style="font-size:11px; margin-top:-2px; margin-bottom:2px;">DeepSeek: paste API key in Auth Token. Ollama: requires local install.</div>
-                    <label class="muted" style="margin:0;">Base URL</label>
-                    <input id="editorLlmBaseUrl" type="text" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                    <label class="muted" style="margin:0;">Model</label>
+                    <div class="muted" style="font-size:11px; margin-top:-2px; margin-bottom:2px;" data-i18n="editor.deepseekOllamaHint">DeepSeek: paste API key in Auth Token. Ollama: requires local install.</div>
+                    <label class="muted" style="margin:0;" data-i18n="editor.baseUrl">Base URL</label>
+                    <input id="editorLlmBaseUrl" type="text" data-i18n-placeholder="editor.baseUrlPlaceholder" placeholder="OpenAI-compatible endpoint" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label class="muted" style="margin:0;" data-i18n="editor.model">Model</label>
                     <select id="editorLlmModelSelect" class="btn" style="width:100%; padding:6px; font-size:12px; margin-bottom:4px;">
-                      <option value="">(Select a model...)</option>
+                      <option value="" data-i18n="editor.selectModel">(Select a model...)</option>
                     </select>
                     <datalist id="editorLlmModelList"></datalist>
                     <div class="row" style="gap:6px; align-items:center;">
-                      <input id="editorLlmModel" type="text" list="editorLlmModelList" placeholder="Model name" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
-                      <button id="btnEditorLlmLoadModels" type="button" class="btn mini">Load Models</button>
+                      <input id="editorLlmModel" type="text" list="editorLlmModelList" data-i18n-placeholder="editor.modelPlaceholder" placeholder="Model name" style="flex:1; min-width:0; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                      <button id="btnEditorLlmLoadModels" type="button" class="btn mini" data-i18n="editor.loadModels">Load Models</button>
                     </div>
                     <div id="editorLlmModelLoadStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
-                    <label class="muted" style="margin:0;">Auth Token</label>
-                    <input id="editorLlmAuthToken" type="password" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
+                    <label class="muted" style="margin:0;" data-i18n="editor.authToken">Auth Token</label>
+                    <input id="editorLlmAuthToken" type="password" data-i18n-placeholder="editor.authOptional" placeholder="(optional)" autocomplete="off" style="width:100%; padding:6px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.2); color:var(--text); font-size:12px; box-sizing:border-box;" />
                     <div class="editor-llm-row">
                       <label class="editor-llm-checkbox">
                         <input type="checkbox" id="editorLlmVelocityOnly" checked />
-                        <span>Velocity-only (Safe mode)</span>
+                        <span data-i18n="editor.velocityOnlySafe">Velocity-only (Safe mode)</span>
                       </label>
                     </div>
                     <div class="row" style="margin-top:4px;">
-                      <button id="btnEditorLlmSave" type="button" class="btn mini">Save</button>
-                      <button id="btnEditorLlmReset" type="button" class="btn mini">Reset</button>
-                      <button id="btnEditorLlmTest" type="button" class="btn mini">Test Connection</button>
+                      <button id="btnEditorLlmSave" type="button" class="btn mini" data-i18n="inst.save">Save</button>
+                      <button id="btnEditorLlmReset" type="button" class="btn mini" data-i18n="common.reset">Reset</button>
+                      <button id="btnEditorLlmTest" type="button" class="btn mini" data-i18n="editor.testConnection">Test Connection</button>
                     </div>
-                    <div id="editorLlmConfigWarning" class="muted" style="display:none;">LLM config module not loaded.</div>
+                    <div id="editorLlmConfigWarning" class="muted" style="display:none;" data-i18n="editor.llmConfigNotLoaded">LLM config module not loaded.</div>
                     <div id="editorLlmConfigStatus" class="muted" style="min-height:1em;"></div>
                     <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                   </div>
                 </div>
                 <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
                   <details class="help" style="margin-top:0;">
-                    <summary style="cursor:pointer; font-weight:700;">LLM Debug</summary>
+                    <summary style="cursor:pointer; font-weight:700;" data-i18n="editor.llmDebug">LLM Debug</summary>
                     <div style="margin-top:6px; font-size:11px; opacity:0.85;">
                       <div class="row" style="margin-bottom:6px;">
-                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini">Clear Debug</button>
+                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini" data-i18n="editor.clearDebug">Clear Debug</button>
                       </div>
-                      <label class="muted" style="margin:0; display:block;">Last raw output:</label>
+                      <label class="muted" style="margin:0; display:block;" data-i18n="editor.lastRawOutput">Last raw output:</label>
                       <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;">Last extracted patch:</label>
+                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.lastExtractedPatch">Last extracted patch:</label>
                       <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;">Errors + attempt:</label>
+                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.errorsAndAttempt">Errors + attempt:</label>
                       <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
                     </div>
                   </details>
                 </div>
               </div>
             </details>
-            <div class="help" id="editorStatus" style="margin-top:6px;">Ready.</div>
+            <div class="help" id="editorStatus" style="margin-top:6px;" data-i18n="editor.ready">Ready.</div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- i18n core (PR-G1a) - load before other scripts -->
+  <script src="/static/i18n/i18n.js"></script>
   <!-- Tone.js (UMD) - local vendor -->
   <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
   <script src="/static/pianoroll/project.js"></script>
+  <script src="/static/pianoroll/core/local_audio_assets.js"></script>
+  <script src="/static/pianoroll/controllers/instrument_library_store.js"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
+  <script src="/static/pianoroll/core/velocity_shape.js?v=1"></script>
+  <script src="/static/pianoroll/core/local_transpose.js?v=1"></script>
+  <script src="/static/pianoroll/core/rhythm_tighten_loosen.js?v=1"></script>
+  <script src="/static/pianoroll/core/phase1_assistant_narrow.js?v=1"></script>
+  <script src="/static/pianoroll/core/phase1_deterministic_meta.js?v=1"></script>
+  <script src="/static/pianoroll/core/optimize_templates_v1.js"></script>
   <script src="/static/pianoroll/controllers/agent_controller.js"></script>
   <script src="/static/pianoroll/ui/timeline_view.js"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
@@ -827,6 +1529,9 @@
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_wav_controller.js"></script>
+  <script src="/static/pianoroll/core/score_heuristic_split.js"></script>
+  <script src="/static/pianoroll/internal_action_registry.js"></script>
+  <script src="/static/pianoroll/internal_skill_registry.js"></script>
   <script src="/static/pianoroll/app.js"></script>
 </body>
 </html>

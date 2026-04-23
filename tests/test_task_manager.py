@@ -27,6 +27,21 @@ def test_infer_format():
 # 1. Lifecycle Tests (全生命周期测试)
 # ==========================================
 
+def test_create_task_request_two_stem_separation_flag():
+    manager = TaskManager()
+    tid_default = manager.create_task()
+    assert manager.get_request_two_stem_separation(tid_default) is False
+
+    tid_sep = manager.create_task(request_two_stem_separation=True)
+    assert manager.get_request_two_stem_separation(tid_sep) is True
+
+
+def test_get_request_two_stem_separation_unknown_task():
+    manager = TaskManager()
+    assert manager.get_request_two_stem_separation(uuid4()) is False
+    assert manager.get_request_two_stem_separation("not-a-uuid") is False
+
+
 def test_full_lifecycle_success(tmp_path):
     """测试从 创建 -> 进行中 -> 完成 的完整流程"""
     manager = TaskManager()

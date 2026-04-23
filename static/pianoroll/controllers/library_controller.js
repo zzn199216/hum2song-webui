@@ -153,9 +153,10 @@
       const clipId = btn.getAttribute('data-id') || btn.getAttribute('data-clip-id');
       if (!act || !clipId) return;
 
-      // Prefer explicit callbacks; fallback to common app methods if opts.app is provided.
       const app = opts.app || (typeof window !== 'undefined' ? window.H2SApp : null);
       const projectV2 = getProjectV2();
+
+      if (typeof opts.onSelectClip === 'function') opts.onSelectClip(clipId);
 
       if (act === 'play'){
         if (typeof opts.onPlay === 'function') return opts.onPlay(clipId);
@@ -168,7 +169,22 @@
         if (app && typeof app.addClipInstance === 'function') return app.addClipInstance(clipId);
         return;
       }
+      if (act === 'convertToEditable'){
+        if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
+          const fn = (app && typeof app.convertAudioClipToEditable === 'function') ? app.convertAudioClipToEditable.bind(app) : null;
+          if (fn){
+            Promise.resolve(fn(clipId)).catch(function(err){
+              console.warn('[LibraryController] convertAudioClipToEditable failed', err);
+            });
+          }
+        }
+        return;
+      }
       if (act === 'edit'){
+        if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
+          try{ if (typeof alert !== 'undefined') alert('Audio clips cannot be edited in the piano roll yet.'); }catch(_){}
+          return;
+        }
         if (typeof opts.onEdit === 'function') return opts.onEdit(clipId);
         if (app && typeof app.openClipEditor === 'function') return app.openClipEditor(clipId);
         return;
@@ -182,6 +198,11 @@
       // T3-4: Optimize (agent runner v0)
       // PR-D2d: Preset moved to Inspector; Optimize uses stored per-clip options via getOptimizeOptions.
       if (act === 'optimize'){
+        if (P && projectV2 && projectV2.clips && projectV2.clips[clipId] && typeof P.clipKind === 'function' && P.clipKind(projectV2.clips[clipId]) === 'audio'){
+          try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
+          try{ if (typeof alert !== 'undefined') alert('Optimize is not available for audio clips yet.'); }catch(_){}
+          return;
+        }
         // Important: bind this handler in capture phase so we can reliably intercept
         // optimize clicks even if a fallback listener is added later.
         // This also prevents double-handling (e.g. App fallback + controller).

@@ -5,6 +5,7 @@
     function create(opts){
       opts = opts || {};
       const root = (typeof window !== 'undefined') ? window : global;
+      const _t = (root && root.I18N && typeof root.I18N.t === 'function') ? root.I18N.t.bind(root.I18N) : function(k){ return k; };
       const H2SProject = opts.H2SProject || (root && root.H2SProject) || null;
       const H2SApp = opts.H2SApp || (root && root.H2SApp) || (root && root.window && root.window.H2SApp) || null;
 
@@ -18,6 +19,58 @@
         (H2SApp && typeof H2SApp.commitV2 === 'function') ? ((p, reason)=>H2SApp.commitV2(p, reason)) :
         (root && typeof root.commitV2 === 'function') ? root.commitV2 :
         null;
+
+      /** Dev-only: same key as app.js — localStorage 'hum2song_studio_dev_perf_timing' === '1' */
+      function _h2sDevPerfTimingEnabled(){
+        try{
+          return typeof localStorage !== 'undefined' && String(localStorage.getItem('hum2song_studio_dev_perf_timing') || '') === '1';
+        }catch(e){ return false; }
+      }
+
+      /** Dev-only clip playback timing: prefer performance.now, else Date.now (never gate logging on performance API). */
+      function _perfClipNow(){
+        try{
+          if (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') return performance.now();
+        }catch(e){}
+        return Date.now();
+      }
+
+      function _h2sDragPerfSessionBegin(inst, mode){
+        if (!_h2sDevPerfTimingEnabled()) return;
+        inst._h2sDragPerf = {
+          tDown: _perfClipNow(),
+          mode: String(mode),
+          moveCount: 0,
+          moveTotalMs: 0,
+          moveMaxMs: 0,
+          modalDrawCount: 0,
+        };
+      }
+
+      function _h2sDragPerfSessionEnd(inst){
+        const s = inst._h2sDragPerf;
+        if (!s) return;
+        if (!_h2sDevPerfTimingEnabled()){
+          inst._h2sDragPerf = null;
+          return;
+        }
+        const tUp = _perfClipNow();
+        const avg = s.moveCount ? (s.moveTotalMs / s.moveCount) : 0;
+        try{
+          console.log('[H2S perf] clipEditor drag session', {
+            mode: s.mode,
+            pointerMoves: s.moveCount,
+            modalPointerMoveMs: {
+              total: Number(s.moveTotalMs.toFixed(3)),
+              avg: Number(avg.toFixed(3)),
+              max: Number((s.moveCount ? s.moveMaxMs : 0).toFixed(3)),
+            },
+            modalDrawCalls: s.modalDrawCount,
+            dragDurationMs: Number((tUp - s.tDown).toFixed(3)),
+          });
+        }catch(e){}
+        inst._h2sDragPerf = null;
+      }
 
       const persistFromV1 = (typeof opts.persistFromV1 === 'function') ? opts.persistFromV1 :
         (H2SApp && typeof H2SApp.persistFromV1 === 'function') ? ((reason)=>H2SApp.persistFromV1(reason)) :
@@ -70,27 +123,23 @@
       }
       function _formatPatchTypeSummary(ps){
         if (!ps || typeof ps !== 'object') return '';
+        const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
         let base = '';
         if ((ps.ops != null && ps.ops === 0) || ps.noChanges) base = '(no changes)';
-        else if (ps.isVelocityOnly === true) base = 'Changed: velocity only';
+        else if (ps.isVelocityOnly === true) base = 'Changed: ' + t('opt.velocityOnly');
         else {
           const parts = [];
-          if (ps.hasPitchChange === true) parts.push('pitch ✓');
-          if (ps.hasTimingChange === true) parts.push('timing ✓');
-          if (ps.hasStructuralChange === true) parts.push('structure ✓');
-          base = parts.length === 0 ? 'Changed: velocity only' : 'Changed: ' + parts.join(' ');
+          if (ps.hasPitchChange === true) parts.push(t('opt.pitch'));
+          if (ps.hasTimingChange === true) parts.push(t('opt.timing'));
+          if (ps.hasStructuralChange === true) parts.push(t('opt.structure'));
+          base = parts.length === 0 ? 'Changed: ' + t('opt.velocityOnly') : 'Changed: ' + parts.join(' ');
         }
         const suffix = _formatPromptMetaSuffix(ps);
         return suffix ? base + ' | ' + suffix : base;
       }
 
-      // PR-E2: UI-side template map (v1) matching docs/LLM_TEMPLATES_V1.md
-      const TEMPLATES_V1_UI = {
-        fix_pitch_v1: { label: 'Fix Pitch', intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false }, seed: 'Correct pitch errors while keeping the melody recognizable. Prefer small pitch adjustments; do not rewrite the phrase.' },
-        tighten_rhythm_v1: { label: 'Tighten Rhythm', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Align note starts and durations to a steadier groove while keeping pitches unchanged. Prefer small timing adjustments and consistent note lengths; do not rewrite the melody.' },
-        clean_outliers_v1: { label: 'Clean Outliers', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true }, seed: 'Smooth extreme values; reduce outliers.' },
-        bluesy_v1: { label: 'Bluesy', intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false }, seed: 'Add subtle blues inflection to timing and dynamics.' },
-      };
+      // PR-E2 / INFRA-1a: UI-side template map — derived from shared optimize_templates_v1.js
+      const TEMPLATES_V1_UI = (root && root.H2S_OPTIMIZE_TEMPLATES_V1_MAP) ? root.H2S_OPTIMIZE_TEMPLATES_V1_MAP : {};
 
       // NOTE: In the original monolithic app.js, roundRect() lived in the same closure.
       // After modularization (editor_runtime.js extracted into its own file), that helper
@@ -350,6 +399,29 @@
         return _manualScoreSecToBeat(scoreSec, bpm);
       }
 
+      /**
+       * Ghost overlay source: the CURRENT clip head's parent revision score (seconds-score for editor).
+       * No parent id or missing parent snapshot => null (no ghost).
+       */
+      function _ghostScoreFromClipParentRevision(p2b, clipId, bpmFallback){
+        if (!clipId || !p2b || !p2b.clips || !p2b.clips[clipId]) return null;
+        const clipV2 = p2b.clips[clipId];
+        const parentId = clipV2 && clipV2.parentRevisionId;
+        if (parentId == null || String(parentId).trim() === '') return null;
+        const revs = clipV2 && clipV2.revisions;
+        const revsIsMap = revs && typeof revs === 'object' && !Array.isArray(revs);
+        const pid = String(parentId);
+        const parent = (revsIsMap && revs[pid]) ? revs[pid] : null;
+        if (!parent || !parent.score) return null;
+        const ps = parent.score;
+        const bpm = (p2b && p2b.bpm) ? p2b.bpm : (Number(bpmFallback) || 120);
+        if (_isBeatScore(ps)){
+          try { return _scoreBeatToSec(ps, bpm); }
+          catch(e){ return H2SProject.deepClone(ps); }
+        }
+        return H2SProject.deepClone(ps);
+      }
+
       function _recomputeClipMetaFromBeatScore(clip, scoreBeat){
         const meta0 = (clip && clip.meta) ? clip.meta : {};
         if (H2SProject && typeof H2SProject.recomputeClipMetaFromScoreBeat === 'function' && clip){
@@ -452,6 +524,25 @@
       if (!clip) return;
 
       const p2b = getProjectV2 && getProjectV2();
+      const cV2 = p2b && p2b.clips && clipId ? p2b.clips[clipId] : null;
+      const audioGuard = (H2SProject && typeof H2SProject.clipKind === 'function')
+        ? (H2SProject.clipKind(cV2 || clip) === 'audio')
+        : (clip.kind === 'audio');
+      if (audioGuard){
+        try{
+          const msg = _t('msg.audioClipNoEditor') || 'Audio clips cannot be edited in the piano roll yet.';
+          if (typeof alert !== 'undefined') alert(msg);
+          else log(msg);
+        }catch(e){}
+        return;
+      }
+
+      const _perfOpen = _h2sDevPerfTimingEnabled();
+      const _perfW = _perfOpen && typeof performance !== 'undefined';
+      if (_perfW){
+        this._h2sOpenPerf = { pendingFirstDraw: true, t0: performance.now(), clipId: String(clipId) };
+      }
+
       const bpm = (p2b && p2b.bpm) ? p2b.bpm : (this.project && this.project.bpm ? this.project.bpm : 120);
       const projectWantsBeat = !!(
         (p2b && (p2b.timebase === 'beat' || Number(p2b.version) === 2)) ||
@@ -474,23 +565,12 @@
       this.state.modal.draftScore = H2SProject.deepClone(savedScoreSec);
       this.state.modal.dirty = false;
 
-      // T3-4: ghost + patch summary (revision UI bridge)
-      this.state.modal.ghostScore = null;
+      // T3-4: ghost + patch summary (revision UI bridge) — parent revision score under current head
       try{
-        const parentId = clip && clip.parentRevisionId;
-        if (parentId && Array.isArray(clip.revisions)){
-          const parent = clip.revisions.find(r => r && r.revisionId === parentId);
-          if (parent && parent.score){
-            const ps = parent.score;
-            if (_isBeatScore(ps)){
-              try { this.state.modal.ghostScore = _scoreBeatToSec(ps, bpm); }
-              catch(e){ this.state.modal.ghostScore = H2SProject.deepClone(ps); }
-            } else {
-              this.state.modal.ghostScore = H2SProject.deepClone(ps);
-            }
-          }
-        }
-      }catch(e){}
+        this.state.modal.ghostScore = _ghostScoreFromClipParentRevision(p2b, clipId, bpm);
+      }catch(e){
+        this.state.modal.ghostScore = null;
+      }
 
       try{
         const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
@@ -501,6 +581,8 @@
           else el.textContent = '(none)';
         }
       }catch(e){}
+
+      if (_perfW) this._h2sOpenPerf.tAfterScorePrep = performance.now();
 
       // PR-4/PR-6b: Editor Optimize UI — preset, prompt, status line
       try{
@@ -559,7 +641,7 @@
           const testStatusEl = document.getElementById('editorLlmTestStatus');
           // PR-8J/8K: Populate Model select dropdown from defaults (fallback to hardcoded list)
           if (modelSelectEl){
-            modelSelectEl.innerHTML = '<option value="">(Select a model...)</option>';
+            modelSelectEl.innerHTML = '<option value="">' + _t('editor.selectModel') + '</option>';
             try{
               const defaults = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_DEFAULTS) ? globalThis.H2S_LLM_DEFAULTS : null;
               const suggestions = (defaults && Array.isArray(defaults.modelSuggestions)) ? defaults.modelSuggestions : ['gpt-4o-mini', 'gpt-4.1-mini', 'deepseek-chat', 'deepseek-reasoner', 'deepseek/deepseek-chat', 'deepseek/deepseek-reasoner'];
@@ -621,7 +703,7 @@
             if (testStatusEl) testStatusEl.textContent = '';
             if (modelLoadStatusEl) modelLoadStatusEl.textContent = '';
             if (gatewayPresetEl) gatewayPresetEl.value = 'custom';
-            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = 'LLM module not loaded.'; }
+            if (warnEl) { warnEl.style.display = 'block'; warnEl.textContent = _t('editor.llmConfigNotLoaded'); }
             if (saveBtn) saveBtn.disabled = true;
             if (resetBtn) resetBtn.disabled = true;
             if (testBtn) testBtn.disabled = true;
@@ -686,6 +768,15 @@
       this.state.modal.pitchCenter = H2SProject.clamp(center, 0, 127);
       $('#rngPitchCenter').value = this.state.modal.pitchCenter;
 
+      // Large/dense clips: default velocity lane collapsed (modalDraw velocity phase is costly at high note counts).
+      // Prefer clip.meta when present; otherwise scoreStats.
+      const _meta = clip && clip.meta ? clip.meta : null;
+      const _noteSig = (_meta && typeof _meta.notes === 'number') ? _meta.notes : st.count;
+      const _spanSig = (_meta && typeof _meta.spanSec === 'number' && isFinite(_meta.spanSec)) ? _meta.spanSec : st.spanSec;
+      const _VEL_COLLAPSE_MIN_NOTES = 250;
+      const _VEL_COLLAPSE_MIN_SPAN_SEC = 30;
+      this.state.modal.velocityLaneCollapsed = (_noteSig >= _VEL_COLLAPSE_MIN_NOTES) || (_spanSig >= _VEL_COLLAPSE_MIN_SPAN_SEC);
+
       // Pitch zoom (visual size). Remember across sessions.
       // Levels: 1.0 -> normal, 1.25 -> bigger default, 1.5 -> extra big.
       try{
@@ -694,19 +785,65 @@
         this.state.modal.pitchZoom = z;
       }catch(e){ this.state.modal.pitchZoom = 1.25; }
 
-      $('#modalTitle').textContent = `Editing: ${clip.name}`;
-      $('#modalSub').textContent = `notes ${st.count} | pitch ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | span ${fmtSec(st.spanSec)}`;
+      $('#modalTitle').textContent = (_t('editor.editingName') || 'Editing: {name}').replace('{name}', clip.name || '');
+      $('#modalSub').textContent = `${_t('editor.notes')} ${st.count} | ${_t('editor.pitch')} ${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)} | ${_t('editor.span')} ${fmtSec(st.spanSec)}`;
       $('#modal').classList.add('show');
       $('#modal').setAttribute('aria-hidden', 'false');
 
-      $('#editorStatus').textContent = 'Tip: Q toggle Snap, [ ] change grid, hold Alt to bypass Snap while dragging.';
+      $('#editorStatus').textContent = _t('editor.tipSnap');
 
-      this.modalUpdateRightPanel();
-      this.modalResizeCanvasToContent();
-      this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
-      this.modalRequestDraw();
-      this.modalBindControls();
-      this.modalUpdateEditorOptimizeUI();
+      if (_perfW) this._h2sOpenPerf.tBeforeRightPanel = performance.now();
+      if (_perfW){
+        const _t = performance.now();
+        this.modalUpdateRightPanel();
+        this._h2sOpenPerf.rightPanelFirstMs = performance.now() - _t;
+      } else {
+        this.modalUpdateRightPanel();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalResizeCanvasToContent();
+        this._h2sOpenPerf.resizeCanvasMs = performance.now() - _t;
+      } else {
+        this.modalResizeCanvasToContent();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+        this._h2sOpenPerf.autoScrollMs = performance.now() - _t;
+      } else {
+        this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalSetupVelocityScrollSync();
+        this._h2sOpenPerf.velocitySyncMs = performance.now() - _t;
+      } else {
+        this.modalSetupVelocityScrollSync();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalRequestDraw();
+        this._h2sOpenPerf.requestDrawScheduleMs = performance.now() - _t;
+        this._h2sOpenPerf.tAfterRequestDraw = performance.now();
+      } else {
+        this.modalRequestDraw();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalBindControls();
+        this._h2sOpenPerf.bindControlsMs = performance.now() - _t;
+      } else {
+        this.modalBindControls();
+      }
+      if (_perfW){
+        const _t = performance.now();
+        this.modalUpdateEditorOptimizeUI();
+        this._h2sOpenPerf.optimizeUiMs = performance.now() - _t;
+        this._h2sOpenPerf.openSyncTotalMs = performance.now() - this._h2sOpenPerf.t0;
+      } else {
+        this.modalUpdateEditorOptimizeUI();
+      }
       log(`Open editor: ${clip.name}`);
     },
 
@@ -801,6 +938,8 @@
       this.state.modal._sourceClipWasBeat = false;
       this.state.modal._projectWantsBeat = false;
 
+      if (this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw) this._h2sOpenPerf = null;
+
       $('#modal').classList.remove('show');
       $('#modal').setAttribute('aria-hidden', 'true');
     },
@@ -824,7 +963,7 @@
         this.state.modal.snapLastNonOff = val;
       }
       if (!opts || !opts.silent){
-        $('#editorStatus').textContent = `Snap = ${val === 'off' ? 'Off' : ('1/' + val)}  (Q toggle, [ ] grid, Alt bypass)`;
+        $('#editorStatus').textContent = (_t('editor.snapStatusFmt') || 'Snap = {val}  (Q toggle, [ ] grid, Alt bypass)').replace('{val}', val === 'off' ? _t('snap.off') : ('1/' + val));
       }
       this.modalRequestDraw();
     },
@@ -877,6 +1016,9 @@
     modalResizeCanvasToContent(){
       const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
+      const gridWrap = $('.editorGridWrap') || wrap;
+      const velocityCanvas = $('#velocityCanvas');
+      const velocityLaneWrap = $('#velocityLaneWrap');
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
       const span = Math.max(4, st.spanSec);
       const w = Math.max(1200, Math.ceil(span * this.state.modal.pxPerSec) + 140);
@@ -888,7 +1030,8 @@
       // draw() adds top/bottom pad=2 rows (≈ +4 rows); count them so we don't "almost fit but no scroll".
       const pitchSpanPadded = pitchSpan > 0 ? (pitchSpan + 4) : 0;
 
-      const wrapH = Math.max(320, wrap.clientHeight - 2);
+      const gridAreaH = (gridWrap && gridWrap.clientHeight > 0) ? gridWrap.clientHeight : wrap.clientHeight;
+      const wrapH = Math.max(320, gridAreaH - 2);
 
       // Visual row size (zoom)
       const ROW_H = Math.max(12, Math.round(16 * (Number(this.state.modal.pitchZoom || 1))));
@@ -911,21 +1054,51 @@
       } else {
         canvas.height = wrapH;
       }
+
+      // Velocity lane: match grid width; height from state; HiDPI
+      if (velocityCanvas && velocityLaneWrap){
+        const collapsed = !!this.state.modal.velocityLaneCollapsed;
+        velocityLaneWrap.classList.toggle('collapsed', collapsed);
+        $('#velocitySplitter').classList.toggle('collapsed', collapsed);
+        if (!collapsed){
+          const vh = Math.max(48, Math.min(200, Number(this.state.modal.velocityLaneHeight) || 80));
+          const cssH = vh - 22;
+          const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+          velocityCanvas.width = Math.round(w * dpr);
+          velocityCanvas.height = Math.round(cssH * dpr);
+          velocityCanvas.style.width = w + 'px';
+          velocityCanvas.style.height = cssH + 'px';
+          this.state.modal.velocityLaneCssW = w;
+          this.state.modal.velocityLaneCssH = cssH;
+          velocityLaneWrap.style.height = vh + 'px';
+        }
+      }
     },
 
     // When vertical pitch scrolling is enabled, scroll so pitchCenter sits near the viewport center.
+    modalSetupVelocityScrollSync(){
+      if (typeof document === 'undefined' || !$) return;
+      const gridWrap = $('.editorGridWrap');
+      const velWrap = $('.editorVelocityLaneCanvasWrap');
+      if (!gridWrap || !velWrap || gridWrap.__h2s_vel_scroll_synced) return;
+      gridWrap.__h2s_vel_scroll_synced = true;
+      gridWrap.addEventListener('scroll', () => {
+        if (velWrap) velWrap.scrollLeft = gridWrap.scrollLeft;
+      });
+    },
+
     modalAutoScrollPitchToCenter(){
       if (!this.state.modal.show) return;
       if (!this.state.modal.usePitchVScroll) return;
-      const wrap = $('#canvasWrap');
+      const gridWrap = $('.editorGridWrap');
       const canvas = $('#canvas');
-      if (!wrap || !canvas) return;
+      if (!gridWrap || !canvas) return;
       const rowH = Number(this.state.modal.rowH) || 16;
       const pitch = (this.state.modal.pitchCenter != null) ? Number(this.state.modal.pitchCenter) : 60;
       const y = (this.state.modal.padT || PITCH_PAD_T) + (127 - pitch) * rowH;
-      const target = y - (wrap.clientHeight / 2);
-      const maxScroll = Math.max(0, (canvas.height || 0) - wrap.clientHeight);
-      wrap.scrollTop = Math.max(0, Math.min(maxScroll, target));
+      const target = y - (gridWrap.clientHeight / 2);
+      const maxScroll = Math.max(0, (canvas.height || 0) - gridWrap.clientHeight);
+      gridWrap.scrollTop = Math.max(0, Math.min(maxScroll, target));
     },
 
     modalUpdateRightPanel(){
@@ -933,8 +1106,8 @@
       $('#kvClipNotes').textContent = String(st.count);
       $('#kvClipPitch').textContent = `${H2SProject.midiToName(st.minPitch)}..${H2SProject.midiToName(st.maxPitch)}`;
       $('#kvClipSpan').textContent = fmtSec(st.spanSec);
-      $('#pillCursor').textContent = `Cursor: ${fmtSec(this.state.modal.cursorSec)}`;
-      $('#pillSnap').textContent = $('#selSnap').value === 'off' ? 'Snap off' : ('Snap 1/' + $('#selSnap').value);
+      $('#pillCursor').textContent = (_t('editor.cursorFmt') || 'Cursor: {sec}').replace('{sec}', fmtSec(this.state.modal.cursorSec));
+      $('#pillSnap').textContent = $('#selSnap').value === 'off' ? _t('editor.snapOff') : (_t('editor.snapFmt') || 'Snap 1/{n}').replace('{n}', $('#selSnap').value);
     },
 
     // PR-4/PR-6b: Update Editor Optimize preset, prompt, and status from current clip (e.g. after Optimize).
@@ -967,7 +1140,8 @@
         const templateLabelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeTemplateLabel') : null;
         if (templateLabelEl) {
           const tmpl = this._selectedTemplateId && TEMPLATES_V1_UI[this._selectedTemplateId] ? TEMPLATES_V1_UI[this._selectedTemplateId] : null;
-          templateLabelEl.textContent = tmpl ? ('Template: ' + tmpl.label) : 'Template: Custom';
+          const lbl = tmpl ? (_t('editor.template') + ': ' + (tmpl.labelKey ? _t(tmpl.labelKey) : tmpl.label)) : (_t('editor.template') + ': ' + _t('editor.templateCustom'));
+          templateLabelEl.textContent = lbl;
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
@@ -982,20 +1156,20 @@
           const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG : null;
           if (api){
             const cfg = api.loadLlmConfig();
-            if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? 'Full mode' : 'Safe mode';
-            if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ('Model: ' + cfg.model) : 'Model: (unset)';
+            if (quickModeEl) quickModeEl.textContent = (cfg && typeof cfg.velocityOnly === 'boolean' && !cfg.velocityOnly) ? ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.full') : 'Full mode') : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode');
+            if (quickModelEl) quickModelEl.textContent = (cfg && cfg.model && typeof cfg.model === 'string' && cfg.model.trim()) ? ((_t('editor.modelFmt') || 'Model: {model}').replace('{model}', cfg.model)) : _t('editor.modelUnset');
           } else {
-            if (quickModeEl) quickModeEl.textContent = 'Safe mode';
-            if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
+            if (quickModeEl) quickModeEl.textContent = (typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode';
+            if (quickModelEl) quickModelEl.textContent = _t('editor.modelUnset');
           }
         }catch(_){
-          if (quickModeEl) quickModeEl.textContent = 'Safe mode';
+          if (quickModeEl) quickModeEl.textContent = (typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.safe') : 'Safe mode';
           if (quickModelEl) quickModelEl.textContent = 'Model: (unset)';
         }
         const quickSummaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
         if (quickSummaryEl){
           const ps = (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary) || null;
-          quickSummaryEl.textContent = ps ? _formatPatchTypeSummary(ps) : '(no result yet)';
+          quickSummaryEl.textContent = ps ? _formatPatchTypeSummary(ps) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
         }
       }catch(e){}
     },
@@ -1039,6 +1213,7 @@
         }
         this.state.modal.draftScore = H2SProject.deepClone(draftSec);
         this.state.modal.savedScore = H2SProject.deepClone(draftSec);
+        this.modalSyncGhostFromClipParent();
         this.modalUpdateRightPanel();
         this.modalResizeCanvasToContent();
         this.modalAutoScrollPitchToCenter && this.modalAutoScrollPitchToCenter();
@@ -1046,6 +1221,23 @@
         this.modalUpdateEditorOptimizeUI();
         this.modalUpdateEditorRevisionUI();
       }catch(e){}
+    },
+
+    /** Keep ghost overlay aligned with current head's parent revision (same-session optimize / revision changes). */
+    modalSyncGhostFromClipParent(){
+      if (!this.state.modal || !this.state.modal.show) return;
+      const clipId = this.state.modal.clipId;
+      if (!clipId){
+        this.state.modal.ghostScore = null;
+        return;
+      }
+      try{
+        const p2 = getProjectV2 && getProjectV2();
+        const bpm = (p2 && p2.bpm) ? p2.bpm : (this.project && this.project.bpm) ? this.project.bpm : 120;
+        this.state.modal.ghostScore = _ghostScoreFromClipParentRevision(p2, clipId, bpm);
+      }catch(e){
+        this.state.modal.ghostScore = null;
+      }
     },
 
     modalRequestDraw(){
@@ -1058,10 +1250,41 @@
     },
 
     modalDraw(){
-      if (!this.state.modal.show) return;
+      if (!this.state.modal.show){
+        if (this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw) this._h2sOpenPerf = null;
+        return;
+      }
+      if (_h2sDevPerfTimingEnabled() && this._h2sDragPerf){
+        const _dm = this.state.modal.mode;
+        if (_dm === 'drag_note' || _dm === 'resize_note' || _dm === 'drag_velocity' || _dm === 'resize_velocity_lane'){
+          this._h2sDragPerf.modalDrawCount = (this._h2sDragPerf.modalDrawCount || 0) + 1;
+        }
+      }
+      if (_h2sDevPerfTimingEnabled() && this.state.modal.isPlaying){
+        this._playbackPerfModalDrawCount = (this._playbackPerfModalDrawCount || 0) + 1;
+      }
+      const _openPerfFirstDraw = !!(this._h2sOpenPerf && this._h2sOpenPerf.pendingFirstDraw);
+      let _drawEnter = 0;
+      if (_openPerfFirstDraw && typeof performance !== 'undefined'){
+        const op = this._h2sOpenPerf;
+        const tAfter = op.tAfterRequestDraw;
+        op.rafDelayMs = (typeof tAfter === 'number') ? (performance.now() - tAfter) : 0;
+        _drawEnter = performance.now();
+      }
+      const _perf = _h2sDevPerfTimingEnabled();
+      const _perfT0 = _perf && typeof performance !== 'undefined' ? performance.now() : 0;
+      let _mark = _perfT0;
+      function _split(){
+        if (!_perf || typeof performance === 'undefined') return 0;
+        const t = performance.now();
+        const d = t - _mark;
+        _mark = t;
+        return d;
+      }
       const canvas = $('#canvas');
       const ctx = canvas.getContext('2d');
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
+      const msScoreStats = _split();
 
       // Determine pitch window
       const useVScroll = !!this.state.modal.usePitchVScroll;
@@ -1154,9 +1377,10 @@
           ctx.strokeRect(x+0.5, y+0.5, gridPx-1, rowH-1);
         }
       }
+      const msGridBg = _split();
 
       // notes
-      // ghost overlay (stroke-only, non-interactive)
+      // ghost overlay (faint fill + subtle outline, non-interactive)
       if (this.state.modal.ghostScore){
         const gnotes = [];
         const gscore = this.state.modal.ghostScore;
@@ -1166,21 +1390,31 @@
           }
         }
         ctx.save();
-        ctx.globalAlpha = 0.25;
         ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(255,255,255,.55)';
         for (const n of gnotes){
           if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
           const x = padL + n.start * pxPerSec;
           const y = padT + (pitchMax - n.pitch) * rowH + 1;
           const w = Math.max(6, n.duration * pxPerSec);
           const h = rowH - 2;
-          ctx.strokeRect(Math.floor(x)+0.5, Math.floor(y)+0.5, Math.floor(w), Math.floor(h));
+          const gx = x - 1.5;
+          const gy = y - 1.5;
+          const gw = w + 3;
+          const gh = h + 3;
+          ctx.beginPath(); // isolate each ghost so fill/stroke apply once (no alpha stacking)
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.strokeStyle = 'rgba(255,255,255,0.70)';
+          roundRect(ctx, gx, gy, gw, gh, 7);
+          ctx.fill();
+          ctx.stroke();
         }
         ctx.restore();
       }
+      const msGhost = _split();
 
       const notes = this.modalAllNotes();
+      const msModalAllNotes = _split();
+      ctx.beginPath(); // reset path so blue fill/stroke don't repaint ghost rects
       for (const n of notes){
         if (n.pitch < pitchMin || n.pitch > pitchMax) continue;
         const x = padL + n.start * pxPerSec;
@@ -1196,25 +1430,157 @@
         ctx.fill();
         ctx.stroke();
 
-        // resize handle (right 10px)
+        // resize handles (symmetric left/right; keep center move zone on narrow notes)
+        const handles = this.modalResizeZoneWidths(w);
         ctx.fillStyle = 'rgba(255,255,255,.18)';
-        ctx.fillRect(x + w - 10, y, 10, h);
+        ctx.fillRect(x, y, handles.left, h);
+        ctx.fillRect(x + w - handles.right, y, handles.right, h);
       }
+      const msNoteBodies = _split();
 
-      // playhead (cursor)
-      const cx = padL + this.state.modal.cursorSec * pxPerSec;
-      ctx.strokeStyle = 'rgba(239,68,68,.95)';
-      ctx.beginPath();
-      ctx.moveTo(Math.floor(cx)+0.5, 0);
-      ctx.lineTo(Math.floor(cx)+0.5, canvas.height);
-      ctx.stroke();
+      // playhead (cursor) — when playing, overlay div is used; avoid double playhead
+      if (!this.state.modal.isPlaying){
+        const cx = padL + this.state.modal.cursorSec * pxPerSec;
+        ctx.strokeStyle = 'rgba(239,68,68,.95)';
+        ctx.beginPath();
+        ctx.moveTo(Math.floor(cx)+0.5, 0);
+        ctx.lineTo(Math.floor(cx)+0.5, canvas.height);
+        ctx.stroke();
+      }
 
       // top text
       ctx.fillStyle = 'rgba(255,255,255,.75)';
       ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
       ctx.fillText(`Cursor: ${fmtSec(this.state.modal.cursorSec)} (click empty grid to move; click note to select)`, 10, 14);
+      const msCanvasTail = _split();
 
-      this.modalUpdateRightPanel();
+      this.modalDrawVelocityLane();
+      const msVelocityLane = _split();
+
+      // Skip right-panel stats during active drag/resize/velocity interactions (hot path).
+      // Next draw after pointerup runs with mode 'none' and refreshes the panel.
+      const _m = this.state.modal.mode;
+      const _skipRightPanel =
+        _m === 'drag_note' || _m === 'resize_note' || _m === 'drag_velocity' || _m === 'resize_velocity_lane';
+      if (!_skipRightPanel){
+        if (_openPerfFirstDraw && typeof performance !== 'undefined'){
+          const _rp0 = performance.now();
+          this.modalUpdateRightPanel();
+          if (this._h2sOpenPerf) this._h2sOpenPerf.rightPanelInFirstDrawMs = performance.now() - _rp0;
+        } else {
+          this.modalUpdateRightPanel();
+        }
+      }
+      const msRightPanel = _split();
+
+      if (_openPerfFirstDraw && typeof performance !== 'undefined' && this._h2sOpenPerf){
+        const op = this._h2sOpenPerf;
+        op.firstDrawTotalMs = performance.now() - _drawEnter;
+        op.pendingFirstDraw = false;
+        const t0 = op.t0;
+        const tAsp = op.tAfterScorePrep;
+        const tBrp = op.tBeforeRightPanel;
+        console.log('[H2S perf] openClipEditor (one-time)', {
+          clipId: op.clipId,
+          scorePrepMs: (typeof tAsp === 'number' && typeof t0 === 'number') ? Number((tAsp - t0).toFixed(3)) : null,
+          uiPrepMs: (typeof tBrp === 'number' && typeof tAsp === 'number') ? Number((tBrp - tAsp).toFixed(3)) : null,
+          rightPanelFirstMs: Number((op.rightPanelFirstMs || 0).toFixed(3)),
+          resizeCanvasMs: Number((op.resizeCanvasMs || 0).toFixed(3)),
+          autoScrollMs: Number((op.autoScrollMs || 0).toFixed(3)),
+          velocitySyncMs: Number((op.velocitySyncMs || 0).toFixed(3)),
+          requestDrawScheduleMs: Number((op.requestDrawScheduleMs || 0).toFixed(3)),
+          rafDelayMs: Number((op.rafDelayMs || 0).toFixed(3)),
+          bindControlsMs: Number((op.bindControlsMs || 0).toFixed(3)),
+          optimizeUiMs: Number((op.optimizeUiMs || 0).toFixed(3)),
+          openSyncTotalMs: Number((op.openSyncTotalMs || 0).toFixed(3)),
+          firstDrawTotalMs: Number((op.firstDrawTotalMs || 0).toFixed(3)),
+          rightPanelInFirstDrawMs: Number((op.rightPanelInFirstDrawMs || 0).toFixed(3)),
+          endToEndMs: Number((performance.now() - t0).toFixed(3)),
+        });
+        this._h2sOpenPerf = null;
+      }
+
+      if (_perf && typeof performance !== 'undefined' && !_openPerfFirstDraw){
+        const total = performance.now() - _perfT0;
+        console.log('[H2S perf] modalDraw phases (ms)', {
+          total: Number(total.toFixed(3)),
+          scoreStats: Number(msScoreStats.toFixed(3)),
+          gridBg: Number(msGridBg.toFixed(3)),
+          ghostNotes: Number(msGhost.toFixed(3)),
+          modalAllNotes: Number(msModalAllNotes.toFixed(3)),
+          noteBodies: Number(msNoteBodies.toFixed(3)),
+          canvasTail: Number(msCanvasTail.toFixed(3)),
+          velocityLane: Number(msVelocityLane.toFixed(3)),
+          rightPanel: Number(msRightPanel.toFixed(3)),
+          notesCount: notes.length,
+        });
+      }
+    },
+
+    modalDrawVelocityLane(){
+      if (!this.state.modal.show) return;
+      if (!!this.state.modal.velocityLaneCollapsed) return;
+      const vCanvas = $('#velocityCanvas');
+      if (!vCanvas) return;
+
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+      const cssW = this.state.modal.velocityLaneCssW != null ? this.state.modal.velocityLaneCssW : 1200;
+      const cssH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : 48;
+
+      vCanvas.style.width = cssW + 'px';
+      vCanvas.style.height = cssH + 'px';
+      vCanvas.width = Math.round(cssW * dpr);
+      vCanvas.height = Math.round(cssH * dpr);
+
+      const ctx = vCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#12161c';
+      ctx.fillRect(0, 0, cssW, cssH);
+
+      const padL = this.state.modal.padL;
+      const pxPerSec = this.state.modal.pxPerSec;
+      const laneH = cssH;
+      const padV = 4;
+      const drawH = Math.max(4, laneH - padV);
+      const notes = this.modalAllNotes();
+      const selectedId = this.state.modal.selectedNoteId;
+
+      const clampBarW = (x) => H2SProject.clamp(x, 6, 14);
+      for (const n of notes){
+        const vel = H2SProject.clamp(Math.round(Number(n.velocity) ?? 100), 1, 127);
+        const noteX = padL + n.start * pxPerSec;
+        const noteW = n.duration * pxPerSec;
+        const barW = clampBarW(Math.max(0, noteW - 2));
+        const barX = noteX + (noteW - barW) / 2;
+        const barHeight = (vel / 127) * drawH;
+        const barY = laneH - barHeight - padV / 2;
+        const selected = (n.id === selectedId);
+        ctx.fillStyle = selected ? 'rgba(96,165,250,.92)' : 'rgba(59,130,246,.68)';
+        ctx.strokeStyle = selected ? 'rgba(255,255,255,.85)' : 'rgba(29,78,216,.65)';
+        ctx.lineWidth = selected ? 1.5 : 1;
+        roundRect(ctx, barX, barY, barW, Math.max(2, barHeight), 4);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      const lbl = $('#velocityLaneLabel');
+      if (lbl){
+        let v = null;
+        const m = this.state.modal;
+        const selId = m.selectedNoteId;
+        if (m.mode === 'drag_velocity' && m.drag.noteId){
+          const found = this.modalFindNoteById(m.drag.noteId);
+          if (found) v = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
+        } else if (selId){
+          const found = this.modalFindNoteById(selId);
+          if (found) v = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
+        }
+        lbl.textContent = v != null ? ('Vel: ' + v) : 'Vel: —';
+      }
     },
 
     modalAllNotes(){
@@ -1237,6 +1603,18 @@
         if (idx >= 0) return { track:t, note:t.notes[idx], index: idx };
       }
       return null;
+    },
+
+    modalResizeZoneWidths(noteWidthPx){
+      const w = Math.max(1, Number(noteWidthPx) || 1);
+      const MIN_EDGE = 2;
+      const MAX_EDGE = 10;
+      const TARGET_MOVE = 6;
+      let edge = Math.floor((w - TARGET_MOVE) / 2);
+      edge = H2SProject.clamp(edge, MIN_EDGE, MAX_EDGE);
+      // Keep at least 1px center move zone for very narrow notes.
+      if ((edge * 2) >= w) edge = Math.max(1, Math.floor((w - 1) / 2));
+      return { left: edge, right: edge };
     },
 
 
@@ -1299,7 +1677,16 @@
           const stored = app.getOptimizeOptions(clipId);
           templateId = (stored && stored.templateId != null && String(stored.templateId).trim()) ? String(stored.templateId).trim() : null;
         }
-        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null };
+        let velocityShapeNoteIds = null;
+        const modal = rt && rt.state && rt.state.modal;
+        if (modal){
+          if (modal.selectedNoteIds && modal.selectedNoteIds.length >= 2){
+            velocityShapeNoteIds = modal.selectedNoteIds.slice().map(function(id){ return String(id); });
+          } else if (modal.selectedNoteId){
+            velocityShapeNoteIds = [String(modal.selectedNoteId)];
+          }
+        }
+        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null, velocityShapeNoteIds, localTransposeNoteIds: velocityShapeNoteIds, rhythmNoteIds: velocityShapeNoteIds };
       };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;
@@ -1318,8 +1705,9 @@
             if (!m) modelHint = 'Model is unset — open Advanced → LLM Settings to choose a model. ';
           }
         } catch (_) {}
-        const base = 'Quality gate failed (velocity-only). Try: (1) switch to a stronger model, (2) turn off Tighten Rhythm, or (3) add prompt: "fix pitch/timing, not just dynamics".';
-        if (forStatus) return modelHint + 'Quality gate failed. See summary for next steps.';
+        const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+        const base = t('opt.lowQualityVelocityOnly');
+        if (forStatus) return modelHint + t('opt.lowQualityShort');
         return modelHint + base;
       };
       // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
@@ -1343,7 +1731,8 @@
           if (!api) return '';
           const cfg = api.loadLlmConfig();
           const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
-          return safeMode ? ' [Safe mode]' : ' [Full mode]';
+          const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+          return safeMode ? (' [' + t('opt.safe') + ']') : (' [' + t('opt.full') + ']');
         } catch (_) { return ''; }
       };
       const statusFromResult = (res, clip, presetId) => {
@@ -1360,7 +1749,7 @@
             let line = 'ok, ops=' + ops + ' (' + opTypes + ')' + modeLabel;
             const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function') ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
             const safeMode = (cfg && typeof cfg.velocityOnly === 'boolean') ? cfg.velocityOnly : true;
-            if (safeMode) line += ' velocity-only';
+            if (safeMode) line += ' ' + ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.velocityOnly') : 'velocity-only');
             return line;
           }
           return 'ok, ops=' + (res.ops ?? 0) + ' (preset=' + preset + ', prompt=' + promptSrc + ')';
@@ -1463,7 +1852,7 @@
                     const link = summaryEl.querySelector('.qopt-simplify');
                     if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
                   }
-                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? (((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)') + ' | ' + _formatPromptMetaSuffix(ps)) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
@@ -1704,7 +2093,7 @@
                     const link = summaryEl.querySelector('.qopt-simplify');
                     if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
                   }
-                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? '(no result yet) | ' + _formatPromptMetaSuffix(ps) : '(no result yet)';
+                  else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? (((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)') + ' | ' + _formatPromptMetaSuffix(ps)) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
                 }
                 // PR-8C: Save LLM debug data if present (llm_v0 only)
                 if (typeof saveLlmDebug === 'function' && presetId === 'llm_v0' && res && res.llmDebug){
@@ -1905,7 +2294,7 @@
               const api = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG) ? globalThis.H2S_LLM_CONFIG : null;
               const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
               if (!api || typeof api.loadLlmConfig !== 'function' || !client || typeof client.callChatCompletions !== 'function'){
-                setTestStatus('LLM module not loaded.');
+                setTestStatus(_t('editor.llmConfigNotLoaded'));
                 return;
               }
               const baseEl = doc.getElementById('editorLlmBaseUrl');
@@ -1915,7 +2304,7 @@
               const model = (modelEl && modelEl.value != null) ? String(modelEl.value).trim() : '';
               const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
               if (!baseUrl || !model){
-                setTestStatus('Please set Base URL and Model first');
+                setTestStatus(_t('editor.pleaseSetBaseUrlAndModel'));
                 return;
               }
               setTestStatus('Testing...');
@@ -1930,9 +2319,9 @@
                 })
                 .catch(function(err){
                   const msg = (err && err.message) ? String(err.message) : '';
-                  if (/401|403|Unauthorized/i.test(msg)) setTestStatus('Unauthorized (check token)');
-                  else if (/404|not found/i.test(msg)) setTestStatus('Endpoint not found (check Base URL)');
-                  else if (/timeout|request timeout/i.test(msg)) setTestStatus('Timeout (gateway unreachable?)');
+                  if (/401|403|Unauthorized/i.test(msg)) setTestStatus(_t('editor.unauthorized'));
+                  else if (/404|not found/i.test(msg)) setTestStatus(_t('editor.endpointNotFound'));
+                  else if (/timeout|request timeout/i.test(msg)) setTestStatus(_t('editor.timeout'));
                   else setTestStatus('Connection failed');
                 });
             }catch(e){}
@@ -1956,7 +2345,7 @@
               const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt || ''; };
               const client = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CLIENT) ? globalThis.H2S_LLM_CLIENT : null;
               if (!client || typeof client.listModels !== 'function'){
-                setStatus('LLM module not loaded.');
+                setStatus(_t('editor.llmConfigNotLoaded'));
                 return;
               }
               const baseEl = doc.getElementById('editorLlmBaseUrl');
@@ -1964,10 +2353,10 @@
               const baseUrl = (baseEl && baseEl.value != null) ? String(baseEl.value).trim() : '';
               const authToken = (tokenEl && tokenEl.value != null) ? String(tokenEl.value) : '';
               if (!baseUrl){
-                setStatus('Please set Base URL first');
+                setStatus(_t('editor.pleaseSetBaseUrl'));
                 return;
               }
-              setStatus('Loading...');
+              setStatus(_t('common.loading'));
               const cfg = { baseUrl: baseUrl, authToken: authToken };
               client.listModels(cfg, { timeoutMs: 8000 })
                 .then(function(res){
@@ -1986,7 +2375,7 @@
                   const selectEl = doc.getElementById('editorLlmModelSelect');
                   if (selectEl){
                     const currentValue = selectEl.value;
-                    selectEl.innerHTML = '<option value="">(Select a model...)</option>';
+                    selectEl.innerHTML = '<option value="">' + _t('editor.selectModel') + '</option>';
                     const selectCap = 50;
                     for (var j = 0; j < ids.length && j < selectCap; j++){
                       var opt2 = doc.createElement('option');
@@ -1996,14 +2385,14 @@
                     }
                     if (currentValue) selectEl.value = currentValue;
                   }
-                  setStatus('Loaded ' + ids.length + ' models');
+                  setStatus((_t('editor.loadedModels') || 'Loaded {n} models').replace('{n}', ids.length));
                 })
                 .catch(function(err){
                   const msg = (err && err.message) ? String(err.message) : '';
-                  if (/401|403|Unauthorized/i.test(msg)) setStatus('Unauthorized (check token)');
-                  else if (/404|not found/i.test(msg)) setStatus('Endpoint not found (check Base URL)');
-                  else if (/timeout|request timeout/i.test(msg)) setStatus('Timeout (gateway unreachable?)');
-                  else setStatus('Failed to load models');
+                  if (/401|403|Unauthorized/i.test(msg)) setStatus(_t('editor.unauthorized'));
+                  else if (/404|not found/i.test(msg)) setStatus(_t('editor.endpointNotFound'));
+                  else if (/timeout|request timeout/i.test(msg)) setStatus(_t('editor.timeout'));
+                  else setStatus(_t('editor.failedLoadModels'));
                 });
             }catch(e){}
           };
@@ -2039,7 +2428,7 @@
                 rt.modalResizeCanvasToContent();
                 rt.modalAutoScrollPitchToCenter();
                 rt.modalRequestDraw();
-                try{ $('#editorStatus').textContent = `Pitch zoom = ${next}x (press Z to cycle)`; }catch(e){}
+                try{ $('#editorStatus').textContent = (_t('editor.pitchZoomFmt') || 'Pitch zoom = {n}x (press Z to cycle)').replace('{n}', next); }catch(e){}
                 return;
               }
               if (k === 'Insert'){
@@ -2120,7 +2509,7 @@
     },
 
     modalHitTest(px, py){
-      // Return {type:'resize'|'note', noteId} or null
+      // Return {type:'resize'|'resize_left'|'note', noteId} or null
       const canvas = $('#canvas');
       const padL = this.state.modal.padL;
       const padT = this.state.modal.padT;
@@ -2156,14 +2545,116 @@
         const w = Math.max(6, n.duration * pxPerSec);
         const h = rowH - 2;
         if (px >= x && px <= x+w && py >= y && py <= y+h){
-          // resize area: last 10px
-          if (px >= x + w - 10) return { type:'resize', noteId:n.id };
+          const handles = this.modalResizeZoneWidths(w);
+          if (px < x + handles.left) return { type:'resize_left', noteId:n.id };
+          if (px >= x + w - handles.right) return { type:'resize', noteId:n.id };
           return { type:'note', noteId:n.id };
         }
       }
       return null;
     },
 
+    modalCursorForHit(hit){
+      if (!hit || !hit.type) return '';
+      if (hit.type === 'resize' || hit.type === 'resize_left') return 'ew-resize';
+      if (hit.type === 'note') return 'move';
+      return '';
+    },
+
+    modalSetCanvasCursor(cursor){
+      const canvas = $('#canvas');
+      if (!canvas || !canvas.style) return;
+      const next = String(cursor || '');
+      if (canvas.style.cursor !== next) canvas.style.cursor = next;
+    },
+
+    modalUpdateHoverCursor(ev){
+      const m = this.state.modal;
+      if (!m || !m.show) return;
+      const canvas = $('#canvas');
+      if (!canvas || typeof canvas.getBoundingClientRect !== 'function'){
+        this.modalSetCanvasCursor('');
+        return;
+      }
+      if (m.mode === 'resize_note'){
+        this.modalSetCanvasCursor('ew-resize');
+        return;
+      }
+      if (m.mode === 'drag_note'){
+        this.modalSetCanvasCursor('move');
+        return;
+      }
+      if (m.mode !== 'none'){
+        this.modalSetCanvasCursor('');
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const cx = Number(ev && ev.clientX);
+      const cy = Number(ev && ev.clientY);
+      const inside = Number.isFinite(cx) && Number.isFinite(cy) &&
+        cx >= rect.left && cx <= rect.right &&
+        cy >= rect.top && cy <= rect.bottom;
+      if (!inside){
+        this.modalSetCanvasCursor('');
+        return;
+      }
+      const scaleX = rect.width ? (canvas.width / rect.width) : 1;
+      const scaleY = rect.height ? (canvas.height / rect.height) : 1;
+      const px = (cx - rect.left) * scaleX;
+      const py = (cy - rect.top) * scaleY;
+      const hit = this.modalHitTest(px, py);
+      this.modalSetCanvasCursor(this.modalCursorForHit(hit));
+    },
+
+    modalVelocityHitTest(pxCss, pyCss){
+      const vCanvas = $('#velocityCanvas');
+      if (!vCanvas) return null;
+      const padL = this.state.modal.padL;
+      const pxPerSec = this.state.modal.pxPerSec;
+      const laneH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : 48;
+      const padV = 4;
+      const drawH = Math.max(4, laneH - padV);
+      if (pyCss < 0 || pyCss > laneH) return null;
+
+      const clampBarW = (x) => H2SProject.clamp(x, 6, 14);
+      const notes = this.modalAllNotes();
+      for (let i = notes.length - 1; i >= 0; i--){
+        const n = notes[i];
+        const vel = H2SProject.clamp(Math.round(Number(n.velocity) ?? 100), 1, 127);
+        const noteX = padL + n.start * pxPerSec;
+        const noteW = n.duration * pxPerSec;
+        const barW = clampBarW(Math.max(0, noteW - 2));
+        const barX = noteX + (noteW - barW) / 2;
+        const barHeight = (vel / 127) * drawH;
+        const barY = laneH - barHeight - padV / 2;
+        if (pxCss >= barX && pxCss <= barX + barW && pyCss >= barY && pyCss <= laneH) return { type:'velocity', noteId:n.id };
+      }
+      return null;
+    },
+
+    /** Dev-only (hum2song_studio_dev_perf_timing): one summary per clip-editor playback session */
+    _logClipEditorPlaybackPerfSummary(){
+      if (!_h2sDevPerfTimingEnabled()) return;
+      if (typeof performance === 'undefined' || typeof performance.now !== 'function') return;
+      const n = this._playbackPerfTickCount || 0;
+      const sum = this._playbackPerfTickSum || 0;
+      const max = this._playbackPerfTickMax || 0;
+      const d = this._playbackPerfModalDrawCount || 0;
+      if (!n && !d) return;
+      try{
+        console.log('[H2S perf] clipEditor playback session', {
+          rafTicks: n,
+          tickAvgMs: n ? Number((sum / n).toFixed(4)) : 0,
+          tickMaxMs: Number(max.toFixed(4)),
+          tickTotalMs: Number(sum.toFixed(3)),
+          modalDrawCallsWhilePlaying: d,
+        });
+      }catch(e){}
+      this._playbackPerfTickSum = 0;
+      this._playbackPerfTickCount = 0;
+      this._playbackPerfTickMax = 0;
+      this._playbackPerfModalDrawCount = 0;
+    },
 
 // ---- Playback inside modal (Clip Editor) ----
 modalTogglePlay(){
@@ -2174,71 +2665,208 @@ modalTogglePlay(){
 
 async modalPlay(){
 
-  if (!this.state.modal.show) return;
-  if (this.state.modal.isPlaying){ this.modalStop(); return; }
+  const _mpLog = _h2sDevPerfTimingEnabled();
+
+  if (!this.state.modal.show){
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', { outcome: 'earlyExit', reason: 'modalHidden' });
+      }catch(e){}
+    }
+    return;
+  }
+  if (this.state.modal.isPlaying){
+    this.modalStop();
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', { outcome: 'earlyExit', reason: 'wasPlaying_stoppedFirst' });
+      }catch(e){}
+    }
+    return;
+  }
+
+  const _mpT0 = _mpLog ? _perfClipNow() : 0;
 
   const ok = await this.ensureTone();
-  if (!ok){ alert('Tone.js not available.'); return; }
-
-  // IMPORTANT: Tone.start() must be called from a user gesture (button click).
-  // modalPlay() is invoked by the Play button handler, so we can await safely here.
-  try { await Tone.start(); } catch(e){}
-
-  const score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
-  const startAt = this.state.modal.cursorSec || 0;
-
-  const synth = new Tone.PolySynth(Tone.Synth).toDestination();
-  this.state.modal.synth = synth;
-
-  Tone.Transport.stop();
-  Tone.Transport.cancel();
-  Tone.Transport.seconds = 0;
-  Tone.Transport.bpm.value = this.project.bpm || 120;
-
-  let maxT = 0;
-  for (const tr of (score.tracks || [])){
-    for (const n of (tr.notes || [])){
-      const end = (Number(n.start)||0) + (Number(n.duration)||0);
-      if (end < startAt) continue;
-      const rel = Math.max(0, (Number(n.start)||0) - startAt);
-      const dur = Math.max(0, Number(n.duration)||0);
-      maxT = Math.max(maxT, rel + dur);
-	      Tone.Transport.schedule((time) => {
-	        const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
-	        // Accept either MIDI velocity (1..127) or normalized (0..1)
-	        let vel = Number(n.velocity);
-	        if (!isFinite(vel)) vel = 0.8;
-	        if (vel > 1.01) vel = H2SProject.clamp(vel, 1, 127) / 127;
-	        else vel = H2SProject.clamp(vel, 0.05, 1.0);
-	        synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
-	      }, rel);
+  const _mpAfterEnsure = _mpLog ? _perfClipNow() : 0;
+  if (!ok){
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', {
+          outcome: 'ensureToneFailed',
+          totalMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+          ensureToneMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+        });
+      }catch(e){}
     }
+    alert('Tone.js not available.');
+    return;
+  }
+
+  let _mpAfterToneStart = 0;
+  let _mpAfterScore = 0;
+  let _mpAfterSynth = 0;
+  let _mpAfterTransportReset = 0;
+  let _mpAfterSchedule = 0;
+  let score;
+  let startAt;
+  let maxT = 0;
+
+  try{
+    // IMPORTANT: Tone.start() must be called from a user gesture (button click).
+    // modalPlay() is invoked by the Play button handler, so we can await safely here.
+    try { await Tone.start(); } catch(e){}
+    _mpAfterToneStart = _mpLog ? _perfClipNow() : 0;
+
+    score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
+    startAt = this.state.modal.cursorSec || 0;
+    _mpAfterScore = _mpLog ? _perfClipNow() : 0;
+
+    const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+    this.state.modal.synth = synth;
+    _mpAfterSynth = _mpLog ? _perfClipNow() : 0;
+
+    Tone.Transport.stop();
+    Tone.Transport.cancel();
+    Tone.Transport.seconds = 0;
+    Tone.Transport.bpm.value = this.project.bpm || 120;
+    _mpAfterTransportReset = _mpLog ? _perfClipNow() : 0;
+
+    maxT = 0;
+    for (const tr of (score.tracks || [])){
+      for (const n of (tr.notes || [])){
+        const end = (Number(n.start)||0) + (Number(n.duration)||0);
+        if (end < startAt) continue;
+        const rel = Math.max(0, (Number(n.start)||0) - startAt);
+        const dur = Math.max(0, Number(n.duration)||0);
+        maxT = Math.max(maxT, rel + dur);
+	        Tone.Transport.schedule((time) => {
+	          const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
+	          // Accept either MIDI velocity (1..127) or normalized (0..1)
+	          let vel = Number(n.velocity);
+	          if (!isFinite(vel)) vel = 0.8;
+	          if (vel > 1.01) vel = H2SProject.clamp(vel, 1, 127) / 127;
+	          else vel = H2SProject.clamp(vel, 0.05, 1.0);
+	          synth.triggerAttackRelease(Tone.Frequency(pitch, "midi"), dur, time, vel);
+	        }, rel);
+      }
+    }
+    _mpAfterSchedule = _mpLog ? _perfClipNow() : 0;
+  }catch(e){
+    if (_mpLog){
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', {
+          outcome: 'throw',
+          message: String(e && e.message),
+          totalMs: Number((_perfClipNow() - _mpT0).toFixed(3)),
+        });
+      }catch(_){}
+    }
+    throw e;
   }
 
   // If no notes after cursor, treat as a no-op but still reset cursor to 0 for UX.
   if (!(maxT > 0)){
     this.state.modal.cursorSec = 0;
-    this.modalRequestDraw();
+    let _mpDrawErr = null;
+    try{
+      this.modalRequestDraw();
+    }catch(e){
+      _mpDrawErr = e;
+    }finally{
+      if (_mpLog){
+        const _mpEnd = _perfClipNow();
+        try{
+          console.log('[H2S perf] clipEditor modalPlay setup', {
+            outcome: _mpDrawErr ? 'modalRequestDrawThrew' : 'noNotesAfterCursor',
+            drawError: _mpDrawErr ? String(_mpDrawErr && _mpDrawErr.message) : undefined,
+            totalMs: Number((_mpEnd - _mpT0).toFixed(3)),
+            ensureToneMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+            toneStartMs: Number((_mpAfterToneStart - _mpAfterEnsure).toFixed(3)),
+            scorePrepMs: Number((_mpAfterScore - _mpAfterToneStart).toFixed(3)),
+            synthMs: Number((_mpAfterSynth - _mpAfterScore).toFixed(3)),
+            transportResetMs: Number((_mpAfterTransportReset - _mpAfterSynth).toFixed(3)),
+            scheduleMs: Number((_mpAfterSchedule - _mpAfterTransportReset).toFixed(3)),
+          });
+        }catch(e){}
+      }
+    }
+    if (_mpDrawErr) throw _mpDrawErr;
     return;
   }
 
   Tone.Transport.start("+0.05");
+  const _mpAfterTransportStart = _mpLog ? _perfClipNow() : 0;
   this.state.modal.isPlaying = true;
+  this._playbackPerfTickSum = 0;
+  this._playbackPerfTickCount = 0;
+  this._playbackPerfTickMax = 0;
+  this._playbackPerfModalDrawCount = 0;
   try{ $('#editorStatus').textContent = 'Playing...'; }catch(e){}
+
+  // Show DOM playhead overlay (lightweight; avoids full modalDraw per frame)
+  const phEl = $('#editorPlayhead');
+  if (phEl){
+    phEl.style.display = 'block';
+    const padL = this.state.modal.padL != null ? this.state.modal.padL : 60;
+    const pxPerSec = this.state.modal.pxPerSec != null ? this.state.modal.pxPerSec : 180;
+    phEl.style.left = (padL + startAt * pxPerSec) + 'px';
+  }
+
+  // One-time redraw to clear stale canvas playhead (modalDraw skips playhead when isPlaying)
+  let _mpDrawErr2 = null;
+  try{
+    this.modalRequestDraw();
+  }catch(e){
+    _mpDrawErr2 = e;
+  }finally{
+    if (_mpLog){
+      const _mpEnd = _perfClipNow();
+      try{
+        console.log('[H2S perf] clipEditor modalPlay setup', {
+          outcome: _mpDrawErr2 ? 'modalRequestDrawThrew' : 'playing',
+          drawError: _mpDrawErr2 ? String(_mpDrawErr2 && _mpDrawErr2.message) : undefined,
+          totalMs: Number((_mpEnd - _mpT0).toFixed(3)),
+          ensureToneMs: Number((_mpAfterEnsure - _mpT0).toFixed(3)),
+          toneStartMs: Number((_mpAfterToneStart - _mpAfterEnsure).toFixed(3)),
+          scorePrepMs: Number((_mpAfterScore - _mpAfterToneStart).toFixed(3)),
+          synthMs: Number((_mpAfterSynth - _mpAfterScore).toFixed(3)),
+          transportResetMs: Number((_mpAfterTransportReset - _mpAfterSynth).toFixed(3)),
+          scheduleMs: Number((_mpAfterSchedule - _mpAfterTransportReset).toFixed(3)),
+          transportStartMs: Number((_mpAfterTransportStart - _mpAfterSchedule).toFixed(3)),
+          startUiSyncMs: Number((_mpEnd - _mpAfterTransportStart).toFixed(3)),
+        });
+      }catch(e){}
+    }
+  }
+  if (_mpDrawErr2) throw _mpDrawErr2;
 
   // progress ticker (uses closure vars; do NOT reference them elsewhere)
   const tick = () => {
     if (!this.state.modal.isPlaying) return;
+    const _perfPb = _h2sDevPerfTimingEnabled() && typeof performance !== 'undefined' && typeof performance.now === 'function';
+    const t0 = _perfPb ? performance.now() : 0;
     const sec = startAt + (Tone.Transport.seconds || 0);
     this.state.modal.cursorSec = sec;
     try{ $('#pillCursor').textContent = `Cursor: ${fmtSec(sec)}`; }catch(e){}
-    this.modalRequestDraw();
+    // Update overlay only — no modalRequestDraw per frame
+    const ph = $('#editorPlayhead');
+    if (ph){
+      const pad = this.state.modal.padL != null ? this.state.modal.padL : 60;
+      const pps = this.state.modal.pxPerSec != null ? this.state.modal.pxPerSec : 180;
+      ph.style.left = (pad + sec * pps) + 'px';
+    }
+    if (_perfPb){
+      const dt = performance.now() - t0;
+      this._playbackPerfTickSum = (this._playbackPerfTickSum || 0) + dt;
+      this._playbackPerfTickCount = (this._playbackPerfTickCount || 0) + 1;
+      if (dt > (this._playbackPerfTickMax || 0)) this._playbackPerfTickMax = dt;
+    }
 
     // Auto-stop when finished, and reset to start.
     if ((Tone.Transport.seconds || 0) >= maxT){
       this.modalStop();
       this.state.modal.cursorSec = 0;
-      this.modalRequestDraw();
       return;
     }
     requestAnimationFrame(tick);
@@ -2247,7 +2875,60 @@ async modalPlay(){
 },
     modalPointerDown(ev){
       if (!this.state.modal.show) return;
-      const wrap = $('#canvasWrap');
+      const target = ev.target;
+      const isVelocityCanvas = target && target.id === 'velocityCanvas';
+      const isSplitter = target && (target.id === 'velocitySplitter' || target.closest && target.closest('#velocitySplitter'));
+
+      if (isSplitter){
+        if (ev.detail === 2){
+          this.state.modal.velocityLaneCollapsed = !this.state.modal.velocityLaneCollapsed;
+          this.modalResizeCanvasToContent();
+          this.modalRequestDraw();
+          return;
+        }
+        this.state.modal.mode = 'resize_velocity_lane';
+        this.state.modal.drag.startY = ev.clientY;
+        this.state.modal.drag.origLaneHeight = this.state.modal.velocityLaneHeight;
+        _h2sDragPerfSessionBegin(this, 'resize_velocity_lane');
+        return;
+      }
+
+      if (isVelocityCanvas){
+        const vCanvas = $('#velocityCanvas');
+        if (!vCanvas) return;
+        const rect = vCanvas.getBoundingClientRect();
+        const pxCss = ev.clientX - rect.left;
+        const pyCss = ev.clientY - rect.top;
+        const hit = this.modalVelocityHitTest(pxCss, pyCss);
+        if (hit){
+          const draggedNoteId = hit.noteId;
+          const currentSelectedIds = (this.state.modal.selectedNoteIds && this.state.modal.selectedNoteIds.length >= 2)
+            ? this.state.modal.selectedNoteIds
+            : (this.state.modal.selectedNoteId ? [this.state.modal.selectedNoteId] : []);
+          let targets;
+          if (currentSelectedIds.length >= 2 && currentSelectedIds.indexOf(draggedNoteId) >= 0){
+            targets = currentSelectedIds;
+          } else {
+            targets = [draggedNoteId];
+            this.state.modal.selectedNoteId = draggedNoteId;
+            this.state.modal.selectedNoteIds = null;
+          }
+          this._velDragTargets = targets;
+          const found = this.modalFindNoteById(draggedNoteId);
+          if (!found) return;
+          const v0 = H2SProject.clamp(Math.round(Number(found.note.velocity) ?? 100), 1, 127);
+          this.state.modal.drag.noteId = draggedNoteId;
+          this.state.modal.drag.startY = pyCss;
+          this.state.modal.drag.origVelocity = v0;
+          this.state.modal.mode = 'drag_velocity';
+          _h2sDragPerfSessionBegin(this, 'drag_velocity');
+          $('#editorStatus').textContent = 'Drag to set velocity...';
+          this.modalRequestDraw();
+          return;
+        }
+        return;
+      }
+
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
       const scaleX = rect.width ? (canvas.width / rect.width) : 1;
@@ -2271,9 +2952,11 @@ async modalPlay(){
         this.state.modal.drag.origStart = n.start;
         this.state.modal.drag.origPitch = n.pitch;
         this.state.modal.drag.origDur = n.duration;
+        this.state.modal.drag.resizeEdge = (hit.type === 'resize_left') ? 'left' : (hit.type === 'resize') ? 'right' : undefined;
 
-        this.state.modal.mode = (hit.type === 'resize') ? 'resize_note' : 'drag_note';
-        $('#editorStatus').textContent = (hit.type === 'resize') ? 'Resize note...' : 'Drag note...';
+        this.state.modal.mode = (hit.type === 'resize' || hit.type === 'resize_left') ? 'resize_note' : 'drag_note';
+        _h2sDragPerfSessionBegin(this, this.state.modal.mode);
+        $('#editorStatus').textContent = (hit.type === 'resize' || hit.type === 'resize_left') ? 'Resize note...' : 'Drag note...';
         this.modalRequestDraw();
         return;
       }
@@ -2324,9 +3007,44 @@ async modalPlay(){
     modalPointerMove(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
+      this.modalUpdateHoverCursor(ev);
+      const _sess = this._h2sDragPerf;
+      const _track = _h2sDevPerfTimingEnabled() && _sess && (m.mode === 'resize_velocity_lane' || m.mode === 'drag_velocity' || m.mode === 'drag_note' || m.mode === 'resize_note');
+      const _tMove0 = _track ? _perfClipNow() : 0;
+      try{
+      if (m.mode === 'resize_velocity_lane'){
+        const dy = ev.clientY - m.drag.startY;
+        let h = Math.max(48, Math.min(200, (m.drag.origLaneHeight || 80) + dy));
+        this.state.modal.velocityLaneHeight = h;
+        this.modalResizeCanvasToContent();
+        this.modalRequestDraw();
+        return;
+      }
+
+      if (m.mode === 'drag_velocity'){
+        const vCanvas = $('#velocityCanvas');
+        if (!vCanvas) return;
+        const rect = vCanvas.getBoundingClientRect();
+        const pyCss = ev.clientY - rect.top;
+        const laneH = this.state.modal.velocityLaneCssH != null ? this.state.modal.velocityLaneCssH : 48;
+        const step = ev.shiftKey ? 4 : 1;
+        let v = Math.round(127 * (1 - pyCss / laneH));
+        v = H2SProject.clamp(v, 1, 127);
+        if (step > 1) v = Math.round(v / step) * step;
+        v = H2SProject.clamp(v, 1, 127);
+        const targets = this._velDragTargets || [m.drag.noteId];
+        for (const id of targets){
+          const found = this.modalFindNoteById(id);
+          if (found) found.note.velocity = v;
+        }
+        m.dirty = true;
+        $('#editorStatus').textContent = 'Vel: ' + v;
+        this.modalRequestDraw();
+        return;
+      }
+
       if (m.mode !== 'drag_note' && m.mode !== 'resize_note') return;
 
-      const wrap = $('#canvasWrap');
       const canvas = $('#canvas');
       const rect = canvas.getBoundingClientRect();
       const scaleX = rect.width ? (canvas.width / rect.width) : 1;
@@ -2373,24 +3091,52 @@ async modalPlay(){
         m.dirty = true;
         $('#editorStatus').textContent = `Drag: start ${fmtSec(ns)} pitch ${H2SProject.midiToName(np)}`;
       } else {
-        let nd = m.drag.origDur + secDelta;
-        nd = Math.max(0.05, nd);
-        // quantize duration (optional) - hold Alt to bypass snap
-        const g = (ev && ev.altKey) ? 0 : this.modalSnapSec();
-        if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
-        found.note.duration = nd;
-        m.dirty = true;
-        $('#editorStatus').textContent = `Resize: duration ${fmtSec(nd)}`;
+        const edge = m.drag.resizeEdge || 'right';
+        if (edge === 'right'){
+          let nd = m.drag.origDur + secDelta;
+          nd = Math.max(0.05, nd);
+          const g = (ev && ev.altKey) ? 0 : this.modalSnapSec();
+          if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+          found.note.duration = nd;
+          m.dirty = true;
+          $('#editorStatus').textContent = `Resize: duration ${fmtSec(nd)}`;
+        } else {
+          const end = m.drag.origStart + m.drag.origDur;
+          let nd = m.drag.origDur - secDelta;
+          nd = Math.max(0.05, nd);
+          const g = (ev && ev.altKey) ? 0 : this.modalSnapSec();
+          if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+          let ns = end - nd;
+          if (ns < 0){
+            ns = 0;
+            nd = end - ns;
+            nd = Math.max(0.05, nd);
+            if (g && g > 0) nd = Math.max(g, Math.round(nd / g) * g);
+            ns = end - nd;
+          }
+          found.note.start = ns;
+          found.note.duration = nd;
+          m.dirty = true;
+          $('#editorStatus').textContent = `Resize: start ${fmtSec(ns)} duration ${fmtSec(nd)}`;
+        }
       }
 
       this.modalRequestDraw();
+      } finally {
+        if (_track && _tMove0){
+          const dt = _perfClipNow() - _tMove0;
+          _sess.moveCount++;
+          _sess.moveTotalMs += dt;
+          if (dt > _sess.moveMaxMs) _sess.moveMaxMs = dt;
+        }
+      }
     },
 
     modalPointerUp(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
-      // finalize note drag/resize
-      if (m.mode === 'drag_note' || m.mode === 'resize_note'){
+      if (m.mode === 'drag_note' || m.mode === 'resize_note' || m.mode === 'drag_velocity' || m.mode === 'resize_velocity_lane'){
+        _h2sDragPerfSessionEnd(this);
         m.mode = 'none';
         try { $('#editorStatus').textContent = 'Ready.'; } catch(e){}
         this.modalRequestDraw();
@@ -2398,27 +3144,78 @@ async modalPlay(){
     },
 
     modalStop(){
-  if (!this.state.modal.show) return;
-
-  // Cancel UI tick
-  if (this._modalRAF){
-    try{ cancelAnimationFrame(this._modalRAF); }catch(_){}
-    this._modalRAF = null;
+  const _msLog = _h2sDevPerfTimingEnabled();
+  if (!this.state.modal.show){
+    if (_msLog){
+      try{
+        console.log('[H2S perf] clipEditor modalStop cleanup', { outcome: 'earlyExit', reason: 'modalHidden' });
+      }catch(e){}
+    }
+    return;
   }
 
-  // Stop scheduled notes
-  if (this._modalPart){
-    try{ this._modalPart.dispose(); }catch(_){}
-    this._modalPart = null;
-  }
+  const _msT0 = _msLog ? _perfClipNow() : 0;
+  let _msAfterRafSummary = _msT0;
+  let _msAfterCancelRaf = _msT0;
+  let _msAfterModalPart = _msT0;
+  let _msAfterTransport = _msT0;
+  let _msAfterOverlay = _msT0;
+  let _msDrawErr = null;
 
-  if (window.Tone){
-    try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(_){}
-  }
+  try{
+    this._logClipEditorPlaybackPerfSummary();
+    _msAfterRafSummary = _msLog ? _perfClipNow() : 0;
 
-  this.state.modal.isPlaying = false;
-  $('#editorStatus').textContent = 'Stopped.';
-  this.modalRequestDraw();
+    // Cancel UI tick
+    if (this._modalRAF){
+      try{ cancelAnimationFrame(this._modalRAF); }catch(_){}
+      this._modalRAF = null;
+    }
+    _msAfterCancelRaf = _msLog ? _perfClipNow() : 0;
+
+    // Stop scheduled notes
+    if (this._modalPart){
+      try{ this._modalPart.dispose(); }catch(_){}
+      this._modalPart = null;
+    }
+    _msAfterModalPart = _msLog ? _perfClipNow() : 0;
+
+    if (window.Tone){
+      try{ Tone.Transport.stop(); Tone.Transport.cancel(); }catch(_){}
+    }
+    _msAfterTransport = _msLog ? _perfClipNow() : 0;
+
+    this.state.modal.isPlaying = false;
+    $('#editorStatus').textContent = 'Stopped.';
+    // Hide DOM overlay so canvas playhead is shown again
+    const phEl = $('#editorPlayhead');
+    if (phEl) phEl.style.display = 'none';
+    _msAfterOverlay = _msLog ? _perfClipNow() : 0;
+
+    try{
+      this.modalRequestDraw();
+    }catch(e){
+      _msDrawErr = e;
+    }
+  }finally{
+    if (_msLog){
+      const _msEndWall = _perfClipNow();
+      try{
+        console.log('[H2S perf] clipEditor modalStop cleanup', {
+          outcome: _msDrawErr ? 'modalRequestDrawThrew' : 'ok',
+          drawError: _msDrawErr ? String(_msDrawErr && _msDrawErr.message) : undefined,
+          totalMs: Number((_msEndWall - _msT0).toFixed(3)),
+          rafSessionLogMs: Number((_msAfterRafSummary - _msT0).toFixed(3)),
+          cancelRafMs: Number((_msAfterCancelRaf - _msAfterRafSummary).toFixed(3)),
+          modalPartDisposeMs: Number((_msAfterModalPart - _msAfterCancelRaf).toFixed(3)),
+          transportStopCancelMs: Number((_msAfterTransport - _msAfterModalPart).toFixed(3)),
+          stopUiOverlayMs: Number((_msAfterOverlay - _msAfterTransport).toFixed(3)),
+          modalRequestDrawScheduleMs: Number((_msEndWall - _msAfterOverlay).toFixed(3)),
+        });
+      }catch(e){}
+    }
+  }
+  if (_msDrawErr) throw _msDrawErr;
 },
 
       };

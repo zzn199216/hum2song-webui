@@ -72,6 +72,23 @@ class Settings(BaseSettings):
     # ---- Converter switch ----
     use_stub_converter: bool = Field(default=False, validation_alias="USE_STUB_CONVERTER")
 
+    # ---- Experimental: 2-stem path (backend only) ----
+    # Per-upload control is via POST /generate?vocal_separation=true (API; Studio UI does not expose this).
+    # Pipeline gates on task flags, not this env var (kept for compatibility / tooling only).
+    experimental_two_stem_separation: bool = Field(
+        default=False,
+        validation_alias="H2S_EXPERIMENTAL_TWO_STEM_SEPARATION",
+    )
+
+    # When experimental_two_stem_separation is on: stub (no DSP) vs real Demucs.
+    stem_separation_backend: str = Field(
+        default="stub",
+        validation_alias="H2S_STEM_SEPARATION_BACKEND",
+    )
+
+    # Demucs pretrained model name (e.g. htdemucs, htdemucs_ft).
+    demucs_model: str = Field(default="htdemucs_ft", validation_alias="H2S_DEMUCS_MODEL")
+
 
     def model_post_init(self, __context) -> None:
         # 1) Normalize paths to absolute, relative to BASE_DIR
@@ -104,6 +121,19 @@ class Settings(BaseSettings):
         # Threshold clamps
         self.onset_threshold = float(min(max(self.onset_threshold, 0.05), 0.95))
         self.frame_threshold = float(min(max(self.frame_threshold, 0.05), 0.95))
+
+        _b = str(self.stem_separation_backend or "stub").strip().lower()
+        if _b not in ("stub", "demucs"):
+            raise ValueError(
+                "stem_separation_backend must be 'stub' or 'demucs' "
+                f"(got {self.stem_separation_backend!r}); check H2S_STEM_SEPARATION_BACKEND"
+            )
+        self.stem_separation_backend = _b  # type: ignore[assignment]
+
+        _dm = str(self.demucs_model or "htdemucs_ft").strip()
+        if not _dm:
+            _dm = "htdemucs_ft"
+        self.demucs_model = _dm
 
     @staticmethod
     def _abs_path(p: Path) -> Path:

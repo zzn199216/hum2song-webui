@@ -27,6 +27,8 @@ def test_frontend_node_contracts():
         cwd=repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         shell=False,
     )
 

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Union
+
+# Demucs is trained/evaluated around 44.1 kHz; keep stereo when the source is stereo.
+_SEPARATION_SAMPLE_RATE = 44100
 import logging
 import sys
 
@@ -111,6 +114,90 @@ def preprocess_audio(
         out_path.name,
         target_sr,
         len(y) / target_sr if target_sr > 0 else 0.0,
+    )
+
+    return out_path
+
+
+def prepare_separation_input_audio(
+    input_path: Union[str, Path],
+    output_dir: Union[str, Path],
+    task_id: str,
+) -> Path:
+    """
+    Build a WAV for stem separation (Demucs): first ``max_audio_seconds``, resampled to
+    44.1 kHz, stereo preserved (mono sources duplicated to L/R), peak-normalized to 0.99.
+
+    Output: ``{output_dir}/{task_id}_separation.wav`` — not the transcription ``*_clean.wav``.
+    """
+    settings = get_settings()
+    in_path = Path(input_path)
+    if not in_path.exists():
+        raise FileNotFoundError(f"输入文件不存在: {in_path}")
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{task_id}_separation.wav"
+
+    try:
+        size_mb = in_path.stat().st_size / (1024 * 1024)
+        if size_mb > settings.max_upload_size_mb:
+            logger.warning(
+                "⚠️ [Preprocess/separation] 输入文件 %.2fMB 超过配置上限 %.2fMB，仍将尝试读取。",
+                size_mb,
+                settings.max_upload_size_mb,
+            )
+    except OSError:
+        pass
+
+    max_sec = settings.max_audio_seconds if settings.max_audio_seconds > 0 else 20
+    sr = _SEPARATION_SAMPLE_RATE
+
+    logger.info(
+        "🔊 [Preprocess/separation] 加载音频: %s (sr=%d, 只读前 %.1fs, stereo preserve)",
+        in_path.name,
+        sr,
+        max_sec,
+    )
+
+    try:
+        y, _ = librosa.load(str(in_path), sr=sr, mono=False, duration=max_sec)
+    except Exception as e:
+        logger.error("❌ [Preprocess/separation] Librosa 加载失败: %s", e)
+        if "NoBackendError" in str(e) or "audioread" in str(e):
+            logger.error("💡 提示: 请检查系统是否安装了 FFmpeg（librosa 读取 mp3/m4a 需要它）")
+        raise
+
+    if y.ndim == 1:
+        y = np.stack([y, y], axis=0)
+    elif y.ndim == 2:
+        if y.shape[0] > 2:
+            y = y[:2, :]
+        elif y.shape[0] == 1:
+            y = np.repeat(y, 2, axis=0)
+    else:
+        raise ValueError(f"unexpected audio shape from librosa.load: {y.shape}")
+
+    if y.size > 0:
+        max_vol = float(np.max(np.abs(y)))
+    else:
+        max_vol = 0.0
+
+    if max_vol > 0:
+        y = y / max_vol * 0.99
+    else:
+        logger.warning("⚠️ [Preprocess/separation] 读取到的音频为空或全静音。")
+
+    y_out = y.T.astype(np.float32)
+    logger.info("💾 [Preprocess/separation] 写入: %s", out_path.name)
+    sf.write(str(out_path), y_out, sr)
+
+    logger.info(
+        "✅ [Preprocess/separation] 完成: %s (sr=%d, ch=%d, duration=%.2fs)",
+        out_path.name,
+        sr,
+        y_out.shape[1] if y_out.ndim == 2 else 1,
+        len(y_out) / sr if sr > 0 else 0.0,
     )
 
     return out_path

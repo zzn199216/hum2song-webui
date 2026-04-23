@@ -6,7 +6,7 @@
 (function(){
   'use strict';
 
-  var LS_V2 = 'hum2song_studio_project_v2';
+  var LS_LEGACY_V2 = 'hum2song_studio_project_v2';
   var LS_V1 = 'hum2song_studio_project_v1';
   var TAIL_SEC = 1.5;
 
@@ -15,7 +15,22 @@
   }
 
   function loadProjectAny(){
-    var rawV2 = localStorage.getItem(LS_V2);
+    var APP = window.H2SApp || window.APP || window.app;
+    if (APP && typeof APP.getProjectV2 === 'function'){
+      var mem = APP.getProjectV2();
+      if (mem) return mem;
+    }
+    if (APP && typeof APP.getActiveProjectDocumentLocalStorageKey === 'function'){
+      var key = APP.getActiveProjectDocumentLocalStorageKey();
+      if (key){
+        var rawA = localStorage.getItem(key);
+        if (rawA){
+          var o = safeParse(rawA);
+          if (o) return o;
+        }
+      }
+    }
+    var rawV2 = localStorage.getItem(LS_LEGACY_V2);
     if (rawV2){ var p2 = safeParse(rawV2); if (p2) return p2; }
     var rawV1 = localStorage.getItem(LS_V1);
     if (rawV1){ var p1 = safeParse(rawV1); if (p1) return p1; }
@@ -48,8 +63,12 @@
     return Math.max(lo, Math.min(hi, v));
   }
 
-  function makeSynthByInstrument(Tone, name){
-    switch (String(name || 'default')){
+  function makeSynthByInstrumentSync(Tone, instr){
+    var desc = (window.H2SProject && typeof window.H2SProject.normalizeInstrument === 'function')
+      ? window.H2SProject.normalizeInstrument(instr)
+      : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+    var presetId = (desc.kind === 'tone_synth' && desc.presetId) ? desc.presetId : 'default';
+    switch (String(presetId)){
       case 'bass': return new Tone.MonoSynth();
       case 'lead': return new Tone.Synth();
       case 'pad': return new Tone.FMSynth();
@@ -57,6 +76,108 @@
       case 'drum': return new Tone.MembraneSynth();
       default: return new Tone.PolySynth(Tone.Synth);
     }
+  }
+
+  var SAMPLER_LOAD_TIMEOUT_MS = 4000;
+
+  function makeSynthByInstrument(Tone, instr){
+    return makeSynthByInstrumentSync(Tone, instr);
+  }
+
+  function makeSynthByInstrumentAsync(Tone, instr, setStatusFn){
+    var desc = (window.H2SProject && typeof window.H2SProject.normalizeInstrument === 'function')
+      ? window.H2SProject.normalizeInstrument(instr)
+      : { kind: 'tone_synth', presetId: (typeof instr === 'string' && instr) ? instr : 'default', params: {} };
+
+    if (desc.kind === 'oneshot' && desc.packId){
+      var resolveOneshot = (window.H2SProject && window.H2SProject.resolveCustomOneshotUrl) ? window.H2SProject.resolveCustomOneshotUrl : null;
+      if (!resolveOneshot) return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
+      return resolveOneshot(desc.packId).then(function(res){
+        if (!res || !res.url) return makeSynthByInstrumentSync(Tone, 'default');
+        return new Promise(function(resolve){
+          var p = new Tone.Player({ url: res.url, onload: function(){ resolve(p); } });
+          p.toDestination();
+          setTimeout(function(){ resolve(p); }, 3000);
+        }).then(function(p){
+          return { triggerAttackRelease: function(f, d, t){ try{ p.start(t, 0, d || 0.1); }catch(e){} }, toDestination: function(){ return p; }, dispose: function(){ try{ if (p.dispose) p.dispose(); }catch(e){} } };
+        });
+      }).catch(function(){ return makeSynthByInstrumentSync(Tone, 'default'); });
+    }
+
+    if (desc.kind !== 'sampler' || !desc.packId){
+      return Promise.resolve(makeSynthByInstrumentSync(Tone, instr));
+    }
+
+    var packId = desc.packId;
+    var isCustom = packId.indexOf('user:') === 0;
+
+    if (isCustom){
+      var resolveCustom = (window.H2SProject && window.H2SProject.resolveCustomSamplerUrls) ? window.H2SProject.resolveCustomSamplerUrls : null;
+      if (!resolveCustom) return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
+      return resolveCustom(packId).then(function(resolved){
+        var urls = resolved.urls;
+        var keyCount = urls ? Object.keys(urls).length : 0;
+        if (!urls || keyCount < 2){
+          if (typeof setStatusFn === 'function') setStatusFn(resolved.fallbackReason || 'Custom sampler needs >=2 samples.');
+          return makeSynthByInstrumentSync(Tone, 'default');
+        }
+        return new Promise(function(resolve){
+          var sampler = new Tone.Sampler({ urls: urls, baseUrl: '', onload: function(){ resolve(sampler); } });
+          setTimeout(function(){ resolve(sampler); }, SAMPLER_LOAD_TIMEOUT_MS);
+        });
+      }).catch(function(){ return makeSynthByInstrumentSync(Tone, 'default'); });
+    }
+
+    var packs = (window.H2SProject && window.H2SProject.SAMPLER_PACKS) ? window.H2SProject.SAMPLER_PACKS : {};
+    var pack = packs[packId];
+    var resolveUrls = (window.H2SProject && window.H2SProject.resolveSamplerUrlsForPack) ? window.H2SProject.resolveSamplerUrlsForPack : null;
+    if (!pack || !pack.urls || !resolveUrls){
+      if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+      return Promise.resolve(makeSynthByInstrumentSync(Tone, 'default'));
+    }
+
+    return resolveUrls(pack, packId).then(function(resolved){
+      var urls = resolved.urls;
+      var keyCount = urls ? Object.keys(urls).length : 0;
+      if (!urls || keyCount < 2){
+        var msg = resolved.fallbackReason || 'Sampler pack missing. See docs to install samples. Using default synth.';
+        if (typeof setStatusFn === 'function') setStatusFn(msg);
+        return makeSynthByInstrumentSync(Tone, 'default');
+      }
+      return new Promise(function(resolve){
+        var settled = false;
+        function settle(synth){
+          if (settled) return;
+          settled = true;
+          resolve(synth);
+        }
+        var timeout = setTimeout(function(){
+          if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+          settle(makeSynthByInstrumentSync(Tone, 'default'));
+          try{ if (sampler && sampler.dispose) sampler.dispose(); }catch(e){}
+        }, SAMPLER_LOAD_TIMEOUT_MS);
+
+        var sampler;
+        try{
+          sampler = new Tone.Sampler({
+            urls: urls,
+            baseUrl: '',
+            onload: function(){
+              clearTimeout(timeout);
+              if (!settled) settle(sampler);
+            },
+          });
+        }catch(e){
+          clearTimeout(timeout);
+          if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+          settle(makeSynthByInstrumentSync(Tone, 'default'));
+          return;
+        }
+      });
+    }).catch(function(){
+      if (typeof setStatusFn === 'function') setStatusFn('Sampler pack missing. See docs to install samples. Using default synth.');
+      return makeSynthByInstrumentSync(Tone, 'default');
+    });
   }
 
   function audioBufferToWav(ab){
@@ -157,11 +278,11 @@
     if (btn){ btn.disabled = true; }
     exportWavCancelled = false;
     exportWavActive = true;
-    setStatus('Preparing audio render...', true);
+    setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.preparing') : 'Preparing audio render...', true);
 
     try {
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
-      setStatus('Rendering audio...', true);
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.rendering') : 'Rendering audio...', true);
       var metaByTrackId = {};
       for (var i = 0; i < (p2.tracks || []).length; i++){
         var t = p2.tracks[i];
@@ -170,23 +291,33 @@
         if (tid) metaByTrackId[tid] = { instrument: t.instrument || 'default', muted: !!t.muted, gainDb: Number.isFinite(Number(t.gainDb)) ? Number(t.gainDb) : 0 };
       }
 
-      var result = await Tone.Offline(function(ctx){
+      var result = await Tone.Offline(async function(ctx){
         var transport = ctx.transport;
         var synthByTid = {};
-        function getSynth(trackId){
+        async function getSynth(trackId){
           if (synthByTid[trackId]) return synthByTid[trackId];
           var meta = metaByTrackId[trackId] || { instrument: 'default', muted: false, gainDb: 0 };
           if (meta.muted) return null;
-          var s = makeSynthByInstrument(Tone, meta.instrument).toDestination();
-          try{ if (s.volume && isFinite(meta.gainDb)) s.volume.value = meta.gainDb; }catch(e){}
-          synthByTid[trackId] = s;
-          return s;
+          var s = await makeSynthByInstrumentAsync(Tone, meta.instrument, setStatus);
+          var dest = (s && s.toDestination) ? s.toDestination() : s;
+          try{ if (dest && dest.volume && isFinite(meta.gainDb)) dest.volume.value = meta.gainDb; }catch(e){}
+          synthByTid[trackId] = dest;
+          return dest;
+        }
+        var trackIdsNeeded = [];
+        for (var ti = 0; ti < (flat.tracks || []).length; ti++){
+          var tr0 = flat.tracks[ti];
+          var tid0 = tr0 && (tr0.trackId || tr0.id);
+          if (tid0 && trackIdsNeeded.indexOf(tid0) < 0) trackIdsNeeded.push(tid0);
+        }
+        for (var ii = 0; ii < trackIdsNeeded.length; ii++){
+          await getSynth(trackIdsNeeded[ii]);
         }
         for (var ti = 0; ti < (flat.tracks || []).length; ti++){
           var tr = flat.tracks[ti];
           var tid = tr && (tr.trackId || tr.id);
           if (!tid) continue;
-          var syn = getSynth(tid);
+          var syn = synthByTid[tid];
           if (!syn) continue;
           var notes = tr.notes || [];
           for (var ni = 0; ni < notes.length; ni++){
@@ -207,8 +338,8 @@
         transport.start(0);
       }, totalSec);
 
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
-      setStatus('Encoding WAV...', true);
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.encoding') : 'Encoding WAV...', true);
 
       var buf = (result && result.buffer) ? result.buffer : result;
       var blob = audioBufferToWav(buf);
@@ -217,9 +348,9 @@
         alert('Export WAV: failed to encode audio buffer.');
         return;
       }
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
-      setStatus('Downloading...', false);
-      if (exportWavCancelled){ setStatus('Cancelled.', false); return; }
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('export.downloading') : 'Downloading...', false);
+      if (exportWavCancelled){ setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false); return; }
 
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
@@ -246,7 +377,7 @@
   function onCancelClick(){
     if (exportWavActive){
       exportWavCancelled = true;
-      setStatus('Cancelled.', false);
+      setStatus((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
     }
   }
 

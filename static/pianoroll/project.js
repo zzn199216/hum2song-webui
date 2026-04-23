@@ -73,6 +73,327 @@
     DEFAULT_INSTRUMENT: 'default',
   };
 
+  /**
+   * PR-INS1/INS2a/INS2e.2: Normalize instrument to descriptor shape.
+   * Accepts legacy string (e.g. 'pad', 'sampler:tonejs:piano', 'sampler:user:xxx', 'oneshot:user:xxx') or structured descriptor.
+   * Returns { kind: 'tone_synth'|'sampler'|'oneshot', presetId?: string, packId?: string, params: {} }
+   */
+  function normalizeInstrument(instr){
+    if (typeof instr === 'string' && instr.trim()){
+      const s = instr.trim();
+      if (s.indexOf('sampler:') === 0){
+        const packId = s.slice(8).trim() || 'tonejs:piano';
+        return { kind: 'sampler', packId: packId, params: {} };
+      }
+      if (s.indexOf('oneshot:') === 0){
+        const packId = s.slice(8).trim();
+        return { kind: 'oneshot', packId: packId, params: {} };
+      }
+      return { kind: 'tone_synth', presetId: s, params: {} };
+    }
+    if (instr && typeof instr === 'object'){
+      if (instr.kind === 'sampler' && typeof instr.packId === 'string'){
+        return { kind: 'sampler', packId: instr.packId, params: instr.params || {} };
+      }
+      if (instr.kind === 'oneshot' && typeof instr.packId === 'string'){
+        return { kind: 'oneshot', packId: instr.packId, params: instr.params || {} };
+      }
+      if (instr.kind === 'tone_synth' && typeof instr.presetId === 'string'){
+        return { kind: 'tone_synth', presetId: instr.presetId, params: instr.params || {} };
+      }
+    }
+    return { kind: 'tone_synth', presetId: SCHEMA_V2.DEFAULT_INSTRUMENT, params: {} };
+  }
+
+  /** PR-INS2a/INS2d/INS2g: Sampler pack registry. urls = Tone note key -> filename. requiredKeys = minimal set for completeness. */
+  const SAMPLER_PACKS = {
+    'tonejs:piano': {
+      label: 'Piano (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/piano/',
+      instrumentSubdir: 'piano/',
+      requiredKeys: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
+      urls: { A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3' },
+    },
+    'tonejs:strings': {
+      label: 'Strings (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/violin/',
+      instrumentSubdir: 'violin/',
+      subdirAliases: ['strings'],
+      requiredKeys: ['C4', 'E4', 'G3', 'G4', 'A3', 'A4'],
+      urls: { C4: 'C4.mp3', E4: 'E4.mp3', G3: 'G3.mp3', G4: 'G4.mp3', A3: 'A3.mp3', A4: 'A4.mp3' },
+    },
+    'tonejs:bass': {
+      label: 'Bass (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/bass-electric/',
+      instrumentSubdir: 'bass-electric/',
+      subdirAliases: ['bass'],
+      requiredKeys: ['E1', 'G1', 'C#2', 'E2', 'G2', 'C#3'],
+      urls: { E1: 'E1.mp3', G1: 'G1.mp3', 'C#2': 'Cs2.mp3', E2: 'E2.mp3', G2: 'G2.mp3', 'C#3': 'Cs3.mp3' },
+    },
+    'tonejs:guitar-acoustic': {
+      label: 'Guitar Acoustic (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/guitar-acoustic/',
+      instrumentSubdir: 'guitar-acoustic/',
+      requiredKeys: ['C3', 'D3', 'E3', 'G3', 'A3', 'C4'],
+      urls: { C3: 'C3.mp3', D3: 'D3.mp3', E3: 'E3.mp3', G3: 'G3.mp3', A3: 'A3.mp3', C4: 'C4.mp3' },
+    },
+    'tonejs:guitar-electric': {
+      label: 'Guitar Electric (tonejs-instruments)',
+      baseUrlDefault: '/static/pianoroll/vendor/tonejs-instruments/samples/guitar-electric/',
+      instrumentSubdir: 'guitar-electric/',
+      requiredKeys: ['C3', 'D3', 'E3', 'G3', 'A3', 'C4'],
+      urls: { C3: 'C3.mp3', D3: 'D3.mp3', E3: 'E3.mp3', G3: 'G3.mp3', A3: 'A3.mp3', C4: 'C4.mp3' },
+    },
+  };
+
+  const LS_SAMPLER_BASEURL = 'hum2song_studio_sampler_baseurl';
+
+  /** PR-INS2c: Get user-configured sampler baseUrl from localStorage. Returns null if not set. */
+  function getSamplerBaseUrl(){
+    try{
+      if (typeof localStorage === 'undefined') return null;
+      var v = localStorage.getItem(LS_SAMPLER_BASEURL);
+      return (v && typeof v === 'string' && v.trim()) ? v.trim() : null;
+    }catch(e){ return null; }
+  }
+
+  /** PR-INS2c: Set user-configured sampler baseUrl. Empty string removes the key. */
+  function setSamplerBaseUrl(url){
+    try{
+      if (typeof localStorage === 'undefined') return;
+      var s = (url != null && typeof url === 'string') ? url.trim() : '';
+      if (s) localStorage.setItem(LS_SAMPLER_BASEURL, s);
+      else localStorage.removeItem(LS_SAMPLER_BASEURL);
+    }catch(e){}
+  }
+
+  /** PR-INS2c: Resolve baseUrl for a pack. Uses user baseUrl + instrumentSubdir if set, else baseUrlDefault. */
+  function getResolvedSamplerBaseUrl(pack){
+    if (!pack) return null;
+    var user = getSamplerBaseUrl();
+    if (!user) return pack.baseUrlDefault || null;
+    var subdir = pack.instrumentSubdir || 'piano/';
+    var base = user.replace(/\/+$/, '');
+    return base + '/' + subdir.replace(/^\//, '');
+  }
+
+  var PROBE_EXTENSIONS = ['mp3', 'ogg', 'wav'];
+  var PROBE_TIMEOUT_MS = 800;
+  var PROBE_CACHE = {};
+  var PROBE_CACHE_TTL_MS = 120000;
+
+  /** PR-INS2g.1: Probe which sample files exist at baseUrl. Returns { availableKeys, urlMap }.
+   *  Tries .mp3, .ogg, .wav per key. Caches results by packId+baseUrl. */
+  function probeSamplerFiles(baseUrl, keys, pack){
+    if (!baseUrl || !keys || !keys.length || !pack || !pack.urls) return Promise.resolve({ availableKeys: [], urlMap: {} });
+    var cacheKey = (typeof window !== 'undefined') ? (pack.instrumentSubdir + ':' + baseUrl) : null;
+    if (cacheKey && PROBE_CACHE[cacheKey]){
+      var cached = PROBE_CACHE[cacheKey];
+      if (Date.now() - (cached.ts || 0) < PROBE_CACHE_TTL_MS) return Promise.resolve(cached);
+    }
+    var base = baseUrl.replace(/\/+$/, '') + '/';
+    var concurrency = 3;
+    var idx = 0;
+    function next(){
+      if (idx >= keys.length) return Promise.resolve();
+      var k = keys[idx++];
+      var def = pack.urls[k];
+      var basename = (def && def.replace(/\.[^/.]+$/, '')) ? def.replace(/\.[^/.]+$/, '') : k.replace(/#/g, 's');
+      function tryExt(j){
+        if (j >= PROBE_EXTENSIONS.length) return Promise.resolve(null);
+        var url = base + basename + '.' + PROBE_EXTENSIONS[j];
+        var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var t = ctrl ? setTimeout(function(){ ctrl.abort(); }, PROBE_TIMEOUT_MS) : null;
+        return fetch(url, { method: 'HEAD', signal: ctrl ? ctrl.signal : undefined }).then(function(r){
+          if (t) clearTimeout(t);
+          return r.ok ? { k: k, url: url } : tryExt(j + 1);
+        }).catch(function(){ if (t) clearTimeout(t); return tryExt(j + 1); });
+      }
+      return tryExt(0).then(function(r){ return r; });
+    }
+    var results = [];
+    function runBatch(){
+      var batch = [];
+      while (batch.length < concurrency && idx < keys.length){ batch.push(next()); }
+      if (!batch.length) return Promise.resolve();
+      return Promise.all(batch).then(function(arr){
+        for (var i = 0; i < arr.length; i++) if (arr[i]) results.push(arr[i]);
+        return runBatch();
+      });
+    }
+    return runBatch().then(function(){
+      var availableKeys = results.map(function(r){ return r.k; });
+      var urlMap = {};
+      for (var i = 0; i < results.length; i++) urlMap[results[i].k] = results[i].url;
+      var out = { availableKeys: availableKeys, urlMap: urlMap };
+      if (cacheKey) PROBE_CACHE[cacheKey] = { availableKeys: availableKeys, urlMap: urlMap, ts: Date.now() };
+      return out;
+    });
+  }
+
+  /** PR-INS2e/INS2g.1: Resolve sampler urls. Local IndexedDB first (no probe). Else probe baseUrl for available keys.
+   *  Returns { urls, objectUrls, fallbackReason? }. If <2 keys available, fallbackReason is set. */
+  function resolveSamplerUrlsForPack(pack, packId){
+    var result = { urls: {}, objectUrls: [], fallbackReason: null };
+    if (!pack || !pack.urls || !packId) return Promise.resolve(result);
+    var baseUrl = getResolvedSamplerBaseUrl(pack) || pack.baseUrlDefault || '';
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    var keys = (pack.requiredKeys && pack.requiredKeys.length) ? pack.requiredKeys : Object.keys(pack.urls);
+
+    return Promise.all(keys.map(function(k){
+      if (!store || !store.getSample) return Promise.resolve(null);
+      return store.getSample(packId, k).then(function(blob){
+        if (blob && blob instanceof Blob){
+          var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+          if (url){ result.objectUrls.push(url); return { k: k, url: url }; }
+        }
+        return null;
+      });
+    })).then(function(localResults){
+      var localKeys = [];
+      for (var i = 0; i < keys.length; i++){
+        var loc = localResults[i];
+        if (loc && loc.url){ result.urls[loc.k] = loc.url; localKeys.push(loc.k); }
+      }
+      if (store && store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
+
+      if (localKeys.length > 0){
+        result.availableKeys = localKeys;
+        if (localKeys.length < 2) result.fallbackReason = 'Sampler pack incomplete (' + localKeys.length + ' sample(s) found).';
+        return result;
+      }
+
+      if (!baseUrl){ result.fallbackReason = 'Sampler pack missing. See docs to install samples.'; return result; }
+      return probeSamplerFiles(baseUrl, keys, pack).then(function(probed){
+        result.availableKeys = probed.availableKeys || [];
+        for (var k in (probed.urlMap || {})) result.urls[k] = probed.urlMap[k];
+        if (result.availableKeys.length < 2) result.fallbackReason = 'Sampler pack incomplete (' + result.availableKeys.length + ' sample(s) found).';
+        return result;
+      });
+    });
+  }
+
+  /** PR-INS2e.2.4e: Scan IDB sampler_samples by prefix packId: -> { keys, records }. No per-key get. */
+  function scanPackRecords(packId){
+    if (!packId || typeof indexedDB === 'undefined') return Promise.resolve({ keys: [], records: new Map() });
+    var DB_NAME = 'hum2song_studio_instrument_library';
+    var STORE_NAME = 'sampler_samples';
+    var prefix = packId + ':';
+    return new Promise(function(resolve, reject){
+      var req = indexedDB.open(DB_NAME, 2);
+      req.onerror = function(){ resolve({ keys: [], records: new Map() }); };
+      req.onsuccess = function(){
+        var db = req.result;
+        if (!db || !db.objectStoreNames.contains(STORE_NAME)){ resolve({ keys: [], records: new Map() }); return; }
+        var tx = db.transaction(STORE_NAME, 'readonly');
+        var store = tx.objectStore(STORE_NAME);
+        var keys = [];
+        var records = new Map();
+        var cr = store.openCursor();
+        cr.onsuccess = function(){
+          var cur = cr.result;
+          if (!cur){ resolve({ keys: keys, records: records }); return; }
+          var k = String(cur.key);
+          if (k.indexOf(prefix) === 0){
+            var noteKey = k.slice(prefix.length);
+            keys.push(noteKey);
+            records.set(noteKey, cur.value);
+          }
+          cur.continue();
+        };
+        cr.onerror = function(){ resolve({ keys: keys, records: records }); };
+      };
+    });
+  }
+
+  function _extractBlob(rec){
+    if (!rec) return null;
+    var blob = (rec instanceof Blob) ? rec : (rec.blob || rec.file || rec.data);
+    if (!blob) return null;
+    if (blob instanceof Blob) return blob;
+    if (typeof blob.slice === 'function' && 'size' in blob && 'type' in blob) return blob;
+    return null;
+  }
+
+  /** PR-INS2e.2/INS2e.2.4/INS2e.2.4e: Resolve URLs for custom sampler (IDB prefix scan). Returns { urls, objectUrls, fallbackReason? }. */
+  function resolveCustomSamplerUrls(packId){
+    var result = { urls: {}, objectUrls: [], fallbackReason: null };
+    if (!packId || packId.indexOf('user:') !== 0) return Promise.resolve(result);
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    var debug = (typeof window !== 'undefined' && window.H2S_DEBUG_INSTRUMENT);
+    return scanPackRecords(packId).then(function(scanned){
+      var keys = scanned.keys || [];
+      var recMap = scanned.records || new Map();
+      var firstRec = keys.length ? recMap.get(keys[0]) : null;
+      var hasBlobField = !!(firstRec && typeof firstRec === 'object' && 'blob' in firstRec);
+      for (var i = 0; i < keys.length; i++){
+        var noteKey = keys[i];
+        var rec = recMap.get(noteKey);
+        var blob = _extractBlob(rec);
+        if (blob){
+          var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+          if (url){ result.urls[noteKey] = url; result.objectUrls.push(url); }
+        }
+      }
+      if (store && store.registerObjectUrls && result.objectUrls.length) store.registerObjectUrls(packId, result.objectUrls);
+      var urlCount = Object.keys(result.urls).length;
+      if (urlCount < 2) result.fallbackReason = 'Custom sampler needs >=2 samples.';
+      if (debug){
+        var urlKeys = Object.keys(result.urls);
+        var firstUrl = urlKeys[0] ? result.urls[urlKeys[0]] : '';
+        var urlPrefix = firstUrl ? String(firstUrl).substring(0, 30) : '';
+        console.log('[resolveCustomSamplerUrls] packId:' + packId + ' keyCount:' + keys.length + ' urlCount:' + urlCount + ' recHasBlobField:' + hasBlobField + ' first2Keys:' + urlKeys.slice(0, 2).join(',') + ' urlPrefix:' + urlPrefix + ' isBlobUrl:' + (String(firstUrl).indexOf('blob:') === 0));
+      }
+      return result;
+    });
+  }
+
+  /** PR-INS2e.2/INS2e.2.4e: Resolve single URL for custom oneshot (IDB prefix scan). Returns { url, objectUrls } or null. */
+  function resolveCustomOneshotUrl(packId){
+    if (!packId || packId.indexOf('user:') !== 0) return Promise.resolve(null);
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    return scanPackRecords(packId).then(function(scanned){
+      var keys = scanned.keys || [];
+      var recMap = scanned.records || new Map();
+      for (var i = 0; i < keys.length; i++){
+        var blob = _extractBlob(recMap.get(keys[i]));
+        if (blob){
+          var url = (typeof URL !== 'undefined' && URL.createObjectURL) ? URL.createObjectURL(blob) : null;
+          if (url){
+            if (store && store.registerObjectUrls) store.registerObjectUrls(packId, [url]);
+            return { url: url, objectUrls: [url] };
+          }
+        }
+      }
+      return null;
+    });
+  }
+
+  /** PR-INS2g.1: Probe sampler availability for status display. Returns { availableKeys, missingKeys, source }. */
+  function probeSamplerAvailability(packId){
+    var packs = (typeof SAMPLER_PACKS !== 'undefined') ? SAMPLER_PACKS : {};
+    var pack = packs[packId];
+    if (!pack || !pack.urls) return Promise.resolve({ availableKeys: [], missingKeys: [], source: null });
+    var keys = (pack.requiredKeys && pack.requiredKeys.length) ? pack.requiredKeys : Object.keys(pack.urls);
+    var store = (typeof window !== 'undefined' && window.H2SInstrumentLibraryStore) ? window.H2SInstrumentLibraryStore : null;
+    if (!store || !store.getSample) return Promise.resolve({ availableKeys: [], missingKeys: keys, source: null });
+    return Promise.all(keys.map(function(k){ return store.getSample(packId, k); })).then(function(blobs){
+      var availableKeys = [];
+      for (var i = 0; i < keys.length; i++) if (blobs[i] && blobs[i] instanceof Blob) availableKeys.push(keys[i]);
+      if (availableKeys.length > 0){
+        var missingKeys = keys.filter(function(k){ return availableKeys.indexOf(k) < 0; });
+        return { availableKeys: availableKeys, missingKeys: missingKeys, source: 'local' };
+      }
+      var baseUrl = getResolvedSamplerBaseUrl(pack) || pack.baseUrlDefault || '';
+      if (!baseUrl) return { availableKeys: [], missingKeys: keys, source: null };
+      return probeSamplerFiles(baseUrl, keys, pack).then(function(probed){
+        var av = probed.availableKeys || [];
+        var missing = keys.filter(function(k){ return av.indexOf(k) < 0; });
+        return { availableKeys: av, missingKeys: missing, source: 'remote' };
+      });
+    });
+  }
+
   function defaultTrackV2(){
     return { id: SCHEMA_V2.DEFAULT_TRACK_ID, name: 'Track 1', instrument: SCHEMA_V2.DEFAULT_INSTRUMENT, gainDb: 0, muted: false };
   }
@@ -131,9 +452,20 @@
         if (!isFiniteNumber(c.createdAt)) c.createdAt = Date.now();
         if (!c.meta || typeof c.meta !== 'object') c.meta = {};
         const srcTempo = (c.meta && isFiniteNumber(c.meta.sourceTempoBpm)) ? Number(c.meta.sourceTempoBpm) : null;
-        c.score = ensureScoreBeatIds(c.score);
-        recomputeClipMetaFromScoreBeat(c);
-        if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        if (clipKind(c) === 'audio'){
+          if (!c.audio || typeof c.audio !== 'object') c.audio = {};
+          c.audio.assetRef = (typeof c.audio.assetRef === 'string') ? c.audio.assetRef : '';
+          let dur = Number(c.audio.durationSec);
+          if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+          c.audio.durationSec = dur;
+          if ('score' in c) delete c.score;
+          recomputeClipMetaFromAudio(c, bpm);
+          if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        } else {
+          c.score = ensureScoreBeatIds(c.score);
+          recomputeClipMetaFromScoreBeat(c);
+          if (c.meta) c.meta.sourceTempoBpm = srcTempo;
+        }
         if (c.meta && 'spanSec' in c.meta) delete c.meta.spanSec;
         map[id] = c;
         order.push(id);
@@ -422,6 +754,49 @@
     };
   }
 
+  /**
+   * Resolve placement for audio -> editable conversion in v1 view space.
+   * When `sourceInstanceId` is set, align to that instance (must match `sourceClipId`).
+   * Otherwise align only when there is exactly one timeline instance for the clip; else fallback.
+   */
+  function resolveAudioConvertPlacementV1(projectV1, sourceClipId, fallbackStartSec, fallbackTrackIndex, sourceInstanceId){
+    const fallbackStart = (isFiniteNumber(fallbackStartSec) && Number(fallbackStartSec) >= 0) ? Number(fallbackStartSec) : 0;
+    const fallbackTrack = (isFiniteNumber(fallbackTrackIndex) && Number(fallbackTrackIndex) >= 0) ? Math.floor(Number(fallbackTrackIndex)) : 0;
+    if (!projectV1 || !sourceClipId){
+      return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'missing_input' };
+    }
+    const sid = (sourceInstanceId != null && String(sourceInstanceId).trim() !== '') ? String(sourceInstanceId).trim() : '';
+    if (sid){
+      const inst = Array.isArray(projectV1.instances)
+        ? projectV1.instances.find(i => i && String(i.id) === sid)
+        : null;
+      if (!inst){
+        return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'source_instance_not_found' };
+      }
+      if (String(inst.clipId || '') !== String(sourceClipId)){
+        return { startSec: fallbackStart, trackIndex: fallbackTrack, aligned: false, reason: 'source_instance_clip_mismatch' };
+      }
+      const startSec = (isFiniteNumber(inst.startSec) && Number(inst.startSec) >= 0) ? Number(inst.startSec) : fallbackStart;
+      const trackIndex = (isFiniteNumber(inst.trackIndex) && Number(inst.trackIndex) >= 0) ? Math.floor(Number(inst.trackIndex)) : fallbackTrack;
+      return { startSec, trackIndex, aligned: true, reason: 'explicit_source_instance' };
+    }
+    const matches = Array.isArray(projectV1.instances)
+      ? projectV1.instances.filter(inst => inst && String(inst.clipId || '') === String(sourceClipId))
+      : [];
+    if (matches.length !== 1){
+      return {
+        startSec: fallbackStart,
+        trackIndex: fallbackTrack,
+        aligned: false,
+        reason: (matches.length === 0) ? 'no_source_instance' : 'multiple_source_instances'
+      };
+    }
+    const only = matches[0];
+    const startSec = (isFiniteNumber(only.startSec) && Number(only.startSec) >= 0) ? Number(only.startSec) : fallbackStart;
+    const trackIndex = (isFiniteNumber(only.trackIndex) && Number(only.trackIndex) >= 0) ? Math.floor(Number(only.trackIndex)) : fallbackTrack;
+    return { startSec, trackIndex, aligned: true, reason: 'single_source_instance' };
+  }
+
   /* -------------------- T1-1 ProjectDoc v2 helpers (beats) -------------------- */
 
   function defaultProjectV2(){
@@ -498,6 +873,36 @@
     clip.meta.spanBeat = st.spanBeat;
     // Preserve meta.agent (e.g. patchSummary) so optimize results persist.
     if (oldMeta && oldMeta.agent) clip.meta.agent = oldMeta.agent;
+    return clip;
+  }
+
+  /** ProjectDoc v2: 'note' (default) or 'audio'. Missing/invalid kind => note clip. */
+  function clipKind(clip){
+    if (!clip || typeof clip !== 'object') return 'note';
+    return (clip.kind === 'audio') ? 'audio' : 'note';
+  }
+
+  /**
+   * Audio clips: derive meta.spanBeat from audio.durationSec and project BPM.
+   * Does not require clip.score. Preserves meta.agent and meta.sourceTempoBpm when present.
+   */
+  function recomputeClipMetaFromAudio(clip, bpm){
+    if (!clip) return clip;
+    const bpmUsed = coerceBpm(bpm);
+    const audio = clip.audio && typeof clip.audio === 'object' ? clip.audio : {};
+    const durSec = Number(audio.durationSec);
+    const spanBeat = (isFiniteNumber(durSec) && durSec > 0)
+      ? normalizeBeat(secToBeat(durSec, bpmUsed))
+      : 0;
+    const oldMeta = clip.meta;
+    if (!clip.meta) clip.meta = {};
+    clip.meta.notes = 0;
+    clip.meta.pitchMin = null;
+    clip.meta.pitchMax = null;
+    clip.meta.spanBeat = spanBeat;
+    if (oldMeta && oldMeta.agent) clip.meta.agent = oldMeta.agent;
+    if (oldMeta && isFiniteNumber(oldMeta.sourceTempoBpm)) clip.meta.sourceTempoBpm = Number(oldMeta.sourceTempoBpm);
+    else clip.meta.sourceTempoBpm = null;
     return clip;
   }
 
@@ -769,6 +1174,42 @@ function beginNewClipRevision(project, clipId, opts){
     };
   }
 
+  /**
+   * Native audio clip (ProjectDoc v2). No score; meta.spanBeat derived via recomputeClipMetaFromAudio.
+   * @param {{ assetRef: string, durationSec: number, name?: string, id?: string, bpm?: number, createdAt?: number }} opts
+   */
+  function createClipFromAudio(opts){
+    opts = opts || {};
+    const assetRef = (typeof opts.assetRef === 'string') ? opts.assetRef : '';
+    let dur = Number(opts.durationSec);
+    if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+    const name = (opts.name != null && String(opts.name).trim()) ? String(opts.name).trim() : ('Audio ' + uid('').slice(0, 5));
+    const clipId = (opts.id != null && String(opts.id).trim()) ? String(opts.id) : uid('clip_');
+    const now = isFiniteNumber(opts.createdAt) ? Number(opts.createdAt) : Date.now();
+    const bpmForMeta = isFiniteNumber(opts.bpm) ? Number(opts.bpm) : TIMEBASE.BPM_DEFAULT;
+    const clip = {
+      id: clipId,
+      kind: 'audio',
+      name,
+      createdAt: now,
+      updatedAt: isFiniteNumber(opts.updatedAt) ? Number(opts.updatedAt) : now,
+      revisionId: (opts.revisionId != null && String(opts.revisionId).trim()) ? String(opts.revisionId) : uid('rev_'),
+      parentRevisionId: (opts.parentRevisionId !== undefined && opts.parentRevisionId !== null) ? String(opts.parentRevisionId) : null,
+      revisions: (opts.revisions && typeof opts.revisions === 'object' && !Array.isArray(opts.revisions)) ? opts.revisions : {},
+      sourceTaskId: (opts.sourceTaskId !== undefined && opts.sourceTaskId !== null) ? String(opts.sourceTaskId) : null,
+      audio: { assetRef, durationSec: dur },
+      meta: {
+        notes: 0,
+        pitchMin: null,
+        pitchMax: null,
+        spanBeat: 0,
+        sourceTempoBpm: isFiniteNumber(opts.sourceTempoBpm) ? Number(opts.sourceTempoBpm) : null,
+      },
+    };
+    recomputeClipMetaFromAudio(clip, bpmForMeta);
+    return clip;
+  }
+
   function createInstanceV2(clipId, startBeat, trackId){
     return {
       id: uid('inst_'),
@@ -849,11 +1290,25 @@ function beginNewClipRevision(project, clipId, opts){
       if (!clip.name) clip.name = String(clip.name ?? '');
       if (!isFiniteNumber(clip.createdAt)) clip.createdAt = Date.now();
       if (!clip.meta) clip.meta = { notes:0, pitchMin:null, pitchMax:null, spanBeat:0, sourceTempoBpm:null };
-      clip.score = ensureScoreBeatIds(clip.score);
-      // keep meta.sourceTempoBpm if exists
-      const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
-      recomputeClipMetaFromScoreBeat(clip);
-      if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+
+      if (clipKind(clip) === 'audio'){
+        clip.kind = 'audio';
+        if (!clip.audio || typeof clip.audio !== 'object') clip.audio = {};
+        clip.audio.assetRef = (typeof clip.audio.assetRef === 'string') ? clip.audio.assetRef : '';
+        let dur = Number(clip.audio.durationSec);
+        if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+        clip.audio.durationSec = dur;
+        if ('score' in clip) delete clip.score;
+        const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
+        recomputeClipMetaFromAudio(clip, project.bpm);
+        if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+      } else {
+        clip.score = ensureScoreBeatIds(clip.score);
+        const srcTempo = clip.meta && isFiniteNumber(clip.meta.sourceTempoBpm) ? Number(clip.meta.sourceTempoBpm) : null;
+        recomputeClipMetaFromScoreBeat(clip);
+        if (clip.meta) clip.meta.sourceTempoBpm = srcTempo;
+      }
+
       normalizeClipRevisionChain(clip);
       ensureClipRevisionChain(clip);
       // remove v1 fields if they exist
@@ -934,7 +1389,7 @@ function beginNewClipRevision(project, clipId, opts){
   function flatten(projectV2, opts){
     const p = projectV2;
     const bpm = getProjectBpm(p);
-    const out = { bpm, tracks: [] };
+    const out = { bpm, tracks: [], audioSegments: [] };
     if (!p || !isProjectV2(p)) return out;
 
     const drop = (opts && typeof opts.onDrop === 'function') ? opts.onDrop : null;
@@ -944,12 +1399,35 @@ function beginNewClipRevision(project, clipId, opts){
     const trackOrder = Array.isArray(p.tracks) ? p.tracks.map(t => t.id) : [];
     for (const tid of trackOrder) trackBuckets[tid] = [];
 
+    const audioSegments = [];
+
     for (const inst of (p.instances || [])){
       const clip = p.clips ? p.clips[inst.clipId] : null;
-      if (!clip || !clip.score || !Array.isArray(clip.score.tracks)) continue;
+      if (!clip) continue;
 
       const trackId = inst.trackId;
       if (!trackBuckets[trackId]) trackBuckets[trackId] = [];
+
+      if (clipKind(clip) === 'audio'){
+        const spanBeat = (clip.meta && isFiniteNumber(clip.meta.spanBeat)) ? Number(clip.meta.spanBeat) : 0;
+        if (!(spanBeat > 0)) continue;
+        const instStartBeat = Number(inst.startBeat || 0);
+        const startSec = beatToSec(instStartBeat, bpm);
+        const durationSec = beatToSec(spanBeat, bpm);
+        const assetRef = (clip.audio && typeof clip.audio.assetRef === 'string') ? clip.audio.assetRef : '';
+        if (!isFinite(startSec) || !isFinite(durationSec) || !(durationSec > 0)) continue;
+        audioSegments.push({
+          trackId,
+          startSec,
+          durationSec,
+          clipId: clip.id,
+          instanceId: inst.id,
+          assetRef,
+        });
+        continue;
+      }
+
+      if (!clip.score || !Array.isArray(clip.score.tracks)) continue;
 
       const instStartBeat = Number(inst.startBeat || 0);
       const instTranspose = coerceTranspose(inst.transpose);
@@ -1022,6 +1500,18 @@ function beginNewClipRevision(project, clipId, opts){
       arr.sort(cmp);
       out.tracks.push({ trackId: tid, notes: arr });
     }
+
+    function cmpAudio(a, b){
+      if (a.startSec !== b.startSec) return a.startSec - b.startSec;
+      const ca = String(a.clipId || '');
+      const cb = String(b.clipId || '');
+      if (ca !== cb) return ca.localeCompare(cb);
+      return String(a.instanceId || '').localeCompare(String(b.instanceId || ''));
+    }
+
+    out.audioSegments = audioSegments.filter(function(seg){
+      return seg && seg.trackId != null && !mutedByTid.get(seg.trackId);
+    }).sort(cmpAudio);
 
     return out;
   }
@@ -1127,6 +1617,38 @@ function beginNewClipRevision(project, clipId, opts){
     const clipOrder = [];
     for (const c of clipsArr){
       if (!c || !c.id) continue;
+      if (c.kind === 'audio'){
+        const a = (c.audio && typeof c.audio === 'object') ? c.audio : {};
+        let dur = Number(a.durationSec);
+        if (!isFiniteNumber(dur) || dur <= 0) dur = 1e-6;
+        const clip2 = {
+          id: String(c.id),
+          kind: 'audio',
+          name: (typeof c.name === 'string') ? c.name : String(c.name ?? ''),
+          createdAt: isFiniteNumber(c.createdAt) ? Number(c.createdAt) : Date.now(),
+          updatedAt: isFiniteNumber(c.updatedAt) ? Number(c.updatedAt) : (isFiniteNumber(c.createdAt) ? Number(c.createdAt) : Date.now()),
+          sourceTaskId: (c.sourceTaskId !== undefined && c.sourceTaskId !== null) ? String(c.sourceTaskId) : null,
+          audio: {
+            assetRef: (typeof a.assetRef === 'string') ? a.assetRef : '',
+            durationSec: dur,
+          },
+          meta: {
+            notes: 0,
+            pitchMin: null,
+            pitchMax: null,
+            spanBeat: 0,
+            sourceTempoBpm: null,
+          },
+        };
+        if (c.meta && c.meta.agent) clip2.meta.agent = c.meta.agent;
+        if (c.revisionId != null && String(c.revisionId).trim()) clip2.revisionId = String(c.revisionId);
+        if (c.parentRevisionId !== undefined) clip2.parentRevisionId = c.parentRevisionId;
+        if (c.revisions && typeof c.revisions === 'object' && !Array.isArray(c.revisions)) clip2.revisions = deepClone(c.revisions);
+        recomputeClipMetaFromAudio(clip2, bpm);
+        clips[clip2.id] = clip2;
+        clipOrder.push(clip2.id);
+        continue;
+      }
       const scoreSec = c.score || { tracks: [] };
       const scoreBeat = scoreSecToBeat(scoreSec, bpm);
 
@@ -1417,6 +1939,7 @@ function toggleClipAB(projectV2, clipId){
     defaultProject,
     createClipFromScore,
     createInstance,
+    resolveAudioConvertPlacementV1,
 
     // constants
     TIMEBASE,
@@ -1450,7 +1973,10 @@ function toggleClipAB(projectV2, clipId){
     ensureScoreBeatIds,
     recomputeScoreBeatStats,
     recomputeClipMetaFromScoreBeat,
+    clipKind,
+    recomputeClipMetaFromAudio,
     createClipFromScoreBeat,
+    createClipFromAudio,
     createInstanceV2,
     repairClipOrderV2,
     normalizeProjectV2,
@@ -1482,5 +2008,16 @@ function toggleClipAB(projectV2, clipId){
     // load / schema versioning (T3-0b)
     loadProjectDoc,
     loadProjectDocV2,
+
+    // instrument descriptor (PR-INS1, INS2a, INS2c)
+    normalizeInstrument,
+    SAMPLER_PACKS,
+    getSamplerBaseUrl,
+    setSamplerBaseUrl,
+    getResolvedSamplerBaseUrl,
+    resolveSamplerUrlsForPack,
+    resolveCustomSamplerUrls,
+    resolveCustomOneshotUrl,
+    probeSamplerAvailability,
   };
 })();

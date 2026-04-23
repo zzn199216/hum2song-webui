@@ -11,22 +11,32 @@ Hum2Song 是一个“哼歌成曲”的 MVP 服务：
 
 This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip editing, piano roll, LLM Optimize).
 
+**First-time local setup:** use the compact checklist [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) (prerequisites, SoundFont, health check).
+
+**Quick machine check (optional):** from the project root, `python scripts/beginner_preflight.py` (read-only; does not install anything). See the checklist section *0. Quick preflight*.
+
+**Start the server (after venv + `pip install`):** from the project root, `python scripts/beginner_launch.py` (runs preflight, starts `uvicorn`, **waits for** `/api/v1/health`, then prints Studio / health / docs URLs). Options: `--reload`, `--skip-preflight`, **`--open`** (open Studio in the browser when ready). Same stack as `uvicorn app:app` — see [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4.
+
 ### Quick Start (TL;DR)
 
-1. Create venv and install dependencies:
+1. **Prerequisites:** Python 3.11+, **FFmpeg** and **FluidSynth** on your PATH, and a **SoundFont** file at **`assets/piano.sf2`** (not bundled in git — see [`assets/README.txt`](assets/README.txt)). Optional: copy `.env.example` to `.env` and adjust paths. **Missing any of these?** Follow the step-by-step manual path in [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg).
+2. Create venv and install dependencies (first install can take a while because `requirements.txt` includes larger ML/audio packages):
    ```powershell
    python -m venv venv
    .\venv\Scripts\activate
    pip install -r requirements.txt
    ```
-2. Start the server (from project root; required for correct app import):
+3. Start the server (from project root; required for correct app import):
    ```powershell
-   uvicorn app:app
+   python scripts/beginner_launch.py
    ```
-   (Optional: add `--reload` for local development.)
+   Or manually: `uvicorn app:app` (optional: `--reload` for local development.)
    - **Export MIDI 404?** Run `python scripts/check_export_routes.py` to verify routes; restart uvicorn to pick up changes.
-3. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-4. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+4. **Verify environment:** open [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) and check `checks` — for full audio output you want `soundfont_exists`, `fluidsynth`, and `ffmpeg` to reflect a usable setup (see checklist for details).
+5. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+6. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+
+**Note:** You do **not** need Node.js to run the server or Studio; Node is only for [frontend tests](#测试) (`scripts/run_frontend_all_tests.js`).
 
 **Studio (Hum2Song Studio) — first run:**
 - Open [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) to start.
@@ -35,20 +45,28 @@ This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip e
 - **Advanced** is collapsed by default and contains Prompt, Regenerate, LLM Settings, and Debug.
 - **Quality gate:** In Full mode, if Fix Pitch or Tighten Rhythm is enabled, velocity-only patches are rejected once and you'll see actionable guidance.
 - **Tone.js** loads locally by default (`/static/pianoroll/vendor/tone/Tone.js`); CDN fallback only if `window.H2S_ALLOW_CDN_TONE === true`.
+- **Sampler instruments (e.g. Piano):** Optional; see [docs/INSTRUMENT_LIBRARY.md](docs/INSTRUMENT_LIBRARY.md) for sample asset setup.
 - E2E validation: see [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md). Phase C covers Recording/Import → auto-open editor → Quick Optimize.
 
 ---
 
 ## 环境要求
 
-- Windows + Python 3.11+
-- 系统 PATH 中可用的 FFmpeg（用于 mp3 转码）
-- FluidSynth（用于 midi → 音频合成）
+- **OS:** Windows is the primary documented path; macOS/Linux work with the same Python/venv flow (adjust paths and venv activation).
+- **Python 3.11+**
+- **FFmpeg** on PATH（mp3 转码等）
+- **FluidSynth** on PATH（MIDI → 音频合成）；也可在 `.env` 中设置 `FLUIDSYNTH_PATH`
+- **SoundFont（必需）：** 默认使用 **`assets/piano.sf2`**（仓库不附带；见 [`assets/README.txt`](assets/README.txt)，可用 `SOUND_FONT_PATH` / `SF2_PATH` 指向其他 `.sf2`）
 - 建议使用 `venv` 虚拟环境
+
+**Optional (secondary):** If you prefer containers, a root [`Dockerfile`](Dockerfile) installs FFmpeg, FluidSynth, and Python deps — you must still provide a SoundFont (e.g. mount or copy into `assets/`). The image uses **Python 3.10**; local dev above recommends **3.11+**. There is no `docker-compose` in this repo.
 
 ---
 
 ## 安装与启动（Windows）
+
+1. 安装 FFmpeg、FluidSynth，并准备好 **`assets/piano.sf2`**（见上文与 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md)）。
+2. 创建环境并安装依赖：
 
 ```powershell
 python -m venv venv
@@ -56,13 +74,15 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-启动服务：
+3. 启动服务（请在**项目根目录**执行）：
 
 ```powershell
-uvicorn app:app
+python scripts/beginner_launch.py
 ```
 
-（开发时可加 `--reload`。）
+或：`uvicorn app:app`（开发时可加 `--reload`；若用启动脚本则加 `python scripts/beginner_launch.py --reload`。）
+
+4. 自检：打开 [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) 查看 `checks`。
 
 - API 文档（Swagger）：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 - Studio UI：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)

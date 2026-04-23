@@ -11,14 +11,18 @@
   function assert(cond, msg){ if(!cond) throw new Error(msg||'assertion failed'); }
 
   // --- Minimal DOM stubs expected by timeline_controller.js ---
+  const lane0 = { appendChild: function(){}, querySelectorAll: () => [], children: [] };
+  const lane1 = { appendChild: function(){}, querySelectorAll: () => [], children: [] };
   const tracksEl = {
     id: 'timelineTracks',
     className: 'tracks',
     style: {},
     scrollLeft: 0,
+    scrollTop: 0,
     addEventListener: () => {},
     removeEventListener: () => {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 300 }),
+    querySelectorAll: (sel) => (sel === '.trackLane' ? [lane0, lane1] : []),
   };
 
   const instBodyEl = {
@@ -50,16 +54,20 @@
   };
 
   global.window = global.window || {};
+  global.globalThis = global.globalThis || global;
   window.addEventListener = window.addEventListener || (()=>{});
   window.removeEventListener = window.removeEventListener || (()=>{});
   window.getComputedStyle = window.getComputedStyle || (()=>({}));
   window.__H2S_TIMELINE_SNAP_BEAT = 0.25; // default 1/16
+  // H2STimelineRuntime for cross-track pickLaneIndexByY (Node: require sets module.exports only, so assign to global)
+  require(process.cwd() + '/static/pianoroll/core/timeline_math.js');
+  globalThis.H2STimelineRuntime = require(process.cwd() + '/static/pianoroll/controllers/timeline_runtime.js');
 
   // --- Minimal project/state stubs ---
   const projectView = {
     bpm: 120,
     tracks: [{ id: 'trk_0', name: 'Track 1' }, { id: 'trk_1', name: 'Track 2' }],
-    instances: [{ id: 'inst_0', clipId: 'clip_0', trackId: 'trk_0', startSec: 0, transpose: 0 }],
+    instances: [{ id: 'inst_0', clipId: 'clip_0', trackIndex: 0, trackId: 'trk_0', startSec: 0, transpose: 0 }],
     ui: { pxPerSec: 160, pxPerBeat: 80, playheadSec: 0, playheadBeat: 0 },
   };
   const state = { dragCandidate: null, draggingInstance: null };
@@ -94,6 +102,24 @@
     assert(persisted >= 1, 'drag should commit via onPersistAndRender');
     assert(typeof projectView.instances[0].startSec === 'number' && projectView.instances[0].startSec >= 0, 'startSec should be >=0 after drag');
   }
+
+  // Cross-track drag: start lane 0, move into lane 1, assert trackIndex becomes 1
+  (function testCrossTrackDrag() {
+    projectView.instances[0].trackIndex = 0;
+    projectView.instances[0].startSec = 0;
+    state.dragCandidate = null;
+    state.draggingInstance = null;
+    persisted = 0;
+
+    const instEl = Object.assign({}, instBodyEl, { getBoundingClientRect: () => ({ left: 100, top: 40, width: 200, height: 40 }) });
+    hooks.instancePointerDown({ pointerId: 2, clientX: 140, clientY: 40, altKey: false, preventDefault: ()=>{}, stopPropagation: ()=>{} }, 'inst_0', instEl);
+    // Move horizontally past threshold and vertically into lane 1 (Y>=96 for 96px lanes)
+    hooks.onPointerMove({ pointerId: 2, clientX: 220, clientY: 120, altKey: false, preventDefault: ()=>{}, stopPropagation: ()=>{} });
+    hooks.onPointerUp({ pointerId: 2, clientX: 220, clientY: 120, altKey: false, preventDefault: ()=>{}, stopPropagation: ()=>{} });
+
+    assert(projectView.instances[0].trackIndex === 1, 'cross-track drag should set trackIndex to 1');
+    assert(persisted >= 1, 'cross-track drag should commit via onPersistAndRender');
+  })();
 
   console.log('PASS timeline_controller drag smoke');
 })();
