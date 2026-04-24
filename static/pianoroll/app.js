@@ -4546,23 +4546,24 @@ renderTimeline(){
         const n = Number(m[1]);
         return Number.isFinite(n) ? n : null;
       })();
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, dflt) => (dflt != null ? dflt : k);
       const out = {
         bucket: 'unknown',
-        statusText: 'Import failed. Please try again.',
-        alertText: 'Import failed. Please try again.\n\nIf it keeps failing, restart the local server and try another short audio file.',
+        statusText: _t('importFail.unknown.status', 'Import failed. Please try again.'),
+        alertText: _t('importFail.unknown.alert', 'Import failed. Please try again.\n\nIf it keeps failing, restart the local server and try another short audio file.'),
       };
 
       // Task-level failures from /tasks/{id}: backend processed but did not complete successfully.
       if (err && err.h2sKind === 'task_failed'){
         out.bucket = 'task_failed';
-        out.statusText = 'Import failed on server. Try again or use another file.';
-        out.alertText = 'The server could not finish this generation task.\n\nTry importing again, or try another short/clear audio file. If this keeps happening, check that the local server is healthy.';
+        out.statusText = _t('importFail.taskFailed.status', 'Import failed on server. Try again or use another file.');
+        out.alertText = _t('importFail.taskFailed.alert', 'The server could not finish this generation task.\n\nTry importing again, or try another short/clear audio file. If this keeps happening, check that the local server is healthy.');
         return out;
       }
       if (err && err.h2sKind === 'task_timeout'){
         out.bucket = 'server_unreachable';
-        out.statusText = 'Server took too long. Check server and try again.';
-        out.alertText = 'The server took too long to finish.\n\nMake sure the local app/server is still running, then try again with a shorter clip.';
+        out.statusText = _t('importFail.timeout.status', 'Server took too long. Check server and try again.');
+        out.alertText = _t('importFail.timeout.alert', 'The server took too long to finish.\n\nMake sure the local app/server is still running, then try again with a shorter clip.');
         return out;
       }
 
@@ -4575,8 +4576,8 @@ renderTimeline(){
         msg.indexOf('unsupported') >= 0
       ){
         out.bucket = 'input_issue';
-        out.statusText = 'Audio file was rejected. Try another file.';
-        out.alertText = 'This audio file could not be imported.\n\nTry another file (shorter/clearer, common format like WAV/MP3), then import again.';
+        out.statusText = _t('importFail.inputIssue.status', 'Audio file was rejected. Try another file.');
+        out.alertText = _t('importFail.inputIssue.alert', 'This audio file could not be imported.\n\nTry another file (shorter/clearer, common format like WAV/MP3), then import again.');
         return out;
       }
 
@@ -4593,8 +4594,8 @@ renderTimeline(){
         pick(['fetch', 'network'], '')
       ){
         out.bucket = 'server_unreachable';
-        out.statusText = 'Cannot reach server. Check local app and retry.';
-        out.alertText = 'Hum2Song could not reach the local server.\n\nMake sure the local app/server is running, then try importing again.';
+        out.statusText = _t('importFail.serverUnreachable.status', 'Cannot reach server. Check local app and retry.');
+        out.alertText = _t('importFail.serverUnreachable.alert', 'Hum2Song could not reach the local server.\n\nMake sure the local app/server is running, then try importing again.');
         return out;
       }
 
@@ -4639,9 +4640,10 @@ renderTimeline(){
         const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
         const tid = res.task_id || res.id || res.taskId || res.task || null;
         if (!tid){
-          this.setImportStatus('Failed: Server did not return task ID.', false);
+          const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, dflt) => (dflt != null ? dflt : k);
+          this.setImportStatus(_t('importFail.missingTaskId.status', 'Import could not start. Please try again.'), false);
           log('generate returned no task_id');
-          alert('Upload failed: server did not return a task ID. Check backend logs.');
+          alert(_t('importFail.missingTaskId.alert', 'Hum2Song could not start processing this file.\n\nTry again, and make sure the local app/server is running.'));
           return;
         }
         this.state.lastUploadTaskId = tid;
