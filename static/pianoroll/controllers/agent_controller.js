@@ -474,6 +474,39 @@
     return { changedNoteCount, totalNotes, ratio };
   }
 
+  /**
+   * Clean Outliers quality signals:
+   * - deleteCount / totalNotes for aggressiveness cap
+   * - significant duration changes as an alternative structural cleanup signal
+   */
+  function _computeOutlierCleanupSignals(ops, clip){
+    const arr = Array.isArray(ops) ? ops : [];
+    const noteStateById = _buildNoteStateMapFromClip(clip);
+    const totalNotes = Object.keys(noteStateById).length;
+    const SIGNIFICANT_DURATION_DELTA_BEAT = 0.25;
+    let deleteCount = 0;
+    let significantDurationChangeCount = 0;
+    for (const op of arr){
+      if (!op || typeof op !== 'object') continue;
+      const kind = String(op.op || '');
+      if (kind === 'deleteNote'){
+        deleteCount += 1;
+        continue;
+      }
+      if (kind !== 'setNote' || op.durationBeat == null || op.noteId == null) continue;
+      const noteId = String(op.noteId);
+      const before = Object.prototype.hasOwnProperty.call(noteStateById, noteId) ? noteStateById[noteId] : null;
+      if (!before || !isFinite(before.durationBeat)) continue;
+      const afterDuration = Number(op.durationBeat);
+      if (!isFinite(afterDuration)) continue;
+      if (Math.abs(afterDuration - before.durationBeat) >= SIGNIFICANT_DURATION_DELTA_BEAT){
+        significantDurationChangeCount += 1;
+      }
+    }
+    const deleteRatio = totalNotes > 0 ? (deleteCount / totalNotes) : 0;
+    return { totalNotes, deleteCount, deleteRatio, significantDurationChangeCount };
+  }
+
   function buildPseudoAgentPatch(clip){
     const ops = [];
     const score = clip && clip.score;
@@ -935,6 +968,20 @@
 
           const opsN = patchObj.ops.length;
           if (opsN === 0){
+            if (intent.reduceOutliers){
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: 'no meaningful outlier cleanup',
+                patchSummary: Object.assign({}, patchSummaryBase, {
+                  status: 'failed',
+                  reason: 'no meaningful outlier cleanup',
+                  ops: 0,
+                  byOp: {},
+                  examples: [],
+                }, _llmOutcomeExtra('rejected_quality', { detail: 'no meaningful outlier cleanup' }), _computePatchTypeSummary([])),
+              };
+            }
             if (debugCapture) debugCapture.validateErrors = [];
             return {
               ok: true,
@@ -1046,6 +1093,32 @@
                 ok: false,
                 reason: 'patch_rejected',
                 detail: missingReason,
+                patchSummary,
+              };
+            }
+          }
+
+          // Clean Outliers quality gate: require meaningful cleanup and prevent over-aggressive deletion.
+          if (intent.reduceOutliers && opsN > 0){
+            const outlierSignals = _computeOutlierCleanupSignals(patchObj.ops, clip);
+            let outlierReason = '';
+            if (outlierSignals.deleteCount < 1 && outlierSignals.significantDurationChangeCount < 1){
+              outlierReason = 'no meaningful outlier cleanup';
+            } else if (outlierSignals.totalNotes > 0 && outlierSignals.deleteRatio > 0.30){
+              outlierReason = 'too aggressive cleanup';
+            }
+            if (outlierReason){
+              const patchSummary = Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: outlierReason,
+                ops: opsN,
+                byOp: _opsByOp(patchObj.ops),
+                examples: [],
+              }, _computePatchTypeSummary(patchObj.ops, clip), _llmOutcomeExtra('rejected_quality', { detail: outlierReason }));
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: outlierReason,
                 patchSummary,
               };
             }

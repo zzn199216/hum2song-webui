@@ -959,6 +959,11 @@
       background: #fff;
       color: #111;
     }
+    #editorQuickOptimizeTemplates .btn[data-template-id].active{
+      background: rgba(59,130,246,.24);
+      border-color: rgba(59,130,246,.55);
+      color: #dbeafe;
+    }
     .help{
       color:rgba(255,255,255,.72);
       font-size:12px;
@@ -1409,10 +1414,10 @@
                   <button type="button" class="btn mini" data-template-id="bluesy_v1" data-i18n="editor.bluesy">Bluesy</button>
                 </div>
               </div>
-              <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /><span data-i18n="editor.fixPitch">Fix Pitch</span></label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /><span data-i18n="editor.tightenRhythm">Tighten Rhythm</span></label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /><span data-i18n="editor.reduceOutliers">Reduce Outliers</span></label>
+              <div style="display:none;" aria-hidden="true">
+                <input type="checkbox" id="qoptFixPitch" />
+                <input type="checkbox" id="qoptTightenRhythm" />
+                <input type="checkbox" id="qoptReduceOutliers" />
               </div>
               <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
                 <span id="editorQuickOptimizeMode" class="badge" data-i18n="opt.safe">Safe mode</span>

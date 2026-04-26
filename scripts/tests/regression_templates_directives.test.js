@@ -453,12 +453,12 @@ async function testG_llmPromptIncludesNoteTablePreservesBlocks() {
   let project = proj;
   const cid = clip.id;
 
-  const pitchChangePatch = {
+  const outlierCleanupPatch = {
     version: 1,
     clipId: cid,
-    ops: [{ op: 'setNote', noteId: 'n0', pitch: 61, velocity: 90 }],
+    ops: [{ op: 'setNote', noteId: 'n0', durationBeat: 1.3, velocity: 90 }],
   };
-  const rawText = '```json\n' + JSON.stringify(pitchChangePatch) + '\n```';
+  const rawText = '```json\n' + JSON.stringify(outlierCleanupPatch) + '\n```';
 
   let capturedUser = null;
   const origClient = globalThis.H2S_LLM_CLIENT;
