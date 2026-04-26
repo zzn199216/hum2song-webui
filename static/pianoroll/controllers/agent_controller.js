@@ -451,6 +451,29 @@
     return { hasPitchChange, hasTimingChange, hasStructuralChange, isVelocityOnly };
   }
 
+  /**
+   * Fix Pitch quality scope guard: reject broad pitch edits.
+   * Ratio = unique notes with actual pitch changes / total notes in clip.
+   */
+  function _computePitchChangeScope(ops, clip){
+    const arr = Array.isArray(ops) ? ops : [];
+    const noteStateById = _buildNoteStateMapFromClip(clip);
+    const totalNotes = Object.keys(noteStateById).length;
+    const changed = Object.create(null);
+    for (const op of arr){
+      if (!op || typeof op !== 'object') continue;
+      if (String(op.op || '') !== 'setNote' || op.pitch == null || op.noteId == null) continue;
+      const noteId = String(op.noteId);
+      const before = Object.prototype.hasOwnProperty.call(noteStateById, noteId) ? noteStateById[noteId] : null;
+      if (before && isFinite(before.pitch) && Number(op.pitch) !== before.pitch){
+        changed[noteId] = true;
+      }
+    }
+    const changedNoteCount = Object.keys(changed).length;
+    const ratio = totalNotes > 0 ? (changedNoteCount / totalNotes) : 0;
+    return { changedNoteCount, totalNotes, ratio };
+  }
+
   function buildPseudoAgentPatch(clip){
     const ops = [];
     const score = clip && clip.score;
@@ -1002,6 +1025,12 @@
               missingReason = 'quality_velocity_only';
             } else if (intent.fixPitch && !ps.hasPitchChange){
               missingReason = 'missing pitch change for Fix Pitch';
+            } else if (intent.fixPitch){
+              const scope = _computePitchChangeScope(patchObj.ops, clip);
+              // Keep tiny clips editable: scope cap applies only when enough notes exist.
+              if (scope.totalNotes >= 4 && scope.ratio > 0.3){
+                missingReason = 'pitch change too broad for Fix Pitch';
+              }
             } else if (intent.tightenRhythm && !ps.hasTimingChange){
               missingReason = 'missing timing change for Tighten Rhythm';
             }
