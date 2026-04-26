@@ -148,24 +148,24 @@
     #aiAssistResizeHandle{ position:absolute; top:0; left:0; width:20px; height:20px; cursor:nwse-resize; z-index:10; user-select:none; background:linear-gradient(135deg, rgba(255,255,255,.15) 0%, transparent 50%); border-radius:var(--radius) 0 6px 0; }
     #aiAssistResizeHandle:hover{ background:linear-gradient(135deg, rgba(255,255,255,.25) 0%, transparent 50%); }
     #aiAssistHeader{
-      height:28px;
-      min-height:28px;
+      height:24px;
+      min-height:24px;
       display:flex;
       align-items:center;
-      padding:0 12px;
-      background:rgba(0,0,0,.25);
-      border-bottom:1px solid var(--border);
+      padding:0 10px 0 12px;
+      background:rgba(255,255,255,.03);
+      border-bottom:1px solid rgba(255,255,255,.08);
       cursor:pointer;
       user-select:none;
-      font-size:12px;
+      font-size:11px;
       font-weight:600;
-      flex:1;
+      flex:0 0 24px;
       min-width:0;
     }
-    #aiAssistHeader:hover{ background:rgba(0,0,0,.35); }
+    #aiAssistHeader:hover{ background:rgba(255,255,255,.05); }
     #aiAssistDock:not(.open) #aiAssistHeader{ border-bottom:none; }
-    #aiAssistHeaderTarget{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:6px; }
-    .aiAssistChevron{ margin-left:6px; color:var(--muted); font-size:10px; flex-shrink:0; }
+    #aiAssistHeaderTarget{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:4px; }
+    .aiAssistChevron{ margin-left:4px; color:var(--muted); font-size:10px; flex-shrink:0; }
     #aiAssistBody{ flex:1; min-height:0; display:flex; flex-direction:column; padding:8px; gap:8px; overflow:hidden; }
     #aiAssistDock:not(.open) #aiAssistBody{ display:none; }
     #aiAssistMessages{ flex:1; overflow-y:auto; font-size:12px; min-height:120px; }
