@@ -517,19 +517,21 @@
     }
     .studioLastOptimizeRow .lastOptDetailsBtn{ flex-shrink:0; font-size:10px !important; padding:2px 8px !important; }
     .lastOptDetailsPop{
-      position:absolute;
-      right:0;
-      top:100%;
-      margin-top:6px;
-      z-index:60;
-      min-width:268px;
-      max-width:min(360px, 94vw);
+      position:fixed;
+      left:50%;
+      top:50%;
+      transform:translate(-50%, -50%);
+      z-index:10004;
+      width:min(760px, 94vw);
+      max-height:min(82vh, 760px);
+      overflow:auto;
       padding:10px 12px 12px;
       border:1px solid var(--border);
       border-radius:var(--radius);
-      background:rgba(18,20,26,.98);
-      box-shadow:var(--shadow);
+      background:rgba(18,20,26,.985);
+      box-shadow:0 16px 40px rgba(0,0,0,.55);
       text-align:left;
+      pointer-events:auto;
     }
     .lastOptDetailsPop.hidden{ display:none !important; }
     .lastOptDetailsHeader{
@@ -1179,13 +1181,6 @@
         <span class="studioLastOptimizeLabel muted" data-i18n="lastOpt.label">Last optimize</span>
         <span id="studioLastOptimizeSummary" class="studioLastOptimizeText">—</span>
         <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details">Details</button>
-        <div id="studioLastOptimizeDetails" class="lastOptDetailsPop hidden" role="dialog" aria-hidden="true" aria-labelledby="lastOptDetailsHeading">
-          <div class="lastOptDetailsHeader">
-            <span id="lastOptDetailsHeading" data-i18n="lastOpt.detailTitle">Last optimize — details</span>
-            <button type="button" id="btnLastOptimizeDetailsClose" class="btn mini ghost" data-i18n-aria-label="lastOpt.detailsCloseAria">×</button>
-          </div>
-          <div id="studioLastOptimizeDetailsBody" class="lastOptDetailsBody"></div>
-        </div>
       </div>
 
       <div class="timeline">
@@ -1467,7 +1462,10 @@
                 <span id="editorQuickOptimizeMode" class="badge" data-i18n="opt.safe">Safe mode</span>
                 <span id="editorQuickOptimizeModel" class="muted" data-i18n="editor.modelUnset">Model: (unset)</span>
               </div>
-              <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; flex:1; min-width:0;">(no result yet)</div>
+                <button id="btnEditorOptimizeDetails" type="button" class="btn mini ghost hidden" data-i18n="lastOpt.details" title="Details">Details</button>
+              </div>
             </div>
             <details class="help" style="margin-top:8px;">
               <summary style="cursor:pointer; font-weight:700;" data-i18n="opt.advanced">Advanced</summary>
@@ -1546,6 +1544,13 @@
         </div>
       </div>
     </div>
+  </div>
+  <div id="studioLastOptimizeDetails" class="lastOptDetailsPop hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="lastOptDetailsHeading">
+    <div class="lastOptDetailsHeader">
+      <span id="lastOptDetailsHeading" data-i18n="lastOpt.detailTitle">Last optimize — details</span>
+      <button type="button" id="btnLastOptimizeDetailsClose" class="btn mini ghost" data-i18n-aria-label="lastOpt.detailsCloseAria">×</button>
+    </div>
+    <div id="studioLastOptimizeDetailsBody" class="lastOptDetailsBody"></div>
   </div>
 
   <!-- i18n core (PR-G1a) - load before other scripts -->

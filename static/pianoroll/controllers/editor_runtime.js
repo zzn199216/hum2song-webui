@@ -1174,6 +1174,7 @@
         }
         const statusEl = $('#editorOptStatus');
         if (statusEl) statusEl.textContent = (clip && clip.meta && clip.meta.agent) ? (_editorOptStatusText(clip.meta.agent) || '') : '';
+        updateEditorOptimizeDetailsVisibilityFromClip(clipId, clip);
         const quickPresetEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizePreset') : null;
         const quickModeEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeMode') : null;
         const quickModelEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeModel') : null;
@@ -1751,6 +1752,35 @@
         const el = doc.getElementById('editorOptStatus');
         if (el) el.textContent = text || '';
       };
+      const setEditorOptimizeDetailsVisible = (visible) => {
+        if (typeof document === 'undefined') return;
+        const btn = document.getElementById('btnEditorOptimizeDetails');
+        if (!btn) return;
+        if (visible) btn.classList.remove('hidden');
+        else btn.classList.add('hidden');
+      };
+      const updateEditorOptimizeDetailsVisibilityFromClip = (clipId, clip) => {
+        const app = (typeof globalThis !== 'undefined' && globalThis.H2SApp) ? globalThis.H2SApp : null;
+        const snap = app && app._lastOptimizeSnapshot ? app._lastOptimizeSnapshot : null;
+        const snapHasRes = !!(snap && snap.res);
+        const snapClipMatch = !!(snap && snap.clipId != null && clipId != null && String(snap.clipId) === String(clipId));
+        const hasResult = (snapHasRes && (snapClipMatch || clipId == null))
+          || !!(clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
+        setEditorOptimizeDetailsVisible(hasResult);
+      };
+      const openLastOptimizeDetailsFromEditor = () => {
+        try {
+          const app = (typeof globalThis !== 'undefined' && globalThis.H2SApp) ? globalThis.H2SApp : null;
+          if (app && typeof app._openLastOptimizeDetails === 'function'){
+            app._openLastOptimizeDetails();
+            return;
+          }
+          if (typeof document !== 'undefined'){
+            const btn = document.getElementById('btnLastOptimizeDetails');
+            if (btn && typeof btn.click === 'function') btn.click();
+          }
+        } catch (_e) {}
+      };
       // PR-B4b: Actionable quality gate message (model-unset hint when applicable).
       const getQualityGateFailureMessage = (forStatus) => {
         let modelHint = '';
@@ -1889,6 +1919,17 @@
 
       // PR-4/PR-6b/PR-6d: Click Optimize — read preset + prompt, persist, run (no override), show result, disable during run
       const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
+      const btnEditorOptimizeDetails = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimizeDetails') : null;
+      if (btnEditorOptimizeDetails){
+        if (!H.onEditorOptimizeDetailsClick){
+          H.onEditorOptimizeDetailsClick = (ev) => {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch (_e) {}
+            openLastOptimizeDetailsFromEditor();
+          };
+        }
+        btnEditorOptimizeDetails.removeEventListener('click', H.onEditorOptimizeDetailsClick, true);
+        btnEditorOptimizeDetails.addEventListener('click', H.onEditorOptimizeDetailsClick, true);
+      }
       if (btnOptimize){
         if (!H.onOptimizeClick){
           H.onOptimizeClick = (ev) => {
@@ -1914,6 +1955,7 @@
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
+                updateEditorOptimizeDetailsVisibilityFromClip(clipId, clip);
                 const el = (typeof document !== 'undefined') ? document.getElementById('patchSummary') : null;
                 if (el && clip && clip.meta && clip.meta.agent){
                   if (clip.meta.agent.patchSummary) el.textContent = JSON.stringify(clip.meta.agent.patchSummary, null, 2);
@@ -1940,6 +1982,9 @@
                 const presetIdErr = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
                 if (presetIdErr === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message) + getLlmModeLabel('llm_v0'));
                 else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
+                const p2 = getProjectV2 && getProjectV2();
+                const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                updateEditorOptimizeDetailsVisibilityFromClip(clipId, clip);
               }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };
@@ -2165,6 +2210,7 @@
                 const p2 = getProjectV2 && getProjectV2();
                 const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
                 setEditorOptStatus(statusFromResult(res, clip, presetId));
+                updateEditorOptimizeDetailsVisibilityFromClip(clipId, clip);
                 const ps = (res && res.patchSummary) || (clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
                 if (summaryEl){
@@ -2185,6 +2231,9 @@
                 const presetIdErr = (selPreset && selPreset.value) ? String(selPreset.value).trim() : null;
                 if (presetIdErr === 'llm_v0') setEditorOptStatus('failed: ' + llmFriendlyReason(err && err.message) + getLlmModeLabel('llm_v0'));
                 else setEditorOptStatus('failed: ' + (err && err.message ? err.message : 'error'));
+                const p2 = getProjectV2 && getProjectV2();
+                const clip = (p2 && p2.clips && p2.clips[clipId]) ? p2.clips[clipId] : null;
+                updateEditorOptimizeDetailsVisibilityFromClip(clipId, clip);
               }).finally(function(){ setOptimizeControlsDisabled(false); });
             }catch(e){}
           };

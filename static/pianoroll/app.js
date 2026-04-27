@@ -2594,7 +2594,7 @@ async optimizeClip(clipId, optOverride){
       const raw = ev.target;
       const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
       if (!node || typeof node.closest !== 'function') return;
-      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails')) return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails') || node.closest('#btnEditorOptimizeDetails')) return;
       app._closeLastOptimizeDetails();
     };
     document.addEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
