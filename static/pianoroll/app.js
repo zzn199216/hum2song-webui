@@ -2239,6 +2239,7 @@ async optimizeClip(clipId, optOverride){
       clipId: cid,
       revisionIdAtRun,
       docKeyAtRun,
+      promptTrace: (res && res.llmPromptTrace) ? this._sanitizeLastOptimizePromptTrace(res.llmPromptTrace) : null,
     };
     this._applyLastOptimizeSummaryI18n();
   },
@@ -2296,6 +2297,99 @@ async optimizeClip(clipId, optOverride){
     return '';
   },
 
+  _sanitizeLastOptimizePromptTrace(raw){
+    if (!raw || typeof raw !== 'object') return null;
+    const MAX = 48000;
+    const trim = function(v){
+      if (typeof v !== 'string') return '';
+      return v.length > MAX ? v.slice(0, MAX) + '\n...[truncated]...' : v;
+    };
+    const maybeStr = function(v, max){
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s) return null;
+      const n = Number(max);
+      return Number.isFinite(n) && n > 0 ? s.slice(0, n) : s;
+    };
+    const b = raw.blocks && typeof raw.blocks === 'object' ? raw.blocks : null;
+    const out = {};
+    if (raw.attemptIndex != null && Number.isFinite(Number(raw.attemptIndex))) out.attemptIndex = Number(raw.attemptIndex);
+    if (typeof raw.finalSystemPrompt === 'string') out.finalSystemPrompt = trim(raw.finalSystemPrompt);
+    if (typeof raw.finalUserPrompt === 'string') out.finalUserPrompt = trim(raw.finalUserPrompt);
+    if (b){
+      const bo = {};
+      const templateId = maybeStr(b.resolvedTemplateId, 120);
+      if (templateId != null) bo.resolvedTemplateId = templateId;
+      else bo.resolvedTemplateId = null;
+      if (b.resolvedIntent && typeof b.resolvedIntent === 'object'){
+        bo.resolvedIntent = {
+          fixPitch: !!b.resolvedIntent.fixPitch,
+          tightenRhythm: !!b.resolvedIntent.tightenRhythm,
+          reduceOutliers: !!b.resolvedIntent.reduceOutliers,
+        };
+      }
+      const promptVersion = maybeStr(b.promptVersion, 120);
+      if (promptVersion != null) bo.promptVersion = promptVersion;
+      if (typeof b.planBlock === 'string') bo.planBlock = trim(b.planBlock);
+      if (typeof b.directivesBlock === 'string') bo.directivesBlock = trim(b.directivesBlock);
+      if (typeof b.userBody === 'string') bo.userBody = trim(b.userBody);
+      out.blocks = bo;
+    }
+    return this._redactLastOptimizePromptTrace(out);
+  },
+
+  _redactLastOptimizePromptTrace(value){
+    const REDACT = '[REDACTED]';
+    const isSensitiveKey = function(k){
+      const s = String(k || '').toLowerCase();
+      return s.indexOf('authorization') >= 0
+        || s === 'apikey'
+        || s.indexOf('api_key') >= 0
+        || s.indexOf('auth') >= 0
+        || s.indexOf('token') >= 0
+        || s.indexOf('header') >= 0
+        || s === 'secret'
+        || s.indexOf('password') >= 0;
+    };
+    const walk = function(v){
+      if (Array.isArray(v)) return v.map(walk);
+      if (!v || typeof v !== 'object') return v;
+      const out = {};
+      for (const k in v){
+        if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+        if (isSensitiveKey(k)){
+          out[k] = REDACT;
+          continue;
+        }
+        out[k] = walk(v[k]);
+      }
+      return out;
+    };
+    return walk(value);
+  },
+
+  _copyTextToClipboardWithFallback(text){
+    const copyFallback = function(raw){
+      if (typeof document === 'undefined') return false;
+      const ta = document.createElement('textarea');
+      ta.value = String(raw || '');
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (_e) { ok = false; }
+      document.body.removeChild(ta);
+      return !!ok;
+    };
+    const payload = String(text || '');
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+      return navigator.clipboard.writeText(payload).then(function(){ return true; }).catch(function(){ return copyFallback(payload); });
+    }
+    return Promise.resolve(copyFallback(payload));
+  },
+
   _renderLastOptimizeDetailsBody(){
     const body = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetailsBody') : null;
     if (!body) return;
@@ -2310,6 +2404,93 @@ async optimizeClip(clipId, optOverride){
       const val = document.createElement('span');
       val.className = 'val';
       val.textContent = valueStr;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      body.appendChild(row);
+    };
+    const addPromptTraceSection = (promptTrace) => {
+      const row = document.createElement('div');
+      row.className = 'lastOptDetailRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t('lastOpt.detail.lblPromptTrace');
+      const val = document.createElement('div');
+      val.className = 'val lastOptPromptTrace';
+      if (!promptTrace || typeof promptTrace !== 'object'){
+        const empty = document.createElement('div');
+        empty.className = 'lastOptPromptTraceEmpty';
+        empty.textContent = t('lastOpt.detail.promptUnavailable');
+        val.appendChild(empty);
+        row.appendChild(lbl);
+        row.appendChild(val);
+        body.appendChild(row);
+        return;
+      }
+      const blocks = (promptTrace.blocks && typeof promptTrace.blocks === 'object') ? promptTrace.blocks : null;
+      const copyWrap = document.createElement('div');
+      copyWrap.className = 'lastOptPromptTraceActions';
+      const btnCopyJson = document.createElement('button');
+      btnCopyJson.type = 'button';
+      btnCopyJson.className = 'btn mini ghost';
+      btnCopyJson.textContent = t('lastOpt.detail.copyTrace');
+      const btnCopyUser = document.createElement('button');
+      btnCopyUser.type = 'button';
+      btnCopyUser.className = 'btn mini ghost';
+      btnCopyUser.textContent = t('lastOpt.detail.copyFinalUser');
+      copyWrap.appendChild(btnCopyJson);
+      copyWrap.appendChild(btnCopyUser);
+      val.appendChild(copyWrap);
+      const status = document.createElement('div');
+      status.className = 'lastOptPromptTraceStatus';
+      status.textContent = '';
+      val.appendChild(status);
+      const meta = document.createElement('div');
+      meta.className = 'lastOptPromptTraceMeta';
+      const metaParts = [];
+      if (blocks && blocks.resolvedTemplateId != null && String(blocks.resolvedTemplateId).trim()){
+        metaParts.push(t('lastOpt.detail.lblPromptTemplate') + ': ' + String(blocks.resolvedTemplateId));
+      }
+      if (blocks && blocks.promptVersion != null && String(blocks.promptVersion).trim()){
+        metaParts.push(t('lastOpt.detail.lblPromptVersion') + ': ' + String(blocks.promptVersion));
+      }
+      if (blocks && blocks.resolvedIntent && typeof blocks.resolvedIntent === 'object'){
+        try {
+          metaParts.push(t('lastOpt.detail.lblPromptIntent') + ': ' + JSON.stringify(blocks.resolvedIntent));
+        } catch (_e) {}
+      }
+      if (promptTrace.attemptIndex != null && Number.isFinite(Number(promptTrace.attemptIndex))){
+        metaParts.push(t('lastOpt.detail.lblPromptAttempt') + ': ' + String(Math.floor(Number(promptTrace.attemptIndex))));
+      }
+      meta.textContent = metaParts.length ? metaParts.join(' | ') : t('lastOpt.detail.promptMetaNone');
+      val.appendChild(meta);
+      const makePromptBlock = (title, textValue) => {
+        const wrap = document.createElement('details');
+        wrap.className = 'lastOptPromptTraceBlock';
+        const summary = document.createElement('summary');
+        summary.textContent = title;
+        const ta = document.createElement('textarea');
+        ta.className = 'lastOptPromptTraceText';
+        ta.readOnly = true;
+        ta.value = (typeof textValue === 'string') ? textValue : '';
+        wrap.appendChild(summary);
+        wrap.appendChild(ta);
+        return wrap;
+      };
+      val.appendChild(makePromptBlock(t('lastOpt.detail.lblFinalSystemPrompt'), promptTrace.finalSystemPrompt));
+      val.appendChild(makePromptBlock(t('lastOpt.detail.lblFinalUserPrompt'), promptTrace.finalUserPrompt));
+      btnCopyJson.addEventListener('click', () => {
+        let payload = '{}';
+        try { payload = JSON.stringify(promptTrace, null, 2); } catch (_e) {}
+        this._copyTextToClipboardWithFallback(payload).then((ok) => {
+          status.textContent = ok ? t('lastOpt.detail.copyOk') : t('lastOpt.detail.copyFail');
+        });
+      });
+      btnCopyUser.addEventListener('click', () => {
+        const payload = (typeof promptTrace.finalUserPrompt === 'string') ? promptTrace.finalUserPrompt : '';
+        this._copyTextToClipboardWithFallback(payload).then((ok) => {
+          status.textContent = ok ? t('lastOpt.detail.copyOk') : t('lastOpt.detail.copyFail');
+        });
+      });
       row.appendChild(lbl);
       row.appendChild(val);
       body.appendChild(row);
@@ -2372,6 +2553,7 @@ async optimizeClip(clipId, optOverride){
           .replace('{total}', String(Math.min(Math.floor(total), 99)))
           .replace('{final}', (finalIdx != null && Number.isFinite(finalIdx)) ? String(Math.floor(finalIdx)) : '—'));
       }
+      addPromptTraceSection(s.promptTrace || null);
     }
   },
 
