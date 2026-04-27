@@ -15,8 +15,10 @@ def test_frontend_contracts_node():
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if proc.returncode != 0:
         # Print node output for debugging
-        sys.stdout.write(proc.stdout)
+        sys.stdout.write(proc.stdout or "")
     assert proc.returncode == 0
