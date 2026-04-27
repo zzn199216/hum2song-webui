@@ -1180,7 +1180,7 @@
       <div id="studioLastOptimizeRow" class="studioLastOptimizeRow" style="position:relative;" aria-live="polite">
         <span class="studioLastOptimizeLabel muted" data-i18n="lastOpt.label">Last optimize</span>
         <span id="studioLastOptimizeSummary" class="studioLastOptimizeText">—</span>
-        <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details">Details</button>
+        <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn hidden" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details" disabled>Details</button>
       </div>
 
       <div class="timeline">
@@ -1462,9 +1462,9 @@
                 <span id="editorQuickOptimizeMode" class="badge" data-i18n="opt.safe">Safe mode</span>
                 <span id="editorQuickOptimizeModel" class="muted" data-i18n="editor.modelUnset">Model: (unset)</span>
               </div>
-              <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+              <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
                 <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; flex:1; min-width:0;">(no result yet)</div>
-                <button id="btnEditorOptimizeDetails" type="button" class="btn mini ghost hidden" data-i18n="lastOpt.details" title="Details">Details</button>
+                <button id="btnEditorOptimizeDetailsDebug" type="button" class="btn mini ghost" data-i18n="editor.optimizeDetails" title="Optimize Details">Optimize Details</button>
               </div>
             </div>
             <details class="help" style="margin-top:8px;">
@@ -1520,22 +1520,6 @@
                     <div id="editorLlmConfigStatus" class="muted" style="min-height:1em;"></div>
                     <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                   </div>
-                </div>
-                <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
-                  <details class="help" style="margin-top:0;">
-                    <summary style="cursor:pointer; font-weight:700;" data-i18n="editor.llmDebug">LLM Debug</summary>
-                    <div style="margin-top:6px; font-size:11px; opacity:0.85;">
-                      <div class="row" style="margin-bottom:6px;">
-                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini" data-i18n="editor.clearDebug">Clear Debug</button>
-                      </div>
-                      <label class="muted" style="margin:0; display:block;" data-i18n="editor.lastRawOutput">Last raw output:</label>
-                      <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.lastExtractedPatch">Last extracted patch:</label>
-                      <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.errorsAndAttempt">Errors + attempt:</label>
-                      <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                    </div>
-                  </details>
                 </div>
               </div>
             </details>

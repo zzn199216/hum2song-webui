@@ -1754,17 +1754,21 @@
       };
       const setEditorOptimizeDetailsVisible = (visible) => {
         if (typeof document === 'undefined') return;
-        const btn = document.getElementById('btnEditorOptimizeDetails');
-        if (!btn) return;
-        if (visible) btn.classList.remove('hidden');
-        else btn.classList.add('hidden');
+        const btns = [
+          document.getElementById('btnEditorOptimizeDetails'),
+          document.getElementById('btnEditorOptimizeDetailsStatus'),
+        ];
+        for (const btn of btns){
+          if (!btn) continue;
+          if (visible) btn.classList.remove('hidden');
+          else btn.classList.add('hidden');
+        }
       };
       const updateEditorOptimizeDetailsVisibilityFromClip = (clipId, clip) => {
         const app = (typeof globalThis !== 'undefined' && globalThis.H2SApp) ? globalThis.H2SApp : null;
         const snap = app && app._lastOptimizeSnapshot ? app._lastOptimizeSnapshot : null;
-        const snapHasRes = !!(snap && snap.res);
-        const snapClipMatch = !!(snap && snap.clipId != null && clipId != null && String(snap.clipId) === String(clipId));
-        const hasResult = (snapHasRes && (snapClipMatch || clipId == null))
+        const snapHasRes = !!(snap && snap.res && snap.clipId != null);
+        const hasResult = snapHasRes
           || !!(clip && clip.meta && clip.meta.agent && clip.meta.agent.patchSummary);
         setEditorOptimizeDetailsVisible(hasResult);
       };
@@ -1920,16 +1924,22 @@
       // PR-4/PR-6b/PR-6d: Click Optimize — read preset + prompt, persist, run (no override), show result, disable during run
       const btnOptimize = getBtn(['btnEditorOptimize', 'editorOptimizeBtn']);
       const btnEditorOptimizeDetails = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimizeDetails') : null;
-      if (btnEditorOptimizeDetails){
+      const btnEditorOptimizeDetailsStatus = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimizeDetailsStatus') : null;
+      const btnEditorOptimizeDetailsDebug = (typeof document !== 'undefined') ? document.getElementById('btnEditorOptimizeDetailsDebug') : null;
+      const bindEditorOptimizeDetailsClick = (btn) => {
+        if (!btn) return;
         if (!H.onEditorOptimizeDetailsClick){
           H.onEditorOptimizeDetailsClick = (ev) => {
             try { ev.preventDefault(); ev.stopPropagation(); } catch (_e) {}
             openLastOptimizeDetailsFromEditor();
           };
         }
-        btnEditorOptimizeDetails.removeEventListener('click', H.onEditorOptimizeDetailsClick, true);
-        btnEditorOptimizeDetails.addEventListener('click', H.onEditorOptimizeDetailsClick, true);
-      }
+        btn.removeEventListener('click', H.onEditorOptimizeDetailsClick, true);
+        btn.addEventListener('click', H.onEditorOptimizeDetailsClick, true);
+      };
+      bindEditorOptimizeDetailsClick(btnEditorOptimizeDetails);
+      bindEditorOptimizeDetailsClick(btnEditorOptimizeDetailsStatus);
+      bindEditorOptimizeDetailsClick(btnEditorOptimizeDetailsDebug);
       if (btnOptimize){
         if (!H.onOptimizeClick){
           H.onOptimizeClick = (ev) => {

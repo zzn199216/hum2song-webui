@@ -408,6 +408,7 @@
   "editor.reduceOutliers": "减少异常值",
   "editor.cleanOutliers": "清理异常",
   "editor.bluesy": "蓝调风格",
+  "editor.optimizeDetails": "优化详情",
   "editor.modelUnset": "模型: (未设置)",
   "editor.modelFmt": "模型: {model}",
   "editor.gatewayPreset": "网关预设",

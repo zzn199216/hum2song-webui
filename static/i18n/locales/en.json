@@ -408,6 +408,7 @@
   "editor.reduceOutliers": "Reduce Outliers",
   "editor.cleanOutliers": "Clean Outliers",
   "editor.bluesy": "Bluesy",
+  "editor.optimizeDetails": "Optimize Details",
   "editor.modelUnset": "Model: (unset)",
   "editor.modelFmt": "Model: {model}",
   "editor.gatewayPreset": "Gateway Preset",

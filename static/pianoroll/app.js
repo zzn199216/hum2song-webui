@@ -2262,18 +2262,32 @@ async optimizeClip(clipId, optOverride){
 
   _applyLastOptimizeSummaryI18n(){
     const el = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeSummary') : null;
+    const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
     if (!el) return;
     const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    const setBtnVisible = (enabled) => {
+      if (!btn) return;
+      if (enabled){
+        btn.classList.remove('hidden');
+        btn.disabled = false;
+      } else {
+        btn.classList.add('hidden');
+        btn.disabled = true;
+      }
+    };
     if (!this._lastOptimizeSnapshot){
       el.textContent = t('lastOpt.none');
+      setBtnVisible(false);
       return;
     }
     if (typeof this._isLastOptimizeSnapshotStale === 'function' && this._isLastOptimizeSnapshotStale()){
       el.textContent = t('lastOpt.stale');
+      setBtnVisible(true);
       return;
     }
     const s = this._lastOptimizeSnapshot;
     el.textContent = this._formatLastOptimizeLine(s.res, s.clipId);
+    setBtnVisible(true);
   },
 
   _lastOptIntentDetailLine(ps, pathRaw, t){
@@ -2594,7 +2608,7 @@ async optimizeClip(clipId, optOverride){
       const raw = ev.target;
       const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
       if (!node || typeof node.closest !== 'function') return;
-      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails') || node.closest('#btnEditorOptimizeDetails')) return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails') || node.closest('#btnEditorOptimizeDetails') || node.closest('#btnEditorOptimizeDetailsDebug') || node.closest('#btnInspectorOptimizeDetails')) return;
       app._closeLastOptimizeDetails();
     };
     document.addEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
@@ -4223,7 +4237,11 @@ renderTimeline(){
               (canUndo ? `<button type="button" class="btn mini" data-act="inspUndoOptimize" data-id="${escapeHtml(clipId)}"${running ? ' disabled' : ''}>${escapeHtml(_t('opt.undoOptimize'))}</button>` : '') +
             `</div>` +
             (running ? `<div class="muted" style="font-size:12px;">Running…</div>` : optError ? `<div class="muted" style="font-size:12px; color:var(--danger, #e55);">${escapeHtml(optError)}</div>` : '') +
-            `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="font-size:11px; opacity:0.8;">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inspector.openEditor') : 'Open Editor')}</a>` +
+            `<div class="inspOptimizeLinks" style="font-size:11px; color:#fff; opacity:0.88; margin-top:6px; display:flex; flex-wrap:wrap; align-items:center; gap:0 8px;">` +
+              `<a href="#" id="btnInspectorOptimizeDetails" data-act="inspOpenOptimizeDetails" data-id="${escapeHtml(clipId)}" style="color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,0.45); text-underline-offset:2px;">${escapeHtml(_t('editor.optimizeDetails'))}</a>` +
+              `<span style="opacity:0.45;" aria-hidden="true">·</span>` +
+              `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,0.45); text-underline-offset:2px;">${escapeHtml(_t('inspector.openEditor'))}</a>` +
+            `</div>` +
             `<details class="optAdvanced" data-insp-section="opt_adv" style="margin-top:10px;"${getInspectorSectionOpen('opt_adv') ? ' open' : ''}>` +
               `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.advanced'))}</summary>` +
               `<div style="margin-top:6px;">` +
@@ -4306,6 +4324,11 @@ renderTimeline(){
             self.runCommand('rollback_clip', { clipId: cid }).then(function(res){
               if (res && res.ok){ persist(); self.render(); }
             });
+            return;
+          }
+          if (act === 'inspOpenOptimizeDetails'){
+            ev.preventDefault();
+            if (typeof self._openLastOptimizeDetails === 'function') self._openLastOptimizeDetails();
             return;
           }
           if (act === 'inspOpenEditor'){
