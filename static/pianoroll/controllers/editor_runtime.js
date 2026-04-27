@@ -1767,6 +1767,27 @@
         if (forStatus) return modelHint + t('opt.lowQualityShort');
         return modelHint + base;
       };
+      const getFriendlyRejectionMessage = (reason, detail, forStatus) => {
+        const t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+        const reasonStr = (reason != null && typeof reason === 'string') ? reason.trim() : '';
+        const detailStr = (detail != null && typeof detail === 'string') ? detail.trim() : '';
+        if (reasonStr !== 'patch_rejected') return '';
+        if (detailStr === 'quality_velocity_only') return getQualityGateFailureMessage(forStatus);
+        const map = {
+          'no meaningful outlier cleanup': 'opt.rejectDetail.noMeaningfulOutlierCleanup',
+          'too aggressive cleanup': 'opt.rejectDetail.tooAggressiveCleanup',
+          'missing pitch change for Fix Pitch': 'opt.rejectDetail.missingPitchChangeFixPitch',
+          'missing timing change for Tighten Rhythm': 'opt.rejectDetail.missingTimingChangeTightenRhythm',
+          'pitch change too broad for Fix Pitch': 'opt.rejectDetail.pitchChangeTooBroadFixPitch',
+          'quality_velocity_only': 'opt.rejectDetail.qualityVelocityOnly',
+        };
+        const key = map[detailStr];
+        if (key){
+          const mapped = t(key);
+          if (mapped !== key) return mapped;
+        }
+        return detailStr || '';
+      };
       // PR-7b-3: Map llm_v0 internal failure reasons to user-friendly text (UI layer only).
       const llmFriendlyReason = (reason) => {
         const r = (reason != null && typeof reason === 'string') ? reason : '';
@@ -1814,10 +1835,10 @@
         if (presetId === 'llm_v0') {
           const detail = (res.detail != null && typeof res.detail === 'string') ? res.detail : '';
           const isSafeModeRejection = res.reason === 'patch_rejected' && (detail.indexOf('disallowed_op') >= 0 || detail.indexOf('disallowed_field') >= 0);
-          const isQualityGateRejection = res.reason === 'patch_rejected' && detail === 'quality_velocity_only';
+          const friendlyRejection = getFriendlyRejectionMessage(res.reason, detail, true);
           let msg;
           if (isSafeModeRejection) msg = 'Safe mode rejected non-velocity changes. Turn off Safe mode to allow pitch/timing edits.';
-          else if (isQualityGateRejection) msg = getQualityGateFailureMessage(true);
+          else if (friendlyRejection) msg = friendlyRejection;
           else msg = llmFriendlyReason(res.reason);
           return 'failed: ' + msg + getLlmModeLabel('llm_v0');
         }
@@ -1902,12 +1923,10 @@
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
                 if (summaryEl){
                   if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
-                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
-                    const qgMsg = getQualityGateFailureMessage(false);
-                    const tmplSuffix = ps && _formatPromptMetaSuffix(ps) ? (' <span style="font-size:10px; opacity:0.85;">| ' + _formatPromptMetaSuffix(ps) + '</span>') : '';
-                    summaryEl.innerHTML = qgMsg + tmplSuffix + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
-                    const link = summaryEl.querySelector('.qopt-simplify');
-                    if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
+                  else if (res && res.reason === 'patch_rejected'){
+                    const qgMsg = getFriendlyRejectionMessage(res.reason, res.detail, false) || llmFriendlyReason(res.reason);
+                    const tmplMeta = ps && _formatPromptMetaSuffix(ps) ? _formatPromptMetaSuffix(ps) : '';
+                    summaryEl.textContent = qgMsg + (tmplMeta ? (' | ' + tmplMeta) : '');
                   }
                   else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? (((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)') + ' | ' + _formatPromptMetaSuffix(ps)) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
                 }
@@ -2150,12 +2169,10 @@
                 const summaryEl = (typeof document !== 'undefined') ? document.getElementById('editorQuickOptimizeSummary') : null;
                 if (summaryEl){
                   if (res && res.ok) summaryEl.textContent = _formatPatchTypeSummary(ps);
-                  else if (res && res.reason === 'patch_rejected' && res.detail === 'quality_velocity_only'){
-                    const qgMsg = getQualityGateFailureMessage(false);
-                    const tmplSuffix = ps && _formatPromptMetaSuffix(ps) ? (' <span style="font-size:10px; opacity:0.85;">| ' + _formatPromptMetaSuffix(ps) + '</span>') : '';
-                    summaryEl.innerHTML = qgMsg + tmplSuffix + ' <a href="#" class="qopt-simplify" style="margin-left:6px; font-size:10px;">[Turn off Tighten Rhythm]</a>';
-                    const link = summaryEl.querySelector('.qopt-simplify');
-                    if (link) link.addEventListener('click', function(e){ e.preventDefault(); const el = document.getElementById('qoptTightenRhythm'); if (el){ el.checked = false; const opts = readOptimizeOptionsFromUI(); if (app && app.setOptimizeOptions) app.setOptimizeOptions(opts, clipId); } });
+                  else if (res && res.reason === 'patch_rejected'){
+                    const qgMsg = getFriendlyRejectionMessage(res.reason, res.detail, false) || llmFriendlyReason(res.reason);
+                    const tmplMeta = ps && _formatPromptMetaSuffix(ps) ? _formatPromptMetaSuffix(ps) : '';
+                    summaryEl.textContent = qgMsg + (tmplMeta ? (' | ' + tmplMeta) : '');
                   }
                   else summaryEl.textContent = ps && _formatPromptMetaSuffix(ps) ? (((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)') + ' | ' + _formatPromptMetaSuffix(ps)) : ((typeof window !== 'undefined' && window.I18N && window.I18N.t) ? window.I18N.t('opt.noResultYet') : '(no result yet)');
                 }

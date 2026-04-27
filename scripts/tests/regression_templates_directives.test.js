@@ -201,7 +201,7 @@ async function testB_opsZeroIncludesPromptMeta() {
   console.log('PASS regression templates: Case B — ops===0 includes promptMeta');
 }
 
-async function testC_retryHintIntentSpecific() {
+async function testC_qualityRejectionDoesNotRetry() {
   ensureProjectLoaded();
   ensureAgentPatchLoaded();
 
@@ -260,16 +260,19 @@ async function testC_retryHintIntentSpecific() {
       intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
     });
 
-    assert(res && res.ok === true, 'Case C: retry must succeed');
-    assert(callCount === 2, 'Case C: must have 2 LLM calls (retry)');
-    assert(secondUserContent, 'Case C: must capture second request content');
-    assert(secondUserContent.includes('output setNote with pitch'), 'Case C: retry hint must include intent-specific setNote pitch');
+    assert(res && res.ok === false, 'Case C: quality rejection must fail');
+    assert(res.reason === 'patch_rejected', 'Case C: reason must be patch_rejected');
+    assert(res.detail === 'quality_velocity_only', 'Case C: detail must be quality_velocity_only');
+    assert(callCount === 1, 'Case C: rejected_quality must not retry');
+    assert(!secondUserContent, 'Case C: no second request when rejected_quality');
+    assert(res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome === 'rejected_quality', 'Case C: llm outcome must be rejected_quality');
+    assert(String(project.clips[cid].revisionId || '') === rev0, 'Case C: rejection must not create a new revision');
   } finally {
     globalThis.H2S_LLM_CLIENT = origClient;
     globalThis.H2S_LLM_CONFIG = origConfig;
   }
 
-  console.log('PASS regression templates: Case C — retry hint intent-specific');
+  console.log('PASS regression templates: Case C — quality rejection does not retry');
 }
 
 // Quality fix: fixPitch intent with velocityOnly:true (default) must allow pitch edits through
@@ -589,7 +592,7 @@ async function testH_tightenRhythmV1LlmPromptNoteTableDirectivesAndPromptMeta() 
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
-  await testC_retryHintIntentSpecific();
+  await testC_qualityRejectionDoesNotRetry();
   await testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits();
   await testE_planBlockIncludedWhenPlanProvided();
   await testF_cleanOutliersTemplateResolvesPromptMeta();

@@ -2157,9 +2157,38 @@ async optimizeClip(clipId, optOverride){
     return t('lastOpt.change.updated');
   },
 
+  _friendlyOptimizeRejection(reason, detail, t){
+    const reasonStr = (reason != null) ? String(reason).trim() : '';
+    const detailStr = (detail != null) ? String(detail).trim() : '';
+    const map = {
+      'no meaningful outlier cleanup': 'opt.rejectDetail.noMeaningfulOutlierCleanup',
+      'too aggressive cleanup': 'opt.rejectDetail.tooAggressiveCleanup',
+      'missing pitch change for Fix Pitch': 'opt.rejectDetail.missingPitchChangeFixPitch',
+      'missing timing change for Tighten Rhythm': 'opt.rejectDetail.missingTimingChangeTightenRhythm',
+      'pitch change too broad for Fix Pitch': 'opt.rejectDetail.pitchChangeTooBroadFixPitch',
+      'quality_velocity_only': 'opt.rejectDetail.qualityVelocityOnly',
+    };
+    const mappedKey = map[detailStr];
+    if (mappedKey){
+      const mapped = t(mappedKey);
+      if (mapped !== mappedKey) return mapped;
+    }
+    if (detailStr) return detailStr;
+    if (reasonStr === 'patch_rejected'){
+      const x = t('lastOpt.fail.patch_rejected');
+      return x !== 'lastOpt.fail.patch_rejected' ? x : reasonStr;
+    }
+    return reasonStr;
+  },
+
   _lastOptFailureDetail(res, t){
     const r = (res && res.reason != null) ? String(res.reason)
       : (res && res.error != null) ? String(res.error) : '';
+    const d = (res && res.detail != null) ? String(res.detail) : '';
+    if (r === 'patch_rejected'){
+      const friendly = this._friendlyOptimizeRejection(r, d, t);
+      if (friendly) return friendly;
+    }
     const key = 'lastOpt.fail.' + r;
     const localized = t(key);
     if (localized !== key) return localized;
@@ -2319,6 +2348,11 @@ async optimizeClip(clipId, optOverride){
     const stale = (typeof this._isLastOptimizeSnapshotStale === 'function') && this._isLastOptimizeSnapshotStale();
     addRow('lastOpt.detail.lblStale', stale ? t('lastOpt.detail.valStale') : t('lastOpt.detail.valCurrent'));
     if (s.clipId) addRow('lastOpt.detail.lblClip', String(s.clipId).slice(0, 28));
+    const rawDetail = (res && res.detail != null) ? String(res.detail).trim() : '';
+    if (rawDetail) addRow('lastOpt.detail.lblRawDetail', rawDetail.slice(0, 240));
+    const llmOutcome = (res && res.llmOutcome != null) ? String(res.llmOutcome).trim()
+      : (ps && ps.llm && ps.llm.outcome != null) ? String(ps.llm.outcome).trim() : '';
+    if (llmOutcome) addRow('lastOpt.detail.lblLlmOutcome', llmOutcome.slice(0, 80));
     if (ps && ps.executedPreset != null && String(ps.executedPreset).trim()){
       addRow('lastOpt.detail.lblPreset', String(ps.executedPreset).slice(0, 48));
     }
@@ -3944,6 +3978,8 @@ renderTimeline(){
         null;
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
       let resultsHtml = '';
+      const lastSnap = this._lastOptimizeSnapshot;
+      const lastRes = (lastSnap && lastSnap.clipId === clipId && lastSnap.res) ? lastSnap.res : null;
       if (ps && typeof ps === 'object'){
         const parts = [];
         if (typeof ps.ops === 'number') parts.push(`ops: ${ps.ops}`);
@@ -3954,12 +3990,19 @@ renderTimeline(){
           if (ps.hasStructuralChange === true) parts.push(_t('opt.structure'));
         }
         if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
+        if (ps.reason === 'patch_rejected'){
+          const friendly = this._friendlyOptimizeRejection(ps.reason, (ps.detail != null ? ps.detail : (ps.llm && ps.llm.detail != null ? ps.llm.detail : '')), _t);
+          if (friendly) parts.push(escapeHtml(friendly));
+        }
         if (ps.promptMeta && typeof ps.promptMeta === 'object') {
           const id = (ps.promptMeta.templateId != null && String(ps.promptMeta.templateId).trim()) ? String(ps.promptMeta.templateId) : 'Custom';
           const ver = (ps.promptMeta.promptVersion != null && String(ps.promptMeta.promptVersion).trim()) ? String(ps.promptMeta.promptVersion) : 'manual_v0';
           parts.push(`Template: ${escapeHtml(id)} (${escapeHtml(ver)})`);
         }
         resultsHtml = parts.length > 0 ? parts.join(' · ') : 'No key fields.';
+      } else if (lastRes && lastRes.ok === false && String(lastRes.reason || '') === 'patch_rejected'){
+        const friendly = this._friendlyOptimizeRejection(lastRes.reason, lastRes.detail, _t);
+        resultsHtml = friendly ? escapeHtml(friendly) : escapeHtml(String(lastRes.reason || _t('lastOpt.fail.unknownReason')));
       } else {
         resultsHtml = 'No patch summary yet.';
       }
