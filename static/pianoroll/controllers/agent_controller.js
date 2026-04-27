@@ -1190,7 +1190,12 @@
           if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
           return _attachLlmOutcomeToReturn(out);
         }
-        if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
+        const res1LlmOutcome = (res1 && res1.patchSummary && res1.patchSummary.llm && res1.patchSummary.llm.outcome)
+          ? String(res1.patchSummary.llm.outcome)
+          : (res1 && res1.llmOutcome ? String(res1.llmOutcome) : '');
+        const shouldRetry = (res1.reason === 'llm_no_valid_json')
+          || (res1.reason === 'patch_rejected' && res1LlmOutcome !== 'rejected_quality');
+        if (shouldRetry){
           let fixDetail = '';
           if (res1.reason === 'llm_no_valid_json'){
             fixDetail = 'no valid JSON object found';

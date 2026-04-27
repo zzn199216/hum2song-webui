@@ -372,8 +372,12 @@ async function testRejectedQuality(){
   const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
   const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
 
+  let callN = 0;
   globalThis.H2S_LLM_CLIENT = {
-    callChatCompletions: async () => ({ text: rawText }),
+    callChatCompletions: async () => {
+      callN++;
+      return { text: rawText };
+    },
     extractJsonObject: (text) => {
       const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
       return m ? JSON.parse(m[1]) : null;
@@ -398,6 +402,8 @@ async function testRejectedQuality(){
   });
   assert(res && res.ok === false && res.reason === 'patch_rejected', 'quality reject');
   assertLlmOutcomeContract(res, 'rejected_quality');
+  assertLlmRetryMeta(res, { totalAttempts: 1, finalAttemptIndex: 1 });
+  assert(callN === 1, 'quality reject should not trigger retry');
 }
 
 async function testRejectedQualityMissingPitchForFixPitch(){
