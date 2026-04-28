@@ -26,8 +26,10 @@
     const onEditClip = opts.onEditClip || function(){};
     const onDuplicateInstance = opts.onDuplicateInstance || function(){};
     const onRemoveInstance = opts.onRemoveInstance || function(){};
+    const onAddBass = opts.onAddBass || function(){};
     const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
     const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
+    const getAddBassLabel = opts.getAddBassLabel || function(){ return 'Add Bass'; };
     const onLog = opts.onLog || null;
 
     const view = (window.H2SSelectionView && window.H2SSelectionView.selectionBoxInnerHTML)
@@ -52,6 +54,7 @@
     function bindActions(){
       const btnEdit = rootEl.querySelector('[data-act="edit"]');
       const btnConv = rootEl.querySelector('[data-act="convertAudioEditable"]');
+      const btnAddBass = rootEl.querySelector('[data-act="addBass"]');
       const btnDup = rootEl.querySelector('[data-act="duplicate"]');
       const btnDel = rootEl.querySelector('[data-act="remove"]');
 
@@ -69,6 +72,12 @@
         btnConv.addEventListener('click', (e) => {
           e.preventDefault();
           onConvertAudioToEditable(inst.clipId, inst.id);
+        });
+      }
+      if (btnAddBass){
+        btnAddBass.addEventListener('click', (e) => {
+          e.preventDefault();
+          onAddBass(inst.id);
         });
       }
       if (btnDup){
@@ -108,6 +117,7 @@
           escapeHtml,
           isAudio,
           convertLabel: getConvertLabel(),
+          addBassLabel: getAddBassLabel(),
         });
       } else {
         // Fallback markup (should not happen in normal builds)

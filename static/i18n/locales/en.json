@@ -378,6 +378,9 @@
   "actions.optimize": "Optimize",
   "actions.duplicate": "Duplicate",
   "actions.remove": "Remove",
+  "arrange.addBass": "Add Bass",
+  "arrange.addBassDone": "Bass accompaniment added.",
+  "arrange.selectEditableClipFirst": "Select an editable melody clip first.",
 
   "editor.editingClip": "Editing Clip",
   "editor.editingName": "Editing: {name}",

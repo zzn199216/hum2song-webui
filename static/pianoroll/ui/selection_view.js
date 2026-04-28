@@ -14,12 +14,16 @@
     const escapeHtml = opts.escapeHtml || ((s)=>String(s));
     const isAudio = !!opts.isAudio;
     const convertLabel = (opts.convertLabel != null && String(opts.convertLabel)) ? String(opts.convertLabel) : 'Convert to editable';
+    const addBassLabel = (opts.addBassLabel != null && String(opts.addBassLabel)) ? String(opts.addBassLabel) : 'Add Bass';
     const editBtn = isAudio
       ? ''
       : `<button id="btnSelEdit" class="btn mini" data-act="edit">Edit</button>`;
     const audioConvertBtn = isAudio
       ? `<button id="btnSelConvertAudio" class="btn mini primary" type="button" data-act="convertAudioEditable" title="${escapeHtml(convertLabel)}">${escapeHtml(convertLabel)}</button>`
       : '';
+    const addBassBtn = isAudio
+      ? ''
+      : `<button id="btnSelAddBass" class="btn mini" type="button" data-act="addBass">${escapeHtml(addBassLabel)}</button>`;
 
     return `
       <div class="kv"><b>Clip</b><span>${escapeHtml(clipName)}</span></div>
@@ -28,6 +32,7 @@
       <div class="row" style="margin-top:10px;">
         ${editBtn}
         ${audioConvertBtn}
+        ${addBassBtn}
         <button id="btnSelDup" class="btn mini" data-act="duplicate">Duplicate</button>
         <button id="btnSelDel" class="btn mini danger" data-act="remove">Remove</button>
       </div>

@@ -378,6 +378,9 @@
   "actions.optimize": "优化",
   "actions.duplicate": "复制",
   "actions.remove": "移除",
+  "arrange.addBass": "添加贝斯",
+  "arrange.addBassDone": "已添加贝斯伴奏。",
+  "arrange.selectEditableClipFirst": "请先选择一个可编辑旋律片段。",
 
   "editor.editingClip": "编辑片段",
   "editor.editingName": "编辑: {name}",

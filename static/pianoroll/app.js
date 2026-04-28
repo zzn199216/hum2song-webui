@@ -3098,9 +3098,11 @@ $('#rngPitchCenter').addEventListener('input', () => {
             fmtSec,
             escapeHtml,
             onEditClip: (clipId) => this.openClipEditor(clipId),
+            onAddBass: (instId) => this.addBassFromSelected(instId),
             onDuplicateInstance: (instId) => this.duplicateInstance(instId),
             onRemoveInstance: (instId) => this.deleteInstance(instId),
             getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
+            getAddBassLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addBass') : 'Add Bass'),
             onConvertAudioToEditable: (clipId, instId) => {
               Promise.resolve(this.convertAudioClipToEditable(clipId, { sourceAudioInstanceId: instId })).catch(function(err){
                 console.warn('[App] convertAudioClipToEditable (instance) failed', err);
@@ -4502,6 +4504,68 @@ renderTimeline(){
     selectInstance(instId){
       this.state.selectedInstanceId = instId;
       this.render();
+    },
+
+    addBassFromSelected(instanceId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const P = window.H2SProject;
+      const Bass = window.H2SAddBassV0;
+      if (!P || !Bass || typeof this.getProjectV2 !== 'function' || typeof this.setProjectFromV2 !== 'function'){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'missing_api' };
+      }
+      const p2 = this.getProjectV2();
+      if (!p2 || !P.isProjectV2 || !P.isProjectV2(p2)){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'no_project_v2' };
+      }
+
+      const sid = (instanceId != null && String(instanceId).trim()) ? String(instanceId) : (this.state && this.state.selectedInstanceId ? String(this.state.selectedInstanceId) : '');
+      const inst = sid ? (p2.instances || []).find((x) => x && String(x.id) === sid) : null;
+      if (!inst || !inst.clipId){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'instance_not_found' };
+      }
+      const melodyClip = p2.clips && p2.clips[inst.clipId];
+      if (!melodyClip || (typeof P.clipKind === 'function' && P.clipKind(melodyClip) === 'audio')){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'clip_not_editable' };
+      }
+
+      const built = Bass.buildBassScoreFromMelodyClip(melodyClip, { H2SProject: P });
+      if (!built || !built.ok){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason: built && built.reason ? built.reason : 'bass_build_failed' };
+      }
+
+      const trackRes = Bass.findOrCreateBassTrack(p2, { H2SProject: P });
+      if (!trackRes || !trackRes.ok || !trackRes.trackId){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'bass_track_failed' };
+      }
+
+      const clip = P.createClipFromScoreBeat(built.scoreBeat, {
+        name: 'Bass',
+        sourceTaskId: 'arrange:add_bass_v0',
+      });
+      if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+      p2.clips[clip.id] = clip;
+      if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+      p2.clipOrder.unshift(clip.id);
+      if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+
+      if (!Array.isArray(p2.instances)) p2.instances = [];
+      const startBeat = (typeof inst.startBeat === 'number' && isFinite(inst.startBeat)) ? Math.max(0, inst.startBeat) : 0;
+      const bassInst = P.createInstanceV2(clip.id, startBeat, String(trackRes.trackId));
+      p2.instances.push(bassInst);
+      if (typeof P.normalizeProjectV2 === 'function') P.normalizeProjectV2(p2);
+
+      this.state.selectedClipId = clip.id;
+      this.state.selectedInstanceId = bassInst.id;
+      this.setProjectFromV2(p2);
+      this.setImportStatus(_t('arrange.addBassDone', 'Bass accompaniment added.'), false);
+      log(_t('arrange.addBassDone', 'Bass accompaniment added.'));
+      return { ok:true, clipId: clip.id, instanceId: bassInst.id, trackId: trackRes.trackId, trackCreated: !!trackRes.created };
     },
 
     duplicateInstance(instId){
