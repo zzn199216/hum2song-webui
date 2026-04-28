@@ -316,22 +316,29 @@ function buildPlanBlockForTest(plan) {
   return header + '\n' + lines.slice(0, 6).map(function (l) { return '- ' + String(l).trim().slice(0, 120); }).join('\n');
 }
 
-/** Mirrors app setOptimizeOptions plan resolution (Assistant snapshot carry-forward + merge). */
+/** Mirrors app.js setOptimizeOptions plan resolution (keep in sync with App#setOptimizeOptions). */
 function mergePlanForSetOptimizeOptionsLikeApp(opts, existingOpts) {
-  const rawPlan = opts && opts.plan;
   let assistantExecutionPlanSnapshot;
   if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')) {
     assistantExecutionPlanSnapshot = existingOpts && existingOpts._assistantExecutionPlanSnapshot;
   } else {
     assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
   }
+  const snapshotExplicitlyCleared = !!(opts && Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot') && (opts._assistantExecutionPlanSnapshot == null));
   let plan = null;
   if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object') {
     plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
   } else {
-    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
-      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function (l) { return typeof l === 'string'; }) }
-      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'plan')) {
+      const rp = opts.plan;
+      plan = (rp && typeof rp === 'object' && Array.isArray(rp.planLines) && rp.planLines.length >= 1 && (rp.planTitle || rp.planKind))
+        ? { planKind: rp.planKind || null, planTitle: (rp.planTitle && String(rp.planTitle).trim()) ? String(rp.planTitle).trim() : '', planLines: rp.planLines.slice(0, 6).filter(function (l) { return typeof l === 'string'; }) }
+        : null;
+    } else if (!snapshotExplicitlyCleared && existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') {
+      plan = existingOpts.plan;
+    } else {
+      plan = null;
+    }
   }
   return plan || null;
 }
@@ -362,8 +369,8 @@ function resolveOptimizeClipOptionsLikeApp(stored, optOverride) {
   if (merged.templateId != null && String(merged.templateId).trim()) {
     out.templateId = String(merged.templateId).trim();
   }
-  if (merged.plan && typeof merged.plan === 'object') {
-    out.plan = merged.plan;
+  if (Object.prototype.hasOwnProperty.call(merged, 'plan')) {
+    out.plan = (merged.plan && typeof merged.plan === 'object') ? merged.plan : null;
   }
   if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')) {
     out._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
@@ -1797,11 +1804,11 @@ function createFakeApp(opts) {
     },
   };
   const cleared = mergePlanForSetOptimizeOptionsLikeApp({ _assistantExecutionPlanSnapshot: null, userPrompt: 'z' }, stale);
-  assert(cleared && cleared.planTitle === 'Optimize', 'explicit null snapshot => plan from stale existingOpts.plan');
-  console.log('PASS explicit null clears assistant snapshot for plan fallback');
+  assert(cleared == null, 'explicit null snapshot without plan key must not revive stale existingOpts.plan');
+  console.log('PASS explicit null snapshot strips inherited plan');
 })();
 
-(function testOptimizeClipMergePreservesPlanTemplateSnapshot() {
+(function testOptimizeClipMergeClearsAssistantPlanWhenEditorPassesNulls() {
   const snapPlan = {
     planKind: 'clean-outliers',
     planTitle: '移除离群高音',
@@ -1815,13 +1822,45 @@ function createFakeApp(opts) {
     plan: snapPlan,
     _assistantExecutionPlanSnapshot: snapPlan,
   };
-  const ui = { requestedPresetId: 'llm_v0', userPrompt: 'from ui', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true } };
+  const ui = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'from ui',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    plan: null,
+    _assistantExecutionPlanSnapshot: null,
+  };
   const out = resolveOptimizeClipOptionsLikeApp(stored, ui);
   assert(out.templateId === 'clean_outliers_v1', 'merge preserves templateId from stored');
-  assert(out.plan && out.plan.planTitle === '移除离群高音', 'merge preserves plan aligned with snapshot');
-  assert(out._assistantExecutionPlanSnapshot && out._assistantExecutionPlanSnapshot.planTitle === '移除离群高音', 'merge preserves _assistantExecutionPlanSnapshot');
+  assert(out.plan == null, 'editor-style override clears plan');
+  assert(out._assistantExecutionPlanSnapshot == null, 'editor-style override clears snapshot');
   assert(out.intent && out.intent.reduceOutliers === true && out.intent.fixPitch === false, 'intent from override only (not merged stored intent)');
-  console.log('PASS optimizeClip merge preserves planTemplateId snapshot');
+  console.log('PASS optimizeClip merge clears assistant plan when editor passes nulls');
+})();
+
+(function testOptimizeClipMergePreservesAssistantPlanWhenOverrideSuppliesPlan() {
+  const snapPlan = {
+    planKind: 'clean-outliers',
+    planTitle: '移除离群高音',
+    planLines: ['Goal: remove outliers.', 'Strategy: conservative edits.'],
+  };
+  const stored = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'stored',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    templateId: 'clean_outliers_v1',
+  };
+  const assistantOverride = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'assist',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    templateId: 'clean_outliers_v1',
+    plan: snapPlan,
+    _assistantExecutionPlanSnapshot: snapPlan,
+  };
+  const out = resolveOptimizeClipOptionsLikeApp(stored, assistantOverride);
+  assert(out.plan && out.plan.planTitle === '移除离群高音', 'explicit assistant override keeps plan');
+  assert(out._assistantExecutionPlanSnapshot && out._assistantExecutionPlanSnapshot.planTitle === '移除离群高音', 'explicit assistant override keeps snapshot');
+  console.log('PASS optimizeClip merge preserves plan when assistant override supplies it');
 })();
 
 (function testGenericPlanBlockWhenRuleBasedPlanOnly() {

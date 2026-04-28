@@ -1711,7 +1711,7 @@
       };
       const readOptimizeOptionsFromUI = () => {
         const doc = typeof document !== 'undefined' ? document : null;
-        if (!doc) return { requestedPresetId: null, userPrompt: null, intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: false } };
+        if (!doc) return { requestedPresetId: null, userPrompt: null, intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: false }, plan: null, _assistantExecutionPlanSnapshot: null };
         enforceSingleQuickOptimizeSelection();
         const sel = doc.getElementById('editorOptimizePreset') || doc.getElementById('editorQuickOptimizePreset');
         const promptEl = doc.getElementById('editorOptimizePrompt');
@@ -1744,7 +1744,17 @@
             velocityShapeNoteIds = [String(modal.selectedNoteId)];
           }
         }
-        return { requestedPresetId: presetId || null, userPrompt: promptVal, intent, templateId: templateId || null, velocityShapeNoteIds, localTransposeNoteIds: velocityShapeNoteIds, rhythmNoteIds: velocityShapeNoteIds };
+        return {
+          requestedPresetId: presetId || null,
+          userPrompt: promptVal,
+          intent,
+          templateId: templateId || null,
+          velocityShapeNoteIds,
+          localTransposeNoteIds: velocityShapeNoteIds,
+          rhythmNoteIds: velocityShapeNoteIds,
+          plan: null,
+          _assistantExecutionPlanSnapshot: null,
+        };
       };
       const setEditorOptStatus = (text) => {
         const doc = typeof document !== 'undefined' ? document : null;

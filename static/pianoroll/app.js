@@ -1934,7 +1934,6 @@ setOptimizeOptions(arg0, arg1){
   const templateId = rawTemplateId !== undefined
     ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
     : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
-  const rawPlan = opts && opts.plan;
   /** Like templateId: carry forward snapshot unless incoming opts explicitly sets the key (null clears). */
   let assistantExecutionPlanSnapshot;
   if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')){
@@ -1942,13 +1941,21 @@ setOptimizeOptions(arg0, arg1){
   } else {
     assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
   }
+  const snapshotExplicitlyCleared = !!(opts && Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot') && (opts._assistantExecutionPlanSnapshot == null));
   let plan = null;
   if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object'){
     plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
   } else {
-    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
-      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
-      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'plan')){
+      const rp = opts.plan;
+      plan = (rp && typeof rp === 'object' && Array.isArray(rp.planLines) && rp.planLines.length >= 1 && (rp.planTitle || rp.planKind))
+        ? { planKind: rp.planKind || null, planTitle: (rp.planTitle && String(rp.planTitle).trim()) ? String(rp.planTitle).trim() : '', planLines: rp.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
+        : null;
+    } else if (!snapshotExplicitlyCleared && existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object'){
+      plan = existingOpts.plan;
+    } else {
+      plan = null;
+    }
   }
   let nextVelocityShapeIntent;
   if (opts && Object.prototype.hasOwnProperty.call(opts, 'velocityShapeIntent')){
@@ -2055,7 +2062,14 @@ getOptimizeOptions(clipId){
       }
     } catch (e) { console.warn('[App] read opt options failed', e); }
   }
-  return this._lastOptimizeOptions || null;
+  const last = this._lastOptimizeOptions || null;
+  if (!last) return null;
+  if (!clipId) return last;
+  // clipId has no per-clip row: do not leak assistant-only plan fields from another clip via global last
+  const copy = Object.assign({}, last);
+  delete copy.plan;
+  delete copy._assistantExecutionPlanSnapshot;
+  return copy;
 },
 
 // PR-5e: optOverride = one-shot options for this call only; does NOT modify stored per-clip options.
@@ -2093,8 +2107,8 @@ async optimizeClip(clipId, optOverride){
     if (merged.templateId != null && String(merged.templateId).trim()){
       options.templateId = String(merged.templateId).trim();
     }
-    if (merged.plan && typeof merged.plan === 'object'){
-      options.plan = merged.plan;
+    if (Object.prototype.hasOwnProperty.call(merged, 'plan')){
+      options.plan = (merged.plan && typeof merged.plan === 'object') ? merged.plan : null;
     }
     if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')){
       options._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
@@ -4292,7 +4306,7 @@ renderTimeline(){
             const tid = btn.getAttribute('data-template-id');
             const tmpl = tid && INSPECTOR_TEMPLATES[tid] ? INSPECTOR_TEMPLATES[tid] : null;
             if (tmpl && self.setOptimizeOptions){
-              self.setOptimizeOptions({ templateId: tid, intent: tmpl.intent, requestedPresetId: 'llm_v0', userPrompt: tmpl.seed || null }, cid);
+              self.setOptimizeOptions({ templateId: tid, intent: tmpl.intent, requestedPresetId: 'llm_v0', userPrompt: tmpl.seed || null, plan: null, _assistantExecutionPlanSnapshot: null }, cid);
             }
             self.renderSelectedClip();
             return;
@@ -4374,7 +4388,7 @@ renderTimeline(){
           if (act === 'inspOptimizePreset'){
             const presetId = (el.value && String(el.value).trim()) || null;
             if (cid && self && typeof self.setOptimizeOptions === 'function'){
-              self.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, cid);
+              self.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null, plan: null, _assistantExecutionPlanSnapshot: null }, cid);
             }
             self.render();
             return;
