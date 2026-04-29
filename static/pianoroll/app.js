@@ -3123,10 +3123,19 @@ $('#rngPitchCenter').addEventListener('input', () => {
             escapeHtml,
             onEditClip: (clipId) => this.openClipEditor(clipId),
             onAddBass: (instId) => this.addBassFromSelected(instId),
+            onAddAccompaniment: (instId) => {
+              Promise.resolve(this.addAccompanimentFromSelected(instId)).catch((err) => {
+                console.warn('[App] addAccompanimentFromSelected failed', err);
+                const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+                this.setImportStatus(_t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.'), false);
+              });
+            },
             onDuplicateInstance: (instId) => this.duplicateInstance(instId),
             onRemoveInstance: (instId) => this.deleteInstance(instId),
             getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
             getAddBassLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addBass') : 'Add Bass'),
+            getAddAccompanimentLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompaniment') : 'Add accompaniment'),
+            getAddAccompanimentBadgeLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompanimentBadge') : 'Experimental'),
             onConvertAudioToEditable: (clipId, instId) => {
               Promise.resolve(this.convertAudioClipToEditable(clipId, { sourceAudioInstanceId: instId })).catch(function(err){
                 console.warn('[App] convertAudioClipToEditable (instance) failed', err);
@@ -4590,6 +4599,84 @@ renderTimeline(){
       this.setImportStatus(_t('arrange.addBassDone', 'Bass accompaniment added.'), false);
       log(_t('arrange.addBassDone', 'Bass accompaniment added.'));
       return { ok:true, clipId: clip.id, instanceId: bassInst.id, trackId: trackRes.trackId, trackCreated: !!trackRes.created };
+    },
+
+    _arrangementFailureStatusMessage(result){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const r = (result && result.reason) ? String(result.reason) : '';
+      const d = (result && result.detail) ? String(result.detail).trim() : '';
+      let base;
+      switch (r) {
+        case 'llm_config_missing':
+        case 'llm_client_not_loaded':
+          base = _t('arrange.addAccompanimentFail.llmConfig', 'AI (LLM) is not configured. Open AI Settings and set a model.');
+          break;
+        case 'audio_clip_not_supported':
+          base = _t('arrange.addAccompanimentFail.audioClip', 'Audio clips are not supported. Convert to editable notes first.');
+          break;
+        case 'llm_no_valid_json':
+          base = _t('arrange.addAccompanimentFail.invalidOutput', 'AI returned invalid output.');
+          break;
+        case 'llm_request_failed':
+          base = _t('arrange.addAccompanimentFail.llmRequest', 'AI request failed.');
+          break;
+        case 'patch_validation_failed':
+          base = _t('arrange.addAccompanimentFail.validation', 'Arrangement did not pass validation.');
+          break;
+        case 'patch_apply_failed':
+          base = _t('arrange.addAccompanimentFail.apply', 'Could not apply arrangement.');
+          break;
+        case 'arrangement_patch_module_missing':
+        case 'unsupported_goal':
+          base = _t('arrange.addAccompanimentFail.unavailable', 'Accompaniment is not available.');
+          break;
+        case 'selected_clip_missing':
+        case 'selected_instance_missing':
+        case 'selected_clip_not_found':
+        case 'selected_instance_not_found':
+        case 'selected_clip_not_editable_note_clip':
+        case 'project_missing':
+          base = _t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.');
+          break;
+        default:
+          base = _t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.');
+      }
+      if (d && (r === 'patch_validation_failed' || r === 'patch_apply_failed' || r === 'llm_request_failed' || r === 'llm_no_valid_json')){
+        const max = 100;
+        const suffix = d.length > max ? d.slice(0, max) + '…' : d;
+        if (base.indexOf(suffix) < 0) base = base + ' ' + suffix;
+      }
+      return base;
+    },
+
+    async addAccompanimentFromSelected(_instanceId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const ctrl = this.arrangementCtrl;
+      if (!ctrl || typeof ctrl.runArrangementV0 !== 'function'){
+        this.setImportStatus(_t('arrange.addAccompanimentFail.unavailable', 'Accompaniment is not available.'), false);
+        return { ok: false, reason: 'no_controller' };
+      }
+      this.setImportStatus(_t('arrange.addAccompanimentRunning', 'Adding accompaniment...'), false);
+      let result;
+      try {
+        result = await ctrl.runArrangementV0({ goal: 'add_accompaniment_v0' });
+      } catch (err) {
+        const em = (err && err.message) ? String(err.message).slice(0, 160) : '';
+        this.setImportStatus(
+          _t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.') + (em ? ' ' + em : ''),
+          false
+        );
+        return { ok: false, reason: 'exception' };
+      }
+      if (!result || !result.ok){
+        const msg = this._arrangementFailureStatusMessage(result);
+        this.setImportStatus(msg, false);
+        log(msg);
+        return result || { ok: false };
+      }
+      this.setImportStatus(_t('arrange.addAccompanimentDone', 'Accompaniment added.'), false);
+      log(_t('arrange.addAccompanimentDone', 'Accompaniment added.'));
+      return result;
     },
 
     duplicateInstance(instId){

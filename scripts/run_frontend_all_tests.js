@@ -33,6 +33,7 @@ runOne('scripts/tests/run_command_mvp.test.js');
 runOne('scripts/tests/internal_skill_registry.test.js');
 runOne('scripts/tests/ai_assist_dock.test.js');
 runOne('scripts/tests/selection_sync.test.js');
+runOne('scripts/tests/selection_instance_convert.test.js');
 runOne('scripts/tests/add_bass_v0.test.js');
 runOne('scripts/tests/arrangement_patch_v0.test.js');
 runOne('scripts/tests/arrangement_llm_v0.test.js');

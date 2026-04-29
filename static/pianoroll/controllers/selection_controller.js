@@ -27,9 +27,12 @@
     const onDuplicateInstance = opts.onDuplicateInstance || function(){};
     const onRemoveInstance = opts.onRemoveInstance || function(){};
     const onAddBass = opts.onAddBass || function(){};
+    const onAddAccompaniment = opts.onAddAccompaniment || function(){};
     const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
     const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
     const getAddBassLabel = opts.getAddBassLabel || function(){ return 'Add Bass'; };
+    const getAddAccompanimentLabel = opts.getAddAccompanimentLabel || function(){ return 'Add accompaniment'; };
+    const getAddAccompanimentBadgeLabel = opts.getAddAccompanimentBadgeLabel || function(){ return 'Experimental'; };
     const onLog = opts.onLog || null;
 
     const view = (window.H2SSelectionView && window.H2SSelectionView.selectionBoxInnerHTML)
@@ -55,6 +58,7 @@
       const btnEdit = rootEl.querySelector('[data-act="edit"]');
       const btnConv = rootEl.querySelector('[data-act="convertAudioEditable"]');
       const btnAddBass = rootEl.querySelector('[data-act="addBass"]');
+      const btnAddAccomp = rootEl.querySelector('[data-act="addAccompaniment"]');
       const btnDup = rootEl.querySelector('[data-act="duplicate"]');
       const btnDel = rootEl.querySelector('[data-act="remove"]');
 
@@ -78,6 +82,12 @@
         btnAddBass.addEventListener('click', (e) => {
           e.preventDefault();
           onAddBass(inst.id);
+        });
+      }
+      if (btnAddAccomp){
+        btnAddAccomp.addEventListener('click', (e) => {
+          e.preventDefault();
+          onAddAccompaniment(inst.id);
         });
       }
       if (btnDup){
@@ -118,6 +128,8 @@
           isAudio,
           convertLabel: getConvertLabel(),
           addBassLabel: getAddBassLabel(),
+          addAccompanimentLabel: getAddAccompanimentLabel(),
+          addAccompanimentBadgeLabel: getAddAccompanimentBadgeLabel(),
         });
       } else {
         // Fallback markup (should not happen in normal builds)

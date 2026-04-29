@@ -15,6 +15,8 @@
     const isAudio = !!opts.isAudio;
     const convertLabel = (opts.convertLabel != null && String(opts.convertLabel)) ? String(opts.convertLabel) : 'Convert to editable';
     const addBassLabel = (opts.addBassLabel != null && String(opts.addBassLabel)) ? String(opts.addBassLabel) : 'Add Bass';
+    const addAccompLabel = (opts.addAccompanimentLabel != null && String(opts.addAccompanimentLabel)) ? String(opts.addAccompanimentLabel) : 'Add accompaniment';
+    const addAccompBadge = (opts.addAccompanimentBadgeLabel != null && String(opts.addAccompanimentBadgeLabel)) ? String(opts.addAccompanimentBadgeLabel) : 'Experimental';
     const editBtn = isAudio
       ? ''
       : `<button id="btnSelEdit" class="btn mini" data-act="edit">Edit</button>`;
@@ -24,6 +26,9 @@
     const addBassBtn = isAudio
       ? ''
       : `<button id="btnSelAddBass" class="btn mini" type="button" data-act="addBass">${escapeHtml(addBassLabel)}</button>`;
+    const addAccompBtn = isAudio
+      ? ''
+      : `<button id="btnSelAddAccompaniment" class="btn mini" type="button" data-act="addAccompaniment">${escapeHtml(addAccompLabel)} <span class="badge" style="font-size:10px;opacity:.9;margin-left:4px;vertical-align:middle;">${escapeHtml(addAccompBadge)}</span></button>`;
 
     return `
       <div class="kv"><b>Clip</b><span>${escapeHtml(clipName)}</span></div>
@@ -33,6 +38,7 @@
         ${editBtn}
         ${audioConvertBtn}
         ${addBassBtn}
+        ${addAccompBtn}
         <button id="btnSelDup" class="btn mini" data-act="duplicate">Duplicate</button>
         <button id="btnSelDel" class="btn mini danger" data-act="remove">Remove</button>
       </div>
