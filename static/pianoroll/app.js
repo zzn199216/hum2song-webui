@@ -1674,6 +1674,7 @@ try{
 
 // Controllers (optional)
 agentCtrl: null,
+arrangementCtrl: null,
 
 // PR-UX6a: Command layer — runCommand + event bus
 _cmdSubs: [],
@@ -1854,6 +1855,12 @@ setProjectFromV2(projectV2){
   this.project = _projectV2ToV1View(projectV2);
   this.render();
   return {ok:true};
+},
+getSelectedClipId(){
+  return (this.state && this.state.selectedClipId) ? this.state.selectedClipId : null;
+},
+getSelectedInstanceId(){
+  return (this.state && this.state.selectedInstanceId) ? this.state.selectedInstanceId : null;
 },
 
 // --- T4-1.F: single write entry for per-track instrument (v2 truth) ---
@@ -2743,6 +2750,23 @@ try{
   }
 }catch(e){
   console.warn('AgentController init failed', e);
+}
+
+// Wire ArrangementController (non-UI v0 runner) if available
+try{
+  const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
+  if (ROOT.H2SArrangementController && typeof ROOT.H2SArrangementController.create === 'function'){
+    this.arrangementCtrl = ROOT.H2SArrangementController.create({
+      getProjectV2: () => this.getProjectV2(),
+      setProjectFromV2: (p2) => this.setProjectFromV2(p2),
+      getSelectedClipId: () => this.getSelectedClipId(),
+      getSelectedInstanceId: () => this.getSelectedInstanceId(),
+      log: (msg, data) => this.dbg('[arrangement]', msg, data || ''),
+      H2SProject: window.H2SProject,
+    });
+  }
+}catch(e){
+  console.warn('ArrangementController init failed', e);
 }
 
 // PR-5f: hydrate per-clip optimize options from localStorage (survives hard refresh)
