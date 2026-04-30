@@ -1,26 +1,45 @@
 /* Hum2Song Studio — internal assistant skill metadata (MVP slice).
  * Not user-configurable. Sits above H2SInternalActionRegistry: describes assistant-facing
  * labels/targets/policies; execution remains runCommand → executeBounded.
- * Slice: add_clip_to_timeline, add_track, move_instance, remove_instance (confirm UI stays assistant-side).
+ * Slice: add_accompaniment (async arrange v0 helper; not in H2SInternalActionRegistry), add_clip_to_timeline,
+ * add_track, move_instance, remove_instance (confirm UI stays assistant-side).
  */
 (function (ROOT) {
   'use strict';
 
   var TARGET = { none: 'none', selected_instance: 'selected_instance' };
-  var CONFIRM = { never: 'never', assistant_remove_instance: 'assistant_remove_instance' };
+  var CONFIRM = { never: 'never', assistant_remove_instance: 'assistant_remove_instance', assistant_add_accompaniment: 'assistant_add_accompaniment' };
 
   /**
    * @typedef {Object} InternalAssistantSkill
    * @property {string} skillId
-   * @property {string} commandId — bounded runCommand name
+   * @property {string} commandId — bounded runCommand name (same as skillId when paired); may be async-assistant-only
    * @property {string} target
    * @property {string} confirmPolicy
    * @property {boolean} enabled
+   * @property {boolean} [requiresBoundedRegistryPairing] — when false, skill is assistant-only (not executeBounded)
    * @property {string} [phraseResolverId] — implemented in app.js for this slice
    * @property {{ running: string, ok: string, fail: string, skillDisabled: string, clamp?: string, dirLeft?: string, dirRight?: string }} i18n
    */
 
   var SKILLS = {
+    add_accompaniment: {
+      skillId: 'add_accompaniment',
+      commandId: 'add_accompaniment',
+      target: TARGET.selected_instance,
+      confirmPolicy: CONFIRM.assistant_add_accompaniment,
+      enabled: true,
+      requiresBoundedRegistryPairing: false,
+      phraseResolverId: 'assistant_add_accompaniment_v1',
+      i18n: {
+        running: 'aiAssist.addAccompanimentRunning',
+        ok: 'aiAssist.addAccompanimentOk',
+        fail: 'aiAssist.addAccompanimentFail',
+        cancelled: 'aiAssist.addAccompanimentCancelled',
+        confirm: 'aiAssist.addAccompanimentConfirm',
+        skillDisabled: 'aiAssist.skillDisabled',
+      },
+    },
     add_clip_to_timeline: {
       skillId: 'add_clip_to_timeline',
       commandId: 'add_clip_to_timeline',
@@ -92,13 +111,14 @@
   }
 
   /**
-   * Only commands listed in SKILLS participate; must still be bounded in the action registry.
+   * Only commands listed in SKILLS participate; paired commands must still be bounded in H2SInternalActionRegistry.
    * @param {string} commandId
    * @returns {boolean}
    */
   function isAssistantSkillEnabled(commandId) {
     var s = SKILLS[commandId];
     if (!s || !s.enabled) return false;
+    if (s.requiresBoundedRegistryPairing === false) return true;
     var AR = ROOT.H2SInternalActionRegistry;
     if (AR && typeof AR.isBounded === 'function' && !AR.isBounded(commandId)) return false;
     return true;

@@ -218,6 +218,36 @@
     return phrases.indexOf(s) >= 0;
   }
 
+  /**
+   * Narrow Assistant command: trigger LLM Arrangement v0 — add accompaniment (exact phrase match).
+   * Keep in sync with scripts/tests/assistant_add_accompaniment.test.js `resolveAssistantAddAccompanimentIntentFromText`.
+   */
+  function _resolveAssistantAddAccompanimentIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).trim();
+    s = s.replace(/^please\s+/i, '');
+    s = s.replace(/\s+please\s*$/i, '').trim();
+    s = s.replace(/[。！？.!?]+$/g, '').trim();
+    const ascii = s.toLowerCase();
+    const exactEn = ['add accompaniment', 'add some accompaniment', 'make it fuller', 'add support'];
+    if (exactEn.indexOf(ascii) >= 0) return true;
+    const zh = ['添加伴奏', '加点伴奏', '让它更完整', '加点支撑'];
+    return zh.indexOf(s) >= 0;
+  }
+
+  /** Count editable notes under clip.score (beats-only clip). */
+  function _assistantCountMelodyNotesInClipV2(clip){
+    let n = 0;
+    const sc = clip && clip.score && typeof clip.score === 'object' ? clip.score : null;
+    const tracks = sc && Array.isArray(sc.tracks) ? sc.tracks : [];
+    for (let ti = 0; ti < tracks.length; ti++){
+      const tr = tracks[ti];
+      const notes = (tr && Array.isArray(tr.notes)) ? tr.notes : [];
+      n += notes.length;
+    }
+    return n;
+  }
+
   function _getInternalSkillRegistry(){
     return (typeof globalThis !== 'undefined' && globalThis.H2SInternalSkillRegistry) ? globalThis.H2SInternalSkillRegistry : null;
   }
@@ -252,14 +282,27 @@
     const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
   }
+  function _assistantSkillI18nAddAccompaniment(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_accompaniment') : null;
+    return (sk && sk.i18n) ? sk.i18n : {
+      running: 'aiAssist.addAccompanimentRunning',
+      ok: 'aiAssist.addAccompanimentOk',
+      fail: 'aiAssist.addAccompanimentFail',
+      cancelled: 'aiAssist.addAccompanimentCancelled',
+      confirm: 'aiAssist.addAccompanimentConfirm',
+      skillDisabled: 'aiAssist.skillDisabled',
+    };
+  }
 
   /** Product precedence for bounded assistant skills (internal slice; matches historical if-chain order). */
-  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
+  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
 
   /**
    * phraseResolverId → in-code phrase resolver (must match internal_skill_registry SKILLS.*.phraseResolverId).
    */
   const _ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_accompaniment_v1: _resolveAssistantAddAccompanimentIntentFromText,
     assistant_add_clip_to_timeline_v1: _resolveAssistantAddClipToTimelineIntentFromText,
     assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText,
     assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText,
@@ -268,6 +311,7 @@
 
   /** If a skill row is missing, still resolve using the known phrase ids for this slice. */
   const _ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_accompaniment: 'assistant_add_accompaniment_v1',
     add_clip_to_timeline: 'assistant_add_clip_to_timeline_v1',
     add_track: 'assistant_add_track_v1',
     move_instance: 'assistant_move_instance_v1',
@@ -302,6 +346,98 @@
         self._aiAssistItems = self._aiAssistItems || [];
         self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
         self.render();
+        return true;
+      }
+      if (skillId === 'add_accompaniment'){
+        const kiAm = _assistantSkillI18nAddAccompaniment();
+        self._aiAssistItems = self._aiAssistItems || [];
+        const phraseText = String(text);
+        const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
+        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+        const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
+        if (!instIdGo){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+          self.render();
+          return true;
+        }
+        const inst = (p2 && Array.isArray(p2.instances))
+          ? p2.instances.find(function(x){ return x && String(x.id) === instIdGo; })
+          : null;
+        if (!inst){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+          self.render();
+          return true;
+        }
+        const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
+        if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+          self.render();
+          return true;
+        }
+        const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
+          ? p2.clips[cidFromInst]
+          : null;
+        if (!clipV2){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+          self.render();
+          return true;
+        }
+        const isAudioClip = (function () {
+          if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
+          return !!(clipV2 && clipV2.kind === 'audio');
+        })();
+        if (isAudioClip){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
+          self.render();
+          return true;
+        }
+        if (_assistantCountMelodyNotesInClipV2(clipV2) < 1){
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+          self.render();
+          return true;
+        }
+        const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
+        const win = (typeof window !== 'undefined') ? window : null;
+        if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
+          self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
+          self.render();
+          return true;
+        }
+        const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+        self._aiAssistItems.push(pendingAm);
+        self.render();
+        const selfAm = self;
+        Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+          ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
+          : Promise.resolve({ ok: false, reason: 'missing_api' })
+        ).then(function(res){
+          const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+          if (idx >= 0){
+            if (res && res.ok){
+              selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
+            } else {
+              let detail = '';
+              if (typeof selfAm._arrangementFailureStatusMessage === 'function'){
+                detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
+              }
+              if (!detail && res){
+                const rsn = (res.reason != null) ? String(res.reason).trim() : '';
+                const det = (res.detail != null) ? String(res.detail).trim() : '';
+                detail = [rsn, det].filter(Boolean).join(' ').trim();
+              }
+              if (!detail) detail = 'unknown';
+              selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)) };
+            }
+          }
+          selfAm.render();
+        }).catch(function(err){
+          const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+          if (idx >= 0){
+            const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
+            selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
+          }
+          selfAm.render();
+        });
         return true;
       }
       if (skillId === 'add_clip_to_timeline'){

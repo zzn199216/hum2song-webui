@@ -213,6 +213,13 @@
   "aiAssist.resultPitchTiming": "音高/节奏已更新",
   "aiAssist.resultStructure": "结构已更新",
   "aiAssist.resultUpdated": "已更新",
+  "aiAssist.addAccompanimentRunning": "正在添加伴奏…",
+  "aiAssist.addAccompanimentOk": "已添加伴奏。你可以打开「编曲详情」查看提示词和补丁。",
+  "aiAssist.addAccompanimentFail": "无法添加伴奏：{detail}",
+  "aiAssist.addAccompanimentCancelled": "已取消添加伴奏。",
+  "aiAssist.addAccompanimentConfirm": "我会给当前选中的旋律添加一段实验性伴奏，不会修改原旋律。是否继续？",
+  "aiAssist.selectMelodyTimelineFirst": "请先在时间轴中选中一个可编辑旋律片段。",
+  "aiAssist.addAccompanimentNeedsNoteClip": "这个功能需要可编辑音符片段。请先把音频转换为可编辑音符。",
 
   "cmd.optimizing": "正在优化…",
   "cmd.optimized": "优化完成。",

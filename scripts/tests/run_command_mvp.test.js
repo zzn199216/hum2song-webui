@@ -46,7 +46,7 @@ if (globalThis.window && globalThis.window.H2SInternalSkillRegistry) {
   assert(/assistant_add_track_v1:\s*_resolveAssistantAddTrackIntentFromText/.test(appSrc), 'add_track phrase resolver wiring');
   assert(/assistant_move_instance_v1:\s*_resolveAssistantMoveInstanceIntentFromText/.test(appSrc), 'move_instance phrase resolver wiring');
   assert(/assistant_remove_instance_v1:\s*_resolveAssistantRemoveInstanceIntentFromText/.test(appSrc), 'remove_instance phrase resolver wiring');
-  assert(/add_track/.test(skillSrc) && /move_instance/.test(skillSrc) && /remove_instance/.test(skillSrc), 'skill registry defines bounded assistant slice');
+  assert(/add_accompaniment/.test(skillSrc) && /add_track/.test(skillSrc) && /move_instance/.test(skillSrc) && /remove_instance/.test(skillSrc), 'skill registry defines bounded assistant slice + add_accompaniment');
   assert(/add_clip_to_timeline/.test(regSrc) && /move_instance/.test(regSrc) && /remove_instance/.test(regSrc) && /add_track/.test(regSrc), 'registry should define MVP command ids');
   const R = globalThis.H2SInternalActionRegistry;
   assert(R && typeof R.boundedActionIds === 'function', 'registry exposes boundedActionIds');

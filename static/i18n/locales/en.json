@@ -213,6 +213,13 @@
   "aiAssist.resultPitchTiming": "Pitch/timing updated",
   "aiAssist.resultStructure": "Structure updated",
   "aiAssist.resultUpdated": "Updated",
+  "aiAssist.addAccompanimentRunning": "Adding accompaniment…",
+  "aiAssist.addAccompanimentOk": "Accompaniment added. You can open Arrangement Details to inspect the prompt and patch.",
+  "aiAssist.addAccompanimentFail": "Could not add accompaniment: {detail}",
+  "aiAssist.addAccompanimentCancelled": "Add accompaniment cancelled.",
+  "aiAssist.addAccompanimentConfirm": "I'll add an experimental accompaniment to the currently selected melody without changing the original. Continue?",
+  "aiAssist.selectMelodyTimelineFirst": "Select an editable melody clip on the timeline first.",
+  "aiAssist.addAccompanimentNeedsNoteClip": "This needs an editable note clip. Convert the audio to editable notes first.",
 
   "cmd.optimizing": "Optimizing…",
   "cmd.optimized": "Optimized.",
