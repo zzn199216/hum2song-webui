@@ -382,6 +382,8 @@
   "arrange.addBassDone": "Bass accompaniment added.",
   "arrange.selectEditableClipFirst": "Select an editable melody clip first.",
   "arrange.addAccompaniment": "Add accompaniment",
+  "arrange.addAccompanimentMoreInstructions": "More instructions (optional)",
+  "arrange.addAccompanimentInstructionPlaceholder": "e.g. softer, more rhythmic, game-like",
   "arrange.addAccompanimentBadge": "Experimental",
   "arrange.addAccompanimentRunning": "Adding accompaniment...",
   "arrange.addAccompanimentDone": "Accompaniment added via LLM.",

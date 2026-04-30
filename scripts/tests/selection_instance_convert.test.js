@@ -33,6 +33,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
     addAccompanimentBadgeLabel: 'Experimental',
   });
   assert(htmlNote.includes('data-act="addAccompaniment"') && htmlNote.includes('btnSelAddAccompaniment'), 'note clip renders accompaniment button');
+  assert(htmlNote.includes('data-field="addAccompUserPrompt"') && htmlNote.includes('h2s-add-accomp-hint'), 'note clip renders optional accompaniment instruction field');
   assert(htmlNote.includes('data-act="addBass"'), 'note clip still renders add bass');
   const htmlAudio = H2SSelectionView.selectionBoxInnerHTML({
     isAudio: true,
@@ -42,6 +43,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
     convertLabel: 'Convert',
   });
   assert(!htmlAudio.includes('addAccompaniment'), 'audio clip must not render accompaniment control');
+  assert(!htmlAudio.includes('addAccompUserPrompt'), 'audio clip must not render accompaniment instruction field');
   assert(!htmlAudio.includes('addBass'), 'audio clip must not render add bass');
   console.log('PASS selection_view add accompaniment runtime');
 })();
@@ -52,15 +54,16 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   assert(src.includes('onConvertAudioToEditable'), 'controller accepts convert callback');
   assert(src.includes('convertAudioEditable') && src.includes('onConvertAudioToEditable(inst.clipId, inst.id)'), 'convert passes clip + instance id');
   assert(src.includes("P.clipKind(sel.clip) === 'audio'"), 'audio detection uses clipKind');
-  assert(src.includes('onAddAccompaniment') && /onAddAccompaniment\(inst\.id\)/.test(src), 'add accompaniment forwards instance id');
+  assert(src.includes('onAddAccompaniment') && /onAddAccompaniment\(inst\.id,\s*extra\)/.test(src), 'add accompaniment forwards instance id and extras');
   assert(src.includes('btnAddAccomp') && src.includes('addAccompaniment'), 'controller binds add accompaniment action');
+  assert(src.includes('addAccompUserPrompt') && /onAddAccompaniment\(inst\.id,\s*extra\)/.test(src), 'add accompaniment collects optional userPrompt from inspector');
   console.log('PASS selection_controller wiring');
 })();
 
 (function testAppArrangementUi(){
   const p = path.join(repoRoot, 'static', 'pianoroll', 'app.js');
   const src = fs.readFileSync(p, 'utf8');
-  assert(/\brunArrangementV0\s*\(\s*\{\s*goal:\s*goal\s*\}/.test(src) && /add_accompaniment_v0/.test(src), 'app calls runArrangementV0 with add_accompaniment_v0 goal');
+  assert(/const runOpts = \{\s*goal:\s*goal\s*\}/.test(src) && /if \(up\) runOpts\.userPrompt = up/.test(src) && /\brunArrangementV0\s*\(\s*runOpts\s*\)/.test(src), 'app calls runArrangementV0 with goal and optional userPrompt');
   assert(src.includes('onAddAccompaniment:'), 'selection wiring includes onAddAccompaniment');
   assert(src.includes('addAccompanimentFromSelected'), 'app implements addAccompanimentFromSelected');
   assert(src.includes('addBassFromSelected'), 'add bass handler preserved');
@@ -72,6 +75,8 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   const zh = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'zh.json'), 'utf8'));
   const keys = [
     'arrange.addAccompaniment',
+    'arrange.addAccompanimentMoreInstructions',
+    'arrange.addAccompanimentInstructionPlaceholder',
     'arrange.addAccompanimentBadge',
     'arrange.addAccompanimentRunning',
     'arrange.addAccompanimentDone',

@@ -33,6 +33,7 @@
     const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
     const getAddBassLabel = opts.getAddBassLabel || function(){ return 'Add Bass'; };
     const getAddAccompanimentLabel = opts.getAddAccompanimentLabel || function(){ return 'Add accompaniment'; };
+    const getAddAccompanimentMoreInstructionsLabel = opts.getAddAccompanimentMoreInstructionsLabel || function(){ return 'More instructions (optional)'; };
     const getAddAccompanimentBadgeLabel = opts.getAddAccompanimentBadgeLabel || function(){ return 'Experimental'; };
     const getArrangementDetailsLabel = opts.getArrangementDetailsLabel || function(){ return 'Arrangement Details'; };
     const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
@@ -91,7 +92,13 @@
       if (btnAddAccomp){
         btnAddAccomp.addEventListener('click', (e) => {
           e.preventDefault();
-          onAddAccompaniment(inst.id);
+          const ta = rootEl.querySelector('[data-field="addAccompUserPrompt"]');
+          let extra = {};
+          if (ta && typeof ta.value === 'string'){
+            const t = ta.value.trim();
+            if (t) extra = { userPrompt: t };
+          }
+          onAddAccompaniment(inst.id, extra);
         });
       }
       if (btnArrDet){
@@ -139,6 +146,7 @@
           convertLabel: getConvertLabel(),
           addBassLabel: getAddBassLabel(),
           addAccompanimentLabel: getAddAccompanimentLabel(),
+          addAccompanimentMoreInstructionsLabel: getAddAccompanimentMoreInstructionsLabel(),
           addAccompanimentBadgeLabel: getAddAccompanimentBadgeLabel(),
           showArrangementDetails: !!getHasArrangementDetails(),
           arrangementDetailsLabel: getArrangementDetailsLabel(),

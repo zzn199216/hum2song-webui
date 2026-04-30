@@ -382,6 +382,8 @@
   "arrange.addBassDone": "已添加贝斯伴奏。",
   "arrange.selectEditableClipFirst": "请先选择一个可编辑旋律片段。",
   "arrange.addAccompaniment": "添加伴奏",
+  "arrange.addAccompanimentMoreInstructions": "更多要求（可选）",
+  "arrange.addAccompanimentInstructionPlaceholder": "例如：轻一点、更有节奏、更像游戏音乐",
   "arrange.addAccompanimentBadge": "实验",
   "arrange.addAccompanimentRunning": "正在添加伴奏...",
   "arrange.addAccompanimentDone": "已通过大模型添加伴奏。",

@@ -29,6 +29,15 @@
     const addAccompBtn = isAudio
       ? ''
       : `<button id="btnSelAddAccompaniment" class="btn mini" type="button" data-act="addAccompaniment">${escapeHtml(addAccompLabel)} <span class="badge" style="font-size:10px;opacity:.9;margin-left:4px;vertical-align:middle;">${escapeHtml(addAccompBadge)}</span></button>`;
+    const moreInstrSummary = (opts.addAccompanimentMoreInstructionsLabel != null && String(opts.addAccompanimentMoreInstructionsLabel))
+      ? String(opts.addAccompanimentMoreInstructionsLabel)
+      : 'More instructions (optional)';
+    const addAccompInstrBlock = isAudio
+      ? ''
+      : `<details class="h2s-add-accomp-hint" style="margin-top:8px;font-size:11px;opacity:.9;">
+        <summary style="cursor:pointer;user-select:none;color:var(--muted);font-weight:500;" data-i18n="arrange.addAccompanimentMoreInstructions">${escapeHtml(moreInstrSummary)}</summary>
+        <textarea id="txtSelAddAccompInstr" data-field="addAccompUserPrompt" rows="2" data-i18n-placeholder="arrange.addAccompanimentInstructionPlaceholder" placeholder="" style="width:100%;box-sizing:border-box;margin-top:6px;font-size:11px;resize:vertical;min-height:40px;max-height:120px;padding:4px 6px;border-radius:4px;border:1px solid var(--hairline, rgba(128,128,128,.35));background:var(--panel, transparent);color:inherit;"></textarea>
+      </details>`;
     const showArrDet = !!opts.showArrangementDetails && !isAudio;
     const arrDetLabel = (opts.arrangementDetailsLabel != null && String(opts.arrangementDetailsLabel)) ? String(opts.arrangementDetailsLabel) : 'Arrangement Details';
     const arrangementDetailsRow = showArrDet
@@ -47,6 +56,7 @@
         <button id="btnSelDup" class="btn mini" data-act="duplicate">Duplicate</button>
         <button id="btnSelDel" class="btn mini danger" data-act="remove">Remove</button>
       </div>
+      ${addAccompInstrBlock}
       ${arrangementDetailsRow}
     `;
   }

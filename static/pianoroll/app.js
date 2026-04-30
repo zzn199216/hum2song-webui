@@ -3410,8 +3410,8 @@ $('#rngPitchCenter').addEventListener('input', () => {
             escapeHtml,
             onEditClip: (clipId) => this.openClipEditor(clipId),
             onAddBass: (instId) => this.addBassFromSelected(instId),
-            onAddAccompaniment: (instId) => {
-              Promise.resolve(this.addAccompanimentFromSelected(instId)).catch((err) => {
+            onAddAccompaniment: (instId, extra) => {
+              Promise.resolve(this.addAccompanimentFromSelected(instId, extra)).catch((err) => {
                 console.warn('[App] addAccompanimentFromSelected failed', err);
                 const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
                 this.setImportStatus(_t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.'), false);
@@ -3426,6 +3426,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
             getAddBassLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addBass') : 'Add Bass'),
             getAddAccompanimentLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompaniment') : 'Add accompaniment'),
+            getAddAccompanimentMoreInstructionsLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompanimentMoreInstructions') : 'More instructions (optional)'),
             getAddAccompanimentBadgeLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompanimentBadge') : 'Experimental'),
             getArrangementDetailsLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.detailsShort') : 'Arrangement Details'),
             onConvertAudioToEditable: (clipId, instId) => {
@@ -4941,7 +4942,7 @@ renderTimeline(){
       return base;
     },
 
-    async addAccompanimentFromSelected(_instanceId){
+    async addAccompanimentFromSelected(_instanceId, runExtra){
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
       const goal = 'add_accompaniment_v0';
       const clipId = (typeof this.getSelectedClipId === 'function') ? this.getSelectedClipId() : null;
@@ -4957,7 +4958,10 @@ renderTimeline(){
       this.setImportStatus(_t('arrange.addAccompanimentRunning', 'Adding accompaniment...'), false);
       let result;
       try {
-        result = await ctrl.runArrangementV0({ goal: goal });
+        const runOpts = { goal: goal };
+        const up = (runExtra && runExtra.userPrompt != null) ? String(runExtra.userPrompt).trim() : '';
+        if (up) runOpts.userPrompt = up;
+        result = await ctrl.runArrangementV0(runOpts);
       } catch (err) {
         const em = (err && err.message) ? String(err.message).slice(0, 160) : '';
         this._commitArrangementSnapshot({ ok: false, reason: 'exception', detail: em }, goal, clipId, instId);
