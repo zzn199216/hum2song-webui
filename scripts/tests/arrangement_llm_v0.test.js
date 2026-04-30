@@ -215,6 +215,10 @@ async function testPromptIncludesRequiredContext(){
   assert(sp.indexOf('beats-only') >= 0, 'beats-only constraint included');
   assert(sp.indexOf('no startSec/durationSec/spanSec') >= 0, 'no seconds constraint included');
   assert(sp.indexOf('additive-only') >= 0, 'additive-only constraint included');
+
+  assert(up.indexOf('Strategy for add_accompaniment_v0:') >= 0, 'add_accompaniment_v0 strategy block header');
+  assert(/\bbass-first\b/i.test(up), 'bass-first support guidance');
+  assert(up.indexOf('Avoid pad-only') >= 0 || up.indexOf('block-chord-only') >= 0, 'discourages pad/block sustained default');
 }
 
 async function testRejectsMissingOrAudioSelection(){

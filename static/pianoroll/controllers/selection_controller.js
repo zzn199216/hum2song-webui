@@ -28,11 +28,14 @@
     const onRemoveInstance = opts.onRemoveInstance || function(){};
     const onAddBass = opts.onAddBass || function(){};
     const onAddAccompaniment = opts.onAddAccompaniment || function(){};
-    const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
+    const onArrangementDetails = opts.onArrangementDetails || function(){};
+    const getHasArrangementDetails = opts.getHasArrangementDetails || function(){ return false; };
     const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
     const getAddBassLabel = opts.getAddBassLabel || function(){ return 'Add Bass'; };
     const getAddAccompanimentLabel = opts.getAddAccompanimentLabel || function(){ return 'Add accompaniment'; };
     const getAddAccompanimentBadgeLabel = opts.getAddAccompanimentBadgeLabel || function(){ return 'Experimental'; };
+    const getArrangementDetailsLabel = opts.getArrangementDetailsLabel || function(){ return 'Arrangement Details'; };
+    const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
     const onLog = opts.onLog || null;
 
     const view = (window.H2SSelectionView && window.H2SSelectionView.selectionBoxInnerHTML)
@@ -61,6 +64,7 @@
       const btnAddAccomp = rootEl.querySelector('[data-act="addAccompaniment"]');
       const btnDup = rootEl.querySelector('[data-act="duplicate"]');
       const btnDel = rootEl.querySelector('[data-act="remove"]');
+      const btnArrDet = rootEl.querySelector('[data-act="arrangementDetails"]');
 
       const sel = currentSelectedInstance();
       const inst = sel ? sel.inst : null;
@@ -88,6 +92,12 @@
         btnAddAccomp.addEventListener('click', (e) => {
           e.preventDefault();
           onAddAccompaniment(inst.id);
+        });
+      }
+      if (btnArrDet){
+        btnArrDet.addEventListener('click', (e) => {
+          e.preventDefault();
+          onArrangementDetails();
         });
       }
       if (btnDup){
@@ -130,6 +140,8 @@
           addBassLabel: getAddBassLabel(),
           addAccompanimentLabel: getAddAccompanimentLabel(),
           addAccompanimentBadgeLabel: getAddAccompanimentBadgeLabel(),
+          showArrangementDetails: !!getHasArrangementDetails(),
+          arrangementDetailsLabel: getArrangementDetailsLabel(),
         });
       } else {
         // Fallback markup (should not happen in normal builds)

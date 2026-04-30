@@ -106,6 +106,23 @@
     return out;
   }
 
+  /** Explicit default arrangement strategy (prompt-only; schema unchanged). */
+  function buildAddAccompanimentV0StrategyBlock(){
+    return [
+      'Strategy for add_accompaniment_v0:',
+      '- Default strategy: bass-first support.',
+      '- Prefer creating one supportive bass-like accompaniment track.',
+      '- Use low register notes, but keep them soft and sparse.',
+      '- Use short-to-medium rhythmic notes, not whole-clip or multi-bar sustained blocks.',
+      '- Avoid pad-only / block-chord-only output as the default.',
+      '- Preserve melody as the main focus.',
+      '- If adding chords/pad, keep them secondary and light.',
+      '- Keep velocity conservative.',
+      '- Do not overpower the melody.',
+      '- Do not modify/delete existing melody material.',
+    ].join('\n');
+  }
+
   function buildPromptContext(input){
     const noteTable = buildMelodyNoteTable(input.selectedClip.score, 512);
     const payload = {
@@ -164,16 +181,23 @@
       'Return only the JSON code block.',
     ].join('\n');
 
-    const userPrompt = [
+    const goalStr = safeTrim(input.goal || '');
+    const userPromptParts = [
       'Generate Arrangement Patch v0 for goal: add_accompaniment_v0.',
       (input.userPrompt ? ('User instruction: ' + input.userPrompt) : 'User instruction: (none)'),
+    ];
+    if (goalStr === 'add_accompaniment_v0'){
+      userPromptParts.push('', buildAddAccompanimentV0StrategyBlock());
+    }
+    userPromptParts.push(
       '',
       'Context JSON:',
       JSON.stringify(payload, null, 2),
       '',
       'Allowed schema JSON:',
       JSON.stringify(schema, null, 2),
-    ].join('\n');
+    );
+    const userPrompt = userPromptParts.join('\n');
 
     return { systemPrompt: systemPrompt, userPrompt: userPrompt };
   }

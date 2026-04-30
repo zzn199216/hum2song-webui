@@ -1651,6 +1651,11 @@ try{
     _projectV2: null,
     _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
     _lastOptimizeSnapshot: null, // Studio “last optimize” summary (user-facing; refreshed on lang change)
+    _lastArrangementSnapshot: null, // Last LLM Arrangement v0 run (in-memory only; not persisted)
+    _lastArrangementDetailsOpen: false,
+    _lastArrangementDetailsInitialized: false,
+    _lastArrangementDetailsOnDocDown: null,
+    _lastArrangementDetailsOnKey: null,
     _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
     _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
     _pendingClipFromProject: null, // full project doc v2 while "Import clip from project JSON" chooser is open
@@ -2618,6 +2623,7 @@ async optimizeClip(clipId, optOverride){
     const panel = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetails') : null;
     const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
     if (!panel) return;
+    if (typeof this._closeArrangementDetails === 'function') this._closeArrangementDetails();
     this._closeLastOptimizeDetails();
     this._renderLastOptimizeDetailsBody();
     panel.classList.remove('hidden');
@@ -2630,6 +2636,7 @@ async optimizeClip(clipId, optOverride){
       const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
       if (!node || typeof node.closest !== 'function') return;
       if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails') || node.closest('#btnEditorOptimizeDetails') || node.closest('#btnEditorOptimizeDetailsDebug') || node.closest('#btnInspectorOptimizeDetails')) return;
+      if (node.closest('#studioArrangementDetails') || node.closest('#btnSelArrangementDetails')) return;
       app._closeLastOptimizeDetails();
     };
     document.addEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
@@ -2657,6 +2664,285 @@ async optimizeClip(clipId, optOverride){
       btn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._toggleLastOptimizeDetails(); });
       if (closeBtn) closeBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._closeLastOptimizeDetails(); });
     }catch(e){ console.warn('[lastOpt] _initLastOptimizeDetails failed', e); }
+  },
+
+  _safeArrangementJsonClone(obj){
+    if (obj == null) return null;
+    if (typeof obj !== 'object') return obj;
+    try { return JSON.parse(JSON.stringify(obj)); } catch (_e) { return null; }
+  },
+
+  _isSensitiveArrangementKey(k){
+    const s = String(k || '').toLowerCase();
+    if (!s) return false;
+    if (s === 'headers' || s === 'authorization' || s === 'password' || s === 'auth') return true;
+    if (s === 'apikey' || s === 'api_key' || s.endsWith('apikey')) return true;
+    if (s.includes('secret')) return true;
+    if (s === 'token' || s.endsWith('_token') || s === 'authtoken' || s === 'accesstoken' || s === 'refreshtoken') return true;
+    if (s.indexOf('authorization') >= 0) return true;
+    return false;
+  },
+
+  _redactArrangementDeep(value){
+    const REDACT = '[REDACTED]';
+    const self = this;
+    const isK = (k) => self._isSensitiveArrangementKey(k);
+    const walk = (v) => {
+      if (v == null) return v;
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+      if (Array.isArray(v)) return v.map(walk);
+      if (typeof v !== 'object') return v;
+      const out = {};
+      const keys = Object.keys(v);
+      for (let i = 0; i < keys.length; i++){
+        const k = keys[i];
+        if (isK(k)){
+          out[k] = REDACT;
+          continue;
+        }
+        out[k] = walk(v[k]);
+      }
+      return out;
+    };
+    return walk(value);
+  },
+
+  _commitArrangementSnapshot(runResult, goal, selectedClipId, selectedInstanceId){
+    const r = (runResult && typeof runResult === 'object') ? runResult : {};
+    const snap = {
+      ts: Date.now(),
+      goal: (goal != null) ? String(goal) : 'add_accompaniment_v0',
+      selectedClipId: (selectedClipId != null && String(selectedClipId).trim()) ? String(selectedClipId).trim() : null,
+      selectedInstanceId: (selectedInstanceId != null && String(selectedInstanceId).trim()) ? String(selectedInstanceId).trim() : null,
+      ok: !!r.ok,
+      reason: (r.reason != null) ? String(r.reason) : '',
+      detail: (r.detail != null) ? String(r.detail) : '',
+      summary: this._safeArrangementJsonClone(r.summary),
+      llmDebug: this._safeArrangementJsonClone(r.llmDebug),
+      promptTrace: this._safeArrangementJsonClone(r.promptTrace),
+      rawPatch: this._safeArrangementJsonClone(r.rawPatch),
+      arrangementOutcome: this._safeArrangementJsonClone(r.arrangementOutcome),
+    };
+    this._lastArrangementSnapshot = this._redactArrangementDeep(snap);
+  },
+
+  _arrangementDetailsOutcomeLabel(snap, t){
+    if (!snap) return '—';
+    if (snap.ok && snap.reason === 'ok') return t('arrange.detail.outcomeApplied', 'Applied');
+    const r = String(snap.reason || '');
+    if (r === 'patch_validation_failed') return t('arrange.detail.outcomeRejected', 'Rejected');
+    return t('arrange.detail.outcomeFailed', 'Failed');
+  },
+
+  _renderArrangementDetailsBody(){
+    const body = (typeof document !== 'undefined') ? document.getElementById('studioArrangementDetailsBody') : null;
+    if (!body) return;
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k, fb){ return (fb != null) ? fb : k; };
+    const snap = this._lastArrangementSnapshot;
+    while (body.firstChild) body.removeChild(body.firstChild);
+    if (!snap){
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = t('arrange.detail.empty', 'No arrangement run recorded yet.');
+      body.appendChild(empty);
+      return;
+    }
+    const addRow = (labelKey, valueStr) => {
+      const row = document.createElement('div');
+      row.className = 'lastOptDetailRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t(labelKey);
+      const val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = valueStr;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      body.appendChild(row);
+    };
+    const llmCalled = !!(snap.llmDebug && (Number(snap.llmDebug.callCount) > 0 || (snap.llmDebug.model && String(snap.llmDebug.model).trim())));
+    addRow('arrange.detail.outcome', this._arrangementDetailsOutcomeLabel(snap, t));
+    addRow('arrange.detail.reason', snap.reason || '—');
+    addRow('arrange.detail.detail', (snap.detail && String(snap.detail).slice(0, 400)) || '—');
+    addRow('arrange.detail.goal', snap.goal || '—');
+    addRow('arrange.detail.selectedClip', snap.selectedClipId || '—');
+    addRow('arrange.detail.selectedInstance', snap.selectedInstanceId || '—');
+    addRow('arrange.detail.llmCalled', llmCalled ? t('arrange.detail.llmYes', 'Yes') : t('arrange.detail.llmNo', 'No'));
+    if (snap.llmDebug && typeof snap.llmDebug === 'object'){
+      const d = snap.llmDebug;
+      if (d.model != null) addRow('arrange.detail.model', String(d.model));
+      if (d.baseUrl != null) addRow('arrange.detail.baseUrl', String(d.baseUrl));
+      if (d.callCount != null) addRow('arrange.detail.callCount', String(d.callCount));
+    }
+    const sum = snap.summary && typeof snap.summary === 'object' ? snap.summary : null;
+    if (sum){
+      const j = (k) => (Array.isArray(sum[k]) ? sum[k].join(', ') : '—');
+      addRow('arrange.detail.createdTracks', j('createdTrackIds'));
+      addRow('arrange.detail.createdClips', j('createdClipIds'));
+      addRow('arrange.detail.createdInstances', j('createdInstanceIds'));
+    }
+    const addDetailsTextarea = (summaryKey, textareaRows, jsonObj) => {
+      const det = document.createElement('details');
+      det.style.marginTop = '8px';
+      const summ = document.createElement('summary');
+      summ.style.cursor = 'pointer';
+      summ.style.fontWeight = '600';
+      summ.textContent = t(summaryKey);
+      det.appendChild(summ);
+      const ta = document.createElement('textarea');
+      ta.setAttribute('readonly', 'readonly');
+      ta.rows = textareaRows;
+      ta.style.width = '100%';
+      ta.style.boxSizing = 'border-box';
+      ta.style.fontSize = '11px';
+      ta.style.fontFamily = 'ui-monospace, monospace';
+      let text = '';
+      try { text = jsonObj ? JSON.stringify(jsonObj, null, 2) : ''; } catch (_e) { text = String(jsonObj); }
+      ta.value = text;
+      det.appendChild(ta);
+      body.appendChild(det);
+    };
+    if (snap.arrangementOutcome != null){
+      addDetailsTextarea('arrange.detail.outcomeBlock', 8, snap.arrangementOutcome);
+    }
+    if (snap.rawPatch != null){
+      addDetailsTextarea('arrange.detail.rawPatch', 10, snap.rawPatch);
+    }
+    const pt = snap.promptTrace && typeof snap.promptTrace === 'object' ? snap.promptTrace : null;
+    if (pt){
+      const detSys = document.createElement('details');
+      detSys.style.marginTop = '6px';
+      const s1 = document.createElement('summary');
+      s1.style.cursor = 'pointer';
+      s1.style.fontWeight = '600';
+      s1.textContent = t('arrange.detail.systemPrompt');
+      detSys.appendChild(s1);
+      const taSys = document.createElement('textarea');
+      taSys.setAttribute('readonly', 'readonly');
+      taSys.rows = 6;
+      taSys.style.width = '100%';
+      taSys.style.boxSizing = 'border-box';
+      taSys.style.fontSize = '11px';
+      taSys.value = (typeof pt.systemPrompt === 'string') ? pt.systemPrompt : '';
+      detSys.appendChild(taSys);
+      body.appendChild(detSys);
+      const detUsr = document.createElement('details');
+      detUsr.style.marginTop = '6px';
+      const s2 = document.createElement('summary');
+      s2.style.cursor = 'pointer';
+      s2.style.fontWeight = '600';
+      s2.textContent = t('arrange.detail.userPrompt');
+      detUsr.appendChild(s2);
+      const taUsr = document.createElement('textarea');
+      taUsr.setAttribute('readonly', 'readonly');
+      taUsr.rows = 10;
+      taUsr.style.width = '100%';
+      taUsr.style.boxSizing = 'border-box';
+      taUsr.style.fontSize = '11px';
+      taUsr.value = (typeof pt.userPrompt === 'string') ? pt.userPrompt : '';
+      detUsr.appendChild(taUsr);
+      body.appendChild(detUsr);
+    }
+    const copyWrap = document.createElement('div');
+    copyWrap.style.marginTop = '10px';
+    copyWrap.style.display = 'flex';
+    copyWrap.style.flexWrap = 'wrap';
+    copyWrap.style.gap = '6px';
+    copyWrap.style.alignItems = 'center';
+    const mkBtn = (labelKey) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn mini ghost';
+      b.textContent = t(labelKey);
+      return b;
+    };
+    const statusEl = document.createElement('span');
+    statusEl.className = 'muted';
+    statusEl.style.fontSize = '11px';
+    statusEl.id = 'arrangementDetailsCopyStatus';
+    const setCopyStatus = (ok) => {
+      statusEl.textContent = ok ? t('arrange.detail.copyOk', 'Copied.') : t('arrange.detail.copyFail', 'Copy failed.');
+      setTimeout(() => { if (statusEl.textContent) statusEl.textContent = ''; }, 2000);
+    };
+    const btnTrace = mkBtn('arrange.detail.copyTrace');
+    btnTrace.addEventListener('click', () => {
+      const tracePayload = JSON.stringify(snap, null, 2);
+      Promise.resolve(this._copyTextToClipboardWithFallback(tracePayload)).then((ok) => setCopyStatus(!!ok)).catch(() => setCopyStatus(false));
+    });
+    const btnUser = mkBtn('arrange.detail.copyUser');
+    btnUser.addEventListener('click', () => {
+      const u = (snap.promptTrace && typeof snap.promptTrace.userPrompt === 'string') ? snap.promptTrace.userPrompt : '';
+      Promise.resolve(this._copyTextToClipboardWithFallback(u)).then((ok) => setCopyStatus(!!ok)).catch(() => setCopyStatus(false));
+    });
+    const btnPatch = mkBtn('arrange.detail.copyPatch');
+    btnPatch.addEventListener('click', () => {
+      let p = '';
+      try { p = snap.rawPatch ? JSON.stringify(snap.rawPatch, null, 2) : ''; } catch (_e) { p = ''; }
+      Promise.resolve(this._copyTextToClipboardWithFallback(p)).then((ok) => setCopyStatus(!!ok)).catch(() => setCopyStatus(false));
+    });
+    copyWrap.appendChild(btnTrace);
+    copyWrap.appendChild(btnUser);
+    copyWrap.appendChild(btnPatch);
+    copyWrap.appendChild(statusEl);
+    body.appendChild(copyWrap);
+  },
+
+  _renderArrangementDetailsBodyIfOpen(){
+    if (!this._lastArrangementDetailsOpen) return;
+    this._renderArrangementDetailsBody();
+  },
+
+  _closeArrangementDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioArrangementDetails') : null;
+    if (panel) panel.classList.add('hidden');
+    if (panel) panel.setAttribute('aria-hidden', 'true');
+    this._lastArrangementDetailsOpen = false;
+    if (this._lastArrangementDetailsOnDocDown){
+      document.removeEventListener('pointerdown', this._lastArrangementDetailsOnDocDown, true);
+      this._lastArrangementDetailsOnDocDown = null;
+    }
+    if (this._lastArrangementDetailsOnKey){
+      document.removeEventListener('keydown', this._lastArrangementDetailsOnKey);
+      this._lastArrangementDetailsOnKey = null;
+    }
+  },
+
+  _openArrangementDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioArrangementDetails') : null;
+    if (!panel) return;
+    if (typeof this._closeLastOptimizeDetails === 'function') this._closeLastOptimizeDetails();
+    this._closeArrangementDetails();
+    this._renderArrangementDetailsBody();
+    panel.classList.remove('hidden');
+    panel.setAttribute('aria-hidden', 'false');
+    this._lastArrangementDetailsOpen = true;
+    const app = this;
+    this._lastArrangementDetailsOnDocDown = function(ev){
+      const raw = ev.target;
+      const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
+      if (!node || typeof node.closest !== 'function') return;
+      if (node.closest('#studioArrangementDetails') || node.closest('#btnSelArrangementDetails')) return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails')) return;
+      app._closeArrangementDetails();
+    };
+    document.addEventListener('pointerdown', this._lastArrangementDetailsOnDocDown, true);
+    this._lastArrangementDetailsOnKey = function(ev){
+      if (ev.key === 'Escape') app._closeArrangementDetails();
+    };
+    document.addEventListener('keydown', this._lastArrangementDetailsOnKey);
+  },
+
+  _initArrangementDetails(){
+    try{
+      if (typeof document === 'undefined') return;
+      if (this._lastArrangementDetailsInitialized) return;
+      const panel = document.getElementById('studioArrangementDetails');
+      const closeBtn = document.getElementById('btnArrangementDetailsClose');
+      if (!panel) return;
+      this._lastArrangementDetailsInitialized = true;
+      this._lastArrangementDetailsOpen = false;
+      if (closeBtn) closeBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._closeArrangementDetails(); });
+    }catch(e){ console.warn('[arrange] _initArrangementDetails failed', e); }
   },
 
 // PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
@@ -2999,6 +3285,7 @@ if (typeof localStorage !== 'undefined') {
       this._initBeginnerHintBar();
       this._fetchBackendReadinessOnce();
       this._initLastOptimizeDetails();
+      this._initArrangementDetails();
 
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
@@ -3130,12 +3417,17 @@ $('#rngPitchCenter').addEventListener('input', () => {
                 this.setImportStatus(_t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.'), false);
               });
             },
+            onArrangementDetails: () => {
+              if (typeof this._openArrangementDetails === 'function') this._openArrangementDetails();
+            },
+            getHasArrangementDetails: () => !!this._lastArrangementSnapshot,
             onDuplicateInstance: (instId) => this.duplicateInstance(instId),
             onRemoveInstance: (instId) => this.deleteInstance(instId),
             getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
             getAddBassLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addBass') : 'Add Bass'),
             getAddAccompanimentLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompaniment') : 'Add accompaniment'),
             getAddAccompanimentBadgeLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompanimentBadge') : 'Experimental'),
+            getArrangementDetailsLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.detailsShort') : 'Arrangement Details'),
             onConvertAudioToEditable: (clipId, instId) => {
               Promise.resolve(this.convertAudioClipToEditable(clipId, { sourceAudioInstanceId: instId })).catch(function(err){
                 console.warn('[App] convertAudioClipToEditable (instance) failed', err);
@@ -4651,31 +4943,44 @@ renderTimeline(){
 
     async addAccompanimentFromSelected(_instanceId){
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const goal = 'add_accompaniment_v0';
+      const clipId = (typeof this.getSelectedClipId === 'function') ? this.getSelectedClipId() : null;
+      const instId = ((typeof this.getSelectedInstanceId === 'function') ? this.getSelectedInstanceId() : null) || _instanceId || null;
+
       const ctrl = this.arrangementCtrl;
       if (!ctrl || typeof ctrl.runArrangementV0 !== 'function'){
+        this._commitArrangementSnapshot({ ok: false, reason: 'no_controller', detail: '' }, goal, clipId, instId);
         this.setImportStatus(_t('arrange.addAccompanimentFail.unavailable', 'Accompaniment is not available.'), false);
+        this.render();
         return { ok: false, reason: 'no_controller' };
       }
       this.setImportStatus(_t('arrange.addAccompanimentRunning', 'Adding accompaniment...'), false);
       let result;
       try {
-        result = await ctrl.runArrangementV0({ goal: 'add_accompaniment_v0' });
+        result = await ctrl.runArrangementV0({ goal: goal });
       } catch (err) {
         const em = (err && err.message) ? String(err.message).slice(0, 160) : '';
+        this._commitArrangementSnapshot({ ok: false, reason: 'exception', detail: em }, goal, clipId, instId);
         this.setImportStatus(
           _t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.') + (em ? ' ' + em : ''),
           false
         );
+        this.render();
         return { ok: false, reason: 'exception' };
       }
+
+      this._commitArrangementSnapshot(result, goal, clipId, instId);
+
       if (!result || !result.ok){
         const msg = this._arrangementFailureStatusMessage(result);
         this.setImportStatus(msg, false);
         log(msg);
+        this.render();
         return result || { ok: false };
       }
-      this.setImportStatus(_t('arrange.addAccompanimentDone', 'Accompaniment added.'), false);
-      log(_t('arrange.addAccompanimentDone', 'Accompaniment added.'));
+      this.setImportStatus(_t('arrange.addAccompanimentDone', 'Accompaniment added via LLM.'), false);
+      log(_t('arrange.addAccompanimentDone', 'Accompaniment added via LLM.'));
+      this.render();
       return result;
     },
 
@@ -6258,6 +6563,7 @@ renderTimeline(){
         });
         if (typeof this._applyLastOptimizeSummaryI18n === 'function') this._applyLastOptimizeSummaryI18n();
         if (typeof this._renderLastOptimizeDetailsBodyIfOpen === 'function') this._renderLastOptimizeDetailsBodyIfOpen();
+        if (typeof this._renderArrangementDetailsBodyIfOpen === 'function') this._renderArrangementDetailsBodyIfOpen();
       }catch(e){}
     },
     _initMasterVolumeUI(){

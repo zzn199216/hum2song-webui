@@ -60,7 +60,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 (function testAppArrangementUi(){
   const p = path.join(repoRoot, 'static', 'pianoroll', 'app.js');
   const src = fs.readFileSync(p, 'utf8');
-  assert(/\brunArrangementV0\s*\(\s*\{\s*goal:\s*['"]add_accompaniment_v0['"]\s*\}\s*\)/.test(src), 'app calls runArrangementV0 with add_accompaniment_v0');
+  assert(/\brunArrangementV0\s*\(\s*\{\s*goal:\s*goal\s*\}/.test(src) && /add_accompaniment_v0/.test(src), 'app calls runArrangementV0 with add_accompaniment_v0 goal');
   assert(src.includes('onAddAccompaniment:'), 'selection wiring includes onAddAccompaniment');
   assert(src.includes('addAccompanimentFromSelected'), 'app implements addAccompanimentFromSelected');
   assert(src.includes('addBassFromSelected'), 'add bass handler preserved');

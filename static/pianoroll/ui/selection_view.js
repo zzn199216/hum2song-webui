@@ -29,6 +29,11 @@
     const addAccompBtn = isAudio
       ? ''
       : `<button id="btnSelAddAccompaniment" class="btn mini" type="button" data-act="addAccompaniment">${escapeHtml(addAccompLabel)} <span class="badge" style="font-size:10px;opacity:.9;margin-left:4px;vertical-align:middle;">${escapeHtml(addAccompBadge)}</span></button>`;
+    const showArrDet = !!opts.showArrangementDetails && !isAudio;
+    const arrDetLabel = (opts.arrangementDetailsLabel != null && String(opts.arrangementDetailsLabel)) ? String(opts.arrangementDetailsLabel) : 'Arrangement Details';
+    const arrangementDetailsRow = showArrDet
+      ? `<div class="row" style="margin-top:8px; flex-wrap:wrap; gap:4px;"><button type="button" id="btnSelArrangementDetails" class="btn mini ghost lastOptDetailsBtn" data-act="arrangementDetails" data-i18n="arrange.detailsShort" style="font-size:10px !important;">${escapeHtml(arrDetLabel)}</button></div>`
+      : '';
 
     return `
       <div class="kv"><b>Clip</b><span>${escapeHtml(clipName)}</span></div>
@@ -42,6 +47,7 @@
         <button id="btnSelDup" class="btn mini" data-act="duplicate">Duplicate</button>
         <button id="btnSelDel" class="btn mini danger" data-act="remove">Remove</button>
       </div>
+      ${arrangementDetailsRow}
     `;
   }
 
