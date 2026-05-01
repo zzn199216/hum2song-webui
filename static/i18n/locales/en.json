@@ -218,6 +218,8 @@
   "aiAssist.addAccompanimentFail": "Could not add accompaniment: {detail}",
   "aiAssist.addAccompanimentCancelled": "Add accompaniment cancelled.",
   "aiAssist.addAccompanimentConfirm": "I'll add an experimental accompaniment to the currently selected melody without changing the original. Continue?",
+  "aiAssist.addAccompanimentContinue": "Continue",
+  "aiAssist.addAccompanimentCancel": "Cancel",
   "aiAssist.selectMelodyTimelineFirst": "Select an editable melody clip on the timeline first.",
   "aiAssist.addAccompanimentNeedsNoteClip": "This needs an editable note clip. Convert the audio to editable notes first.",
   "aiAssist.intentRouterArrangementHint": "That sounds like Add accompaniment. Use an explicit phrase (e.g. “添加伴奏”) or configure the AI (LLM) in Settings so the assistant can classify your request.",

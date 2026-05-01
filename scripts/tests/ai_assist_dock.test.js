@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ', 'aiAssist.addAccompanimentRunning': 'Adding accompaniment…', 'aiAssist.addAccompanimentOk': 'Accompaniment added.', 'aiAssist.addAccompanimentFail': 'Fail: {detail}', 'aiAssist.addAccompanimentCancelled': 'Cancelled.', 'aiAssist.addAccompanimentConfirm': 'Confirm?', 'aiAssist.selectMelodyTimelineFirst': 'Select melody on timeline.', 'aiAssist.addAccompanimentNeedsNoteClip': 'Need note clip.', 'aiAssist.intentRouterArrangementHint': 'HINT_ARR', 'aiAssist.intentRouterAccompanimentFaq': 'FAQ_ACCOMP' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ', 'aiAssist.addAccompanimentRunning': 'Adding accompaniment…', 'aiAssist.addAccompanimentOk': 'Accompaniment added. You can open Arrangement Details to inspect the prompt and patch.', 'aiAssist.addAccompanimentFail': 'Could not add accompaniment: {detail}', 'aiAssist.addAccompanimentCancelled': 'Add accompaniment cancelled.', 'aiAssist.addAccompanimentConfirm': 'I\'ll add an experimental accompaniment to the currently selected melody without changing the original. Continue?', 'aiAssist.addAccompanimentContinue': 'Continue', 'aiAssist.addAccompanimentCancel': 'Cancel', 'aiAssist.selectMelodyTimelineFirst': 'Select melody on timeline.', 'aiAssist.addAccompanimentNeedsNoteClip': 'This needs an editable note clip. Convert the audio to editable notes first.', 'aiAssist.intentRouterArrangementHint': 'HINT_ARR', 'aiAssist.intentRouterAccompanimentFaq': 'FAQ_ACCOMP' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -692,8 +692,46 @@ function createFakeApp(opts) {
     }
     return n;
   }
-  function mirrorRunAddAccompanimentFlow(self, text, _t) {
+  let mirrorAccompConfirmSeq = 0;
+  function mirrorAttachAddAccompanimentPromise(self, pendingAm, instIdGo, phraseText, _t) {
     const kiAm = _assistantSkillI18nAddAccompaniment();
+    const selfAm = self;
+    return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+      ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
+      : Promise.resolve({ ok: false, reason: 'missing_api' })
+    ).then(function (res) {
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0) {
+        if (res && res.ok) {
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
+        } else {
+          let detail = '';
+          if (typeof selfAm._arrangementFailureStatusMessage === 'function') {
+            detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
+          }
+          if (!detail && res) {
+            const rsn = (res.reason != null) ? String(res.reason).trim() : '';
+            const det = (res.detail != null) ? String(res.detail).trim() : '';
+            detail = [rsn, det].filter(Boolean).join(' ').trim();
+          }
+          if (!detail) detail = 'unknown';
+          selfAm._aiAssistItems[idx] = {
+            type: 'sys',
+            text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)),
+          };
+        }
+      }
+      selfAm.render();
+    }).catch(function (err) {
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0) {
+        const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
+        selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
+      }
+      selfAm.render();
+    });
+  }
+  function mirrorRunAddAccompanimentFlow(self, text, _t) {
     self._aiAssistItems = self._aiAssistItems || [];
     const phraseText = String(text);
     const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
@@ -740,50 +778,15 @@ function createFakeApp(opts) {
       self.render();
       return Promise.resolve();
     }
-    const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
-    if (!confirmImpl(confirmMsg)) {
-      self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
-      self.render();
-      return Promise.resolve();
-    }
-    const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
-    self._aiAssistItems.push(pendingAm);
-    self.render();
-    const selfAm = self;
-    return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
-      ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
-      : Promise.resolve({ ok: false, reason: 'missing_api' })
-    ).then(function (res) {
-      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
-      if (idx >= 0) {
-        if (res && res.ok) {
-          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
-        } else {
-          let detail = '';
-          if (typeof selfAm._arrangementFailureStatusMessage === 'function') {
-            detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
-          }
-          if (!detail && res) {
-            const rsn = (res.reason != null) ? String(res.reason).trim() : '';
-            const det = (res.detail != null) ? String(res.detail).trim() : '';
-            detail = [rsn, det].filter(Boolean).join(' ').trim();
-          }
-          if (!detail) detail = 'unknown';
-          selfAm._aiAssistItems[idx] = {
-            type: 'sys',
-            text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)),
-          };
-        }
-      }
-      selfAm.render();
-    }).catch(function (err) {
-      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
-      if (idx >= 0) {
-        const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
-        selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
-      }
-      selfAm.render();
+    mirrorAccompConfirmSeq += 1;
+    self._aiAssistItems.push({
+      type: 'add_accompaniment_confirm',
+      _confirmId: 'tac_' + mirrorAccompConfirmSeq,
+      instanceId: instIdGo,
+      userPrompt: phraseText,
     });
+    self.render();
+    return Promise.resolve();
   }
   /** Mirror static/pianoroll/app.js bounded dispatch (phraseResolverId → resolver; same order). */
   const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
@@ -1031,6 +1034,29 @@ function createFakeApp(opts) {
     }
     return false;
   }
+  app._aiAssistAddAccompanimentContinue = function (confirmId) {
+    const _t = this._t;
+    const items = this._aiAssistItems || [];
+    const idx = items.findIndex((x) => x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId));
+    if (idx < 0) return Promise.resolve();
+    const it = items[idx];
+    const instIdGo = String(it.instanceId || '');
+    const phraseText = String(it.userPrompt || '');
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+    items[idx] = pendingAm;
+    this.render();
+    return mirrorAttachAddAccompanimentPromise(this, pendingAm, instIdGo, phraseText, _t);
+  };
+  app._aiAssistAddAccompanimentCancel = function (confirmId) {
+    const _t = this._t;
+    const items = this._aiAssistItems || [];
+    const idx = items.findIndex((x) => x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId));
+    if (idx < 0) return;
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    items[idx] = { type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') };
+    this.render();
+  };
   app._aiAssistSend = function () {
     const inp = doc.getElementById('aiAssistInput');
     const text = String(inp ? inp.value : '').trim();
@@ -1777,24 +1803,38 @@ function createFakeApp(opts) {
       cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
     },
   };
-  const ctx = createFakeApp({
-    projectV2Override: validV2,
-    confirmImpl() { return true; },
-  });
+  let confirmCalls = 0;
+  const prevWc = globalThis.window.confirm;
+  globalThis.window.confirm = function () { confirmCalls++; return true; };
+  const ctx = createFakeApp({ projectV2Override: validV2 });
   const { app, doc, setOptimizeOptionsCalls, runCommandCalls, addAccompanimentCalls } = ctx;
+  app._assistantExecutionPlanSnapshot = { testSnap: 1 };
   app.state.selectedInstanceId = 'ti';
   app.state.selectedClipId = 'cm';
   doc.getElementById('aiAssistInput').value = '添加伴奏';
-  const p = app._aiAssistSend();
-  return p.then(() => {
-    assert(setOptimizeOptionsCalls.length === 0, 'must not touch Quick Optimize / setOptimizeOptions');
-    assert(runCommandCalls.length === 0, 'no runCommand optimize or bounded');
-    assert(addAccompanimentCalls.length === 1, 'addAccompanimentFromSelected once');
-    assert(addAccompanimentCalls[0].instanceId === 'ti', 'uses selected instance');
-    assert(addAccompanimentCalls[0].runExtra && addAccompanimentCalls[0].runExtra.userPrompt === '添加伴奏', 'passes full assistant text as userPrompt');
-    const last = app._aiAssistItems[app._aiAssistItems.length - 1];
-    assert(last.type === 'sys' && last.text === 'Accompaniment added.', 'success sys message');
-  });
+  return Promise.resolve()
+    .then(() => app._aiAssistSend())
+    .then(() => {
+      assert(confirmCalls === 0, 'add_accompaniment must not use window.confirm');
+      assert(addAccompanimentCalls.length === 0, 'defer until Continue');
+      const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+      assert(conf && conf.instanceId === 'ti' && conf.userPrompt === '添加伴奏' && conf._confirmId, 'inline confirmation card');
+      assert(I18N.t('aiAssist.addAccompanimentContinue') === 'Continue' && I18N.t('aiAssist.addAccompanimentCancel') === 'Cancel', 'button i18n keys resolve');
+      return app._aiAssistAddAccompanimentContinue(conf._confirmId);
+    })
+    .then(() => {
+      assert(confirmCalls === 0);
+      assert(app._assistantExecutionPlanSnapshot && app._assistantExecutionPlanSnapshot.testSnap === 1, 'no _assistantExecutionPlanSnapshot mutation on add accomp path');
+      assert(setOptimizeOptionsCalls.length === 0, 'must not touch Quick Optimize / setOptimizeOptions');
+      assert(runCommandCalls.length === 0, 'no runCommand optimize or bounded');
+      assert(addAccompanimentCalls.length === 1, 'addAccompanimentFromSelected once');
+      assert(addAccompanimentCalls[0].instanceId === 'ti', 'uses selected instance');
+      assert(addAccompanimentCalls[0].runExtra && addAccompanimentCalls[0].runExtra.userPrompt === '添加伴奏', 'passes full assistant text as userPrompt');
+      const last = app._aiAssistItems[app._aiAssistItems.length - 1];
+      const okFull = I18N.t('aiAssist.addAccompanimentOk');
+      assert(last.type === 'sys' && last.text === okFull, 'success sys message');
+    })
+    .finally(() => { globalThis.window.confirm = prevWc; });
 })().then(() => { console.log('PASS add accompaniment => addAccompanimentFromSelected, no setOptimizeOptions'); }).catch((e) => { console.error(e); process.exit(1); });
 
 (function testAddAccompanimentRejectAudioKind() {
@@ -1802,14 +1842,21 @@ function createFakeApp(opts) {
     instances: [{ id: 'ti', clipId: 'aud', startBeat: 0, trackId: 'tk' }],
     clips: { aud: { kind: 'audio', name: 'Hum' } },
   };
-  const { app, doc, addAccompanimentCalls } = createFakeApp({ projectV2Override: v2, confirmImpl() { return true; } });
+  let confirmCalls = 0;
+  const prevWc = globalThis.window.confirm;
+  globalThis.window.confirm = function () { confirmCalls++; return true; };
+  const { app, doc, addAccompanimentCalls } = createFakeApp({ projectV2Override: v2 });
   app.state.selectedInstanceId = 'ti';
   app.state.selectedClipId = 'aud';
   doc.getElementById('aiAssistInput').value = 'add accompaniment';
-  return app._aiAssistSend().then(() => {
-    assert(addAccompanimentCalls.length === 0);
-    assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === 'Need note clip.'));
-  });
+  return app._aiAssistSend()
+    .then(() => {
+      assert(confirmCalls === 0);
+      assert(addAccompanimentCalls.length === 0);
+      assert(!app._aiAssistItems.some((x) => x.type === 'add_accompaniment_confirm'), 'no confirm card when validation fails');
+      assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === I18N.t('aiAssist.addAccompanimentNeedsNoteClip')));
+    })
+    .finally(() => { globalThis.window.confirm = prevWc; });
 })().then(() => { console.log('PASS add accompaniment rejects audio clip'); }).catch((e) => { console.error(e); process.exit(1); });
 
 (function testAddAccompanimentConfirmCancel() {
@@ -1819,17 +1866,24 @@ function createFakeApp(opts) {
       cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
     },
   };
-  const { app, doc, addAccompanimentCalls } = createFakeApp({
-    projectV2Override: validV2,
-    confirmImpl() { return false; },
-  });
+  let confirmCalls = 0;
+  const prevWc = globalThis.window.confirm;
+  globalThis.window.confirm = function () { confirmCalls++; return true; };
+  const { app, doc, addAccompanimentCalls } = createFakeApp({ projectV2Override: validV2 });
   app.state.selectedInstanceId = 'ti';
   app.state.selectedClipId = 'cm';
   doc.getElementById('aiAssistInput').value = 'add accompaniment';
-  return app._aiAssistSend().then(() => {
-    assert(addAccompanimentCalls.length === 0);
-    assert(app._aiAssistItems.some((x) => x.text === 'Cancelled.'));
-  });
+  return app._aiAssistSend()
+    .then(() => {
+      assert(confirmCalls === 0);
+      assert(addAccompanimentCalls.length === 0);
+      const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+      assert(conf, 'confirmation row before cancel');
+      app._aiAssistAddAccompanimentCancel(conf._confirmId);
+      assert(addAccompanimentCalls.length === 0);
+      assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === I18N.t('aiAssist.addAccompanimentCancelled')));
+    })
+    .finally(() => { globalThis.window.confirm = prevWc; });
 })().then(() => { console.log('PASS add accompaniment confirm cancel'); }).catch((e) => { console.error(e); process.exit(1); });
 
 (function testAddAccompanimentFailureMessage() {
@@ -1841,17 +1895,21 @@ function createFakeApp(opts) {
   };
   const { app, doc, addAccompanimentCalls } = createFakeApp({
     projectV2Override: validV2,
-    confirmImpl() { return true; },
     addAccompanimentResult: { ok: false, reason: 'patch_validation_failed', detail: 'bad' },
   });
   app.state.selectedInstanceId = 'ti';
   app.state.selectedClipId = 'cm';
   doc.getElementById('aiAssistInput').value = 'add accompaniment';
-  return app._aiAssistSend().then(() => {
-    assert(addAccompanimentCalls.length === 1);
-    const last = app._aiAssistItems[app._aiAssistItems.length - 1];
-    assert(last.text.indexOf('Fail:') >= 0 && last.text.indexOf('patch_validation_failed') >= 0);
-  });
+  return app._aiAssistSend()
+    .then(() => {
+      const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+      return app._aiAssistAddAccompanimentContinue(conf._confirmId);
+    })
+    .then(() => {
+      assert(addAccompanimentCalls.length === 1);
+      const last = app._aiAssistItems[app._aiAssistItems.length - 1];
+      assert(last.text.indexOf('Could not add accompaniment:') >= 0 && last.text.indexOf('patch_validation_failed') >= 0);
+    });
 })().then(() => { console.log('PASS add accompaniment failure surfaces reason'); }).catch((e) => { console.error(e); process.exit(1); });
 
 (function testAppJsBoundedResolverRegistryAndOrder() {
@@ -1867,6 +1925,12 @@ function createFakeApp(opts) {
   assert(s.includes('_tryAssistantBoundedSkillDispatch(this, text, _t)'), '_aiAssistSend calls bounded dispatch');
   assert(s.includes('_assistantCallIntentRouterLlm'), 'intent router calls LLM');
   assert(s.includes('_assistantFinishOptimizeCardPath'), 'optimize card path extracted');
+  assert(s.includes("type: 'add_accompaniment_confirm'"), 'add accompaniment uses inline confirm item, not window.confirm');
+  assert(s.includes('data-act="aiAddAccompanimentContinue"') && s.includes('data-act="aiAddAccompanimentCancel"'), 'dock renders Continue/Cancel for add accompaniment');
+  const flowStart = s.indexOf('function _assistantDispatchAddAccompanimentFlow');
+  const flowEnd = s.indexOf('function _assistantAttachAddAccompanimentPromise');
+  assert(flowStart >= 0 && flowEnd > flowStart, 'slice markers for add accompaniment flow');
+  assert(s.slice(flowStart, flowEnd).indexOf('.confirm(') < 0, '_assistantDispatchAddAccompanimentFlow must not call native confirm()');
   console.log('PASS app.js bounded resolver registry + dispatch hook');
 })();
 
@@ -1885,22 +1949,35 @@ function createFakeApp(opts) {
     },
   };
   try {
+    let confirmCalls = 0;
+    const prevWc = globalThis.window.confirm;
+    globalThis.window.confirm = function () { confirmCalls++; return true; };
     const { app, doc, setOptimizeOptionsCalls, addAccompanimentCalls } = createFakeApp({
       projectV2Override: validV2,
-      confirmImpl() { return true; },
       syntheticIntentRouterRaw: { intent: 'add_accompaniment', confidence: 0.95, userPrompt: '', needsConfirmation: true },
     });
+    app._assistantExecutionPlanSnapshot = { routerSnap: 1 };
     app.state.selectedInstanceId = 'ti';
     app.state.selectedClipId = 'cm';
     const zh = '这段如果是主歌，给它加个伴奏';
     doc.getElementById('aiAssistInput').value = zh;
-    return app._aiAssistSend().then(() => {
-      assert(setOptimizeOptionsCalls.length === 0, 'no setOptimizeOptions');
-      assert(addAccompanimentCalls.length === 1, 'addAccompaniment once');
-      assert(addAccompanimentCalls[0].runExtra.userPrompt === zh, 'full original text as userPrompt');
-      const card = app._aiAssistItems.filter((x) => x.type === 'card');
-      assert(card.length === 0, 'no optimize card');
-    });
+    return app._aiAssistSend()
+      .then(() => {
+        assert(confirmCalls === 0);
+        assert(addAccompanimentCalls.length === 0);
+        const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+        assert(conf && conf.userPrompt === zh, 'router path shows confirm with full text');
+        return app._aiAssistAddAccompanimentContinue(conf._confirmId);
+      })
+      .then(() => {
+        assert(app._assistantExecutionPlanSnapshot && app._assistantExecutionPlanSnapshot.routerSnap === 1);
+        assert(setOptimizeOptionsCalls.length === 0, 'no setOptimizeOptions');
+        assert(addAccompanimentCalls.length === 1, 'addAccompaniment once');
+        assert(addAccompanimentCalls[0].runExtra.userPrompt === zh, 'full original text as userPrompt');
+        const card = app._aiAssistItems.filter((x) => x.type === 'card');
+        assert(card.length === 0, 'no optimize card');
+      })
+      .finally(() => { globalThis.window.confirm = prevWc; });
   } finally {
     globalThis.H2S_LLM_CONFIG = prevCfg;
     globalThis.H2S_LLM_CLIENT = prevClient;

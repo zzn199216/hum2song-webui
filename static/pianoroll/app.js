@@ -75,6 +75,12 @@
     }catch(e){}
   }
 
+  let _aiAssistAddAccompConfirmSeq = 0;
+  function _assistantNextAddAccompanimentConfirmId(){
+    _aiAssistAddAccompConfirmSeq += 1;
+    return 'h2s_ac_am_' + _aiAssistAddAccompConfirmSeq;
+  }
+
   // PR-UX2 / INFRA-1a: Inspector Optimize templates — derived from shared registry
   const INSPECTOR_TEMPLATES = (typeof window !== 'undefined' && window.H2S_OPTIMIZE_TEMPLATES_V1_MAP) ? window.H2S_OPTIMIZE_TEMPLATES_V1_MAP : {};
 
@@ -350,7 +356,6 @@
    * @returns {boolean} true (message flow always consumes Send)
    */
   function _assistantDispatchAddAccompanimentFlow(self, fullUserText, _t){
-    const kiAm = _assistantSkillI18nAddAccompaniment();
     self._aiAssistItems = self._aiAssistItems || [];
     const phraseText = String(fullUserText);
     const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
@@ -397,18 +402,21 @@
       self.render();
       return true;
     }
-    const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
-    const win = (typeof window !== 'undefined') ? window : null;
-    if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
-      self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
-      self.render();
-      return true;
-    }
-    const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
-    self._aiAssistItems.push(pendingAm);
+    self._aiAssistItems.push({
+      type: 'add_accompaniment_confirm',
+      _confirmId: _assistantNextAddAccompanimentConfirmId(),
+      instanceId: instIdGo,
+      userPrompt: phraseText,
+    });
     self.render();
+    return true;
+  }
+
+  /** Runs addAccompanimentFromSelected and updates the existing pendingAm row (in-assistant confirm UX). */
+  function _assistantAttachAddAccompanimentPromise(self, pendingAm, instIdGo, phraseText, _t){
+    const kiAm = _assistantSkillI18nAddAccompaniment();
     const selfAm = self;
-    Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+    return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
       ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
       : Promise.resolve({ ok: false, reason: 'missing_api' })
     ).then(function(res){
@@ -439,7 +447,6 @@
       }
       selfAm.render();
     });
-    return true;
   }
 
   function _getInternalSkillRegistry(){
@@ -4142,8 +4149,17 @@ ensureTrackButtons(){
       if (body) body.addEventListener('click', (ev) => {
         const t = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
         const act = t && t.getAttribute && t.getAttribute('data-act');
+        if (!act) return;
+        if (act === 'aiAddAccompanimentContinue' || act === 'aiAddAccompanimentCancel'){
+          const confirmId = t.getAttribute('data-confirm-id');
+          if (!confirmId) return;
+          ev.preventDefault();
+          if (act === 'aiAddAccompanimentContinue') this._aiAssistAddAccompanimentContinue(confirmId);
+          else this._aiAssistAddAccompanimentCancel(confirmId);
+          return;
+        }
         const clipId = t && t.getAttribute && t.getAttribute('data-clip-id');
-        if (!act || !clipId) return;
+        if (!clipId) return;
         if (act === 'aiRun') this._aiAssistRun(clipId, t);
         else if (act === 'aiOpenOptimize') this.runCommand('open_inspector_optimize');
         else if (act === 'aiUndo') this._aiAssistUndo(clipId);
@@ -4332,6 +4348,33 @@ ensureTrackButtons(){
       }
       this.render();
     },
+    _aiAssistAddAccompanimentContinue(confirmId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const items = this._aiAssistItems || [];
+      const idx = items.findIndex(function(x){
+        return x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId);
+      });
+      if (idx < 0) return Promise.resolve();
+      const it = items[idx];
+      const instIdGo = (it.instanceId != null) ? String(it.instanceId) : '';
+      const phraseText = (it.userPrompt != null) ? String(it.userPrompt) : '';
+      const kiAm = _assistantSkillI18nAddAccompaniment();
+      const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+      items[idx] = pendingAm;
+      this.render();
+      return _assistantAttachAddAccompanimentPromise(this, pendingAm, instIdGo, phraseText, _t);
+    },
+    _aiAssistAddAccompanimentCancel(confirmId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const items = this._aiAssistItems || [];
+      const idx = items.findIndex(function(x){
+        return x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId);
+      });
+      if (idx < 0) return;
+      const kiAm = _assistantSkillI18nAddAccompaniment();
+      items[idx] = { type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') };
+      this.render();
+    },
     async _aiAssistUndo(clipId){
       if (!clipId) return;
       const res = await this.runCommand('rollback_clip', { clipId });
@@ -4385,6 +4428,14 @@ ensureTrackButtons(){
         for (const it of items) {
           if (it.type === 'sys') {
             html += '<div class="aiAssistSys">' + escapeHtml(it.text) + '</div>';
+          } else if (it.type === 'add_accompaniment_confirm') {
+            const confId = escapeHtml(String(it._confirmId || ''));
+            html += '<div class="aiAssistCard aiAssistAddAccompanimentConfirm">';
+            html += '<div class="aiAssistCardPrompt">' + escapeHtml(_t('aiAssist.addAccompanimentConfirm')) + '</div>';
+            html += '<div class="aiAssistCardBtns">';
+            html += '<button type="button" class="btn primary mini" data-act="aiAddAccompanimentContinue" data-confirm-id="' + confId + '">' + escapeHtml(_t('aiAssist.addAccompanimentContinue')) + '</button>';
+            html += '<button type="button" class="btn mini" data-act="aiAddAccompanimentCancel" data-confirm-id="' + confId + '">' + escapeHtml(_t('aiAssist.addAccompanimentCancel')) + '</button>';
+            html += '</div></div>';
           } else if (it.type === 'card') {
             const p2 = this.getProjectV2();
             const c = p2 && p2.clips && p2.clips[it.clipId];
