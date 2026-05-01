@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ', 'aiAssist.addAccompanimentRunning': 'Adding accompaniment…', 'aiAssist.addAccompanimentOk': 'Accompaniment added.', 'aiAssist.addAccompanimentFail': 'Fail: {detail}', 'aiAssist.addAccompanimentCancelled': 'Cancelled.', 'aiAssist.addAccompanimentConfirm': 'Confirm?', 'aiAssist.selectMelodyTimelineFirst': 'Select melody on timeline.', 'aiAssist.addAccompanimentNeedsNoteClip': 'Need note clip.' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ', 'aiAssist.addAccompanimentRunning': 'Adding accompaniment…', 'aiAssist.addAccompanimentOk': 'Accompaniment added.', 'aiAssist.addAccompanimentFail': 'Fail: {detail}', 'aiAssist.addAccompanimentCancelled': 'Cancelled.', 'aiAssist.addAccompanimentConfirm': 'Confirm?', 'aiAssist.selectMelodyTimelineFirst': 'Select melody on timeline.', 'aiAssist.addAccompanimentNeedsNoteClip': 'Need note clip.', 'aiAssist.intentRouterArrangementHint': 'HINT_ARR', 'aiAssist.intentRouterAccompanimentFaq': 'FAQ_ACCOMP' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -50,6 +50,55 @@ function mapAiAssistTextToTemplate(text) {
     }
   }
   return { templateId: null, templateLabel: '', intent: null };
+}
+
+const _TEST_INTENT_ROUTER_ENUM = Object.freeze({
+  add_accompaniment: true,
+  optimize_fix_pitch: true,
+  optimize_tighten_rhythm: true,
+  optimize_clean_outliers: true,
+  none: true,
+  ask_clarify: true,
+});
+
+function testNormalizeIntentRouterPayload(obj, originalText) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const intentRaw = (obj.intent != null) ? String(obj.intent).trim() : '';
+  if (!_TEST_INTENT_ROUTER_ENUM[intentRaw]) return null;
+  let c = Number(obj.confidence);
+  if (!isFinite(c)) c = 0;
+  c = Math.max(0, Math.min(1, c));
+  return {
+    intent: intentRaw,
+    confidence: c,
+    userPrompt: (obj.userPrompt != null && String(obj.userPrompt).trim()) ? String(obj.userPrompt).trim().slice(0, 800) : String(originalText || '').slice(0, 800),
+    needsConfirmation: !!obj.needsConfirmation,
+  };
+}
+
+function testAssistantTextIsAccompanimentFaq(text) {
+  if (!text || typeof text !== 'string') return false;
+  const s = String(text).trim();
+  const low = s.toLowerCase();
+  if (/伴奏/.test(s) && /是什么|什么意思|什么叫|如何|怎么写|怎么做|怎么作|怎样|教程/.test(s)) return true;
+  if (/accompaniment/.test(low) && /what\s+is|what's|explain(\s+|$)|how\s+to\s+(write|make|create)/.test(low)) return true;
+  return false;
+}
+
+function testAssistantHeuristicLikelyArrangementAction(text) {
+  if (!text || typeof text !== 'string') return false;
+  if (testAssistantTextIsAccompanimentFaq(text)) return false;
+  const s = String(text);
+  const low = s.toLowerCase();
+  if (/加.{0,12}伴奏|伴奏.{0,8}加|配.{0,6}伴奏|添.{0,6}伴奏|来段伴奏|给.{0,8}加.{0,6}伴奏|加段伴奏|帮我加伴奏|添加伴奏|段伴奏/i.test(s)) return true;
+  if (/add\s+accompaniment|accompaniment\s+to|add\s+support|make\s+(this\s+)?fuller/i.test(low)) return true;
+  return false;
+}
+
+function testAssistantClearlyOptimizeLikeForSend(text) {
+  if (!text || typeof text !== 'string') return false;
+  const mapped = mapAiAssistTextToTemplate(text);
+  return !!(mapped.templateId && mapped.intent);
 }
 
 /** Mirror static/pianoroll/app.js `_resolveAssistantAddClipToTimelineIntentFromText` (keep in sync). */
@@ -643,6 +692,99 @@ function createFakeApp(opts) {
     }
     return n;
   }
+  function mirrorRunAddAccompanimentFlow(self, text, _t) {
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    self._aiAssistItems = self._aiAssistItems || [];
+    const phraseText = String(text);
+    const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
+    const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+    const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
+    if (!instIdGo) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const inst = (p2 && Array.isArray(p2.instances))
+      ? p2.instances.find(function (x) { return x && String(x.id) === instIdGo; })
+      : null;
+    if (!inst) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
+    if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
+      ? p2.clips[cidFromInst]
+      : null;
+    if (!clipV2) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const isAudioClip = (function () {
+      if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
+      return !!(clipV2 && clipV2.kind === 'audio');
+    })();
+    if (isAudioClip) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
+      self.render();
+      return Promise.resolve();
+    }
+    if (assistantCountMelodyNotesInClipV2(clipV2) < 1) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
+    if (!confirmImpl(confirmMsg)) {
+      self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
+      self.render();
+      return Promise.resolve();
+    }
+    const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+    self._aiAssistItems.push(pendingAm);
+    self.render();
+    const selfAm = self;
+    return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+      ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
+      : Promise.resolve({ ok: false, reason: 'missing_api' })
+    ).then(function (res) {
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0) {
+        if (res && res.ok) {
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
+        } else {
+          let detail = '';
+          if (typeof selfAm._arrangementFailureStatusMessage === 'function') {
+            detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
+          }
+          if (!detail && res) {
+            const rsn = (res.reason != null) ? String(res.reason).trim() : '';
+            const det = (res.detail != null) ? String(res.detail).trim() : '';
+            detail = [rsn, det].filter(Boolean).join(' ').trim();
+          }
+          if (!detail) detail = 'unknown';
+          selfAm._aiAssistItems[idx] = {
+            type: 'sys',
+            text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)),
+          };
+        }
+      }
+      selfAm.render();
+    }).catch(function (err) {
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0) {
+        const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
+        selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
+      }
+      selfAm.render();
+    });
+  }
   /** Mirror static/pianoroll/app.js bounded dispatch (phraseResolverId → resolver; same order). */
   const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
   const ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
@@ -686,97 +828,7 @@ function createFakeApp(opts) {
         return Promise.resolve();
       }
       if (skillId === 'add_accompaniment') {
-        const kiAm = _assistantSkillI18nAddAccompaniment();
-        self._aiAssistItems = self._aiAssistItems || [];
-        const phraseText = String(text);
-        const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
-        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
-        const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
-        if (!instIdGo) {
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return Promise.resolve();
-        }
-        const inst = (p2 && Array.isArray(p2.instances))
-          ? p2.instances.find(function (x) { return x && String(x.id) === instIdGo; })
-          : null;
-        if (!inst) {
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return Promise.resolve();
-        }
-        const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
-        if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst) {
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return Promise.resolve();
-        }
-        const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
-          ? p2.clips[cidFromInst]
-          : null;
-        if (!clipV2) {
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return Promise.resolve();
-        }
-        const isAudioClip = (function () {
-          if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
-          return !!(clipV2 && clipV2.kind === 'audio');
-        })();
-        if (isAudioClip) {
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
-          self.render();
-          return Promise.resolve();
-        }
-        if (assistantCountMelodyNotesInClipV2(clipV2) < 1) {
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return Promise.resolve();
-        }
-        const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
-        if (!confirmImpl(confirmMsg)) {
-          self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
-          self.render();
-          return Promise.resolve();
-        }
-        const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
-        self._aiAssistItems.push(pendingAm);
-        self.render();
-        const selfAm = self;
-        return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
-          ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
-          : Promise.resolve({ ok: false, reason: 'missing_api' })
-        ).then(function (res) {
-          const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
-          if (idx >= 0) {
-            if (res && res.ok) {
-              selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
-            } else {
-              let detail = '';
-              if (typeof selfAm._arrangementFailureStatusMessage === 'function') {
-                detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
-              }
-              if (!detail && res) {
-                const rsn = (res.reason != null) ? String(res.reason).trim() : '';
-                const det = (res.detail != null) ? String(res.detail).trim() : '';
-                detail = [rsn, det].filter(Boolean).join(' ').trim();
-              }
-              if (!detail) detail = 'unknown';
-              selfAm._aiAssistItems[idx] = {
-                type: 'sys',
-                text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)),
-              };
-            }
-          }
-          selfAm.render();
-        }).catch(function (err) {
-          const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
-          if (idx >= 0) {
-            const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
-            selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
-          }
-          selfAm.render();
-        });
+        return mirrorRunAddAccompanimentFlow(self, text, _t);
       }
       if (skillId === 'add_clip_to_timeline') {
         const kiAc = _assistantSkillI18nAddClipToTimeline();
@@ -984,45 +1036,125 @@ function createFakeApp(opts) {
     const text = String(inp ? inp.value : '').trim();
     if (!text) return;
     if (inp) inp.value = '';
-    const d = _tryAssistantBoundedSkillDispatchMirror(this, text, this._t);
+    const _t = this._t;
+    const self = this;
+    const d = _tryAssistantBoundedSkillDispatchMirror(this, text, _t);
     if (d !== false) return d;
-    const clipId = this.state.selectedClipId;
-    if (!clipId) {
-      this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
-      this.render();
-      return Promise.resolve();
-    }
-    const mapped = mapAiAssistTextToTemplate(text);
-    const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-    if (mapped.templateId && mapped.intent) {
-      card.templateId = mapped.templateId;
-      card.templateLabel = mapped.templateLabel;
-      card.intent = mapped.intent;
-    }
-    card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
-    card.reasoningLog = {
-      userPrompt: text.slice(0, 200),
-      templateId: card.templateId || null,
-      intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
-      planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
-      requestedPresetId: 'llm_v0',
-      planSource: 'rule',
-      createdAt: card.createdAt,
-    };
-    this._aiAssistItems.push(card);
-    const p = tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
-      if (plan) {
-        card.plan = plan;
-        if (card.reasoningLog) {
-          card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
-          card.reasoningLog.planSource = 'ai';
-        }
-        syncAssistantCardTemplateFromPlan(card);
+
+    let cfg = null;
+    try {
+      const cfgApi = globalThis.H2S_LLM_CONFIG;
+      cfg = (cfgApi && typeof cfgApi.loadLlmConfig === 'function') ? cfgApi.loadLlmConfig() : null;
+    } catch (_e) { cfg = null; }
+    const client = globalThis.H2S_LLM_CLIENT;
+    const llmReady = !!(cfg && String(cfg.baseUrl || '').trim() && String(cfg.model || '').trim()
+      && client && typeof client.callChatCompletions === 'function' && typeof client.extractJsonObject === 'function');
+
+    function finishOptimizeCard() {
+      const clipId = self.state.selectedClipId;
+      if (!clipId) {
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+        self.render();
+        return Promise.resolve();
       }
-      this.render();
-    }).catch(() => {});
-    this.render();
-    return p;
+      const mapped = mapAiAssistTextToTemplate(text);
+      const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
+      if (mapped.templateId && mapped.intent) {
+        card.templateId = mapped.templateId;
+        card.templateLabel = mapped.templateLabel;
+        card.intent = mapped.intent;
+      }
+      card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+      card.reasoningLog = {
+        userPrompt: text.slice(0, 200),
+        templateId: card.templateId || null,
+        intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+        planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+        requestedPresetId: 'llm_v0',
+        planSource: 'rule',
+        createdAt: card.createdAt,
+      };
+      self._aiAssistItems.push(card);
+      const p = tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+        if (plan) {
+          card.plan = plan;
+          if (card.reasoningLog) {
+            card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+            card.reasoningLog.planSource = 'ai';
+          }
+          syncAssistantCardTemplateFromPlan(card);
+        }
+        self.render();
+      }).catch(() => {});
+      self.render();
+      return p;
+    }
+
+    function fallbackRouter() {
+      const clearlyOpt = testAssistantClearlyOptimizeLikeForSend(text);
+      const faq = testAssistantTextIsAccompanimentFaq(text);
+      const likelyArr = testAssistantHeuristicLikelyArrangementAction(text);
+      if (faq) {
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+        self.render();
+        return Promise.resolve();
+      }
+      if (likelyArr && !clearlyOpt) {
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+        self.render();
+        return Promise.resolve();
+      }
+      return finishOptimizeCard();
+    }
+
+    const useSynthetic = Object.prototype.hasOwnProperty.call(opts, 'syntheticIntentRouterRaw');
+    if (llmReady) {
+      const parsedP = useSynthetic
+        ? Promise.resolve(
+            opts.syntheticIntentRouterRaw == null
+              ? null
+              : testNormalizeIntentRouterPayload(
+                  typeof opts.syntheticIntentRouterRaw === 'object' ? opts.syntheticIntentRouterRaw : client.extractJsonObject(String(opts.syntheticIntentRouterRaw)),
+                  text,
+                ),
+          )
+        : client.callChatCompletions(
+          { baseUrl: String(cfg.baseUrl).trim(), model: String(cfg.model).trim(), authToken: typeof cfg.authToken === 'string' ? cfg.authToken : '' },
+          [{ role: 'user', content: JSON.stringify({ mock: text }) }],
+          { temperature: 0, timeoutMs: 1000 },
+        ).then(function (res) {
+          const raw = (res && typeof res.text === 'string') ? res.text : '';
+          const obj = client.extractJsonObject(raw);
+          return testNormalizeIntentRouterPayload(obj, text);
+        });
+
+      return parsedP.then(function (parsed) {
+        const clearlyOpt = testAssistantClearlyOptimizeLikeForSend(text);
+        const faq = testAssistantTextIsAccompanimentFaq(text);
+        if (parsed && parsed.intent === 'add_accompaniment' && parsed.confidence >= 0.5 && !clearlyOpt && !faq) {
+          return mirrorRunAddAccompanimentFlow(self, text, _t);
+        }
+        if (faq) {
+          self._aiAssistItems = self._aiAssistItems || [];
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+          self.render();
+          return undefined;
+        }
+        const likelyArr = testAssistantHeuristicLikelyArrangementAction(text);
+        if (clearlyOpt || !likelyArr) {
+          return finishOptimizeCard();
+        }
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+        self.render();
+        return undefined;
+      }).catch(function () {
+        return fallbackRouter();
+      });
+    }
+    return fallbackRouter();
   };
   app._aiAssistRun = async function (clipId, btnEl) {
     if (!clipId) return;
@@ -1733,8 +1865,129 @@ function createFakeApp(opts) {
   assert(s.includes('assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText'), 'resolver registry move_instance');
   assert(s.includes('assistant_remove_instance_v1: _resolveAssistantRemoveInstanceIntentFromText'), 'resolver registry remove_instance');
   assert(s.includes('_tryAssistantBoundedSkillDispatch(this, text, _t)'), '_aiAssistSend calls bounded dispatch');
+  assert(s.includes('_assistantCallIntentRouterLlm'), 'intent router calls LLM');
+  assert(s.includes('_assistantFinishOptimizeCardPath'), 'optimize card path extracted');
   console.log('PASS app.js bounded resolver registry + dispatch hook');
 })();
+
+(function testIntentRouterNaturalZhAddAccompaniment() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: () => Promise.reject(new Error('use synthetic')),
+    extractJsonObject: () => null,
+  };
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  try {
+    const { app, doc, setOptimizeOptionsCalls, addAccompanimentCalls } = createFakeApp({
+      projectV2Override: validV2,
+      confirmImpl() { return true; },
+      syntheticIntentRouterRaw: { intent: 'add_accompaniment', confidence: 0.95, userPrompt: '', needsConfirmation: true },
+    });
+    app.state.selectedInstanceId = 'ti';
+    app.state.selectedClipId = 'cm';
+    const zh = '这段如果是主歌，给它加个伴奏';
+    doc.getElementById('aiAssistInput').value = zh;
+    return app._aiAssistSend().then(() => {
+      assert(setOptimizeOptionsCalls.length === 0, 'no setOptimizeOptions');
+      assert(addAccompanimentCalls.length === 1, 'addAccompaniment once');
+      assert(addAccompanimentCalls[0].runExtra.userPrompt === zh, 'full original text as userPrompt');
+      const card = app._aiAssistItems.filter((x) => x.type === 'card');
+      assert(card.length === 0, 'no optimize card');
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS LLM intent router natural ZH -> add accompaniment'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testIntentRouterAccompanimentFaqNoAdd() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = { callChatCompletions: () => Promise.reject(new Error('x')), extractJsonObject: () => null };
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  try {
+    const { app, doc, addAccompanimentCalls } = createFakeApp({
+      projectV2Override: validV2,
+      confirmImpl() { return true; },
+      syntheticIntentRouterRaw: { intent: 'ask_clarify', confidence: 0.9, userPrompt: '', needsConfirmation: false },
+    });
+    app.state.selectedInstanceId = 'ti';
+    app.state.selectedClipId = 'cm';
+    doc.getElementById('aiAssistInput').value = '伴奏是什么';
+    return app._aiAssistSend().then(() => {
+      assert(addAccompanimentCalls.length === 0);
+      assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === 'FAQ_ACCOMP'));
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS 伴奏是什么 -> faq, no add'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testIntentRouterFixPitchOverridesWrongAdd() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = { callChatCompletions: () => Promise.reject(new Error('x')), extractJsonObject: () => null };
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  try {
+    const { app, doc, addAccompanimentCalls } = createFakeApp({
+      projectV2Override: validV2,
+      confirmImpl() { return true; },
+      syntheticIntentRouterRaw: { intent: 'add_accompaniment', confidence: 0.99, userPrompt: '', needsConfirmation: true },
+    });
+    app.state.selectedInstanceId = 'ti';
+    app.state.selectedClipId = 'cm';
+    doc.getElementById('aiAssistInput').value = '修音准';
+    return app._aiAssistSend().then(() => {
+      assert(addAccompanimentCalls.length === 0, 'optimize keyword wins');
+      assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'card');
+      assert(app._aiAssistItems[0].templateId === 'fix_pitch_v1');
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS 修音准 overrides mistaken add_accompaniment router'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testIntentRouterInvalidPayloadFallsBackSafe() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = { callChatCompletions: () => Promise.reject(new Error('x')), extractJsonObject: () => null };
+  try {
+    const { app, doc, addAccompanimentCalls } = createFakeApp({
+      syntheticIntentRouterRaw: { intent: 'not_an_intent', confidence: 1, userPrompt: '', needsConfirmation: false },
+    });
+    app.state.selectedClipId = 'clip-1';
+    doc.getElementById('aiAssistInput').value = 'add more dynamics';
+    return app._aiAssistSend().then(() => {
+      assert(addAccompanimentCalls.length === 0);
+      assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'card');
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS invalid router intent falls back safe'); }).catch((e) => { console.error(e); process.exit(1); });
 
 (function testNonMatchingBoundedTextFallsThroughToOptimizeCard() {
   const { app, doc, runCommandCalls } = createFakeApp();

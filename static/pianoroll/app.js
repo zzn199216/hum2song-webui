@@ -248,6 +248,200 @@
     return n;
   }
 
+  /** v0 bounded enum for Assistant LLM intent router (no ProjectDoc / patch generation). */
+  const _ASSISTANT_INTENT_ROUTER_INTENTS = Object.freeze({
+    add_accompaniment: true,
+    optimize_fix_pitch: true,
+    optimize_tighten_rhythm: true,
+    optimize_clean_outliers: true,
+    none: true,
+    ask_clarify: true,
+  });
+
+  function _assistantIntentRouterMinConfidence(){
+    return 0.5;
+  }
+
+  function _assistantNormalizeIntentRouterPayload(obj, originalText){
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    const intentRaw = (obj.intent != null) ? String(obj.intent).trim() : '';
+    if (!_ASSISTANT_INTENT_ROUTER_INTENTS[intentRaw]) return null;
+    let c = Number(obj.confidence);
+    if (!isFinite(c)) c = 0;
+    c = Math.max(0, Math.min(1, c));
+    const up = (obj.userPrompt != null && String(obj.userPrompt).trim())
+      ? String(obj.userPrompt).trim().slice(0, 800)
+      : String(originalText || '').slice(0, 800);
+    return {
+      intent: intentRaw,
+      confidence: c,
+      userPrompt: up,
+      needsConfirmation: !!obj.needsConfirmation,
+    };
+  }
+
+  function _assistantBuildIntentRouterSystemPrompt(){
+    return [
+      'You classify one user message for a music DAW assistant.',
+      'Reply with exactly one JSON object and no other text.',
+      'Keys: intent (string), confidence (number 0..1), userPrompt (short restatement of the user request), needsConfirmation (boolean).',
+      '',
+      'intent must be one of:',
+      '- add_accompaniment — user wants backing/accompaniment for the current selection (e.g. 加伴奏/配伴奏/主歌加伴奏/更完整/加点支撑; add accompaniment / make fuller / add support).',
+      '- optimize_fix_pitch — fix pitch/tuning (not accompaniment).',
+      '- optimize_tighten_rhythm — tighten timing.',
+      '- optimize_clean_outliers — remove outliers/stray notes.',
+      '- ask_clarify — unclear, chit-chat, or informational/how-to questions.',
+      '- none — unrelated.',
+      '',
+      'NOT add_accompaniment: questions like 伴奏是什么 / 怎么写伴奏 / explain accompaniment / what is accompaniment.',
+      'YES add_accompaniment even with extra scene words (verse/主歌/这段).',
+    ].join('\n');
+  }
+
+  function _assistantCallIntentRouterLlm(userText){
+    const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function')
+      ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
+    const client = (typeof globalThis !== 'undefined') ? globalThis.H2S_LLM_CLIENT : null;
+    if (!cfg || !client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
+      return Promise.resolve(null);
+    }
+    const baseUrl = (cfg.baseUrl != null) ? String(cfg.baseUrl).trim() : '';
+    const model = (cfg.model != null) ? String(cfg.model).trim() : '';
+    if (!baseUrl || !model) return Promise.resolve(null);
+    const authToken = (typeof cfg.authToken === 'string') ? cfg.authToken : '';
+    const body = String(userText || '').slice(0, 900);
+    return client.callChatCompletions(
+      { baseUrl: baseUrl, model: model, authToken: authToken },
+      [
+        { role: 'system', content: _assistantBuildIntentRouterSystemPrompt() },
+        { role: 'user', content: 'User message:\n' + body },
+      ],
+      { temperature: 0, timeoutMs: 15000 }
+    ).then(function(res){
+      const raw = (res && typeof res.text === 'string') ? res.text : '';
+      const obj = client.extractJsonObject(raw);
+      return _assistantNormalizeIntentRouterPayload(obj, userText);
+    }).catch(function(){ return null; });
+  }
+
+  function _assistantTextIsAccompanimentFaq(text){
+    if (!text || typeof text !== 'string') return false;
+    const s = String(text).trim();
+    const low = s.toLowerCase();
+    if (/伴奏/.test(s) && /是什么|什么意思|什么叫|如何|怎么写|怎么做|怎么作|怎样|教程/.test(s)) return true;
+    if (/accompaniment/.test(low) && /what\s+is|what's|explain(\s+|$)|how\s+to\s+(write|make|create)/.test(low)) return true;
+    return false;
+  }
+
+  /** Heuristic: user likely asked to add accompaniment but did not use an exact bounded phrase. */
+  function _assistantHeuristicLikelyArrangementAction(text){
+    if (!text || typeof text !== 'string') return false;
+    if (_assistantTextIsAccompanimentFaq(text)) return false;
+    const s = String(text);
+    const low = s.toLowerCase();
+    if (/加.{0,12}伴奏|伴奏.{0,8}加|配.{0,6}伴奏|添.{0,6}伴奏|来段伴奏|给.{0,8}加.{0,6}伴奏|加段伴奏|帮我加伴奏|添加伴奏|段伴奏/i.test(s)) return true;
+    if (/add\s+accompaniment|accompaniment\s+to|add\s+support|make\s+(this\s+)?fuller/i.test(low)) return true;
+    return false;
+  }
+
+  /**
+   * Add accompaniment path (confirmation + addAccompanimentFromSelected only). Does not touch Optimize / PLAN.
+   * @returns {boolean} true (message flow always consumes Send)
+   */
+  function _assistantDispatchAddAccompanimentFlow(self, fullUserText, _t){
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    self._aiAssistItems = self._aiAssistItems || [];
+    const phraseText = String(fullUserText);
+    const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
+    const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+    const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
+    if (!instIdGo){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const inst = (p2 && Array.isArray(p2.instances))
+      ? p2.instances.find(function(x){ return x && String(x.id) === instIdGo; })
+      : null;
+    if (!inst){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
+    if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
+      ? p2.clips[cidFromInst]
+      : null;
+    if (!clipV2){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const isAudioClip = (function () {
+      if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
+      return !!(clipV2 && clipV2.kind === 'audio');
+    })();
+    if (isAudioClip){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
+      self.render();
+      return true;
+    }
+    if (_assistantCountMelodyNotesInClipV2(clipV2) < 1){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
+    const win = (typeof window !== 'undefined') ? window : null;
+    if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
+      self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
+      self.render();
+      return true;
+    }
+    const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+    self._aiAssistItems.push(pendingAm);
+    self.render();
+    const selfAm = self;
+    Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+      ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
+      : Promise.resolve({ ok: false, reason: 'missing_api' })
+    ).then(function(res){
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0){
+        if (res && res.ok){
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
+        } else {
+          let detail = '';
+          if (typeof selfAm._arrangementFailureStatusMessage === 'function'){
+            detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
+          }
+          if (!detail && res){
+            const rsn = (res.reason != null) ? String(res.reason).trim() : '';
+            const det = (res.detail != null) ? String(res.detail).trim() : '';
+            detail = [rsn, det].filter(Boolean).join(' ').trim();
+          }
+          if (!detail) detail = 'unknown';
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)) };
+        }
+      }
+      selfAm.render();
+    }).catch(function(err){
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0){
+        const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
+        selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
+      }
+      selfAm.render();
+    });
+    return true;
+  }
+
   function _getInternalSkillRegistry(){
     return (typeof globalThis !== 'undefined' && globalThis.H2SInternalSkillRegistry) ? globalThis.H2SInternalSkillRegistry : null;
   }
@@ -349,95 +543,7 @@
         return true;
       }
       if (skillId === 'add_accompaniment'){
-        const kiAm = _assistantSkillI18nAddAccompaniment();
-        self._aiAssistItems = self._aiAssistItems || [];
-        const phraseText = String(text);
-        const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
-        const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
-        const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
-        if (!instIdGo){
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return true;
-        }
-        const inst = (p2 && Array.isArray(p2.instances))
-          ? p2.instances.find(function(x){ return x && String(x.id) === instIdGo; })
-          : null;
-        if (!inst){
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return true;
-        }
-        const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
-        if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst){
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return true;
-        }
-        const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
-          ? p2.clips[cidFromInst]
-          : null;
-        if (!clipV2){
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return true;
-        }
-        const isAudioClip = (function () {
-          if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
-          return !!(clipV2 && clipV2.kind === 'audio');
-        })();
-        if (isAudioClip){
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
-          self.render();
-          return true;
-        }
-        if (_assistantCountMelodyNotesInClipV2(clipV2) < 1){
-          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
-          self.render();
-          return true;
-        }
-        const confirmMsg = _t(kiAm.confirm != null ? String(kiAm.confirm) : 'aiAssist.addAccompanimentConfirm');
-        const win = (typeof window !== 'undefined') ? window : null;
-        if (!win || typeof win.confirm !== 'function' || !win.confirm(confirmMsg)){
-          self._aiAssistItems.push({ type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') });
-          self.render();
-          return true;
-        }
-        const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
-        self._aiAssistItems.push(pendingAm);
-        self.render();
-        const selfAm = self;
-        Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
-          ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
-          : Promise.resolve({ ok: false, reason: 'missing_api' })
-        ).then(function(res){
-          const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
-          if (idx >= 0){
-            if (res && res.ok){
-              selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
-            } else {
-              let detail = '';
-              if (typeof selfAm._arrangementFailureStatusMessage === 'function'){
-                detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
-              }
-              if (!detail && res){
-                const rsn = (res.reason != null) ? String(res.reason).trim() : '';
-                const det = (res.detail != null) ? String(res.detail).trim() : '';
-                detail = [rsn, det].filter(Boolean).join(' ').trim();
-              }
-              if (!detail) detail = 'unknown';
-              selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)) };
-            }
-          }
-          selfAm.render();
-        }).catch(function(err){
-          const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
-          if (idx >= 0){
-            const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
-            selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
-          }
-          selfAm.render();
-        });
+        _assistantDispatchAddAccompanimentFlow(self, String(text), _t);
         return true;
       }
       if (skillId === 'add_clip_to_timeline'){
@@ -796,6 +902,14 @@
     return null;
   }
 
+  /** Keyword / phase1 narrow: user message clearly targets Optimize card path (not arrangement-only heuristic). */
+  function _assistantClearlyOptimizeLikeForSend(text){
+    if (!text || typeof text !== 'string') return false;
+    if (_resolvePhase1AssistantIntentForSend(text)) return true;
+    const mapped = _mapAiAssistTextToTemplate(text);
+    return !!(mapped && mapped.templateId && mapped.intent);
+  }
+
   /**
    * Single authoritative snapshot for one Assistant Run (after _syncAssistantCardTemplateFromPlan).
    * Used for setOptimizeOptions, reasoningLog at run start, and executionTrace (not later card mutations).
@@ -898,6 +1012,75 @@
         };
       })
       .catch(function(){ return null; });
+  }
+
+  /** Create Assistant Optimize card + optional AI plan (existing path; mutates self._aiAssistItems). */
+  function _assistantFinishOptimizeCardPath(self, text, _t){
+    const clipId = self.state.selectedClipId;
+    if (!clipId){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+      self.render();
+      return;
+    }
+    const card = { type: 'card', clipId: clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
+    const narrow = _resolvePhase1AssistantIntentForSend(text);
+    if (narrow && narrow.branch === 'rhythm_tighten_loosen'){
+      card.rhythmIntent = narrow.intent;
+    } else if (narrow && narrow.branch === 'local_transpose'){
+      card.localTransposeIntent = narrow.intent;
+    } else if (narrow && narrow.branch === 'velocity_shape'){
+      card.velocityShapeIntent = narrow.intent;
+    } else {
+      const mapped = _mapAiAssistTextToTemplate(text);
+      if (mapped.templateId && mapped.intent){
+        card.templateId = mapped.templateId;
+        card.templateLabel = mapped.templateLabel;
+        card.intent = mapped.intent;
+      }
+    }
+    card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+    card.reasoningLog = {
+      userPrompt: text.slice(0, 200),
+      templateId: card.templateId || null,
+      intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+      planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+      requestedPresetId: card.rhythmIntent ? 'rhythm_tighten_loosen' : (card.localTransposeIntent ? 'local_transpose' : (card.velocityShapeIntent ? 'velocity_shape' : 'llm_v0')),
+      planSource: 'rule',
+      createdAt: card.createdAt,
+    };
+    self._aiAssistItems.push(card);
+    _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+      if (plan){
+        card.plan = plan;
+        if (card.reasoningLog){
+          card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+          card.reasoningLog.planSource = 'ai';
+        }
+        _syncAssistantCardTemplateFromPlan(card);
+        self.render();
+      }
+    }).catch(function(){ /* keep rule-based plan */ });
+    self.render();
+  }
+
+  /** When intent router LLM is missing, errors, or yields non-add_accompaniment for arrangement-like text. */
+  function _assistantIntentRouterFallbackSend(self, text, _t){
+    const clearlyOpt = _assistantClearlyOptimizeLikeForSend(text);
+    const faq = _assistantTextIsAccompanimentFaq(text);
+    const likelyArr = _assistantHeuristicLikelyArrangementAction(text);
+    if (faq){
+      self._aiAssistItems = self._aiAssistItems || [];
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+      self.render();
+      return;
+    }
+    if (likelyArr && !clearlyOpt){
+      self._aiAssistItems = self._aiAssistItems || [];
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+      self.render();
+      return;
+    }
+    _assistantFinishOptimizeCardPath(self, text, _t);
   }
 
   /** PR2: Enrich reasoning log with execution/result metadata from Run. */
@@ -4024,50 +4207,40 @@ ensureTrackButtons(){
       inp.value = '';
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       if (_tryAssistantBoundedSkillDispatch(this, text, _t)) return;
-      const clipId = this.state.selectedClipId;
-      if (!clipId) {
-        this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
-      } else {
-        const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-        const narrow = _resolvePhase1AssistantIntentForSend(text);
-        if (narrow && narrow.branch === 'rhythm_tighten_loosen') {
-          card.rhythmIntent = narrow.intent;
-        } else if (narrow && narrow.branch === 'local_transpose') {
-          card.localTransposeIntent = narrow.intent;
-        } else if (narrow && narrow.branch === 'velocity_shape') {
-          card.velocityShapeIntent = narrow.intent;
-        } else {
-          const mapped = _mapAiAssistTextToTemplate(text);
-          if (mapped.templateId && mapped.intent) {
-            card.templateId = mapped.templateId;
-            card.templateLabel = mapped.templateLabel;
-            card.intent = mapped.intent;
+      const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function')
+        ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
+      const client = (typeof globalThis !== 'undefined') ? globalThis.H2S_LLM_CLIENT : null;
+      const llmReady = !!(cfg && String(cfg.baseUrl || '').trim() && String(cfg.model || '').trim()
+        && client && typeof client.callChatCompletions === 'function' && typeof client.extractJsonObject === 'function');
+      const self = this;
+      if (llmReady){
+        _assistantCallIntentRouterLlm(text).then(function(parsed){
+          const clearlyOpt = _assistantClearlyOptimizeLikeForSend(text);
+          const faq = _assistantTextIsAccompanimentFaq(text);
+          if (parsed && parsed.intent === 'add_accompaniment' && parsed.confidence >= _assistantIntentRouterMinConfidence() && !clearlyOpt && !faq){
+            _assistantDispatchAddAccompanimentFlow(self, text, _t);
+            return;
           }
-        }
-        card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
-        card.reasoningLog = {
-          userPrompt: text.slice(0, 200),
-          templateId: card.templateId || null,
-          intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
-          planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
-          requestedPresetId: card.rhythmIntent ? 'rhythm_tighten_loosen' : (card.localTransposeIntent ? 'local_transpose' : (card.velocityShapeIntent ? 'velocity_shape' : 'llm_v0')),
-          planSource: 'rule',
-          createdAt: card.createdAt,
-        };
-        this._aiAssistItems.push(card);
-        _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
-          if (plan) {
-            card.plan = plan;
-            if (card.reasoningLog) {
-              card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
-              card.reasoningLog.planSource = 'ai';
-            }
-            _syncAssistantCardTemplateFromPlan(card);
-            this.render();
+          if (faq){
+            self._aiAssistItems = self._aiAssistItems || [];
+            self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+            self.render();
+            return;
           }
-        }).catch(function(){ /* keep rule-based plan */ });
+          const likelyArr = _assistantHeuristicLikelyArrangementAction(text);
+          if (clearlyOpt || !likelyArr){
+            _assistantFinishOptimizeCardPath(self, text, _t);
+            return;
+          }
+          self._aiAssistItems = self._aiAssistItems || [];
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+          self.render();
+        }).catch(function(){
+          _assistantIntentRouterFallbackSend(self, text, _t);
+        });
+        return;
       }
-      this.render();
+      _assistantIntentRouterFallbackSend(self, text, _t);
     },
     async _aiAssistRun(clipId, btnEl){
       if (!clipId) return;

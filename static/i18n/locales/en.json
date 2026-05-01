@@ -220,6 +220,8 @@
   "aiAssist.addAccompanimentConfirm": "I'll add an experimental accompaniment to the currently selected melody without changing the original. Continue?",
   "aiAssist.selectMelodyTimelineFirst": "Select an editable melody clip on the timeline first.",
   "aiAssist.addAccompanimentNeedsNoteClip": "This needs an editable note clip. Convert the audio to editable notes first.",
+  "aiAssist.intentRouterArrangementHint": "That sounds like Add accompaniment. Use an explicit phrase (e.g. “添加伴奏”) or configure the AI (LLM) in Settings so the assistant can classify your request.",
+  "aiAssist.intentRouterAccompanimentFaq": "That looks like a question about accompaniment, not a request to change the project. Use documentation or an explicit assistant command when you want an action.",
 
   "cmd.optimizing": "Optimizing…",
   "cmd.optimized": "Optimized.",
