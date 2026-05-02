@@ -213,6 +213,14 @@
         if (!isNonEmptyString(op.trackId)) errors.push('createTrack.trackId_required:' + i);
         if (!isNonEmptyString(op.name)) errors.push('createTrack.name_required:' + i);
         if (!isNonEmptyString(op.instrument)) errors.push('createTrack.instrument_required:' + i);
+        if (Object.prototype.hasOwnProperty.call(op, 'gainDb')){
+          const g = op.gainDb;
+          if (typeof g !== 'number' || !isFiniteNumber(g)){
+            errors.push('createTrack.gainDb_invalid:' + i);
+          } else if (g < -30 || g > 6){
+            errors.push('createTrack.gainDb_out_of_range:' + i);
+          }
+        }
         const tid = String(op.trackId || '');
         if (createdTrackIds.has(tid)) errors.push('createTrack.duplicate_trackId:' + tid);
         if (existingTrackIds.has(tid)) errors.push('createTrack.trackId_exists:' + tid);
@@ -320,12 +328,16 @@
     // 1) createTrack
     for (const op of v._internal.createTrackOps){
       const trackId = String(op.trackId);
+      let gainDb = 0;
+      if (Object.prototype.hasOwnProperty.call(op, 'gainDb') && typeof op.gainDb === 'number' && isFiniteNumber(op.gainDb)){
+        gainDb = op.gainDb;
+      }
       clone.tracks.push({
         id: trackId,
         trackId: trackId,
         name: String(op.name),
         instrument: String(op.instrument),
-        gainDb: 0,
+        gainDb: gainDb,
         muted: false,
       });
       applySummary.createdTrackIds.push(trackId);

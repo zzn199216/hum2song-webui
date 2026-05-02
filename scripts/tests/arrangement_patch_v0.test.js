@@ -273,6 +273,155 @@ async function main(){
     assertReject(res);
   }
 
+  // --- createTrack gainDb: valid value persisted ---
+  {
+    const { p2, melodyInst } = makeProjectWithMelody();
+    const patch = {
+      version: 1,
+      ops: [
+        { op: 'createTrack', trackId: 'trk_gain_ok', name: 'Bass', instrument: 'bass', gainDb: -9 },
+        {
+          op: 'createClip',
+          clipId: 'clip_gain_ok',
+          name: 'Bass',
+          scoreBeat: {
+            version: 2,
+            tracks: [{ id: 'b0', notes: [{ id: 'bn0', pitch: 40, velocity: 80, startBeat: 0, durationBeat: 1 }] }]
+          }
+        },
+        { op: 'addInstance', instanceId: 'inst_gain_ok', clipId: 'clip_gain_ok', trackId: 'trk_gain_ok', startBeat: melodyInst.startBeat }
+      ]
+    };
+    const res = Arr.applyArrangementPatchV0ToProject(p2, patch, { H2SProject });
+    assert(res && res.ok === true, 'gainDb -9 should apply');
+    const tr = res.project.tracks.find(t => t && String(t.id) === 'trk_gain_ok');
+    assert(tr && tr.gainDb === -9, 'gainDb persisted');
+  }
+
+  // --- createTrack gainDb omitted defaults to 0 ---
+  {
+    const { p2, melodyInst } = makeProjectWithMelody();
+    const patch = {
+      version: 1,
+      ops: [
+        { op: 'createTrack', trackId: 'trk_gain_omit', name: 'Bass', instrument: 'bass' },
+        {
+          op: 'createClip',
+          clipId: 'clip_gain_omit',
+          name: 'Bass',
+          scoreBeat: {
+            version: 2,
+            tracks: [{ id: 'b0', notes: [{ id: 'bn0', pitch: 40, velocity: 80, startBeat: 0, durationBeat: 1 }] }]
+          }
+        },
+        { op: 'addInstance', instanceId: 'inst_gain_omit', clipId: 'clip_gain_omit', trackId: 'trk_gain_omit', startBeat: melodyInst.startBeat }
+      ]
+    };
+    const res = Arr.applyArrangementPatchV0ToProject(p2, patch, { H2SProject });
+    assert(res && res.ok === true, 'omit gainDb should apply');
+    const tr = res.project.tracks.find(t => t && String(t.id) === 'trk_gain_omit');
+    assert(tr && tr.gainDb === 0, 'gainDb defaults to 0');
+  }
+
+  // --- createTrack gainDb below -30 rejected ---
+  {
+    const { p2, melodyInst } = makeProjectWithMelody();
+    const patch = {
+      version: 1,
+      ops: [
+        { op: 'createTrack', trackId: 'trk_bad_low', name: 'Bass', instrument: 'bass', gainDb: -30.01 },
+        {
+          op: 'createClip',
+          clipId: 'clip_bad_low',
+          name: 'Bass',
+          scoreBeat: {
+            version: 2,
+            tracks: [{ id: 'b0', notes: [{ id: 'bn0', pitch: 40, velocity: 80, startBeat: 0, durationBeat: 1 }] }]
+          }
+        },
+        { op: 'addInstance', instanceId: 'inst_bad_low', clipId: 'clip_bad_low', trackId: 'trk_bad_low', startBeat: melodyInst.startBeat }
+      ]
+    };
+    assertReject(Arr.applyArrangementPatchV0ToProject(p2, patch, { H2SProject }));
+  }
+
+  // --- createTrack gainDb above 6 rejected ---
+  {
+    const { p2, melodyInst } = makeProjectWithMelody();
+    const patch = {
+      version: 1,
+      ops: [
+        { op: 'createTrack', trackId: 'trk_bad_hi', name: 'Bass', instrument: 'bass', gainDb: 6.01 },
+        {
+          op: 'createClip',
+          clipId: 'clip_bad_hi',
+          name: 'Bass',
+          scoreBeat: {
+            version: 2,
+            tracks: [{ id: 'b0', notes: [{ id: 'bn0', pitch: 40, velocity: 80, startBeat: 0, durationBeat: 1 }] }]
+          }
+        },
+        { op: 'addInstance', instanceId: 'inst_bad_hi', clipId: 'clip_bad_hi', trackId: 'trk_bad_hi', startBeat: melodyInst.startBeat }
+      ]
+    };
+    assertReject(Arr.applyArrangementPatchV0ToProject(p2, patch, { H2SProject }));
+  }
+
+  // --- createTrack gainDb NaN / non-number rejected ---
+  {
+    const { p2, melodyInst } = makeProjectWithMelody();
+    const mkPatch = function(gainVal){
+      return {
+        version: 1,
+        ops: [
+          { op: 'createTrack', trackId: 'trk_bad_nan', name: 'Bass', instrument: 'bass', gainDb: gainVal },
+          {
+            op: 'createClip',
+            clipId: 'clip_bad_nan',
+            name: 'Bass',
+            scoreBeat: {
+              version: 2,
+              tracks: [{ id: 'b0', notes: [{ id: 'bn0', pitch: 40, velocity: 80, startBeat: 0, durationBeat: 1 }] }]
+            }
+          },
+          { op: 'addInstance', instanceId: 'inst_bad_nan', clipId: 'clip_bad_nan', trackId: 'trk_bad_nan', startBeat: melodyInst.startBeat }
+        ]
+      };
+    };
+    assertReject(Arr.applyArrangementPatchV0ToProject(p2, mkPatch(NaN), { H2SProject }));
+    assertReject(Arr.applyArrangementPatchV0ToProject(p2, mkPatch(Number.POSITIVE_INFINITY), { H2SProject }));
+    assertReject(Arr.applyArrangementPatchV0ToProject(p2, mkPatch('quiet'), { H2SProject }));
+  }
+
+  // --- boundary -30 and 6 accepted ---
+  {
+    const { p2, melodyInst } = makeProjectWithMelody();
+    for (const pair of [['trk_bmin', -30], ['trk_bmax', 6]]){
+      const tid = pair[0];
+      const g = pair[1];
+      const patch = {
+        version: 1,
+        ops: [
+          { op: 'createTrack', trackId: tid, name: 'T', instrument: 'bass', gainDb: g },
+          {
+            op: 'createClip',
+            clipId: 'clip_' + tid,
+            name: 'C',
+            scoreBeat: {
+              version: 2,
+              tracks: [{ id: 'b0', notes: [{ id: 'bn0', pitch: 40, velocity: 80, startBeat: 0, durationBeat: 1 }] }]
+            }
+          },
+          { op: 'addInstance', instanceId: 'inst_' + tid, clipId: 'clip_' + tid, trackId: tid, startBeat: melodyInst.startBeat }
+        ]
+      };
+      const res = Arr.applyArrangementPatchV0ToProject(p2, patch, { H2SProject });
+      assert(res && res.ok === true, 'boundary gainDb ' + g);
+      const tr = res.project.tracks.find(t => t && String(t.id) === tid);
+      assert(tr && tr.gainDb === g, 'boundary persisted');
+    }
+  }
+
   console.log('PASS arrangement_patch_v0.test.js');
 }
 

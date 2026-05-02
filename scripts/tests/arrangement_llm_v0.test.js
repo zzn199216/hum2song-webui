@@ -219,6 +219,24 @@ async function testPromptIncludesRequiredContext(){
   assert(up.indexOf('Strategy for add_accompaniment_v0:') >= 0, 'add_accompaniment_v0 strategy block header');
   assert(/\bbass-first\b/i.test(up), 'bass-first support guidance');
   assert(up.indexOf('Avoid pad-only') >= 0 || up.indexOf('block-chord-only') >= 0, 'discourages pad/block sustained default');
+  assert(up.indexOf('optional_-30..6') >= 0, 'schema documents optional gainDb range');
+  assert(up.indexOf('gainDb') >= 0, 'gainDb mentioned in prompt');
+  assert(/quieter than the melody/i.test(up), 'accompaniment quieter than melody');
+  assert(/-8\b/.test(up) && /-10\b/.test(up), 'suggested bass/dB ranges in strategy');
+  assert(up.indexOf('above 0 dB') >= 0, 'do not exceed 0 dB for accompaniment');
+
+  assert(/\b(bass|drum|lead|pad|pluck|default)\b/.test(up), 'canonical built-in instrument ids mentioned');
+  assert(up.indexOf('pluck') >= 0 && up.indexOf('Built-in instrument') >= 0, 'built-in instrument guidance block');
+  assert(/not drums/i.test(up) && /\bdrum\b/.test(up), 'prefer drum id, discourage drums');
+  assert(/45[^\n]*60/.test(up) && /bass about 45/i.test(up), 'bass velocity range 45–60');
+  assert(/hi-hat|auxiliary/i.test(up) && /30[^\n]*45/.test(up), 'aux/hat velocity range 30–45');
+  assert(/pad\/chords about 35/i.test(up) || (/35[^\n]*55/.test(up) && /pad/i.test(up)), 'pad/chords velocity range 35–55');
+  assert(/kick\/snare|main hit/i.test(up) && /45[^\n]*60/.test(up), 'main drum hit velocity band');
+  assert(/strongest notes/i.test(up) && /melodyNoteTableBeat/i.test(up), 'velocities below melody reference');
+  assert(/Do not rely on gainDb alone/i.test(up), 'gainDb and velocity both required for balance');
+  assert(/prefer one new track/i.test(up), 'default single track preference');
+  assert(/explicitly ask[^\n]*two|two new tracks/i.test(up), 'explicit multi-part allows two tracks');
+  assert(/two tracks[^\n]*bass[^\n]*drum|bass plus light rhythm/i.test(up), 'two-track pairing guidance');
 }
 
 async function testRejectsMissingOrAudioSelection(){

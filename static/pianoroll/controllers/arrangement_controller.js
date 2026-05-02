@@ -111,15 +111,23 @@
     return [
       'Strategy for add_accompaniment_v0:',
       '- Default strategy: bass-first support.',
+      '- Tracks: unless the user explicitly asks for multiple parts, prefer one new track. If they explicitly ask for two parts (e.g. bass + drums), up to two new tracks is appropriate (still within the v0 cap). For two tracks, prefer bass plus light rhythm/drum, both sparse and quieter than the melody.',
+      '- Built-in instrument ids (use these exact strings; do not invent plural ids): bass, drum, lead, pad, pluck, default. For drums/percussion use drum, not drums.',
       '- Prefer creating one supportive bass-like accompaniment track.',
       '- Use low register notes, but keep them soft and sparse.',
       '- Use short-to-medium rhythmic notes, not whole-clip or multi-bar sustained blocks.',
       '- Avoid pad-only / block-chord-only output as the default.',
       '- Preserve melody as the main focus.',
       '- If adding chords/pad, keep them secondary and light.',
-      '- Keep velocity conservative.',
+      '- Velocity (MIDI 1–127) for new accompaniment notes: bass about 45–60; kick/snare/main hits about 45–60; hi-hat/auxiliary hits about 30–45; pad/chords about 35–55.',
+      '- Keep accompaniment velocities generally below the melody’s strongest notes (see melodyNoteTableBeat).',
+      '- Do not rely on gainDb alone; combine conservative gainDb with these velocities so accompaniment stays behind the melody.',
+      '- If using two tracks, keep both sparse and conservative in velocity and note density.',
       '- Do not overpower the melody.',
       '- Do not modify/delete existing melody material.',
+      '- Set conservative createTrack gainDb so accompaniment is quieter than the melody (usually below 0 dB).',
+      '- Typical gainDb: bass about -8 to -10; drums/percussion about -10 to -14; pad/chords about -12 to -16.',
+      '- Do not set accompaniment gainDb above 0 dB.',
     ].join('\n');
   }
 
@@ -148,7 +156,7 @@
       kind: 'arrangement_patch_v0',
       version: 1,
       ops: [
-        { op: 'createTrack', trackId: 'string', name: 'string', instrument: 'string' },
+        { op: 'createTrack', trackId: 'string', name: 'string', instrument: 'string', gainDb: 'optional_-30..6' },
         { op: 'createClip', clipId: 'string', name: 'string', sourceTaskId: 'optional_string', scoreBeat: {
           version: 2,
           time_signature: 'optional_string',
