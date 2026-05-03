@@ -75,6 +75,12 @@
     }catch(e){}
   }
 
+  let _aiAssistAddAccompConfirmSeq = 0;
+  function _assistantNextAddAccompanimentConfirmId(){
+    _aiAssistAddAccompConfirmSeq += 1;
+    return 'h2s_ac_am_' + _aiAssistAddAccompConfirmSeq;
+  }
+
   // PR-UX2 / INFRA-1a: Inspector Optimize templates — derived from shared registry
   const INSPECTOR_TEMPLATES = (typeof window !== 'undefined' && window.H2S_OPTIMIZE_TEMPLATES_V1_MAP) ? window.H2S_OPTIMIZE_TEMPLATES_V1_MAP : {};
 
@@ -218,6 +224,231 @@
     return phrases.indexOf(s) >= 0;
   }
 
+  /**
+   * Narrow Assistant command: trigger LLM Arrangement v0 — add accompaniment (exact phrase match).
+   * Keep in sync with scripts/tests/assistant_add_accompaniment.test.js `resolveAssistantAddAccompanimentIntentFromText`.
+   */
+  function _resolveAssistantAddAccompanimentIntentFromText(text){
+    if (!text || typeof text !== 'string') return false;
+    let s = String(text).trim();
+    s = s.replace(/^please\s+/i, '');
+    s = s.replace(/\s+please\s*$/i, '').trim();
+    s = s.replace(/[。！？.!?]+$/g, '').trim();
+    const ascii = s.toLowerCase();
+    const exactEn = ['add accompaniment', 'add some accompaniment', 'make it fuller', 'add support'];
+    if (exactEn.indexOf(ascii) >= 0) return true;
+    const zh = ['添加伴奏', '加点伴奏', '让它更完整', '加点支撑'];
+    return zh.indexOf(s) >= 0;
+  }
+
+  /** Count editable notes under clip.score (beats-only clip). */
+  function _assistantCountMelodyNotesInClipV2(clip){
+    let n = 0;
+    const sc = clip && clip.score && typeof clip.score === 'object' ? clip.score : null;
+    const tracks = sc && Array.isArray(sc.tracks) ? sc.tracks : [];
+    for (let ti = 0; ti < tracks.length; ti++){
+      const tr = tracks[ti];
+      const notes = (tr && Array.isArray(tr.notes)) ? tr.notes : [];
+      n += notes.length;
+    }
+    return n;
+  }
+
+  /** v0 bounded enum for Assistant LLM intent router (no ProjectDoc / patch generation). */
+  const _ASSISTANT_INTENT_ROUTER_INTENTS = Object.freeze({
+    add_accompaniment: true,
+    optimize_fix_pitch: true,
+    optimize_tighten_rhythm: true,
+    optimize_clean_outliers: true,
+    none: true,
+    ask_clarify: true,
+  });
+
+  function _assistantIntentRouterMinConfidence(){
+    return 0.5;
+  }
+
+  function _assistantNormalizeIntentRouterPayload(obj, originalText){
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    const intentRaw = (obj.intent != null) ? String(obj.intent).trim() : '';
+    if (!_ASSISTANT_INTENT_ROUTER_INTENTS[intentRaw]) return null;
+    let c = Number(obj.confidence);
+    if (!isFinite(c)) c = 0;
+    c = Math.max(0, Math.min(1, c));
+    const up = (obj.userPrompt != null && String(obj.userPrompt).trim())
+      ? String(obj.userPrompt).trim().slice(0, 800)
+      : String(originalText || '').slice(0, 800);
+    return {
+      intent: intentRaw,
+      confidence: c,
+      userPrompt: up,
+      needsConfirmation: !!obj.needsConfirmation,
+    };
+  }
+
+  function _assistantBuildIntentRouterSystemPrompt(){
+    return [
+      'You classify one user message for a music DAW assistant.',
+      'Reply with exactly one JSON object and no other text.',
+      'Keys: intent (string), confidence (number 0..1), userPrompt (short restatement of the user request), needsConfirmation (boolean).',
+      '',
+      'intent must be one of:',
+      '- add_accompaniment — user wants backing/accompaniment for the current selection (e.g. 加伴奏/配伴奏/主歌加伴奏/更完整/加点支撑; add accompaniment / make fuller / add support).',
+      '- optimize_fix_pitch — fix pitch/tuning (not accompaniment).',
+      '- optimize_tighten_rhythm — tighten timing.',
+      '- optimize_clean_outliers — remove outliers/stray notes.',
+      '- ask_clarify — unclear, chit-chat, or informational/how-to questions.',
+      '- none — unrelated.',
+      '',
+      'NOT add_accompaniment: questions like 伴奏是什么 / 怎么写伴奏 / explain accompaniment / what is accompaniment.',
+      'YES add_accompaniment even with extra scene words (verse/主歌/这段).',
+    ].join('\n');
+  }
+
+  function _assistantCallIntentRouterLlm(userText){
+    const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function')
+      ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
+    const client = (typeof globalThis !== 'undefined') ? globalThis.H2S_LLM_CLIENT : null;
+    if (!cfg || !client || typeof client.callChatCompletions !== 'function' || typeof client.extractJsonObject !== 'function'){
+      return Promise.resolve(null);
+    }
+    const baseUrl = (cfg.baseUrl != null) ? String(cfg.baseUrl).trim() : '';
+    const model = (cfg.model != null) ? String(cfg.model).trim() : '';
+    if (!baseUrl || !model) return Promise.resolve(null);
+    const authToken = (typeof cfg.authToken === 'string') ? cfg.authToken : '';
+    const body = String(userText || '').slice(0, 900);
+    return client.callChatCompletions(
+      { baseUrl: baseUrl, model: model, authToken: authToken },
+      [
+        { role: 'system', content: _assistantBuildIntentRouterSystemPrompt() },
+        { role: 'user', content: 'User message:\n' + body },
+      ],
+      { temperature: 0, timeoutMs: 15000 }
+    ).then(function(res){
+      const raw = (res && typeof res.text === 'string') ? res.text : '';
+      const obj = client.extractJsonObject(raw);
+      return _assistantNormalizeIntentRouterPayload(obj, userText);
+    }).catch(function(){ return null; });
+  }
+
+  function _assistantTextIsAccompanimentFaq(text){
+    if (!text || typeof text !== 'string') return false;
+    const s = String(text).trim();
+    const low = s.toLowerCase();
+    if (/伴奏/.test(s) && /是什么|什么意思|什么叫|如何|怎么写|怎么做|怎么作|怎样|教程/.test(s)) return true;
+    if (/accompaniment/.test(low) && /what\s+is|what's|explain(\s+|$)|how\s+to\s+(write|make|create)/.test(low)) return true;
+    return false;
+  }
+
+  /** Heuristic: user likely asked to add accompaniment but did not use an exact bounded phrase. */
+  function _assistantHeuristicLikelyArrangementAction(text){
+    if (!text || typeof text !== 'string') return false;
+    if (_assistantTextIsAccompanimentFaq(text)) return false;
+    const s = String(text);
+    const low = s.toLowerCase();
+    if (/加.{0,12}伴奏|伴奏.{0,8}加|配.{0,6}伴奏|添.{0,6}伴奏|来段伴奏|给.{0,8}加.{0,6}伴奏|加段伴奏|帮我加伴奏|添加伴奏|段伴奏/i.test(s)) return true;
+    if (/add\s+accompaniment|accompaniment\s+to|add\s+support|make\s+(this\s+)?fuller/i.test(low)) return true;
+    return false;
+  }
+
+  /**
+   * Add accompaniment path (confirmation + addAccompanimentFromSelected only). Does not touch Optimize / PLAN.
+   * @returns {boolean} true (message flow always consumes Send)
+   */
+  function _assistantDispatchAddAccompanimentFlow(self, fullUserText, _t){
+    self._aiAssistItems = self._aiAssistItems || [];
+    const phraseText = String(fullUserText);
+    const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
+    const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+    const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
+    if (!instIdGo){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const inst = (p2 && Array.isArray(p2.instances))
+      ? p2.instances.find(function(x){ return x && String(x.id) === instIdGo; })
+      : null;
+    if (!inst){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
+    if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
+      ? p2.clips[cidFromInst]
+      : null;
+    if (!clipV2){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    const isAudioClip = (function () {
+      if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
+      return !!(clipV2 && clipV2.kind === 'audio');
+    })();
+    if (isAudioClip){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
+      self.render();
+      return true;
+    }
+    if (_assistantCountMelodyNotesInClipV2(clipV2) < 1){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return true;
+    }
+    self._aiAssistItems.push({
+      type: 'add_accompaniment_confirm',
+      _confirmId: _assistantNextAddAccompanimentConfirmId(),
+      instanceId: instIdGo,
+      userPrompt: phraseText,
+    });
+    self.render();
+    return true;
+  }
+
+  /** Runs addAccompanimentFromSelected and updates the existing pendingAm row (in-assistant confirm UX). */
+  function _assistantAttachAddAccompanimentPromise(self, pendingAm, instIdGo, phraseText, _t){
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    const selfAm = self;
+    return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+      ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
+      : Promise.resolve({ ok: false, reason: 'missing_api' })
+    ).then(function(res){
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0){
+        if (res && res.ok){
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
+        } else {
+          let detail = '';
+          if (typeof selfAm._arrangementFailureStatusMessage === 'function'){
+            detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
+          }
+          if (!detail && res){
+            const rsn = (res.reason != null) ? String(res.reason).trim() : '';
+            const det = (res.detail != null) ? String(res.detail).trim() : '';
+            detail = [rsn, det].filter(Boolean).join(' ').trim();
+          }
+          if (!detail) detail = 'unknown';
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)) };
+        }
+      }
+      selfAm.render();
+    }).catch(function(err){
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0){
+        const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
+        selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
+      }
+      selfAm.render();
+    });
+  }
+
   function _getInternalSkillRegistry(){
     return (typeof globalThis !== 'undefined' && globalThis.H2SInternalSkillRegistry) ? globalThis.H2SInternalSkillRegistry : null;
   }
@@ -252,14 +483,27 @@
     const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
   }
+  function _assistantSkillI18nAddAccompaniment(){
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_accompaniment') : null;
+    return (sk && sk.i18n) ? sk.i18n : {
+      running: 'aiAssist.addAccompanimentRunning',
+      ok: 'aiAssist.addAccompanimentOk',
+      fail: 'aiAssist.addAccompanimentFail',
+      cancelled: 'aiAssist.addAccompanimentCancelled',
+      confirm: 'aiAssist.addAccompanimentConfirm',
+      skillDisabled: 'aiAssist.skillDisabled',
+    };
+  }
 
   /** Product precedence for bounded assistant skills (internal slice; matches historical if-chain order). */
-  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
+  const _ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
 
   /**
    * phraseResolverId → in-code phrase resolver (must match internal_skill_registry SKILLS.*.phraseResolverId).
    */
   const _ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_accompaniment_v1: _resolveAssistantAddAccompanimentIntentFromText,
     assistant_add_clip_to_timeline_v1: _resolveAssistantAddClipToTimelineIntentFromText,
     assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText,
     assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText,
@@ -268,6 +512,7 @@
 
   /** If a skill row is missing, still resolve using the known phrase ids for this slice. */
   const _ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_accompaniment: 'assistant_add_accompaniment_v1',
     add_clip_to_timeline: 'assistant_add_clip_to_timeline_v1',
     add_track: 'assistant_add_track_v1',
     move_instance: 'assistant_move_instance_v1',
@@ -302,6 +547,10 @@
         self._aiAssistItems = self._aiAssistItems || [];
         self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
         self.render();
+        return true;
+      }
+      if (skillId === 'add_accompaniment'){
+        _assistantDispatchAddAccompanimentFlow(self, String(text), _t);
         return true;
       }
       if (skillId === 'add_clip_to_timeline'){
@@ -660,6 +909,14 @@
     return null;
   }
 
+  /** Keyword / phase1 narrow: user message clearly targets Optimize card path (not arrangement-only heuristic). */
+  function _assistantClearlyOptimizeLikeForSend(text){
+    if (!text || typeof text !== 'string') return false;
+    if (_resolvePhase1AssistantIntentForSend(text)) return true;
+    const mapped = _mapAiAssistTextToTemplate(text);
+    return !!(mapped && mapped.templateId && mapped.intent);
+  }
+
   /**
    * Single authoritative snapshot for one Assistant Run (after _syncAssistantCardTemplateFromPlan).
    * Used for setOptimizeOptions, reasoningLog at run start, and executionTrace (not later card mutations).
@@ -762,6 +1019,75 @@
         };
       })
       .catch(function(){ return null; });
+  }
+
+  /** Create Assistant Optimize card + optional AI plan (existing path; mutates self._aiAssistItems). */
+  function _assistantFinishOptimizeCardPath(self, text, _t){
+    const clipId = self.state.selectedClipId;
+    if (!clipId){
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+      self.render();
+      return;
+    }
+    const card = { type: 'card', clipId: clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
+    const narrow = _resolvePhase1AssistantIntentForSend(text);
+    if (narrow && narrow.branch === 'rhythm_tighten_loosen'){
+      card.rhythmIntent = narrow.intent;
+    } else if (narrow && narrow.branch === 'local_transpose'){
+      card.localTransposeIntent = narrow.intent;
+    } else if (narrow && narrow.branch === 'velocity_shape'){
+      card.velocityShapeIntent = narrow.intent;
+    } else {
+      const mapped = _mapAiAssistTextToTemplate(text);
+      if (mapped.templateId && mapped.intent){
+        card.templateId = mapped.templateId;
+        card.templateLabel = mapped.templateLabel;
+        card.intent = mapped.intent;
+      }
+    }
+    card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+    card.reasoningLog = {
+      userPrompt: text.slice(0, 200),
+      templateId: card.templateId || null,
+      intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+      planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+      requestedPresetId: card.rhythmIntent ? 'rhythm_tighten_loosen' : (card.localTransposeIntent ? 'local_transpose' : (card.velocityShapeIntent ? 'velocity_shape' : 'llm_v0')),
+      planSource: 'rule',
+      createdAt: card.createdAt,
+    };
+    self._aiAssistItems.push(card);
+    _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+      if (plan){
+        card.plan = plan;
+        if (card.reasoningLog){
+          card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+          card.reasoningLog.planSource = 'ai';
+        }
+        _syncAssistantCardTemplateFromPlan(card);
+        self.render();
+      }
+    }).catch(function(){ /* keep rule-based plan */ });
+    self.render();
+  }
+
+  /** When intent router LLM is missing, errors, or yields non-add_accompaniment for arrangement-like text. */
+  function _assistantIntentRouterFallbackSend(self, text, _t){
+    const clearlyOpt = _assistantClearlyOptimizeLikeForSend(text);
+    const faq = _assistantTextIsAccompanimentFaq(text);
+    const likelyArr = _assistantHeuristicLikelyArrangementAction(text);
+    if (faq){
+      self._aiAssistItems = self._aiAssistItems || [];
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+      self.render();
+      return;
+    }
+    if (likelyArr && !clearlyOpt){
+      self._aiAssistItems = self._aiAssistItems || [];
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+      self.render();
+      return;
+    }
+    _assistantFinishOptimizeCardPath(self, text, _t);
   }
 
   /** PR2: Enrich reasoning log with execution/result metadata from Run. */
@@ -1651,6 +1977,11 @@ try{
     _projectV2: null,
     _lastOptimizeOptions: null,  // PR-3: app-level state for optimize options
     _lastOptimizeSnapshot: null, // Studio “last optimize” summary (user-facing; refreshed on lang change)
+    _lastArrangementSnapshot: null, // Last LLM Arrangement v0 run (in-memory only; not persisted)
+    _lastArrangementDetailsOpen: false,
+    _lastArrangementDetailsInitialized: false,
+    _lastArrangementDetailsOnDocDown: null,
+    _lastArrangementDetailsOnKey: null,
     _optPresetByClipId: {},      // PR-3: per-clip last selected preset for dropdown persistence
     _optOptionsByClipId: {},     // PR-5c: per-clip full options so getOptimizeOptions(clipId) returns correct preset
     _pendingClipFromProject: null, // full project doc v2 while "Import clip from project JSON" chooser is open
@@ -1674,6 +2005,7 @@ try{
 
 // Controllers (optional)
 agentCtrl: null,
+arrangementCtrl: null,
 
 // PR-UX6a: Command layer — runCommand + event bus
 _cmdSubs: [],
@@ -1855,6 +2187,12 @@ setProjectFromV2(projectV2){
   this.render();
   return {ok:true};
 },
+getSelectedClipId(){
+  return (this.state && this.state.selectedClipId) ? this.state.selectedClipId : null;
+},
+getSelectedInstanceId(){
+  return (this.state && this.state.selectedInstanceId) ? this.state.selectedInstanceId : null;
+},
 
 // --- T4-1.F: single write entry for per-track instrument (v2 truth) ---
 setTrackInstrument(trackId, instrument){
@@ -1934,7 +2272,6 @@ setOptimizeOptions(arg0, arg1){
   const templateId = rawTemplateId !== undefined
     ? ((rawTemplateId != null && String(rawTemplateId).trim()) ? String(rawTemplateId).trim() : null)
     : (existingOpts && existingOpts.templateId != null && String(existingOpts.templateId).trim()) ? String(existingOpts.templateId).trim() : null;
-  const rawPlan = opts && opts.plan;
   /** Like templateId: carry forward snapshot unless incoming opts explicitly sets the key (null clears). */
   let assistantExecutionPlanSnapshot;
   if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')){
@@ -1942,13 +2279,21 @@ setOptimizeOptions(arg0, arg1){
   } else {
     assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
   }
+  const snapshotExplicitlyCleared = !!(opts && Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot') && (opts._assistantExecutionPlanSnapshot == null));
   let plan = null;
   if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object'){
     plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
   } else {
-    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
-      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
-      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'plan')){
+      const rp = opts.plan;
+      plan = (rp && typeof rp === 'object' && Array.isArray(rp.planLines) && rp.planLines.length >= 1 && (rp.planTitle || rp.planKind))
+        ? { planKind: rp.planKind || null, planTitle: (rp.planTitle && String(rp.planTitle).trim()) ? String(rp.planTitle).trim() : '', planLines: rp.planLines.slice(0, 6).filter(function(l){ return typeof l === 'string'; }) }
+        : null;
+    } else if (!snapshotExplicitlyCleared && existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object'){
+      plan = existingOpts.plan;
+    } else {
+      plan = null;
+    }
   }
   let nextVelocityShapeIntent;
   if (opts && Object.prototype.hasOwnProperty.call(opts, 'velocityShapeIntent')){
@@ -2055,7 +2400,14 @@ getOptimizeOptions(clipId){
       }
     } catch (e) { console.warn('[App] read opt options failed', e); }
   }
-  return this._lastOptimizeOptions || null;
+  const last = this._lastOptimizeOptions || null;
+  if (!last) return null;
+  if (!clipId) return last;
+  // clipId has no per-clip row: do not leak assistant-only plan fields from another clip via global last
+  const copy = Object.assign({}, last);
+  delete copy.plan;
+  delete copy._assistantExecutionPlanSnapshot;
+  return copy;
 },
 
 // PR-5e: optOverride = one-shot options for this call only; does NOT modify stored per-clip options.
@@ -2093,8 +2445,8 @@ async optimizeClip(clipId, optOverride){
     if (merged.templateId != null && String(merged.templateId).trim()){
       options.templateId = String(merged.templateId).trim();
     }
-    if (merged.plan && typeof merged.plan === 'object'){
-      options.plan = merged.plan;
+    if (Object.prototype.hasOwnProperty.call(merged, 'plan')){
+      options.plan = (merged.plan && typeof merged.plan === 'object') ? merged.plan : null;
     }
     if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')){
       options._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
@@ -2157,9 +2509,38 @@ async optimizeClip(clipId, optOverride){
     return t('lastOpt.change.updated');
   },
 
+  _friendlyOptimizeRejection(reason, detail, t){
+    const reasonStr = (reason != null) ? String(reason).trim() : '';
+    const detailStr = (detail != null) ? String(detail).trim() : '';
+    const map = {
+      'no meaningful outlier cleanup': 'opt.rejectDetail.noMeaningfulOutlierCleanup',
+      'too aggressive cleanup': 'opt.rejectDetail.tooAggressiveCleanup',
+      'missing pitch change for Fix Pitch': 'opt.rejectDetail.missingPitchChangeFixPitch',
+      'missing timing change for Tighten Rhythm': 'opt.rejectDetail.missingTimingChangeTightenRhythm',
+      'pitch change too broad for Fix Pitch': 'opt.rejectDetail.pitchChangeTooBroadFixPitch',
+      'quality_velocity_only': 'opt.rejectDetail.qualityVelocityOnly',
+    };
+    const mappedKey = map[detailStr];
+    if (mappedKey){
+      const mapped = t(mappedKey);
+      if (mapped !== mappedKey) return mapped;
+    }
+    if (detailStr) return detailStr;
+    if (reasonStr === 'patch_rejected'){
+      const x = t('lastOpt.fail.patch_rejected');
+      return x !== 'lastOpt.fail.patch_rejected' ? x : reasonStr;
+    }
+    return reasonStr;
+  },
+
   _lastOptFailureDetail(res, t){
     const r = (res && res.reason != null) ? String(res.reason)
       : (res && res.error != null) ? String(res.error) : '';
+    const d = (res && res.detail != null) ? String(res.detail) : '';
+    if (r === 'patch_rejected'){
+      const friendly = this._friendlyOptimizeRejection(r, d, t);
+      if (friendly) return friendly;
+    }
     const key = 'lastOpt.fail.' + r;
     const localized = t(key);
     if (localized !== key) return localized;
@@ -2210,6 +2591,7 @@ async optimizeClip(clipId, optOverride){
       clipId: cid,
       revisionIdAtRun,
       docKeyAtRun,
+      promptTrace: (res && res.llmPromptTrace) ? this._sanitizeLastOptimizePromptTrace(res.llmPromptTrace) : null,
     };
     this._applyLastOptimizeSummaryI18n();
   },
@@ -2232,18 +2614,32 @@ async optimizeClip(clipId, optOverride){
 
   _applyLastOptimizeSummaryI18n(){
     const el = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeSummary') : null;
+    const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
     if (!el) return;
     const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
+    const setBtnVisible = (enabled) => {
+      if (!btn) return;
+      if (enabled){
+        btn.classList.remove('hidden');
+        btn.disabled = false;
+      } else {
+        btn.classList.add('hidden');
+        btn.disabled = true;
+      }
+    };
     if (!this._lastOptimizeSnapshot){
       el.textContent = t('lastOpt.none');
+      setBtnVisible(false);
       return;
     }
     if (typeof this._isLastOptimizeSnapshotStale === 'function' && this._isLastOptimizeSnapshotStale()){
       el.textContent = t('lastOpt.stale');
+      setBtnVisible(true);
       return;
     }
     const s = this._lastOptimizeSnapshot;
     el.textContent = this._formatLastOptimizeLine(s.res, s.clipId);
+    setBtnVisible(true);
   },
 
   _lastOptIntentDetailLine(ps, pathRaw, t){
@@ -2267,6 +2663,99 @@ async optimizeClip(clipId, optOverride){
     return '';
   },
 
+  _sanitizeLastOptimizePromptTrace(raw){
+    if (!raw || typeof raw !== 'object') return null;
+    const MAX = 48000;
+    const trim = function(v){
+      if (typeof v !== 'string') return '';
+      return v.length > MAX ? v.slice(0, MAX) + '\n...[truncated]...' : v;
+    };
+    const maybeStr = function(v, max){
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s) return null;
+      const n = Number(max);
+      return Number.isFinite(n) && n > 0 ? s.slice(0, n) : s;
+    };
+    const b = raw.blocks && typeof raw.blocks === 'object' ? raw.blocks : null;
+    const out = {};
+    if (raw.attemptIndex != null && Number.isFinite(Number(raw.attemptIndex))) out.attemptIndex = Number(raw.attemptIndex);
+    if (typeof raw.finalSystemPrompt === 'string') out.finalSystemPrompt = trim(raw.finalSystemPrompt);
+    if (typeof raw.finalUserPrompt === 'string') out.finalUserPrompt = trim(raw.finalUserPrompt);
+    if (b){
+      const bo = {};
+      const templateId = maybeStr(b.resolvedTemplateId, 120);
+      if (templateId != null) bo.resolvedTemplateId = templateId;
+      else bo.resolvedTemplateId = null;
+      if (b.resolvedIntent && typeof b.resolvedIntent === 'object'){
+        bo.resolvedIntent = {
+          fixPitch: !!b.resolvedIntent.fixPitch,
+          tightenRhythm: !!b.resolvedIntent.tightenRhythm,
+          reduceOutliers: !!b.resolvedIntent.reduceOutliers,
+        };
+      }
+      const promptVersion = maybeStr(b.promptVersion, 120);
+      if (promptVersion != null) bo.promptVersion = promptVersion;
+      if (typeof b.planBlock === 'string') bo.planBlock = trim(b.planBlock);
+      if (typeof b.directivesBlock === 'string') bo.directivesBlock = trim(b.directivesBlock);
+      if (typeof b.userBody === 'string') bo.userBody = trim(b.userBody);
+      out.blocks = bo;
+    }
+    return this._redactLastOptimizePromptTrace(out);
+  },
+
+  _redactLastOptimizePromptTrace(value){
+    const REDACT = '[REDACTED]';
+    const isSensitiveKey = function(k){
+      const s = String(k || '').toLowerCase();
+      return s.indexOf('authorization') >= 0
+        || s === 'apikey'
+        || s.indexOf('api_key') >= 0
+        || s.indexOf('auth') >= 0
+        || s.indexOf('token') >= 0
+        || s.indexOf('header') >= 0
+        || s === 'secret'
+        || s.indexOf('password') >= 0;
+    };
+    const walk = function(v){
+      if (Array.isArray(v)) return v.map(walk);
+      if (!v || typeof v !== 'object') return v;
+      const out = {};
+      for (const k in v){
+        if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+        if (isSensitiveKey(k)){
+          out[k] = REDACT;
+          continue;
+        }
+        out[k] = walk(v[k]);
+      }
+      return out;
+    };
+    return walk(value);
+  },
+
+  _copyTextToClipboardWithFallback(text){
+    const copyFallback = function(raw){
+      if (typeof document === 'undefined') return false;
+      const ta = document.createElement('textarea');
+      ta.value = String(raw || '');
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (_e) { ok = false; }
+      document.body.removeChild(ta);
+      return !!ok;
+    };
+    const payload = String(text || '');
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+      return navigator.clipboard.writeText(payload).then(function(){ return true; }).catch(function(){ return copyFallback(payload); });
+    }
+    return Promise.resolve(copyFallback(payload));
+  },
+
   _renderLastOptimizeDetailsBody(){
     const body = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetailsBody') : null;
     if (!body) return;
@@ -2281,6 +2770,93 @@ async optimizeClip(clipId, optOverride){
       const val = document.createElement('span');
       val.className = 'val';
       val.textContent = valueStr;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      body.appendChild(row);
+    };
+    const addPromptTraceSection = (promptTrace) => {
+      const row = document.createElement('div');
+      row.className = 'lastOptDetailRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t('lastOpt.detail.lblPromptTrace');
+      const val = document.createElement('div');
+      val.className = 'val lastOptPromptTrace';
+      if (!promptTrace || typeof promptTrace !== 'object'){
+        const empty = document.createElement('div');
+        empty.className = 'lastOptPromptTraceEmpty';
+        empty.textContent = t('lastOpt.detail.promptUnavailable');
+        val.appendChild(empty);
+        row.appendChild(lbl);
+        row.appendChild(val);
+        body.appendChild(row);
+        return;
+      }
+      const blocks = (promptTrace.blocks && typeof promptTrace.blocks === 'object') ? promptTrace.blocks : null;
+      const copyWrap = document.createElement('div');
+      copyWrap.className = 'lastOptPromptTraceActions';
+      const btnCopyJson = document.createElement('button');
+      btnCopyJson.type = 'button';
+      btnCopyJson.className = 'btn mini ghost';
+      btnCopyJson.textContent = t('lastOpt.detail.copyTrace');
+      const btnCopyUser = document.createElement('button');
+      btnCopyUser.type = 'button';
+      btnCopyUser.className = 'btn mini ghost';
+      btnCopyUser.textContent = t('lastOpt.detail.copyFinalUser');
+      copyWrap.appendChild(btnCopyJson);
+      copyWrap.appendChild(btnCopyUser);
+      val.appendChild(copyWrap);
+      const status = document.createElement('div');
+      status.className = 'lastOptPromptTraceStatus';
+      status.textContent = '';
+      val.appendChild(status);
+      const meta = document.createElement('div');
+      meta.className = 'lastOptPromptTraceMeta';
+      const metaParts = [];
+      if (blocks && blocks.resolvedTemplateId != null && String(blocks.resolvedTemplateId).trim()){
+        metaParts.push(t('lastOpt.detail.lblPromptTemplate') + ': ' + String(blocks.resolvedTemplateId));
+      }
+      if (blocks && blocks.promptVersion != null && String(blocks.promptVersion).trim()){
+        metaParts.push(t('lastOpt.detail.lblPromptVersion') + ': ' + String(blocks.promptVersion));
+      }
+      if (blocks && blocks.resolvedIntent && typeof blocks.resolvedIntent === 'object'){
+        try {
+          metaParts.push(t('lastOpt.detail.lblPromptIntent') + ': ' + JSON.stringify(blocks.resolvedIntent));
+        } catch (_e) {}
+      }
+      if (promptTrace.attemptIndex != null && Number.isFinite(Number(promptTrace.attemptIndex))){
+        metaParts.push(t('lastOpt.detail.lblPromptAttempt') + ': ' + String(Math.floor(Number(promptTrace.attemptIndex))));
+      }
+      meta.textContent = metaParts.length ? metaParts.join(' | ') : t('lastOpt.detail.promptMetaNone');
+      val.appendChild(meta);
+      const makePromptBlock = (title, textValue) => {
+        const wrap = document.createElement('details');
+        wrap.className = 'lastOptPromptTraceBlock';
+        const summary = document.createElement('summary');
+        summary.textContent = title;
+        const ta = document.createElement('textarea');
+        ta.className = 'lastOptPromptTraceText';
+        ta.readOnly = true;
+        ta.value = (typeof textValue === 'string') ? textValue : '';
+        wrap.appendChild(summary);
+        wrap.appendChild(ta);
+        return wrap;
+      };
+      val.appendChild(makePromptBlock(t('lastOpt.detail.lblFinalSystemPrompt'), promptTrace.finalSystemPrompt));
+      val.appendChild(makePromptBlock(t('lastOpt.detail.lblFinalUserPrompt'), promptTrace.finalUserPrompt));
+      btnCopyJson.addEventListener('click', () => {
+        let payload = '{}';
+        try { payload = JSON.stringify(promptTrace, null, 2); } catch (_e) {}
+        this._copyTextToClipboardWithFallback(payload).then((ok) => {
+          status.textContent = ok ? t('lastOpt.detail.copyOk') : t('lastOpt.detail.copyFail');
+        });
+      });
+      btnCopyUser.addEventListener('click', () => {
+        const payload = (typeof promptTrace.finalUserPrompt === 'string') ? promptTrace.finalUserPrompt : '';
+        this._copyTextToClipboardWithFallback(payload).then((ok) => {
+          status.textContent = ok ? t('lastOpt.detail.copyOk') : t('lastOpt.detail.copyFail');
+        });
+      });
       row.appendChild(lbl);
       row.appendChild(val);
       body.appendChild(row);
@@ -2319,6 +2895,11 @@ async optimizeClip(clipId, optOverride){
     const stale = (typeof this._isLastOptimizeSnapshotStale === 'function') && this._isLastOptimizeSnapshotStale();
     addRow('lastOpt.detail.lblStale', stale ? t('lastOpt.detail.valStale') : t('lastOpt.detail.valCurrent'));
     if (s.clipId) addRow('lastOpt.detail.lblClip', String(s.clipId).slice(0, 28));
+    const rawDetail = (res && res.detail != null) ? String(res.detail).trim() : '';
+    if (rawDetail) addRow('lastOpt.detail.lblRawDetail', rawDetail.slice(0, 240));
+    const llmOutcome = (res && res.llmOutcome != null) ? String(res.llmOutcome).trim()
+      : (ps && ps.llm && ps.llm.outcome != null) ? String(ps.llm.outcome).trim() : '';
+    if (llmOutcome) addRow('lastOpt.detail.lblLlmOutcome', llmOutcome.slice(0, 80));
     if (ps && ps.executedPreset != null && String(ps.executedPreset).trim()){
       addRow('lastOpt.detail.lblPreset', String(ps.executedPreset).slice(0, 48));
     }
@@ -2338,6 +2919,7 @@ async optimizeClip(clipId, optOverride){
           .replace('{total}', String(Math.min(Math.floor(total), 99)))
           .replace('{final}', (finalIdx != null && Number.isFinite(finalIdx)) ? String(Math.floor(finalIdx)) : '—'));
       }
+      addPromptTraceSection(s.promptTrace || null);
     }
   },
 
@@ -2367,6 +2949,7 @@ async optimizeClip(clipId, optOverride){
     const panel = (typeof document !== 'undefined') ? document.getElementById('studioLastOptimizeDetails') : null;
     const btn = (typeof document !== 'undefined') ? document.getElementById('btnLastOptimizeDetails') : null;
     if (!panel) return;
+    if (typeof this._closeArrangementDetails === 'function') this._closeArrangementDetails();
     this._closeLastOptimizeDetails();
     this._renderLastOptimizeDetailsBody();
     panel.classList.remove('hidden');
@@ -2378,7 +2961,8 @@ async optimizeClip(clipId, optOverride){
       const raw = ev.target;
       const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
       if (!node || typeof node.closest !== 'function') return;
-      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails')) return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails') || node.closest('#btnEditorOptimizeDetails') || node.closest('#btnEditorOptimizeDetailsDebug') || node.closest('#btnInspectorOptimizeDetails')) return;
+      if (node.closest('#studioArrangementDetails') || node.closest('#btnSelArrangementDetails')) return;
       app._closeLastOptimizeDetails();
     };
     document.addEventListener('pointerdown', this._lastOptimizeDetailsOnDocDown, true);
@@ -2406,6 +2990,329 @@ async optimizeClip(clipId, optOverride){
       btn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._toggleLastOptimizeDetails(); });
       if (closeBtn) closeBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._closeLastOptimizeDetails(); });
     }catch(e){ console.warn('[lastOpt] _initLastOptimizeDetails failed', e); }
+  },
+
+  _safeArrangementJsonClone(obj){
+    if (obj == null) return null;
+    if (typeof obj !== 'object') return obj;
+    try { return JSON.parse(JSON.stringify(obj)); } catch (_e) { return null; }
+  },
+
+  _isSensitiveArrangementKey(k){
+    const s = String(k || '').toLowerCase();
+    if (!s) return false;
+    if (s === 'headers' || s === 'authorization' || s === 'password' || s === 'auth') return true;
+    if (s === 'apikey' || s === 'api_key' || s.endsWith('apikey')) return true;
+    if (s.includes('secret')) return true;
+    if (s === 'token' || s.endsWith('_token') || s === 'authtoken' || s === 'accesstoken' || s === 'refreshtoken') return true;
+    if (s.indexOf('authorization') >= 0) return true;
+    return false;
+  },
+
+  _redactArrangementDeep(value){
+    const REDACT = '[REDACTED]';
+    const self = this;
+    const isK = (k) => self._isSensitiveArrangementKey(k);
+    const walk = (v) => {
+      if (v == null) return v;
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+      if (Array.isArray(v)) return v.map(walk);
+      if (typeof v !== 'object') return v;
+      const out = {};
+      const keys = Object.keys(v);
+      for (let i = 0; i < keys.length; i++){
+        const k = keys[i];
+        if (isK(k)){
+          out[k] = REDACT;
+          continue;
+        }
+        out[k] = walk(v[k]);
+      }
+      return out;
+    };
+    return walk(value);
+  },
+
+  _commitArrangementSnapshot(runResult, goal, selectedClipId, selectedInstanceId){
+    const r = (runResult && typeof runResult === 'object') ? runResult : {};
+    const snap = {
+      ts: Date.now(),
+      goal: (goal != null) ? String(goal) : 'add_accompaniment_v0',
+      selectedClipId: (selectedClipId != null && String(selectedClipId).trim()) ? String(selectedClipId).trim() : null,
+      selectedInstanceId: (selectedInstanceId != null && String(selectedInstanceId).trim()) ? String(selectedInstanceId).trim() : null,
+      ok: !!r.ok,
+      reason: (r.reason != null) ? String(r.reason) : '',
+      detail: (r.detail != null) ? String(r.detail) : '',
+      summary: this._safeArrangementJsonClone(r.summary),
+      llmDebug: this._safeArrangementJsonClone(r.llmDebug),
+      promptTrace: this._safeArrangementJsonClone(r.promptTrace),
+      rawPatch: this._safeArrangementJsonClone(r.rawPatch),
+      arrangementOutcome: this._safeArrangementJsonClone(r.arrangementOutcome),
+      qualityReport: this._safeArrangementJsonClone(r.qualityReport),
+    };
+    this._lastArrangementSnapshot = this._redactArrangementDeep(snap);
+  },
+
+  _arrangementDetailsOutcomeLabel(snap, t){
+    if (!snap) return '—';
+    if (snap.ok && snap.reason === 'ok') return t('arrange.detail.outcomeApplied', 'Applied');
+    const r = String(snap.reason || '');
+    if (r === 'patch_validation_failed') return t('arrange.detail.outcomeRejected', 'Rejected');
+    return t('arrange.detail.outcomeFailed', 'Failed');
+  },
+
+  _renderArrangementDetailsBody(){
+    const body = (typeof document !== 'undefined') ? document.getElementById('studioArrangementDetailsBody') : null;
+    if (!body) return;
+    const t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k, fb){ return (fb != null) ? fb : k; };
+    const snap = this._lastArrangementSnapshot;
+    while (body.firstChild) body.removeChild(body.firstChild);
+    if (!snap){
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = t('arrange.detail.empty', 'No arrangement run recorded yet.');
+      body.appendChild(empty);
+      return;
+    }
+    const addRow = (labelKey, valueStr) => {
+      const row = document.createElement('div');
+      row.className = 'lastOptDetailRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = t(labelKey);
+      const val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = valueStr;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      body.appendChild(row);
+    };
+    const llmCalled = !!(snap.llmDebug && (Number(snap.llmDebug.callCount) > 0 || (snap.llmDebug.model && String(snap.llmDebug.model).trim())));
+    addRow('arrange.detail.outcome', this._arrangementDetailsOutcomeLabel(snap, t));
+    addRow('arrange.detail.reason', snap.reason || '—');
+    addRow('arrange.detail.detail', (snap.detail && String(snap.detail).slice(0, 400)) || '—');
+    addRow('arrange.detail.goal', snap.goal || '—');
+    addRow('arrange.detail.selectedClip', snap.selectedClipId || '—');
+    addRow('arrange.detail.selectedInstance', snap.selectedInstanceId || '—');
+    addRow('arrange.detail.llmCalled', llmCalled ? t('arrange.detail.llmYes', 'Yes') : t('arrange.detail.llmNo', 'No'));
+    if (snap.llmDebug && typeof snap.llmDebug === 'object'){
+      const d = snap.llmDebug;
+      if (d.model != null) addRow('arrange.detail.model', String(d.model));
+      if (d.baseUrl != null) addRow('arrange.detail.baseUrl', String(d.baseUrl));
+      if (d.callCount != null) addRow('arrange.detail.callCount', String(d.callCount));
+    }
+    const sum = snap.summary && typeof snap.summary === 'object' ? snap.summary : null;
+    if (sum){
+      const j = (k) => (Array.isArray(sum[k]) ? sum[k].join(', ') : '—');
+      addRow('arrange.detail.createdTracks', j('createdTrackIds'));
+      addRow('arrange.detail.createdClips', j('createdClipIds'));
+      addRow('arrange.detail.createdInstances', j('createdInstanceIds'));
+    }
+    const qr = snap.qualityReport && typeof snap.qualityReport === 'object' ? snap.qualityReport : null;
+    if (qr){
+      const warns = Array.isArray(qr.warnings) ? qr.warnings : [];
+      addRow(
+        'arrange.detail.qualityWarnings',
+        warns.length ? String(warns.length) : t('arrange.detail.qualityNone', 'None')
+      );
+      if (warns.length){
+        const detQ = document.createElement('details');
+        detQ.style.marginTop = '8px';
+        const sq = document.createElement('summary');
+        sq.style.cursor = 'pointer';
+        sq.style.fontWeight = '600';
+        sq.textContent = t('arrange.detail.qualityWarnList', 'Quality warnings');
+        detQ.appendChild(sq);
+        const ul = document.createElement('ul');
+        ul.style.margin = '8px 0 0';
+        ul.style.paddingLeft = '20px';
+        ul.style.fontSize = '11px';
+        ul.style.fontFamily = 'ui-monospace, monospace';
+        warns.forEach((w) => {
+          const wi = typeof w === 'object' && w ? w : {};
+          const code = (wi.code != null) ? String(wi.code) : 'unknown';
+          const base = t('arrange.quality.' + code, code);
+          const copy = {};
+          Object.keys(wi).forEach((k) => {
+            if (k === 'severity' || k === 'code') return;
+            copy[k] = wi[k];
+          });
+          let extra = '';
+          try {
+            const keys = Object.keys(copy);
+            if (keys.length) extra = JSON.stringify(copy);
+          } catch (_ex) { extra = ''; }
+          const li = document.createElement('li');
+          li.style.marginBottom = '4px';
+          li.textContent = extra ? (base + ' ' + extra) : base;
+          ul.appendChild(li);
+        });
+        detQ.appendChild(ul);
+        body.appendChild(detQ);
+      }
+    }
+    const addDetailsTextarea = (summaryKey, textareaRows, jsonObj) => {
+      const det = document.createElement('details');
+      det.style.marginTop = '8px';
+      const summ = document.createElement('summary');
+      summ.style.cursor = 'pointer';
+      summ.style.fontWeight = '600';
+      summ.textContent = t(summaryKey);
+      det.appendChild(summ);
+      const ta = document.createElement('textarea');
+      ta.setAttribute('readonly', 'readonly');
+      ta.rows = textareaRows;
+      ta.style.width = '100%';
+      ta.style.boxSizing = 'border-box';
+      ta.style.fontSize = '11px';
+      ta.style.fontFamily = 'ui-monospace, monospace';
+      let text = '';
+      try { text = jsonObj ? JSON.stringify(jsonObj, null, 2) : ''; } catch (_e) { text = String(jsonObj); }
+      ta.value = text;
+      det.appendChild(ta);
+      body.appendChild(det);
+    };
+    if (snap.arrangementOutcome != null){
+      addDetailsTextarea('arrange.detail.outcomeBlock', 8, snap.arrangementOutcome);
+    }
+    if (snap.rawPatch != null){
+      addDetailsTextarea('arrange.detail.rawPatch', 10, snap.rawPatch);
+    }
+    const pt = snap.promptTrace && typeof snap.promptTrace === 'object' ? snap.promptTrace : null;
+    if (pt){
+      const detSys = document.createElement('details');
+      detSys.style.marginTop = '6px';
+      const s1 = document.createElement('summary');
+      s1.style.cursor = 'pointer';
+      s1.style.fontWeight = '600';
+      s1.textContent = t('arrange.detail.systemPrompt');
+      detSys.appendChild(s1);
+      const taSys = document.createElement('textarea');
+      taSys.setAttribute('readonly', 'readonly');
+      taSys.rows = 6;
+      taSys.style.width = '100%';
+      taSys.style.boxSizing = 'border-box';
+      taSys.style.fontSize = '11px';
+      taSys.value = (typeof pt.systemPrompt === 'string') ? pt.systemPrompt : '';
+      detSys.appendChild(taSys);
+      body.appendChild(detSys);
+      const detUsr = document.createElement('details');
+      detUsr.style.marginTop = '6px';
+      const s2 = document.createElement('summary');
+      s2.style.cursor = 'pointer';
+      s2.style.fontWeight = '600';
+      s2.textContent = t('arrange.detail.userPrompt');
+      detUsr.appendChild(s2);
+      const taUsr = document.createElement('textarea');
+      taUsr.setAttribute('readonly', 'readonly');
+      taUsr.rows = 10;
+      taUsr.style.width = '100%';
+      taUsr.style.boxSizing = 'border-box';
+      taUsr.style.fontSize = '11px';
+      taUsr.value = (typeof pt.userPrompt === 'string') ? pt.userPrompt : '';
+      detUsr.appendChild(taUsr);
+      body.appendChild(detUsr);
+    }
+    const copyWrap = document.createElement('div');
+    copyWrap.style.marginTop = '10px';
+    copyWrap.style.display = 'flex';
+    copyWrap.style.flexWrap = 'wrap';
+    copyWrap.style.gap = '6px';
+    copyWrap.style.alignItems = 'center';
+    const mkBtn = (labelKey) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn mini ghost';
+      b.textContent = t(labelKey);
+      return b;
+    };
+    const statusEl = document.createElement('span');
+    statusEl.className = 'muted';
+    statusEl.style.fontSize = '11px';
+    statusEl.id = 'arrangementDetailsCopyStatus';
+    const setCopyStatus = (ok) => {
+      statusEl.textContent = ok ? t('arrange.detail.copyOk', 'Copied.') : t('arrange.detail.copyFail', 'Copy failed.');
+      setTimeout(() => { if (statusEl.textContent) statusEl.textContent = ''; }, 2000);
+    };
+    const btnTrace = mkBtn('arrange.detail.copyTrace');
+    btnTrace.addEventListener('click', () => {
+      const tracePayload = JSON.stringify(snap, null, 2);
+      Promise.resolve(this._copyTextToClipboardWithFallback(tracePayload)).then((ok) => setCopyStatus(!!ok)).catch(() => setCopyStatus(false));
+    });
+    const btnUser = mkBtn('arrange.detail.copyUser');
+    btnUser.addEventListener('click', () => {
+      const u = (snap.promptTrace && typeof snap.promptTrace.userPrompt === 'string') ? snap.promptTrace.userPrompt : '';
+      Promise.resolve(this._copyTextToClipboardWithFallback(u)).then((ok) => setCopyStatus(!!ok)).catch(() => setCopyStatus(false));
+    });
+    const btnPatch = mkBtn('arrange.detail.copyPatch');
+    btnPatch.addEventListener('click', () => {
+      let p = '';
+      try { p = snap.rawPatch ? JSON.stringify(snap.rawPatch, null, 2) : ''; } catch (_e) { p = ''; }
+      Promise.resolve(this._copyTextToClipboardWithFallback(p)).then((ok) => setCopyStatus(!!ok)).catch(() => setCopyStatus(false));
+    });
+    copyWrap.appendChild(btnTrace);
+    copyWrap.appendChild(btnUser);
+    copyWrap.appendChild(btnPatch);
+    copyWrap.appendChild(statusEl);
+    body.appendChild(copyWrap);
+  },
+
+  _renderArrangementDetailsBodyIfOpen(){
+    if (!this._lastArrangementDetailsOpen) return;
+    this._renderArrangementDetailsBody();
+  },
+
+  _closeArrangementDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioArrangementDetails') : null;
+    if (panel) panel.classList.add('hidden');
+    if (panel) panel.setAttribute('aria-hidden', 'true');
+    this._lastArrangementDetailsOpen = false;
+    if (this._lastArrangementDetailsOnDocDown){
+      document.removeEventListener('pointerdown', this._lastArrangementDetailsOnDocDown, true);
+      this._lastArrangementDetailsOnDocDown = null;
+    }
+    if (this._lastArrangementDetailsOnKey){
+      document.removeEventListener('keydown', this._lastArrangementDetailsOnKey);
+      this._lastArrangementDetailsOnKey = null;
+    }
+  },
+
+  _openArrangementDetails(){
+    const panel = (typeof document !== 'undefined') ? document.getElementById('studioArrangementDetails') : null;
+    if (!panel) return;
+    if (typeof this._closeLastOptimizeDetails === 'function') this._closeLastOptimizeDetails();
+    this._closeArrangementDetails();
+    this._renderArrangementDetailsBody();
+    panel.classList.remove('hidden');
+    panel.setAttribute('aria-hidden', 'false');
+    this._lastArrangementDetailsOpen = true;
+    const app = this;
+    this._lastArrangementDetailsOnDocDown = function(ev){
+      const raw = ev.target;
+      const node = (raw && raw.nodeType === 1) ? raw : (raw && raw.parentElement);
+      if (!node || typeof node.closest !== 'function') return;
+      if (node.closest('#studioArrangementDetails') || node.closest('#btnSelArrangementDetails')) return;
+      if (node.closest('#studioLastOptimizeDetails') || node.closest('#btnLastOptimizeDetails')) return;
+      app._closeArrangementDetails();
+    };
+    document.addEventListener('pointerdown', this._lastArrangementDetailsOnDocDown, true);
+    this._lastArrangementDetailsOnKey = function(ev){
+      if (ev.key === 'Escape') app._closeArrangementDetails();
+    };
+    document.addEventListener('keydown', this._lastArrangementDetailsOnKey);
+  },
+
+  _initArrangementDetails(){
+    try{
+      if (typeof document === 'undefined') return;
+      if (this._lastArrangementDetailsInitialized) return;
+      const panel = document.getElementById('studioArrangementDetails');
+      const closeBtn = document.getElementById('btnArrangementDetailsClose');
+      if (!panel) return;
+      this._lastArrangementDetailsInitialized = true;
+      this._lastArrangementDetailsOpen = false;
+      if (closeBtn) closeBtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); } catch (e) {} this._closeArrangementDetails(); });
+    }catch(e){ console.warn('[arrange] _initArrangementDetails failed', e); }
   },
 
 // PR-5: Undo Optimize — rollback clip to parent revision (atomic: setProjectFromV2 + commitV2).
@@ -2499,6 +3406,23 @@ try{
   }
 }catch(e){
   console.warn('AgentController init failed', e);
+}
+
+// Wire ArrangementController (non-UI v0 runner) if available
+try{
+  const ROOT = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : {});
+  if (ROOT.H2SArrangementController && typeof ROOT.H2SArrangementController.create === 'function'){
+    this.arrangementCtrl = ROOT.H2SArrangementController.create({
+      getProjectV2: () => this.getProjectV2(),
+      setProjectFromV2: (p2) => this.setProjectFromV2(p2),
+      getSelectedClipId: () => this.getSelectedClipId(),
+      getSelectedInstanceId: () => this.getSelectedInstanceId(),
+      log: (msg, data) => this.dbg('[arrangement]', msg, data || ''),
+      H2SProject: window.H2SProject,
+    });
+  }
+}catch(e){
+  console.warn('ArrangementController init failed', e);
 }
 
 // PR-5f: hydrate per-clip optimize options from localStorage (survives hard refresh)
@@ -2731,6 +3655,7 @@ if (typeof localStorage !== 'undefined') {
       this._initBeginnerHintBar();
       this._fetchBackendReadinessOnce();
       this._initLastOptimizeDetails();
+      this._initArrangementDetails();
 
       // Modal
       $('#btnModalClose').addEventListener('click', () => this.closeModal(false));
@@ -2854,9 +3779,26 @@ $('#rngPitchCenter').addEventListener('input', () => {
             fmtSec,
             escapeHtml,
             onEditClip: (clipId) => this.openClipEditor(clipId),
+            onAddBass: (instId) => this.addBassFromSelected(instId),
+            onAddAccompaniment: (instId, extra) => {
+              Promise.resolve(this.addAccompanimentFromSelected(instId, extra)).catch((err) => {
+                console.warn('[App] addAccompanimentFromSelected failed', err);
+                const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+                this.setImportStatus(_t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.'), false);
+              });
+            },
+            onArrangementDetails: () => {
+              if (typeof this._openArrangementDetails === 'function') this._openArrangementDetails();
+            },
+            getHasArrangementDetails: () => !!this._lastArrangementSnapshot,
             onDuplicateInstance: (instId) => this.duplicateInstance(instId),
             onRemoveInstance: (instId) => this.deleteInstance(instId),
             getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertToEditable') : 'Convert to editable'),
+            getAddBassLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addBass') : 'Add Bass'),
+            getAddAccompanimentLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompaniment') : 'Add accompaniment'),
+            getAddAccompanimentMoreInstructionsLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompanimentMoreInstructions') : 'More instructions (optional)'),
+            getAddAccompanimentBadgeLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.addAccompanimentBadge') : 'Experimental'),
+            getArrangementDetailsLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('arrange.detailsShort') : 'Arrangement Details'),
             onConvertAudioToEditable: (clipId, instId) => {
               Promise.resolve(this.convertAudioClipToEditable(clipId, { sourceAudioInstanceId: instId })).catch(function(err){
                 console.warn('[App] convertAudioClipToEditable (instance) failed', err);
@@ -3251,8 +4193,17 @@ ensureTrackButtons(){
       if (body) body.addEventListener('click', (ev) => {
         const t = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
         const act = t && t.getAttribute && t.getAttribute('data-act');
+        if (!act) return;
+        if (act === 'aiAddAccompanimentContinue' || act === 'aiAddAccompanimentCancel'){
+          const confirmId = t.getAttribute('data-confirm-id');
+          if (!confirmId) return;
+          ev.preventDefault();
+          if (act === 'aiAddAccompanimentContinue') this._aiAssistAddAccompanimentContinue(confirmId);
+          else this._aiAssistAddAccompanimentCancel(confirmId);
+          return;
+        }
         const clipId = t && t.getAttribute && t.getAttribute('data-clip-id');
-        if (!act || !clipId) return;
+        if (!clipId) return;
         if (act === 'aiRun') this._aiAssistRun(clipId, t);
         else if (act === 'aiOpenOptimize') this.runCommand('open_inspector_optimize');
         else if (act === 'aiUndo') this._aiAssistUndo(clipId);
@@ -3316,50 +4267,40 @@ ensureTrackButtons(){
       inp.value = '';
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       if (_tryAssistantBoundedSkillDispatch(this, text, _t)) return;
-      const clipId = this.state.selectedClipId;
-      if (!clipId) {
-        this._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
-      } else {
-        const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-        const narrow = _resolvePhase1AssistantIntentForSend(text);
-        if (narrow && narrow.branch === 'rhythm_tighten_loosen') {
-          card.rhythmIntent = narrow.intent;
-        } else if (narrow && narrow.branch === 'local_transpose') {
-          card.localTransposeIntent = narrow.intent;
-        } else if (narrow && narrow.branch === 'velocity_shape') {
-          card.velocityShapeIntent = narrow.intent;
-        } else {
-          const mapped = _mapAiAssistTextToTemplate(text);
-          if (mapped.templateId && mapped.intent) {
-            card.templateId = mapped.templateId;
-            card.templateLabel = mapped.templateLabel;
-            card.intent = mapped.intent;
+      const cfg = (typeof globalThis !== 'undefined' && globalThis.H2S_LLM_CONFIG && typeof globalThis.H2S_LLM_CONFIG.loadLlmConfig === 'function')
+        ? globalThis.H2S_LLM_CONFIG.loadLlmConfig() : null;
+      const client = (typeof globalThis !== 'undefined') ? globalThis.H2S_LLM_CLIENT : null;
+      const llmReady = !!(cfg && String(cfg.baseUrl || '').trim() && String(cfg.model || '').trim()
+        && client && typeof client.callChatCompletions === 'function' && typeof client.extractJsonObject === 'function');
+      const self = this;
+      if (llmReady){
+        _assistantCallIntentRouterLlm(text).then(function(parsed){
+          const clearlyOpt = _assistantClearlyOptimizeLikeForSend(text);
+          const faq = _assistantTextIsAccompanimentFaq(text);
+          if (parsed && parsed.intent === 'add_accompaniment' && parsed.confidence >= _assistantIntentRouterMinConfidence() && !clearlyOpt && !faq){
+            _assistantDispatchAddAccompanimentFlow(self, text, _t);
+            return;
           }
-        }
-        card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
-        card.reasoningLog = {
-          userPrompt: text.slice(0, 200),
-          templateId: card.templateId || null,
-          intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
-          planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
-          requestedPresetId: card.rhythmIntent ? 'rhythm_tighten_loosen' : (card.localTransposeIntent ? 'local_transpose' : (card.velocityShapeIntent ? 'velocity_shape' : 'llm_v0')),
-          planSource: 'rule',
-          createdAt: card.createdAt,
-        };
-        this._aiAssistItems.push(card);
-        _tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
-          if (plan) {
-            card.plan = plan;
-            if (card.reasoningLog) {
-              card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
-              card.reasoningLog.planSource = 'ai';
-            }
-            _syncAssistantCardTemplateFromPlan(card);
-            this.render();
+          if (faq){
+            self._aiAssistItems = self._aiAssistItems || [];
+            self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+            self.render();
+            return;
           }
-        }).catch(function(){ /* keep rule-based plan */ });
+          const likelyArr = _assistantHeuristicLikelyArrangementAction(text);
+          if (clearlyOpt || !likelyArr){
+            _assistantFinishOptimizeCardPath(self, text, _t);
+            return;
+          }
+          self._aiAssistItems = self._aiAssistItems || [];
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+          self.render();
+        }).catch(function(){
+          _assistantIntentRouterFallbackSend(self, text, _t);
+        });
+        return;
       }
-      this.render();
+      _assistantIntentRouterFallbackSend(self, text, _t);
     },
     async _aiAssistRun(clipId, btnEl){
       if (!clipId) return;
@@ -3451,6 +4392,33 @@ ensureTrackButtons(){
       }
       this.render();
     },
+    _aiAssistAddAccompanimentContinue(confirmId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const items = this._aiAssistItems || [];
+      const idx = items.findIndex(function(x){
+        return x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId);
+      });
+      if (idx < 0) return Promise.resolve();
+      const it = items[idx];
+      const instIdGo = (it.instanceId != null) ? String(it.instanceId) : '';
+      const phraseText = (it.userPrompt != null) ? String(it.userPrompt) : '';
+      const kiAm = _assistantSkillI18nAddAccompaniment();
+      const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+      items[idx] = pendingAm;
+      this.render();
+      return _assistantAttachAddAccompanimentPromise(this, pendingAm, instIdGo, phraseText, _t);
+    },
+    _aiAssistAddAccompanimentCancel(confirmId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
+      const items = this._aiAssistItems || [];
+      const idx = items.findIndex(function(x){
+        return x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId);
+      });
+      if (idx < 0) return;
+      const kiAm = _assistantSkillI18nAddAccompaniment();
+      items[idx] = { type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') };
+      this.render();
+    },
     async _aiAssistUndo(clipId){
       if (!clipId) return;
       const res = await this.runCommand('rollback_clip', { clipId });
@@ -3504,6 +4472,14 @@ ensureTrackButtons(){
         for (const it of items) {
           if (it.type === 'sys') {
             html += '<div class="aiAssistSys">' + escapeHtml(it.text) + '</div>';
+          } else if (it.type === 'add_accompaniment_confirm') {
+            const confId = escapeHtml(String(it._confirmId || ''));
+            html += '<div class="aiAssistCard aiAssistAddAccompanimentConfirm">';
+            html += '<div class="aiAssistCardPrompt">' + escapeHtml(_t('aiAssist.addAccompanimentConfirm')) + '</div>';
+            html += '<div class="aiAssistCardBtns">';
+            html += '<button type="button" class="btn primary mini" data-act="aiAddAccompanimentContinue" data-confirm-id="' + confId + '">' + escapeHtml(_t('aiAssist.addAccompanimentContinue')) + '</button>';
+            html += '<button type="button" class="btn mini" data-act="aiAddAccompanimentCancel" data-confirm-id="' + confId + '">' + escapeHtml(_t('aiAssist.addAccompanimentCancel')) + '</button>';
+            html += '</div></div>';
           } else if (it.type === 'card') {
             const p2 = this.getProjectV2();
             const c = p2 && p2.clips && p2.clips[it.clipId];
@@ -3944,6 +4920,8 @@ renderTimeline(){
         null;
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
       let resultsHtml = '';
+      const lastSnap = this._lastOptimizeSnapshot;
+      const lastRes = (lastSnap && lastSnap.clipId === clipId && lastSnap.res) ? lastSnap.res : null;
       if (ps && typeof ps === 'object'){
         const parts = [];
         if (typeof ps.ops === 'number') parts.push(`ops: ${ps.ops}`);
@@ -3954,12 +4932,19 @@ renderTimeline(){
           if (ps.hasStructuralChange === true) parts.push(_t('opt.structure'));
         }
         if (ps.reason && ps.reason !== 'ok' && ps.reason !== 'empty_ops') parts.push(`reason: ${escapeHtml(String(ps.reason))}`);
+        if (ps.reason === 'patch_rejected'){
+          const friendly = this._friendlyOptimizeRejection(ps.reason, (ps.detail != null ? ps.detail : (ps.llm && ps.llm.detail != null ? ps.llm.detail : '')), _t);
+          if (friendly) parts.push(escapeHtml(friendly));
+        }
         if (ps.promptMeta && typeof ps.promptMeta === 'object') {
           const id = (ps.promptMeta.templateId != null && String(ps.promptMeta.templateId).trim()) ? String(ps.promptMeta.templateId) : 'Custom';
           const ver = (ps.promptMeta.promptVersion != null && String(ps.promptMeta.promptVersion).trim()) ? String(ps.promptMeta.promptVersion) : 'manual_v0';
           parts.push(`Template: ${escapeHtml(id)} (${escapeHtml(ver)})`);
         }
         resultsHtml = parts.length > 0 ? parts.join(' · ') : 'No key fields.';
+      } else if (lastRes && lastRes.ok === false && String(lastRes.reason || '') === 'patch_rejected'){
+        const friendly = this._friendlyOptimizeRejection(lastRes.reason, lastRes.detail, _t);
+        resultsHtml = friendly ? escapeHtml(friendly) : escapeHtml(String(lastRes.reason || _t('lastOpt.fail.unknownReason')));
       } else {
         resultsHtml = 'No patch summary yet.';
       }
@@ -3998,7 +4983,11 @@ renderTimeline(){
               (canUndo ? `<button type="button" class="btn mini" data-act="inspUndoOptimize" data-id="${escapeHtml(clipId)}"${running ? ' disabled' : ''}>${escapeHtml(_t('opt.undoOptimize'))}</button>` : '') +
             `</div>` +
             (running ? `<div class="muted" style="font-size:12px;">Running…</div>` : optError ? `<div class="muted" style="font-size:12px; color:var(--danger, #e55);">${escapeHtml(optError)}</div>` : '') +
-            `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="font-size:11px; opacity:0.8;">${escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inspector.openEditor') : 'Open Editor')}</a>` +
+            `<div class="inspOptimizeLinks" style="font-size:11px; color:#fff; opacity:0.88; margin-top:6px; display:flex; flex-wrap:wrap; align-items:center; gap:0 8px;">` +
+              `<a href="#" id="btnInspectorOptimizeDetails" data-act="inspOpenOptimizeDetails" data-id="${escapeHtml(clipId)}" style="color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,0.45); text-underline-offset:2px;">${escapeHtml(_t('editor.optimizeDetails'))}</a>` +
+              `<span style="opacity:0.45;" aria-hidden="true">·</span>` +
+              `<a href="#" data-act="inspOpenEditor" data-id="${escapeHtml(clipId)}" style="color:#fff; text-decoration:underline; text-decoration-color:rgba(255,255,255,0.45); text-underline-offset:2px;">${escapeHtml(_t('inspector.openEditor'))}</a>` +
+            `</div>` +
             `<details class="optAdvanced" data-insp-section="opt_adv" style="margin-top:10px;"${getInspectorSectionOpen('opt_adv') ? ' open' : ''}>` +
               `<summary style="cursor:pointer; user-select:none; opacity:0.8;">${escapeHtml(_t('opt.advanced'))}</summary>` +
               `<div style="margin-top:6px;">` +
@@ -4049,7 +5038,7 @@ renderTimeline(){
             const tid = btn.getAttribute('data-template-id');
             const tmpl = tid && INSPECTOR_TEMPLATES[tid] ? INSPECTOR_TEMPLATES[tid] : null;
             if (tmpl && self.setOptimizeOptions){
-              self.setOptimizeOptions({ templateId: tid, intent: tmpl.intent, requestedPresetId: 'llm_v0', userPrompt: tmpl.seed || null }, cid);
+              self.setOptimizeOptions({ templateId: tid, intent: tmpl.intent, requestedPresetId: 'llm_v0', userPrompt: tmpl.seed || null, plan: null, _assistantExecutionPlanSnapshot: null }, cid);
             }
             self.renderSelectedClip();
             return;
@@ -4081,6 +5070,11 @@ renderTimeline(){
             self.runCommand('rollback_clip', { clipId: cid }).then(function(res){
               if (res && res.ok){ persist(); self.render(); }
             });
+            return;
+          }
+          if (act === 'inspOpenOptimizeDetails'){
+            ev.preventDefault();
+            if (typeof self._openLastOptimizeDetails === 'function') self._openLastOptimizeDetails();
             return;
           }
           if (act === 'inspOpenEditor'){
@@ -4126,7 +5120,7 @@ renderTimeline(){
           if (act === 'inspOptimizePreset'){
             const presetId = (el.value && String(el.value).trim()) || null;
             if (cid && self && typeof self.setOptimizeOptions === 'function'){
-              self.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null }, cid);
+              self.setOptimizeOptions({ requestedPresetId: presetId, userPrompt: null, plan: null, _assistantExecutionPlanSnapshot: null }, cid);
             }
             self.render();
             return;
@@ -4240,6 +5234,162 @@ renderTimeline(){
     selectInstance(instId){
       this.state.selectedInstanceId = instId;
       this.render();
+    },
+
+    addBassFromSelected(instanceId){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const P = window.H2SProject;
+      const Bass = window.H2SAddBassV0;
+      if (!P || !Bass || typeof this.getProjectV2 !== 'function' || typeof this.setProjectFromV2 !== 'function'){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'missing_api' };
+      }
+      const p2 = this.getProjectV2();
+      if (!p2 || !P.isProjectV2 || !P.isProjectV2(p2)){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'no_project_v2' };
+      }
+
+      const sid = (instanceId != null && String(instanceId).trim()) ? String(instanceId) : (this.state && this.state.selectedInstanceId ? String(this.state.selectedInstanceId) : '');
+      const inst = sid ? (p2.instances || []).find((x) => x && String(x.id) === sid) : null;
+      if (!inst || !inst.clipId){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'instance_not_found' };
+      }
+      const melodyClip = p2.clips && p2.clips[inst.clipId];
+      if (!melodyClip || (typeof P.clipKind === 'function' && P.clipKind(melodyClip) === 'audio')){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'clip_not_editable' };
+      }
+
+      const built = Bass.buildBassScoreFromMelodyClip(melodyClip, { H2SProject: P });
+      if (!built || !built.ok){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason: built && built.reason ? built.reason : 'bass_build_failed' };
+      }
+
+      const trackRes = Bass.findOrCreateBassTrack(p2, { H2SProject: P });
+      if (!trackRes || !trackRes.ok || !trackRes.trackId){
+        this.setImportStatus(_t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.'), false);
+        return { ok:false, reason:'bass_track_failed' };
+      }
+
+      const clip = P.createClipFromScoreBeat(built.scoreBeat, {
+        name: 'Bass',
+        sourceTaskId: 'arrange:add_bass_v0',
+      });
+      if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
+      p2.clips[clip.id] = clip;
+      if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
+      p2.clipOrder.unshift(clip.id);
+      if (typeof P.repairClipOrderV2 === 'function') P.repairClipOrderV2(p2);
+
+      if (!Array.isArray(p2.instances)) p2.instances = [];
+      const startBeat = (typeof inst.startBeat === 'number' && isFinite(inst.startBeat)) ? Math.max(0, inst.startBeat) : 0;
+      const bassInst = P.createInstanceV2(clip.id, startBeat, String(trackRes.trackId));
+      p2.instances.push(bassInst);
+      if (typeof P.normalizeProjectV2 === 'function') P.normalizeProjectV2(p2);
+
+      this.state.selectedClipId = clip.id;
+      this.state.selectedInstanceId = bassInst.id;
+      this.setProjectFromV2(p2);
+      this.setImportStatus(_t('arrange.addBassDone', 'Bass accompaniment added.'), false);
+      log(_t('arrange.addBassDone', 'Bass accompaniment added.'));
+      return { ok:true, clipId: clip.id, instanceId: bassInst.id, trackId: trackRes.trackId, trackCreated: !!trackRes.created };
+    },
+
+    _arrangementFailureStatusMessage(result){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const r = (result && result.reason) ? String(result.reason) : '';
+      const d = (result && result.detail) ? String(result.detail).trim() : '';
+      let base;
+      switch (r) {
+        case 'llm_config_missing':
+        case 'llm_client_not_loaded':
+          base = _t('arrange.addAccompanimentFail.llmConfig', 'AI (LLM) is not configured. Open AI Settings and set a model.');
+          break;
+        case 'audio_clip_not_supported':
+          base = _t('arrange.addAccompanimentFail.audioClip', 'Audio clips are not supported. Convert to editable notes first.');
+          break;
+        case 'llm_no_valid_json':
+          base = _t('arrange.addAccompanimentFail.invalidOutput', 'AI returned invalid output.');
+          break;
+        case 'llm_request_failed':
+          base = _t('arrange.addAccompanimentFail.llmRequest', 'AI request failed.');
+          break;
+        case 'patch_validation_failed':
+          base = _t('arrange.addAccompanimentFail.validation', 'Arrangement did not pass validation.');
+          break;
+        case 'patch_apply_failed':
+          base = _t('arrange.addAccompanimentFail.apply', 'Could not apply arrangement.');
+          break;
+        case 'arrangement_patch_module_missing':
+        case 'unsupported_goal':
+          base = _t('arrange.addAccompanimentFail.unavailable', 'Accompaniment is not available.');
+          break;
+        case 'selected_clip_missing':
+        case 'selected_instance_missing':
+        case 'selected_clip_not_found':
+        case 'selected_instance_not_found':
+        case 'selected_clip_not_editable_note_clip':
+        case 'project_missing':
+          base = _t('arrange.selectEditableClipFirst', 'Select an editable melody clip first.');
+          break;
+        default:
+          base = _t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.');
+      }
+      if (d && (r === 'patch_validation_failed' || r === 'patch_apply_failed' || r === 'llm_request_failed' || r === 'llm_no_valid_json')){
+        const max = 100;
+        const suffix = d.length > max ? d.slice(0, max) + '…' : d;
+        if (base.indexOf(suffix) < 0) base = base + ' ' + suffix;
+      }
+      return base;
+    },
+
+    async addAccompanimentFromSelected(_instanceId, runExtra){
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, fb) => (fb || k);
+      const goal = 'add_accompaniment_v0';
+      const clipId = (typeof this.getSelectedClipId === 'function') ? this.getSelectedClipId() : null;
+      const instId = ((typeof this.getSelectedInstanceId === 'function') ? this.getSelectedInstanceId() : null) || _instanceId || null;
+
+      const ctrl = this.arrangementCtrl;
+      if (!ctrl || typeof ctrl.runArrangementV0 !== 'function'){
+        this._commitArrangementSnapshot({ ok: false, reason: 'no_controller', detail: '' }, goal, clipId, instId);
+        this.setImportStatus(_t('arrange.addAccompanimentFail.unavailable', 'Accompaniment is not available.'), false);
+        this.render();
+        return { ok: false, reason: 'no_controller' };
+      }
+      this.setImportStatus(_t('arrange.addAccompanimentRunning', 'Adding accompaniment...'), false);
+      let result;
+      try {
+        const runOpts = { goal: goal };
+        const up = (runExtra && runExtra.userPrompt != null) ? String(runExtra.userPrompt).trim() : '';
+        if (up) runOpts.userPrompt = up;
+        result = await ctrl.runArrangementV0(runOpts);
+      } catch (err) {
+        const em = (err && err.message) ? String(err.message).slice(0, 160) : '';
+        this._commitArrangementSnapshot({ ok: false, reason: 'exception', detail: em }, goal, clipId, instId);
+        this.setImportStatus(
+          _t('arrange.addAccompanimentFail.generic', 'Could not add accompaniment.') + (em ? ' ' + em : ''),
+          false
+        );
+        this.render();
+        return { ok: false, reason: 'exception' };
+      }
+
+      this._commitArrangementSnapshot(result, goal, clipId, instId);
+
+      if (!result || !result.ok){
+        const msg = this._arrangementFailureStatusMessage(result);
+        this.setImportStatus(msg, false);
+        log(msg);
+        this.render();
+        return result || { ok: false };
+      }
+      this.setImportStatus(_t('arrange.addAccompanimentDone', 'Accompaniment added via LLM.'), false);
+      log(_t('arrange.addAccompanimentDone', 'Accompaniment added via LLM.'));
+      this.render();
+      return result;
     },
 
     duplicateInstance(instId){
@@ -4529,6 +5679,100 @@ renderTimeline(){
       } catch (e) {}
     },
 
+    /** Import/generate failures: normalize technical errors into user-actionable buckets. */
+    _classifyImportGenerateFailure(err){
+      const raw = (err && err.message) ? String(err.message) : String(err || '');
+      const msg = raw.toLowerCase();
+      const pick = (arr, fallback) => {
+        for (let i = 0; i < arr.length; i++){
+          const p = arr[i];
+          if (p && msg.indexOf(p) >= 0) return p;
+        }
+        return fallback || '';
+      };
+      const http = (() => {
+        const m = raw.match(/^\s*(\d{3})\b/);
+        if (!m) return null;
+        const n = Number(m[1]);
+        return Number.isFinite(n) ? n : null;
+      })();
+      const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, dflt) => (dflt != null ? dflt : k);
+      const out = {
+        bucket: 'unknown',
+        statusText: _t('importFail.unknown.status', 'Import failed. Please try again.'),
+        alertText: _t('importFail.unknown.alert', 'Import failed. Please try again.\n\nIf it keeps failing, restart the local server and try another short audio file.'),
+      };
+
+      // Task-level failures from /tasks/{id}: backend processed but did not complete successfully.
+      if (err && err.h2sKind === 'task_failed'){
+        out.bucket = 'task_failed';
+        out.statusText = _t('importFail.taskFailed.status', 'Import failed on server. Try again or use another file.');
+        out.alertText = _t('importFail.taskFailed.alert', 'The server could not finish this generation task.\n\nTry importing again, or try another short/clear audio file. If this keeps happening, check that the local server is healthy.');
+        return out;
+      }
+      if (err && err.h2sKind === 'task_timeout'){
+        out.bucket = 'server_unreachable';
+        out.statusText = _t('importFail.timeout.status', 'Server took too long. Check server and try again.');
+        out.alertText = _t('importFail.timeout.alert', 'The server took too long to finish.\n\nMake sure the local app/server is still running, then try again with a shorter clip.');
+        return out;
+      }
+
+      // Input/file related issues (client-side or API validation/rejection).
+      if (
+        http === 400 || http === 413 || http === 415 || http === 422 ||
+        msg.indexOf('file too large') >= 0 ||
+        msg.indexOf('empty file') >= 0 ||
+        msg.indexOf('invalid file') >= 0 ||
+        msg.indexOf('unsupported') >= 0
+      ){
+        out.bucket = 'input_issue';
+        out.statusText = _t('importFail.inputIssue.status', 'Audio file was rejected. Try another file.');
+        out.alertText = _t('importFail.inputIssue.alert', 'This audio file could not be imported.\n\nTry another file (shorter/clearer, common format like WAV/MP3), then import again.');
+        return out;
+      }
+
+      // Server unavailable / network / startup state.
+      if (
+        http === 500 || http === 502 || http === 503 || http === 504 ||
+        msg.indexOf('failed to fetch') >= 0 ||
+        msg.indexOf('networkerror') >= 0 ||
+        msg.indexOf('network error') >= 0 ||
+        msg.indexOf('err_connection') >= 0 ||
+        msg.indexOf('econnrefused') >= 0 ||
+        msg.indexOf('timed out') >= 0 ||
+        msg.indexOf('timeout') >= 0 ||
+        pick(['fetch', 'network'], '')
+      ){
+        out.bucket = 'server_unreachable';
+        out.statusText = _t('importFail.serverUnreachable.status', 'Cannot reach server. Check local app and retry.');
+        out.alertText = _t('importFail.serverUnreachable.alert', 'Hum2Song could not reach the local server.\n\nMake sure the local app/server is running, then try importing again.');
+        return out;
+      }
+
+      return out;
+    },
+
+    /** Import success UX: short "what next" text for status bar. */
+    _buildImportSuccessStatus(opts){
+      opts = opts || {};
+      const done = (window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done';
+      const clipCount = Number.isFinite(Number(opts.clipCount)) ? Math.max(1, Math.floor(Number(opts.clipCount))) : 1;
+      const autoOpen = !!opts.autoOpen;
+      if (autoOpen){
+        return (clipCount > 1)
+          ? `${done} (${clipCount} clips). Opening editor...`
+          : `${done}. Opening editor...`;
+      }
+      return (clipCount > 1)
+        ? `${done} (${clipCount} clips). Next: click a clip in Library, then Edit.`
+        : `${done}. Next: click the clip in Library to edit.`;
+    },
+    /** Import success UX timing: keep "what next" guidance visible longer when manual action is needed. */
+    _importSuccessStatusClearMs(opts){
+      opts = opts || {};
+      return opts.autoOpen ? 2500 : 6000;
+    },
+
     /** PR-C1: Shared upload/generate pipeline — used by Upload WAV and Use last recording.
      * @param {Blob|File} f
      * @param {{ sourceAudioClipId?: string, sourceAudioInstanceId?: string }} [opts] When `sourceAudioClipId` is set (audio→editable conversion), simple-import placement uses H2SProject.resolveAudioConvertPlacementV1; optional `sourceAudioInstanceId` pins placement to that timeline instance. Bar-segment / explode paths unchanged.
@@ -4546,9 +5790,10 @@ renderTimeline(){
         const res = await fetchJson(API.generate('mp3'), { method:'POST', body:fd });
         const tid = res.task_id || res.id || res.taskId || res.task || null;
         if (!tid){
-          this.setImportStatus('Failed: Server did not return task ID.', false);
+          const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k, dflt) => (dflt != null ? dflt : k);
+          this.setImportStatus(_t('importFail.missingTaskId.status', 'Import could not start. Please try again.'), false);
           log('generate returned no task_id');
-          alert('Upload failed: server did not return a task ID. Check backend logs.');
+          alert(_t('importFail.missingTaskId.alert', 'Hum2Song could not start processing this file.\n\nTry again, and make sure the local app/server is running.'));
           return;
         }
         this.state.lastUploadTaskId = tid;
@@ -4724,17 +5969,19 @@ renderTimeline(){
           this.render();
           log('Added clip to timeline.');
           const doneMulti = 'Done: ' + explodeClipCount + ' clips (bar segment + explode).';
-          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
-          log('Clips added (bar segment + explode): ' + explodeClipCount);
+          let shouldAutoOpen = false;
           if (explodeClipCount === 1 && lastClipIdForAutoOpen && this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function'){
             const c = this.project.clips.find((x) => x && x.id === lastClipIdForAutoOpen);
-            if (c && !_importTooLargeForAutoOpen(c)){
-              setTimeout(() => this.openClipEditor(lastClipIdForAutoOpen), 0);
-            }
+            shouldAutoOpen = !!(c && !_importTooLargeForAutoOpen(c));
+          }
+          this.setImportStatus(this._buildImportSuccessStatus({ clipCount: explodeClipCount, autoOpen: shouldAutoOpen }), false);
+          log('Clips added (bar segment + explode): ' + explodeClipCount);
+          if (shouldAutoOpen){
+            setTimeout(() => this.openClipEditor(lastClipIdForAutoOpen), 0);
           } else {
             log('Import: editor not auto-opened (multi-clip).');
           }
-          setTimeout(() => this.setImportStatus('', false), 2500);
+          setTimeout(() => this.setImportStatus('', false), this._importSuccessStatusClearMs({ autoOpen: shouldAutoOpen }));
         } else if (useExplode){
           if (!this.project.tracks) this.project.tracks = [];
           while (this.project.tracks.length < explodeParts.length){
@@ -4808,10 +6055,10 @@ renderTimeline(){
           this.render();
           log('Added clip to timeline.');
           const doneMulti = 'Done: ' + explodeClipCount + ' clips on ' + explodeParts.length + ' tracks.';
-          this.setImportStatus((window.I18N && window.I18N.t) ? (window.I18N.t('io.done') + ' (' + explodeClipCount + ' clips)') : doneMulti, false);
+          this.setImportStatus(this._buildImportSuccessStatus({ clipCount: explodeClipCount, autoOpen: false }), false);
           log('Clips added (split explode): ' + explodeClipCount);
           log('Import: editor not auto-opened (multi-clip).');
-          setTimeout(() => this.setImportStatus('', false), 2500);
+          setTimeout(() => this.setImportStatus('', false), this._importSuccessStatusClearMs({ autoOpen: false }));
         } else {
           let placeStartSec = playheadSec;
           let placeTrackIndex = 0;
@@ -4840,32 +6087,28 @@ renderTimeline(){
           this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
           persist();
           this.render();
-          this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.done') : 'Done', false);
           log(`Clip added: ${clip.name}`);
           const cidNew = clip.id;
           const skipAutoOpenLarge = _importTooLargeForAutoOpen(clip);
+          const shouldAutoOpen = !!(this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function' && !skipAutoOpenLarge);
+          this.setImportStatus(this._buildImportSuccessStatus({ clipCount: 1, autoOpen: shouldAutoOpen }), false);
           if (skipAutoOpenLarge) log('Import: editor not auto-opened (large result).');
-          if (this.state.autoOpenAfterImport && typeof this.openClipEditor === 'function' && !skipAutoOpenLarge){
+          if (shouldAutoOpen){
             setTimeout(() => this.openClipEditor(cidNew), 0);
           }
-          setTimeout(() => this.setImportStatus('', false), 2000);
+          setTimeout(() => this.setImportStatus('', false), this._importSuccessStatusClearMs({ autoOpen: shouldAutoOpen }));
         }
       }catch(e){
         if (this.state.importCancelled){
           this.setImportStatus((window.I18N && window.I18N.t) ? window.I18N.t('io.cancelled') : 'Cancelled.', false);
           log('Import cancelled by user');
         }else{
-          const msg = (e && e.message) ? String(e.message) : String(e);
-          const short = msg.length > 80 ? msg.slice(0, 77) + '...' : msg;
-          this.setImportStatus('Failed: ' + short, false);
-          log('Upload/generate error: ' + msg);
+          const msg = (e && e.message) ? String(e.message) : String(e || '');
+          const cls = this._classifyImportGenerateFailure(e);
+          this.setImportStatus(cls.statusText, false);
+          log('Upload/generate error [' + cls.bucket + ']: ' + msg);
           console.error('[Studio] uploadFileAndGenerate error', e);
-          let userMsg = 'Generate failed. ';
-          if (/timeout/i.test(msg)) userMsg += 'Processing timed out. Try a shorter clip.';
-          else if (/task failed/i.test(msg)) userMsg += 'Backend task failed. Check server logs.';
-          else if (/fetch|network/i.test(msg)) userMsg += 'Network error. Check connection and server.';
-          else userMsg += 'See status bar and console for details.';
-          alert(userMsg);
+          alert(cls.alertText);
         }
       }
     },
@@ -5156,10 +6399,21 @@ renderTimeline(){
           return;
         }
         if (status.includes('failed') || status.includes('error')){
-          throw new Error(`Task failed: ${JSON.stringify(data)}`);
+          const taskErr =
+            (data && data.error && data.error.message) ||
+            (data && data.error && data.error.detail) ||
+            data.detail ||
+            data.message ||
+            '';
+          const err = new Error(taskErr ? `Task failed: ${taskErr}` : `Task failed: ${JSON.stringify(data)}`);
+          err.h2sKind = 'task_failed';
+          err.h2sTask = data;
+          throw err;
         }
         if (performance.now() - start > maxWaitMs){
-          throw new Error('Task timeout');
+          const err = new Error('Task timeout');
+          err.h2sKind = 'task_timeout';
+          throw err;
         }
         await sleep(800);
       }
@@ -5717,6 +6971,7 @@ renderTimeline(){
         });
         if (typeof this._applyLastOptimizeSummaryI18n === 'function') this._applyLastOptimizeSummaryI18n();
         if (typeof this._renderLastOptimizeDetailsBodyIfOpen === 'function') this._renderLastOptimizeDetailsBodyIfOpen();
+        if (typeof this._renderArrangementDetailsBodyIfOpen === 'function') this._renderArrangementDetailsBodyIfOpen();
       }catch(e){}
     },
     _initMasterVolumeUI(){

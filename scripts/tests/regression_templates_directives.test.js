@@ -201,7 +201,7 @@ async function testB_opsZeroIncludesPromptMeta() {
   console.log('PASS regression templates: Case B — ops===0 includes promptMeta');
 }
 
-async function testC_retryHintIntentSpecific() {
+async function testC_qualityRejectionDoesNotRetry() {
   ensureProjectLoaded();
   ensureAgentPatchLoaded();
 
@@ -260,16 +260,19 @@ async function testC_retryHintIntentSpecific() {
       intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
     });
 
-    assert(res && res.ok === true, 'Case C: retry must succeed');
-    assert(callCount === 2, 'Case C: must have 2 LLM calls (retry)');
-    assert(secondUserContent, 'Case C: must capture second request content');
-    assert(secondUserContent.includes('output setNote with pitch'), 'Case C: retry hint must include intent-specific setNote pitch');
+    assert(res && res.ok === false, 'Case C: quality rejection must fail');
+    assert(res.reason === 'patch_rejected', 'Case C: reason must be patch_rejected');
+    assert(res.detail === 'quality_velocity_only', 'Case C: detail must be quality_velocity_only');
+    assert(callCount === 1, 'Case C: rejected_quality must not retry');
+    assert(!secondUserContent, 'Case C: no second request when rejected_quality');
+    assert(res.patchSummary && res.patchSummary.llm && res.patchSummary.llm.outcome === 'rejected_quality', 'Case C: llm outcome must be rejected_quality');
+    assert(String(project.clips[cid].revisionId || '') === rev0, 'Case C: rejection must not create a new revision');
   } finally {
     globalThis.H2S_LLM_CLIENT = origClient;
     globalThis.H2S_LLM_CONFIG = origConfig;
   }
 
-  console.log('PASS regression templates: Case C — retry hint intent-specific');
+  console.log('PASS regression templates: Case C — quality rejection does not retry');
 }
 
 // Quality fix: fixPitch intent with velocityOnly:true (default) must allow pitch edits through
@@ -413,6 +416,73 @@ async function testE_planBlockIncludedWhenPlanProvided() {
   console.log('PASS regression templates: Case E — plan block included when plan provided');
 }
 
+// Editor isolation: explicit null plan fields must not emit PLAN in user message (still assistant-capable when plan set — Case E).
+async function testE2_editorStyleOptsOmitPlanBlockInUserPrompt() {
+  ensureProjectLoaded();
+  ensureAgentPatchLoaded();
+
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeMinimalProject();
+  let project = proj;
+  const cid = clip.id;
+
+  const pitchChangePatch = {
+    version: 1,
+    clipId: cid,
+    ops: [{ op: 'setNote', noteId: 'n0', pitch: 61, velocity: 90 }],
+  };
+  const rawText = '```json\n' + JSON.stringify(pitchChangePatch) + '\n```';
+
+  let capturedMessages = null;
+  const origClient = globalThis.H2S_LLM_CLIENT;
+  const origConfig = globalThis.H2S_LLM_CONFIG;
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async (_cfg, messages) => {
+      capturedMessages = messages;
+      return { text: rawText };
+    },
+    extractJsonObject: (text) => {
+      try {
+        const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+        return m ? JSON.parse(m[1]) : null;
+      } catch (_) { return null; }
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'test-model', velocityOnly: false }),
+  };
+
+  try {
+    const ctrl = AgentController.create({
+      getProjectV2: () => project,
+      setProjectFromV2: (p) => { project = p; },
+      persist: () => {},
+      render: () => {},
+    });
+    const res = await ctrl.optimizeClip(cid, {
+      requestedPresetId: 'llm_v0',
+      templateId: 'fix_pitch_v1',
+      intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+      userPrompt: 'the pitch is off',
+      plan: null,
+      _assistantExecutionPlanSnapshot: null,
+    });
+
+    assert(res && res.ok === true, 'Case E2: must succeed');
+    assert(capturedMessages && Array.isArray(capturedMessages), 'Case E2: must capture messages');
+    const userMsg = capturedMessages.find((m) => m.role === 'user');
+    assert(userMsg && userMsg.content, 'Case E2: user message must exist');
+    assert(userMsg.content.indexOf('PLAN:') < 0, 'Case E2: user content must not contain PLAN when editor clears plan fields');
+    assert(userMsg.content.includes('DIRECTIVES:'), 'Case E2: DIRECTIVES still present');
+    assert(userMsg.content.includes('NOTE TABLE (beats-only, all editable notes):'), 'Case E2: NOTE TABLE still present');
+  } finally {
+    globalThis.H2S_LLM_CLIENT = origClient;
+    globalThis.H2S_LLM_CONFIG = origConfig;
+  }
+
+  console.log('PASS regression templates: Case E2 — editor-style null plan fields omit PLAN block');
+}
+
 // Assistant PR: clean_outliers_v1 must resolve promptMeta (not manual_v0) when templateId is passed
 async function testF_cleanOutliersTemplateResolvesPromptMeta() {
   ensureProjectLoaded();
@@ -453,12 +523,12 @@ async function testG_llmPromptIncludesNoteTablePreservesBlocks() {
   let project = proj;
   const cid = clip.id;
 
-  const pitchChangePatch = {
+  const outlierCleanupPatch = {
     version: 1,
     clipId: cid,
-    ops: [{ op: 'setNote', noteId: 'n0', pitch: 61, velocity: 90 }],
+    ops: [{ op: 'setNote', noteId: 'n0', durationBeat: 1.3, velocity: 90 }],
   };
-  const rawText = '```json\n' + JSON.stringify(pitchChangePatch) + '\n```';
+  const rawText = '```json\n' + JSON.stringify(outlierCleanupPatch) + '\n```';
 
   let capturedUser = null;
   const origClient = globalThis.H2S_LLM_CLIENT;
@@ -589,9 +659,10 @@ async function testH_tightenRhythmV1LlmPromptNoteTableDirectivesAndPromptMeta() 
 (async () => {
   await testA_templateVelocityOnlyRejectedWithPromptMeta();
   await testB_opsZeroIncludesPromptMeta();
-  await testC_retryHintIntentSpecific();
+  await testC_qualityRejectionDoesNotRetry();
   await testD_fixPitchWithVelocityOnlyTrueAllowsPitchEdits();
   await testE_planBlockIncludedWhenPlanProvided();
+  await testE2_editorStyleOptsOmitPlanBlockInUserPrompt();
   await testF_cleanOutliersTemplateResolvesPromptMeta();
   await testG_llmPromptIncludesNoteTablePreservesBlocks();
   await testH_tightenRhythmV1LlmPromptNoteTableDirectivesAndPromptMeta();

@@ -14,7 +14,14 @@ NODE = shutil.which("node")
 def test_frontend_core_node():
     script = REPO_ROOT / "scripts" / "run_frontend_tests.js"
     assert script.exists(), f"Missing test runner: {script}"
-    proc = subprocess.run([NODE, str(script)], cwd=str(REPO_ROOT), capture_output=True, text=True)
-    sys.stdout.write(proc.stdout)
-    sys.stderr.write(proc.stderr)
+    proc = subprocess.run(
+        [NODE, str(script)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    sys.stdout.write(proc.stdout or "")
+    sys.stderr.write(proc.stderr or "")
     assert proc.returncode == 0

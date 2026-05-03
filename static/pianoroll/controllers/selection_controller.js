@@ -26,8 +26,17 @@
     const onEditClip = opts.onEditClip || function(){};
     const onDuplicateInstance = opts.onDuplicateInstance || function(){};
     const onRemoveInstance = opts.onRemoveInstance || function(){};
-    const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
+    const onAddBass = opts.onAddBass || function(){};
+    const onAddAccompaniment = opts.onAddAccompaniment || function(){};
+    const onArrangementDetails = opts.onArrangementDetails || function(){};
+    const getHasArrangementDetails = opts.getHasArrangementDetails || function(){ return false; };
     const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
+    const getAddBassLabel = opts.getAddBassLabel || function(){ return 'Add Bass'; };
+    const getAddAccompanimentLabel = opts.getAddAccompanimentLabel || function(){ return 'Add accompaniment'; };
+    const getAddAccompanimentMoreInstructionsLabel = opts.getAddAccompanimentMoreInstructionsLabel || function(){ return 'More instructions (optional)'; };
+    const getAddAccompanimentBadgeLabel = opts.getAddAccompanimentBadgeLabel || function(){ return 'Experimental'; };
+    const getArrangementDetailsLabel = opts.getArrangementDetailsLabel || function(){ return 'Arrangement Details'; };
+    const onConvertAudioToEditable = opts.onConvertAudioToEditable || function(){};
     const onLog = opts.onLog || null;
 
     const view = (window.H2SSelectionView && window.H2SSelectionView.selectionBoxInnerHTML)
@@ -52,8 +61,11 @@
     function bindActions(){
       const btnEdit = rootEl.querySelector('[data-act="edit"]');
       const btnConv = rootEl.querySelector('[data-act="convertAudioEditable"]');
+      const btnAddBass = rootEl.querySelector('[data-act="addBass"]');
+      const btnAddAccomp = rootEl.querySelector('[data-act="addAccompaniment"]');
       const btnDup = rootEl.querySelector('[data-act="duplicate"]');
       const btnDel = rootEl.querySelector('[data-act="remove"]');
+      const btnArrDet = rootEl.querySelector('[data-act="arrangementDetails"]');
 
       const sel = currentSelectedInstance();
       const inst = sel ? sel.inst : null;
@@ -69,6 +81,30 @@
         btnConv.addEventListener('click', (e) => {
           e.preventDefault();
           onConvertAudioToEditable(inst.clipId, inst.id);
+        });
+      }
+      if (btnAddBass){
+        btnAddBass.addEventListener('click', (e) => {
+          e.preventDefault();
+          onAddBass(inst.id);
+        });
+      }
+      if (btnAddAccomp){
+        btnAddAccomp.addEventListener('click', (e) => {
+          e.preventDefault();
+          const ta = rootEl.querySelector('[data-field="addAccompUserPrompt"]');
+          let extra = {};
+          if (ta && typeof ta.value === 'string'){
+            const t = ta.value.trim();
+            if (t) extra = { userPrompt: t };
+          }
+          onAddAccompaniment(inst.id, extra);
+        });
+      }
+      if (btnArrDet){
+        btnArrDet.addEventListener('click', (e) => {
+          e.preventDefault();
+          onArrangementDetails();
         });
       }
       if (btnDup){
@@ -108,6 +144,12 @@
           escapeHtml,
           isAudio,
           convertLabel: getConvertLabel(),
+          addBassLabel: getAddBassLabel(),
+          addAccompanimentLabel: getAddAccompanimentLabel(),
+          addAccompanimentMoreInstructionsLabel: getAddAccompanimentMoreInstructionsLabel(),
+          addAccompanimentBadgeLabel: getAddAccompanimentBadgeLabel(),
+          showArrangementDetails: !!getHasArrangementDetails(),
+          arrangementDetailsLabel: getArrangementDetailsLabel(),
         });
       } else {
         // Fallback markup (should not happen in normal builds)

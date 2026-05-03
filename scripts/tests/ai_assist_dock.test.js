@@ -18,7 +18,7 @@ function assert(cond, msg) {
 }
 
 // Stub I18N
-const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ' }; return m[k] || k; } };
+const I18N = { t: (k) => { const m = { 'aiAssist.selectClipFirst': 'Select a clip first.', 'aiAssist.selectedClipStale': 'That clip is no longer in the project.', 'aiAssist.skillDisabled': 'That assistant action is unavailable.', 'aiAssist.addClipToTimelineRunning': 'Adding clip to timeline…', 'aiAssist.addClipToTimelineOk': 'Added clip to timeline.', 'aiAssist.addClipToTimelineFail': 'Could not add clip to timeline', 'aiAssist.addClipToTimelineTrackOutOfRange': 'Track {n} is out of range (1-{max}).', 'aiAssist.addClipToTimelineBeatInvalid': 'Beat value must be a non-negative number.', 'aiAssist.addTrackRunning': 'Adding track…', 'aiAssist.addTrackOk': 'Added track {n}.', 'aiAssist.addTrackFail': 'Could not add track', 'aiAssist.selectInstanceFirst': 'Select a timeline instance first.', 'aiAssist.moveInstanceStale': 'That instance is no longer in the project.', 'aiAssist.moveInstanceRunning': 'Moving instance…', 'aiAssist.moveInstanceFail': 'Could not move instance', 'aiAssist.moveInstanceOk': 'Moved {dir} by {delta} beats.', 'aiAssist.moveInstanceOkTrack': 'Moved instance to track {n}.', 'aiAssist.moveInstanceClamped': '(Start clamped to beat 0.)', 'aiAssist.removeInstanceConfirm': 'Remove ({name})?', 'aiAssist.removeInstanceCancelled': 'Remove cancelled.', 'aiAssist.removeInstanceRunning': 'Removing instance…', 'aiAssist.removeInstanceOk': 'Removed timeline instance.', 'aiAssist.removeInstanceFail': 'Could not remove instance', 'aiAssist.dirLeft': 'left', 'aiAssist.dirRight': 'right', 'aiAssist.run': 'Run', 'aiAssist.openOptimize': 'Open Optimize', 'aiAssist.undo': 'Undo', 'aiAssist.noClip': 'No clip selected', 'aiAssist.clipPrefix': 'Clip: ', 'aiAssist.trackPrefix': 'Track ', 'aiAssist.addAccompanimentRunning': 'Adding accompaniment…', 'aiAssist.addAccompanimentOk': 'Accompaniment added. You can open Arrangement Details to inspect the prompt and patch.', 'aiAssist.addAccompanimentFail': 'Could not add accompaniment: {detail}', 'aiAssist.addAccompanimentCancelled': 'Add accompaniment cancelled.', 'aiAssist.addAccompanimentConfirm': 'I\'ll add an experimental accompaniment to the currently selected melody without changing the original. Continue?', 'aiAssist.addAccompanimentContinue': 'Continue', 'aiAssist.addAccompanimentCancel': 'Cancel', 'aiAssist.selectMelodyTimelineFirst': 'Select melody on timeline.', 'aiAssist.addAccompanimentNeedsNoteClip': 'This needs an editable note clip. Convert the audio to editable notes first.', 'aiAssist.intentRouterArrangementHint': 'HINT_ARR', 'aiAssist.intentRouterAccompanimentFaq': 'FAQ_ACCOMP' }; return m[k] || k; } };
 
 // UX7b: Minimal INSPECTOR_TEMPLATES + mapper stub (matches app.js behavior)
 const INSPECTOR_TEMPLATES = {
@@ -50,6 +50,55 @@ function mapAiAssistTextToTemplate(text) {
     }
   }
   return { templateId: null, templateLabel: '', intent: null };
+}
+
+const _TEST_INTENT_ROUTER_ENUM = Object.freeze({
+  add_accompaniment: true,
+  optimize_fix_pitch: true,
+  optimize_tighten_rhythm: true,
+  optimize_clean_outliers: true,
+  none: true,
+  ask_clarify: true,
+});
+
+function testNormalizeIntentRouterPayload(obj, originalText) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const intentRaw = (obj.intent != null) ? String(obj.intent).trim() : '';
+  if (!_TEST_INTENT_ROUTER_ENUM[intentRaw]) return null;
+  let c = Number(obj.confidence);
+  if (!isFinite(c)) c = 0;
+  c = Math.max(0, Math.min(1, c));
+  return {
+    intent: intentRaw,
+    confidence: c,
+    userPrompt: (obj.userPrompt != null && String(obj.userPrompt).trim()) ? String(obj.userPrompt).trim().slice(0, 800) : String(originalText || '').slice(0, 800),
+    needsConfirmation: !!obj.needsConfirmation,
+  };
+}
+
+function testAssistantTextIsAccompanimentFaq(text) {
+  if (!text || typeof text !== 'string') return false;
+  const s = String(text).trim();
+  const low = s.toLowerCase();
+  if (/伴奏/.test(s) && /是什么|什么意思|什么叫|如何|怎么写|怎么做|怎么作|怎样|教程/.test(s)) return true;
+  if (/accompaniment/.test(low) && /what\s+is|what's|explain(\s+|$)|how\s+to\s+(write|make|create)/.test(low)) return true;
+  return false;
+}
+
+function testAssistantHeuristicLikelyArrangementAction(text) {
+  if (!text || typeof text !== 'string') return false;
+  if (testAssistantTextIsAccompanimentFaq(text)) return false;
+  const s = String(text);
+  const low = s.toLowerCase();
+  if (/加.{0,12}伴奏|伴奏.{0,8}加|配.{0,6}伴奏|添.{0,6}伴奏|来段伴奏|给.{0,8}加.{0,6}伴奏|加段伴奏|帮我加伴奏|添加伴奏|段伴奏/i.test(s)) return true;
+  if (/add\s+accompaniment|accompaniment\s+to|add\s+support|make\s+(this\s+)?fuller/i.test(low)) return true;
+  return false;
+}
+
+function testAssistantClearlyOptimizeLikeForSend(text) {
+  if (!text || typeof text !== 'string') return false;
+  const mapped = mapAiAssistTextToTemplate(text);
+  return !!(mapped.templateId && mapped.intent);
 }
 
 /** Mirror static/pianoroll/app.js `_resolveAssistantAddClipToTimelineIntentFromText` (keep in sync). */
@@ -148,6 +197,20 @@ function resolveAssistantRemoveInstanceIntentFromText(text) {
     'delete selected block',
   ];
   return phrases.indexOf(s) >= 0;
+}
+
+/** Mirror static/pianoroll/app.js `_resolveAssistantAddAccompanimentIntentFromText` (keep in sync). */
+function resolveAssistantAddAccompanimentIntentFromText(text) {
+  if (!text || typeof text !== 'string') return false;
+  let s = String(text).trim();
+  s = s.replace(/^please\s+/i, '');
+  s = s.replace(/\s+please\s*$/i, '').trim();
+  s = s.replace(/[。！？.!?]+$/g, '').trim();
+  const ascii = s.toLowerCase();
+  const exactEn = ['add accompaniment', 'add some accompaniment', 'make it fuller', 'add support'];
+  if (exactEn.indexOf(ascii) >= 0) return true;
+  const zh = ['添加伴奏', '加点伴奏', '让它更完整', '加点支撑'];
+  return zh.indexOf(s) >= 0;
 }
 
 function templateExecutionFieldsFromPlanKind(planKind) {
@@ -316,22 +379,29 @@ function buildPlanBlockForTest(plan) {
   return header + '\n' + lines.slice(0, 6).map(function (l) { return '- ' + String(l).trim().slice(0, 120); }).join('\n');
 }
 
-/** Mirrors app setOptimizeOptions plan resolution (Assistant snapshot carry-forward + merge). */
+/** Mirrors app.js setOptimizeOptions plan resolution (keep in sync with App#setOptimizeOptions). */
 function mergePlanForSetOptimizeOptionsLikeApp(opts, existingOpts) {
-  const rawPlan = opts && opts.plan;
   let assistantExecutionPlanSnapshot;
   if (!opts || !Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot')) {
     assistantExecutionPlanSnapshot = existingOpts && existingOpts._assistantExecutionPlanSnapshot;
   } else {
     assistantExecutionPlanSnapshot = opts._assistantExecutionPlanSnapshot;
   }
+  const snapshotExplicitlyCleared = !!(opts && Object.prototype.hasOwnProperty.call(opts, '_assistantExecutionPlanSnapshot') && (opts._assistantExecutionPlanSnapshot == null));
   let plan = null;
   if (assistantExecutionPlanSnapshot != null && typeof assistantExecutionPlanSnapshot === 'object') {
     plan = _normalizeAssistantPlanForExecution(assistantExecutionPlanSnapshot);
   } else {
-    plan = (rawPlan && typeof rawPlan === 'object' && Array.isArray(rawPlan.planLines) && rawPlan.planLines.length >= 1 && (rawPlan.planTitle || rawPlan.planKind))
-      ? { planKind: rawPlan.planKind || null, planTitle: (rawPlan.planTitle && String(rawPlan.planTitle).trim()) ? String(rawPlan.planTitle).trim() : '', planLines: rawPlan.planLines.slice(0, 6).filter(function (l) { return typeof l === 'string'; }) }
-      : (existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') ? existingOpts.plan : null;
+    if (opts && Object.prototype.hasOwnProperty.call(opts, 'plan')) {
+      const rp = opts.plan;
+      plan = (rp && typeof rp === 'object' && Array.isArray(rp.planLines) && rp.planLines.length >= 1 && (rp.planTitle || rp.planKind))
+        ? { planKind: rp.planKind || null, planTitle: (rp.planTitle && String(rp.planTitle).trim()) ? String(rp.planTitle).trim() : '', planLines: rp.planLines.slice(0, 6).filter(function (l) { return typeof l === 'string'; }) }
+        : null;
+    } else if (!snapshotExplicitlyCleared && existingOpts && existingOpts.plan && typeof existingOpts.plan === 'object') {
+      plan = existingOpts.plan;
+    } else {
+      plan = null;
+    }
   }
   return plan || null;
 }
@@ -362,8 +432,8 @@ function resolveOptimizeClipOptionsLikeApp(stored, optOverride) {
   if (merged.templateId != null && String(merged.templateId).trim()) {
     out.templateId = String(merged.templateId).trim();
   }
-  if (merged.plan && typeof merged.plan === 'object') {
-    out.plan = merged.plan;
+  if (Object.prototype.hasOwnProperty.call(merged, 'plan')) {
+    out.plan = (merged.plan && typeof merged.plan === 'object') ? merged.plan : null;
   }
   if (Object.prototype.hasOwnProperty.call(merged, '_assistantExecutionPlanSnapshot')) {
     out._assistantExecutionPlanSnapshot = merged._assistantExecutionPlanSnapshot;
@@ -508,6 +578,7 @@ function createFakeApp(opts) {
   const doc = createStubDocument();
   const setOptimizeOptionsCalls = [];
   const runCommandCalls = [];
+  const addAccompanimentCalls = [];
   const app = {
     state: { selectedClipId: null, selectedInstanceId: null },
     project: { bpm: 120, clips: [{ id: 'clip-1', name: 'Test Clip', parentRevisionId: 'rev-0' }], instances: [{ id: 'inst-1', clipId: 'clip-1', startSec: 0, trackIndex: 0 }], tracks: [{ id: 'tr0' }] },
@@ -549,7 +620,18 @@ function createFakeApp(opts) {
       return Promise.resolve({ ok: true });
     },
     getProjectV2() {
+      if (opts.projectV2Override) return opts.projectV2Override;
       return { clips: { 'clip-1': { name: 'Test Clip', parentRevisionId: 'rev-0' } } };
+    },
+    addAccompanimentFromSelected(instId, runExtra) {
+      addAccompanimentCalls.push({ instanceId: instId, runExtra: runExtra || null });
+      const r = (opts.addAccompanimentResult !== undefined && opts.addAccompanimentResult !== null)
+        ? opts.addAccompanimentResult
+        : { ok: true };
+      return Promise.resolve(r);
+    },
+    _arrangementFailureStatusMessage(res) {
+      return (res && res.reason != null) ? String(res.reason).trim() : '';
     },
     render: () => {},
   };
@@ -587,15 +669,136 @@ function createFakeApp(opts) {
     const sk = R && R.getSkill ? R.getSkill('remove_instance') : null;
     return (sk && sk.i18n) ? sk.i18n : { running: 'aiAssist.removeInstanceRunning', ok: 'aiAssist.removeInstanceOk', fail: 'aiAssist.removeInstanceFail', skillDisabled: 'aiAssist.skillDisabled' };
   }
+  function _assistantSkillI18nAddAccompaniment() {
+    const R = _getInternalSkillRegistry();
+    const sk = R && R.getSkill ? R.getSkill('add_accompaniment') : null;
+    return (sk && sk.i18n) ? sk.i18n : {
+      running: 'aiAssist.addAccompanimentRunning',
+      ok: 'aiAssist.addAccompanimentOk',
+      fail: 'aiAssist.addAccompanimentFail',
+      cancelled: 'aiAssist.addAccompanimentCancelled',
+      confirm: 'aiAssist.addAccompanimentConfirm',
+      skillDisabled: 'aiAssist.skillDisabled',
+    };
+  }
+  function assistantCountMelodyNotesInClipV2(clip) {
+    let n = 0;
+    const sc = clip && clip.score && typeof clip.score === 'object' ? clip.score : null;
+    const tracks = sc && Array.isArray(sc.tracks) ? sc.tracks : [];
+    for (let ti = 0; ti < tracks.length; ti++) {
+      const tr = tracks[ti];
+      const notes = (tr && Array.isArray(tr.notes)) ? tr.notes : [];
+      n += notes.length;
+    }
+    return n;
+  }
+  let mirrorAccompConfirmSeq = 0;
+  function mirrorAttachAddAccompanimentPromise(self, pendingAm, instIdGo, phraseText, _t) {
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    const selfAm = self;
+    return Promise.resolve((typeof selfAm.addAccompanimentFromSelected === 'function')
+      ? selfAm.addAccompanimentFromSelected(instIdGo, { userPrompt: phraseText })
+      : Promise.resolve({ ok: false, reason: 'missing_api' })
+    ).then(function (res) {
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0) {
+        if (res && res.ok) {
+          selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.ok) };
+        } else {
+          let detail = '';
+          if (typeof selfAm._arrangementFailureStatusMessage === 'function') {
+            detail = String(selfAm._arrangementFailureStatusMessage(res || {}) || '').trim();
+          }
+          if (!detail && res) {
+            const rsn = (res.reason != null) ? String(res.reason).trim() : '';
+            const det = (res.detail != null) ? String(res.detail).trim() : '';
+            detail = [rsn, det].filter(Boolean).join(' ').trim();
+          }
+          if (!detail) detail = 'unknown';
+          selfAm._aiAssistItems[idx] = {
+            type: 'sys',
+            text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, detail.slice(0, 220)),
+          };
+        }
+      }
+      selfAm.render();
+    }).catch(function (err) {
+      const idx = (selfAm._aiAssistItems || []).indexOf(pendingAm);
+      if (idx >= 0) {
+        const em = (err && err.message) ? String(err.message).trim().slice(0, 220) : 'error';
+        selfAm._aiAssistItems[idx] = { type: 'sys', text: _t(kiAm.fail || 'aiAssist.addAccompanimentFail').replace(/\{detail\}/g, em) };
+      }
+      selfAm.render();
+    });
+  }
+  function mirrorRunAddAccompanimentFlow(self, text, _t) {
+    self._aiAssistItems = self._aiAssistItems || [];
+    const phraseText = String(text);
+    const p2 = (typeof self.getProjectV2 === 'function') ? self.getProjectV2() : null;
+    const P = (typeof window !== 'undefined' && window.H2SProject) ? window.H2SProject : null;
+    const instIdGo = self.state && self.state.selectedInstanceId ? String(self.state.selectedInstanceId) : '';
+    if (!instIdGo) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const inst = (p2 && Array.isArray(p2.instances))
+      ? p2.instances.find(function (x) { return x && String(x.id) === instIdGo; })
+      : null;
+    if (!inst) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const cidFromInst = (inst.clipId != null && String(inst.clipId).trim()) ? String(inst.clipId).trim() : '';
+    if (self.state.selectedClipId != null && cidFromInst && String(self.state.selectedClipId) !== cidFromInst) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const clipV2 = (p2 && p2.clips && typeof p2.clips === 'object' && !Array.isArray(p2.clips) && cidFromInst)
+      ? p2.clips[cidFromInst]
+      : null;
+    if (!clipV2) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    const isAudioClip = (function () {
+      if (P && typeof P.clipKind === 'function') return P.clipKind(clipV2) === 'audio';
+      return !!(clipV2 && clipV2.kind === 'audio');
+    })();
+    if (isAudioClip) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.addAccompanimentNeedsNoteClip') });
+      self.render();
+      return Promise.resolve();
+    }
+    if (assistantCountMelodyNotesInClipV2(clipV2) < 1) {
+      self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectMelodyTimelineFirst') });
+      self.render();
+      return Promise.resolve();
+    }
+    mirrorAccompConfirmSeq += 1;
+    self._aiAssistItems.push({
+      type: 'add_accompaniment_confirm',
+      _confirmId: 'tac_' + mirrorAccompConfirmSeq,
+      instanceId: instIdGo,
+      userPrompt: phraseText,
+    });
+    self.render();
+    return Promise.resolve();
+  }
   /** Mirror static/pianoroll/app.js bounded dispatch (phraseResolverId → resolver; same order). */
-  const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
+  const ASSISTANT_BOUNDED_SKILL_ORDER = Object.freeze(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']);
   const ASSISTANT_BOUNDED_RESOLVER_BY_PHRASE_ID = Object.freeze({
+    assistant_add_accompaniment_v1: resolveAssistantAddAccompanimentIntentFromText,
     assistant_add_clip_to_timeline_v1: resolveAssistantAddClipToTimelineIntentFromText,
     assistant_add_track_v1: resolveAssistantAddTrackIntentFromText,
     assistant_move_instance_v1: resolveAssistantMoveInstanceIntentFromText,
     assistant_remove_instance_v1: resolveAssistantRemoveInstanceIntentFromText,
   });
   const ASSISTANT_BOUNDED_PHRASE_ID_FALLBACK = Object.freeze({
+    add_accompaniment: 'assistant_add_accompaniment_v1',
     add_clip_to_timeline: 'assistant_add_clip_to_timeline_v1',
     add_track: 'assistant_add_track_v1',
     move_instance: 'assistant_move_instance_v1',
@@ -626,6 +829,9 @@ function createFakeApp(opts) {
         self._aiAssistItems.push({ type: 'sys', text: _t(_assistantSkillDisabledKey(skillId)) });
         self.render();
         return Promise.resolve();
+      }
+      if (skillId === 'add_accompaniment') {
+        return mirrorRunAddAccompanimentFlow(self, text, _t);
       }
       if (skillId === 'add_clip_to_timeline') {
         const kiAc = _assistantSkillI18nAddClipToTimeline();
@@ -828,50 +1034,153 @@ function createFakeApp(opts) {
     }
     return false;
   }
+  app._aiAssistAddAccompanimentContinue = function (confirmId) {
+    const _t = this._t;
+    const items = this._aiAssistItems || [];
+    const idx = items.findIndex((x) => x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId));
+    if (idx < 0) return Promise.resolve();
+    const it = items[idx];
+    const instIdGo = String(it.instanceId || '');
+    const phraseText = String(it.userPrompt || '');
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    const pendingAm = { type: 'sys', text: _t(kiAm.running), _pendingAddAccompaniment: true };
+    items[idx] = pendingAm;
+    this.render();
+    return mirrorAttachAddAccompanimentPromise(this, pendingAm, instIdGo, phraseText, _t);
+  };
+  app._aiAssistAddAccompanimentCancel = function (confirmId) {
+    const _t = this._t;
+    const items = this._aiAssistItems || [];
+    const idx = items.findIndex((x) => x && x.type === 'add_accompaniment_confirm' && String(x._confirmId) === String(confirmId));
+    if (idx < 0) return;
+    const kiAm = _assistantSkillI18nAddAccompaniment();
+    items[idx] = { type: 'sys', text: _t(kiAm.cancelled != null ? String(kiAm.cancelled) : 'aiAssist.addAccompanimentCancelled') };
+    this.render();
+  };
   app._aiAssistSend = function () {
     const inp = doc.getElementById('aiAssistInput');
     const text = String(inp ? inp.value : '').trim();
     if (!text) return;
     if (inp) inp.value = '';
-    const d = _tryAssistantBoundedSkillDispatchMirror(this, text, this._t);
+    const _t = this._t;
+    const self = this;
+    const d = _tryAssistantBoundedSkillDispatchMirror(this, text, _t);
     if (d !== false) return d;
-    const clipId = this.state.selectedClipId;
-    if (!clipId) {
-      this._aiAssistItems.push({ type: 'sys', text: this._t('aiAssist.selectClipFirst') });
-      this.render();
-      return Promise.resolve();
-    }
-    const mapped = mapAiAssistTextToTemplate(text);
-    const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
-    if (mapped.templateId && mapped.intent) {
-      card.templateId = mapped.templateId;
-      card.templateLabel = mapped.templateLabel;
-      card.intent = mapped.intent;
-    }
-    card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
-    card.reasoningLog = {
-      userPrompt: text.slice(0, 200),
-      templateId: card.templateId || null,
-      intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
-      planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
-      requestedPresetId: 'llm_v0',
-      planSource: 'rule',
-      createdAt: card.createdAt,
-    };
-    this._aiAssistItems.push(card);
-    const p = tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
-      if (plan) {
-        card.plan = plan;
-        if (card.reasoningLog) {
-          card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
-          card.reasoningLog.planSource = 'ai';
-        }
-        syncAssistantCardTemplateFromPlan(card);
+
+    let cfg = null;
+    try {
+      const cfgApi = globalThis.H2S_LLM_CONFIG;
+      cfg = (cfgApi && typeof cfgApi.loadLlmConfig === 'function') ? cfgApi.loadLlmConfig() : null;
+    } catch (_e) { cfg = null; }
+    const client = globalThis.H2S_LLM_CLIENT;
+    const llmReady = !!(cfg && String(cfg.baseUrl || '').trim() && String(cfg.model || '').trim()
+      && client && typeof client.callChatCompletions === 'function' && typeof client.extractJsonObject === 'function');
+
+    function finishOptimizeCard() {
+      const clipId = self.state.selectedClipId;
+      if (!clipId) {
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.selectClipFirst') });
+        self.render();
+        return Promise.resolve();
       }
-      this.render();
-    }).catch(() => {});
-    this.render();
-    return p;
+      const mapped = mapAiAssistTextToTemplate(text);
+      const card = { type: 'card', clipId, promptText: text, createdAt: Date.now(), runState: 'idle', usedPresetId: null, resultKind: null, lastError: null };
+      if (mapped.templateId && mapped.intent) {
+        card.templateId = mapped.templateId;
+        card.templateLabel = mapped.templateLabel;
+        card.intent = mapped.intent;
+      }
+      card.plan = _buildAiAssistPlan(card.templateId || null, card.intent || null, text);
+      card.reasoningLog = {
+        userPrompt: text.slice(0, 200),
+        templateId: card.templateId || null,
+        intent: card.intent && typeof card.intent === 'object' ? { fixPitch: !!card.intent.fixPitch, tightenRhythm: !!card.intent.tightenRhythm, reduceOutliers: !!card.intent.reduceOutliers } : null,
+        planSummary: (card.plan && card.plan.planTitle) ? String(card.plan.planTitle) : 'Optimize',
+        requestedPresetId: 'llm_v0',
+        planSource: 'rule',
+        createdAt: card.createdAt,
+      };
+      self._aiAssistItems.push(card);
+      const p = tryGenerateAiPlan(text, card.templateId || null, card.intent || null).then((plan) => {
+        if (plan) {
+          card.plan = plan;
+          if (card.reasoningLog) {
+            card.reasoningLog.planSummary = (plan.planTitle && String(plan.planTitle).trim()) ? String(plan.planTitle).trim() : card.reasoningLog.planSummary;
+            card.reasoningLog.planSource = 'ai';
+          }
+          syncAssistantCardTemplateFromPlan(card);
+        }
+        self.render();
+      }).catch(() => {});
+      self.render();
+      return p;
+    }
+
+    function fallbackRouter() {
+      const clearlyOpt = testAssistantClearlyOptimizeLikeForSend(text);
+      const faq = testAssistantTextIsAccompanimentFaq(text);
+      const likelyArr = testAssistantHeuristicLikelyArrangementAction(text);
+      if (faq) {
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+        self.render();
+        return Promise.resolve();
+      }
+      if (likelyArr && !clearlyOpt) {
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+        self.render();
+        return Promise.resolve();
+      }
+      return finishOptimizeCard();
+    }
+
+    const useSynthetic = Object.prototype.hasOwnProperty.call(opts, 'syntheticIntentRouterRaw');
+    if (llmReady) {
+      const parsedP = useSynthetic
+        ? Promise.resolve(
+            opts.syntheticIntentRouterRaw == null
+              ? null
+              : testNormalizeIntentRouterPayload(
+                  typeof opts.syntheticIntentRouterRaw === 'object' ? opts.syntheticIntentRouterRaw : client.extractJsonObject(String(opts.syntheticIntentRouterRaw)),
+                  text,
+                ),
+          )
+        : client.callChatCompletions(
+          { baseUrl: String(cfg.baseUrl).trim(), model: String(cfg.model).trim(), authToken: typeof cfg.authToken === 'string' ? cfg.authToken : '' },
+          [{ role: 'user', content: JSON.stringify({ mock: text }) }],
+          { temperature: 0, timeoutMs: 1000 },
+        ).then(function (res) {
+          const raw = (res && typeof res.text === 'string') ? res.text : '';
+          const obj = client.extractJsonObject(raw);
+          return testNormalizeIntentRouterPayload(obj, text);
+        });
+
+      return parsedP.then(function (parsed) {
+        const clearlyOpt = testAssistantClearlyOptimizeLikeForSend(text);
+        const faq = testAssistantTextIsAccompanimentFaq(text);
+        if (parsed && parsed.intent === 'add_accompaniment' && parsed.confidence >= 0.5 && !clearlyOpt && !faq) {
+          return mirrorRunAddAccompanimentFlow(self, text, _t);
+        }
+        if (faq) {
+          self._aiAssistItems = self._aiAssistItems || [];
+          self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterAccompanimentFaq') });
+          self.render();
+          return undefined;
+        }
+        const likelyArr = testAssistantHeuristicLikelyArrangementAction(text);
+        if (clearlyOpt || !likelyArr) {
+          return finishOptimizeCard();
+        }
+        self._aiAssistItems = self._aiAssistItems || [];
+        self._aiAssistItems.push({ type: 'sys', text: _t('aiAssist.intentRouterArrangementHint') });
+        self.render();
+        return undefined;
+      }).catch(function () {
+        return fallbackRouter();
+      });
+    }
+    return fallbackRouter();
   };
   app._aiAssistRun = async function (clipId, btnEl) {
     if (!clipId) return;
@@ -986,7 +1295,7 @@ function createFakeApp(opts) {
     }
     return prefix + clipName;
   };
-  return { app, setOptimizeOptionsCalls, runCommandCalls, doc };
+  return { app, setOptimizeOptionsCalls, runCommandCalls, addAccompanimentCalls, doc };
 }
 
 (function testDockElementsExist() {
@@ -1468,26 +1777,294 @@ function createFakeApp(opts) {
 
 (function testPhraseResolverIdsMatchBoundedDispatchSet() {
   const R = globalThis.H2SInternalSkillRegistry;
-  const expected = new Set(['assistant_add_clip_to_timeline_v1', 'assistant_add_track_v1', 'assistant_move_instance_v1', 'assistant_remove_instance_v1']);
-  for (const sid of ['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']) {
+  const expected = new Set(['assistant_add_accompaniment_v1', 'assistant_add_clip_to_timeline_v1', 'assistant_add_track_v1', 'assistant_move_instance_v1', 'assistant_remove_instance_v1']);
+  for (const sid of ['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']) {
     const pid = R.getSkill(sid).phraseResolverId;
     assert(expected.has(pid), 'phraseResolverId for ' + sid + ': ' + pid);
   }
   console.log('PASS phraseResolverIds are the bounded assistant v1 ids');
 })();
 
+(function testResolveAddAccompanimentIntentNarrow() {
+  assert(resolveAssistantAddAccompanimentIntentFromText('add accompaniment') === true);
+  assert(resolveAssistantAddAccompanimentIntentFromText('Add Some Accompaniment.') === true);
+  assert(resolveAssistantAddAccompanimentIntentFromText('please add accompaniment') === true);
+  assert(resolveAssistantAddAccompanimentIntentFromText('加点伴奏') === true);
+  assert(resolveAssistantAddAccompanimentIntentFromText('添加伴奏') === true);
+  assert(resolveAssistantAddAccompanimentIntentFromText('making it fuller') === false, 'do not match substring');
+  assert(resolveAssistantAddAccompanimentIntentFromText('fix the pitch') === false);
+  console.log('PASS add-accompaniment intent phrases narrow');
+})();
+
+(function testAddAccompanimentSuccessNoOptimizeOptions() {
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  let confirmCalls = 0;
+  const prevWc = globalThis.window.confirm;
+  globalThis.window.confirm = function () { confirmCalls++; return true; };
+  const ctx = createFakeApp({ projectV2Override: validV2 });
+  const { app, doc, setOptimizeOptionsCalls, runCommandCalls, addAccompanimentCalls } = ctx;
+  app._assistantExecutionPlanSnapshot = { testSnap: 1 };
+  app.state.selectedInstanceId = 'ti';
+  app.state.selectedClipId = 'cm';
+  doc.getElementById('aiAssistInput').value = '添加伴奏';
+  return Promise.resolve()
+    .then(() => app._aiAssistSend())
+    .then(() => {
+      assert(confirmCalls === 0, 'add_accompaniment must not use window.confirm');
+      assert(addAccompanimentCalls.length === 0, 'defer until Continue');
+      const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+      assert(conf && conf.instanceId === 'ti' && conf.userPrompt === '添加伴奏' && conf._confirmId, 'inline confirmation card');
+      assert(I18N.t('aiAssist.addAccompanimentContinue') === 'Continue' && I18N.t('aiAssist.addAccompanimentCancel') === 'Cancel', 'button i18n keys resolve');
+      return app._aiAssistAddAccompanimentContinue(conf._confirmId);
+    })
+    .then(() => {
+      assert(confirmCalls === 0);
+      assert(app._assistantExecutionPlanSnapshot && app._assistantExecutionPlanSnapshot.testSnap === 1, 'no _assistantExecutionPlanSnapshot mutation on add accomp path');
+      assert(setOptimizeOptionsCalls.length === 0, 'must not touch Quick Optimize / setOptimizeOptions');
+      assert(runCommandCalls.length === 0, 'no runCommand optimize or bounded');
+      assert(addAccompanimentCalls.length === 1, 'addAccompanimentFromSelected once');
+      assert(addAccompanimentCalls[0].instanceId === 'ti', 'uses selected instance');
+      assert(addAccompanimentCalls[0].runExtra && addAccompanimentCalls[0].runExtra.userPrompt === '添加伴奏', 'passes full assistant text as userPrompt');
+      const last = app._aiAssistItems[app._aiAssistItems.length - 1];
+      const okFull = I18N.t('aiAssist.addAccompanimentOk');
+      assert(last.type === 'sys' && last.text === okFull, 'success sys message');
+    })
+    .finally(() => { globalThis.window.confirm = prevWc; });
+})().then(() => { console.log('PASS add accompaniment => addAccompanimentFromSelected, no setOptimizeOptions'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testAddAccompanimentRejectAudioKind() {
+  const v2 = {
+    instances: [{ id: 'ti', clipId: 'aud', startBeat: 0, trackId: 'tk' }],
+    clips: { aud: { kind: 'audio', name: 'Hum' } },
+  };
+  let confirmCalls = 0;
+  const prevWc = globalThis.window.confirm;
+  globalThis.window.confirm = function () { confirmCalls++; return true; };
+  const { app, doc, addAccompanimentCalls } = createFakeApp({ projectV2Override: v2 });
+  app.state.selectedInstanceId = 'ti';
+  app.state.selectedClipId = 'aud';
+  doc.getElementById('aiAssistInput').value = 'add accompaniment';
+  return app._aiAssistSend()
+    .then(() => {
+      assert(confirmCalls === 0);
+      assert(addAccompanimentCalls.length === 0);
+      assert(!app._aiAssistItems.some((x) => x.type === 'add_accompaniment_confirm'), 'no confirm card when validation fails');
+      assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === I18N.t('aiAssist.addAccompanimentNeedsNoteClip')));
+    })
+    .finally(() => { globalThis.window.confirm = prevWc; });
+})().then(() => { console.log('PASS add accompaniment rejects audio clip'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testAddAccompanimentConfirmCancel() {
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  let confirmCalls = 0;
+  const prevWc = globalThis.window.confirm;
+  globalThis.window.confirm = function () { confirmCalls++; return true; };
+  const { app, doc, addAccompanimentCalls } = createFakeApp({ projectV2Override: validV2 });
+  app.state.selectedInstanceId = 'ti';
+  app.state.selectedClipId = 'cm';
+  doc.getElementById('aiAssistInput').value = 'add accompaniment';
+  return app._aiAssistSend()
+    .then(() => {
+      assert(confirmCalls === 0);
+      assert(addAccompanimentCalls.length === 0);
+      const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+      assert(conf, 'confirmation row before cancel');
+      app._aiAssistAddAccompanimentCancel(conf._confirmId);
+      assert(addAccompanimentCalls.length === 0);
+      assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === I18N.t('aiAssist.addAccompanimentCancelled')));
+    })
+    .finally(() => { globalThis.window.confirm = prevWc; });
+})().then(() => { console.log('PASS add accompaniment confirm cancel'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testAddAccompanimentFailureMessage() {
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  const { app, doc, addAccompanimentCalls } = createFakeApp({
+    projectV2Override: validV2,
+    addAccompanimentResult: { ok: false, reason: 'patch_validation_failed', detail: 'bad' },
+  });
+  app.state.selectedInstanceId = 'ti';
+  app.state.selectedClipId = 'cm';
+  doc.getElementById('aiAssistInput').value = 'add accompaniment';
+  return app._aiAssistSend()
+    .then(() => {
+      const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+      return app._aiAssistAddAccompanimentContinue(conf._confirmId);
+    })
+    .then(() => {
+      assert(addAccompanimentCalls.length === 1);
+      const last = app._aiAssistItems[app._aiAssistItems.length - 1];
+      assert(last.text.indexOf('Could not add accompaniment:') >= 0 && last.text.indexOf('patch_validation_failed') >= 0);
+    });
+})().then(() => { console.log('PASS add accompaniment failure surfaces reason'); }).catch((e) => { console.error(e); process.exit(1); });
+
 (function testAppJsBoundedResolverRegistryAndOrder() {
   const fs = require('fs');
   const appPath = path.join(__dirname, '../../static/pianoroll/app.js');
   const s = fs.readFileSync(appPath, 'utf8');
-  assert(s.includes("Object.freeze(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance'])"), 'bounded dispatch order clip → track → move → remove');
+  assert(s.includes("Object.freeze(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance'])"), 'bounded dispatch order accompaniment → clip → track → move → remove');
+  assert(s.includes('assistant_add_accompaniment_v1: _resolveAssistantAddAccompanimentIntentFromText'), 'resolver registry add_accompaniment');
   assert(s.includes('assistant_add_clip_to_timeline_v1: _resolveAssistantAddClipToTimelineIntentFromText'), 'resolver registry add_clip_to_timeline');
   assert(s.includes('assistant_add_track_v1: _resolveAssistantAddTrackIntentFromText'), 'resolver registry add_track');
   assert(s.includes('assistant_move_instance_v1: _resolveAssistantMoveInstanceIntentFromText'), 'resolver registry move_instance');
   assert(s.includes('assistant_remove_instance_v1: _resolveAssistantRemoveInstanceIntentFromText'), 'resolver registry remove_instance');
   assert(s.includes('_tryAssistantBoundedSkillDispatch(this, text, _t)'), '_aiAssistSend calls bounded dispatch');
+  assert(s.includes('_assistantCallIntentRouterLlm'), 'intent router calls LLM');
+  assert(s.includes('_assistantFinishOptimizeCardPath'), 'optimize card path extracted');
+  assert(s.includes("type: 'add_accompaniment_confirm'"), 'add accompaniment uses inline confirm item, not window.confirm');
+  assert(s.includes('data-act="aiAddAccompanimentContinue"') && s.includes('data-act="aiAddAccompanimentCancel"'), 'dock renders Continue/Cancel for add accompaniment');
+  const flowStart = s.indexOf('function _assistantDispatchAddAccompanimentFlow');
+  const flowEnd = s.indexOf('function _assistantAttachAddAccompanimentPromise');
+  assert(flowStart >= 0 && flowEnd > flowStart, 'slice markers for add accompaniment flow');
+  assert(s.slice(flowStart, flowEnd).indexOf('.confirm(') < 0, '_assistantDispatchAddAccompanimentFlow must not call native confirm()');
   console.log('PASS app.js bounded resolver registry + dispatch hook');
 })();
+
+(function testIntentRouterNaturalZhAddAccompaniment() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: () => Promise.reject(new Error('use synthetic')),
+    extractJsonObject: () => null,
+  };
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  try {
+    let confirmCalls = 0;
+    const prevWc = globalThis.window.confirm;
+    globalThis.window.confirm = function () { confirmCalls++; return true; };
+    const { app, doc, setOptimizeOptionsCalls, addAccompanimentCalls } = createFakeApp({
+      projectV2Override: validV2,
+      syntheticIntentRouterRaw: { intent: 'add_accompaniment', confidence: 0.95, userPrompt: '', needsConfirmation: true },
+    });
+    app._assistantExecutionPlanSnapshot = { routerSnap: 1 };
+    app.state.selectedInstanceId = 'ti';
+    app.state.selectedClipId = 'cm';
+    const zh = '这段如果是主歌，给它加个伴奏';
+    doc.getElementById('aiAssistInput').value = zh;
+    return app._aiAssistSend()
+      .then(() => {
+        assert(confirmCalls === 0);
+        assert(addAccompanimentCalls.length === 0);
+        const conf = app._aiAssistItems.find((x) => x.type === 'add_accompaniment_confirm');
+        assert(conf && conf.userPrompt === zh, 'router path shows confirm with full text');
+        return app._aiAssistAddAccompanimentContinue(conf._confirmId);
+      })
+      .then(() => {
+        assert(app._assistantExecutionPlanSnapshot && app._assistantExecutionPlanSnapshot.routerSnap === 1);
+        assert(setOptimizeOptionsCalls.length === 0, 'no setOptimizeOptions');
+        assert(addAccompanimentCalls.length === 1, 'addAccompaniment once');
+        assert(addAccompanimentCalls[0].runExtra.userPrompt === zh, 'full original text as userPrompt');
+        const card = app._aiAssistItems.filter((x) => x.type === 'card');
+        assert(card.length === 0, 'no optimize card');
+      })
+      .finally(() => { globalThis.window.confirm = prevWc; });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS LLM intent router natural ZH -> add accompaniment'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testIntentRouterAccompanimentFaqNoAdd() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = { callChatCompletions: () => Promise.reject(new Error('x')), extractJsonObject: () => null };
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  try {
+    const { app, doc, addAccompanimentCalls } = createFakeApp({
+      projectV2Override: validV2,
+      confirmImpl() { return true; },
+      syntheticIntentRouterRaw: { intent: 'ask_clarify', confidence: 0.9, userPrompt: '', needsConfirmation: false },
+    });
+    app.state.selectedInstanceId = 'ti';
+    app.state.selectedClipId = 'cm';
+    doc.getElementById('aiAssistInput').value = '伴奏是什么';
+    return app._aiAssistSend().then(() => {
+      assert(addAccompanimentCalls.length === 0);
+      assert(app._aiAssistItems.some((x) => x.type === 'sys' && x.text === 'FAQ_ACCOMP'));
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS 伴奏是什么 -> faq, no add'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testIntentRouterFixPitchOverridesWrongAdd() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = { callChatCompletions: () => Promise.reject(new Error('x')), extractJsonObject: () => null };
+  const validV2 = {
+    instances: [{ id: 'ti', clipId: 'cm', startBeat: 0, trackId: 'tk' }],
+    clips: {
+      cm: { name: 'M', score: { tracks: [{ notes: [{ id: 'n', pitch: 60, velocity: 80, startBeat: 0, durationBeat: 1 }] }] } },
+    },
+  };
+  try {
+    const { app, doc, addAccompanimentCalls } = createFakeApp({
+      projectV2Override: validV2,
+      confirmImpl() { return true; },
+      syntheticIntentRouterRaw: { intent: 'add_accompaniment', confidence: 0.99, userPrompt: '', needsConfirmation: true },
+    });
+    app.state.selectedInstanceId = 'ti';
+    app.state.selectedClipId = 'cm';
+    doc.getElementById('aiAssistInput').value = '修音准';
+    return app._aiAssistSend().then(() => {
+      assert(addAccompanimentCalls.length === 0, 'optimize keyword wins');
+      assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'card');
+      assert(app._aiAssistItems[0].templateId === 'fix_pitch_v1');
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS 修音准 overrides mistaken add_accompaniment router'); }).catch((e) => { console.error(e); process.exit(1); });
+
+(function testIntentRouterInvalidPayloadFallsBackSafe() {
+  const prevCfg = globalThis.H2S_LLM_CONFIG;
+  const prevClient = globalThis.H2S_LLM_CLIENT;
+  globalThis.H2S_LLM_CONFIG = { loadLlmConfig: () => ({ baseUrl: 'http://mock', model: 'mock', authToken: '' }) };
+  globalThis.H2S_LLM_CLIENT = { callChatCompletions: () => Promise.reject(new Error('x')), extractJsonObject: () => null };
+  try {
+    const { app, doc, addAccompanimentCalls } = createFakeApp({
+      syntheticIntentRouterRaw: { intent: 'not_an_intent', confidence: 1, userPrompt: '', needsConfirmation: false },
+    });
+    app.state.selectedClipId = 'clip-1';
+    doc.getElementById('aiAssistInput').value = 'add more dynamics';
+    return app._aiAssistSend().then(() => {
+      assert(addAccompanimentCalls.length === 0);
+      assert(app._aiAssistItems.length === 1 && app._aiAssistItems[0].type === 'card');
+    });
+  } finally {
+    globalThis.H2S_LLM_CONFIG = prevCfg;
+    globalThis.H2S_LLM_CLIENT = prevClient;
+  }
+})().then(() => { console.log('PASS invalid router intent falls back safe'); }).catch((e) => { console.error(e); process.exit(1); });
 
 (function testNonMatchingBoundedTextFallsThroughToOptimizeCard() {
   const { app, doc, runCommandCalls } = createFakeApp();
@@ -1797,11 +2374,11 @@ function createFakeApp(opts) {
     },
   };
   const cleared = mergePlanForSetOptimizeOptionsLikeApp({ _assistantExecutionPlanSnapshot: null, userPrompt: 'z' }, stale);
-  assert(cleared && cleared.planTitle === 'Optimize', 'explicit null snapshot => plan from stale existingOpts.plan');
-  console.log('PASS explicit null clears assistant snapshot for plan fallback');
+  assert(cleared == null, 'explicit null snapshot without plan key must not revive stale existingOpts.plan');
+  console.log('PASS explicit null snapshot strips inherited plan');
 })();
 
-(function testOptimizeClipMergePreservesPlanTemplateSnapshot() {
+(function testOptimizeClipMergeClearsAssistantPlanWhenEditorPassesNulls() {
   const snapPlan = {
     planKind: 'clean-outliers',
     planTitle: '移除离群高音',
@@ -1815,13 +2392,45 @@ function createFakeApp(opts) {
     plan: snapPlan,
     _assistantExecutionPlanSnapshot: snapPlan,
   };
-  const ui = { requestedPresetId: 'llm_v0', userPrompt: 'from ui', intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true } };
+  const ui = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'from ui',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    plan: null,
+    _assistantExecutionPlanSnapshot: null,
+  };
   const out = resolveOptimizeClipOptionsLikeApp(stored, ui);
   assert(out.templateId === 'clean_outliers_v1', 'merge preserves templateId from stored');
-  assert(out.plan && out.plan.planTitle === '移除离群高音', 'merge preserves plan aligned with snapshot');
-  assert(out._assistantExecutionPlanSnapshot && out._assistantExecutionPlanSnapshot.planTitle === '移除离群高音', 'merge preserves _assistantExecutionPlanSnapshot');
+  assert(out.plan == null, 'editor-style override clears plan');
+  assert(out._assistantExecutionPlanSnapshot == null, 'editor-style override clears snapshot');
   assert(out.intent && out.intent.reduceOutliers === true && out.intent.fixPitch === false, 'intent from override only (not merged stored intent)');
-  console.log('PASS optimizeClip merge preserves planTemplateId snapshot');
+  console.log('PASS optimizeClip merge clears assistant plan when editor passes nulls');
+})();
+
+(function testOptimizeClipMergePreservesAssistantPlanWhenOverrideSuppliesPlan() {
+  const snapPlan = {
+    planKind: 'clean-outliers',
+    planTitle: '移除离群高音',
+    planLines: ['Goal: remove outliers.', 'Strategy: conservative edits.'],
+  };
+  const stored = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'stored',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    templateId: 'clean_outliers_v1',
+  };
+  const assistantOverride = {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'assist',
+    intent: { fixPitch: false, tightenRhythm: false, reduceOutliers: true },
+    templateId: 'clean_outliers_v1',
+    plan: snapPlan,
+    _assistantExecutionPlanSnapshot: snapPlan,
+  };
+  const out = resolveOptimizeClipOptionsLikeApp(stored, assistantOverride);
+  assert(out.plan && out.plan.planTitle === '移除离群高音', 'explicit assistant override keeps plan');
+  assert(out._assistantExecutionPlanSnapshot && out._assistantExecutionPlanSnapshot.planTitle === '移除离群高音', 'explicit assistant override keeps snapshot');
+  console.log('PASS optimizeClip merge preserves plan when assistant override supplies it');
 })();
 
 (function testGenericPlanBlockWhenRuleBasedPlanOnly() {

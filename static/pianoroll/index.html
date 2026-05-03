@@ -148,24 +148,24 @@
     #aiAssistResizeHandle{ position:absolute; top:0; left:0; width:20px; height:20px; cursor:nwse-resize; z-index:10; user-select:none; background:linear-gradient(135deg, rgba(255,255,255,.15) 0%, transparent 50%); border-radius:var(--radius) 0 6px 0; }
     #aiAssistResizeHandle:hover{ background:linear-gradient(135deg, rgba(255,255,255,.25) 0%, transparent 50%); }
     #aiAssistHeader{
-      height:28px;
-      min-height:28px;
+      height:24px;
+      min-height:24px;
       display:flex;
       align-items:center;
-      padding:0 12px;
-      background:rgba(0,0,0,.25);
-      border-bottom:1px solid var(--border);
+      padding:0 10px 0 12px;
+      background:rgba(255,255,255,.03);
+      border-bottom:1px solid rgba(255,255,255,.08);
       cursor:pointer;
       user-select:none;
-      font-size:12px;
+      font-size:11px;
       font-weight:600;
-      flex:1;
+      flex:0 0 24px;
       min-width:0;
     }
-    #aiAssistHeader:hover{ background:rgba(0,0,0,.35); }
+    #aiAssistHeader:hover{ background:rgba(255,255,255,.05); }
     #aiAssistDock:not(.open) #aiAssistHeader{ border-bottom:none; }
-    #aiAssistHeaderTarget{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:6px; }
-    .aiAssistChevron{ margin-left:6px; color:var(--muted); font-size:10px; flex-shrink:0; }
+    #aiAssistHeaderTarget{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:4px; }
+    .aiAssistChevron{ margin-left:4px; color:var(--muted); font-size:10px; flex-shrink:0; }
     #aiAssistBody{ flex:1; min-height:0; display:flex; flex-direction:column; padding:8px; gap:8px; overflow:hidden; }
     #aiAssistDock:not(.open) #aiAssistBody{ display:none; }
     #aiAssistMessages{ flex:1; overflow-y:auto; font-size:12px; min-height:120px; }
@@ -517,19 +517,21 @@
     }
     .studioLastOptimizeRow .lastOptDetailsBtn{ flex-shrink:0; font-size:10px !important; padding:2px 8px !important; }
     .lastOptDetailsPop{
-      position:absolute;
-      right:0;
-      top:100%;
-      margin-top:6px;
-      z-index:60;
-      min-width:268px;
-      max-width:min(360px, 94vw);
+      position:fixed;
+      left:50%;
+      top:50%;
+      transform:translate(-50%, -50%);
+      z-index:10004;
+      width:min(760px, 94vw);
+      max-height:min(82vh, 760px);
+      overflow:auto;
       padding:10px 12px 12px;
       border:1px solid var(--border);
       border-radius:var(--radius);
-      background:rgba(18,20,26,.98);
-      box-shadow:var(--shadow);
+      background:rgba(18,20,26,.985);
+      box-shadow:0 16px 40px rgba(0,0,0,.55);
       text-align:left;
+      pointer-events:auto;
     }
     .lastOptDetailsPop.hidden{ display:none !important; }
     .lastOptDetailsHeader{
@@ -548,6 +550,50 @@
     .lastOptDetailRow:last-child{ margin-bottom:0; }
     .lastOptDetailRow .lbl{ flex:0 0 42%; max-width:11em; opacity:.88; }
     .lastOptDetailRow .val{ flex:1; min-width:0; word-break:break-word; }
+    .lastOptPromptTrace{ display:flex; flex-direction:column; gap:6px; }
+    .lastOptPromptTraceActions{ display:flex; flex-wrap:wrap; gap:6px; }
+    .lastOptPromptTraceStatus{ min-height:14px; font-size:10px; opacity:.86; }
+    .lastOptPromptTraceMeta{ font-size:10px; opacity:.9; word-break:break-word; }
+    .lastOptPromptTraceBlock summary{ cursor:pointer; font-size:10px; opacity:.95; }
+    .lastOptPromptTraceText{
+      width:100%;
+      min-height:72px;
+      max-height:180px;
+      margin-top:4px;
+      resize:vertical;
+      font-size:10px;
+      line-height:1.35;
+      color:var(--text);
+      background:rgba(255,255,255,.02);
+      border:1px solid var(--border);
+      border-radius:6px;
+      padding:6px 8px;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .lastOptPromptTraceEmpty{ opacity:.85; }
+    .lastOptPromptTrace{ display:flex; flex-direction:column; gap:6px; }
+    .lastOptPromptTraceActions{ display:flex; flex-wrap:wrap; gap:6px; }
+    .lastOptPromptTraceStatus{ min-height:14px; font-size:10px; opacity:.86; }
+    .lastOptPromptTraceMeta{ font-size:10px; opacity:.9; word-break:break-word; }
+    .lastOptPromptTraceBlock summary{ cursor:pointer; font-size:10px; opacity:.95; }
+    .lastOptPromptTraceText{
+      width:100%;
+      min-height:72px;
+      max-height:180px;
+      margin-top:4px;
+      resize:vertical;
+      font-size:10px;
+      line-height:1.35;
+      color:var(--text);
+      background:rgba(255,255,255,.02);
+      border:1px solid var(--border);
+      border-radius:6px;
+      padding:6px 8px;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .lastOptPromptTraceEmpty{ opacity:.85; }
 
     .timeline{
       flex:1;
@@ -959,6 +1005,11 @@
       background: #fff;
       color: #111;
     }
+    #editorQuickOptimizeTemplates .btn[data-template-id].active{
+      background: rgba(59,130,246,.24);
+      border-color: rgba(59,130,246,.55);
+      color: #dbeafe;
+    }
     .help{
       color:rgba(255,255,255,.72);
       font-size:12px;
@@ -996,8 +1047,9 @@
         <button type="button" id="btnImportAudio" class="btn" data-i18n="top.importAudio" data-i18n-title="top.importAudioTitle">Import audio</button>
         <label class="row" style="align-items:center; gap:6px; margin:0; font-size:11px; cursor:pointer; user-select:none;">
           <input type="checkbox" id="chkImportAudioToNotes" checked />
-          <span data-i18n="top.importAudioMakeNotesLabel" data-i18n-title="top.importAudioMakeNotesTitle">Make editable notes</span>
+          <span data-i18n="top.importAudioMakeNotesLabel" data-i18n-title="top.importAudioMakeNotesTitle">Make editable notes (server)</span>
         </label>
+        <span class="smallmuted" style="font-size:11px;" data-i18n="top.importAudioModeHint">On = editable notes · Off = audio-only clip</span>
       </span>
     </div>
     <div class="spacer"></div>
@@ -1029,19 +1081,20 @@
         </li>
         <li>
           <details class="beginnerHintSetupDetails">
-            <summary data-i18n="beginnerHint.setupSummary">Local run from a git clone (optional troubleshooting)</summary>
+            <summary data-i18n="beginnerHint.setupSummary">Windows first run (recommended)</summary>
             <div class="beginnerHintSetupBody">
               <div class="smallmuted" style="margin-bottom:6px;" data-i18n="beginnerHint.setupPreamble">Skip this section if uploads and playback already work.</div>
-              <span data-i18n="beginnerHint.step1">In the repo root, run preflight (checks FFmpeg, FluidSynth, SoundFont):</span>
+              <span data-i18n="beginnerHint.step1">In the repo root, run setup once:</span>
               <div class="beginnerHintCmdLine">
-                <code>python scripts/beginner_preflight.py</code>
-                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_preflight.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+                <code>beginner_setup.bat</code>
+                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="beginner_setup.bat" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
               </div>
-              <span data-i18n="beginnerHint.step2a">Start the API (or use </span><code>uvicorn app:app</code><span data-i18n="beginnerHint.step2b">):</span>
+              <span data-i18n="beginnerHint.step2a">Then start Studio/API with:</span><span data-i18n="beginnerHint.step2b"></span>
               <div class="beginnerHintCmdLine">
-                <code>python scripts/beginner_launch.py</code>
-                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="python scripts/beginner_launch.py" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
+                <code>beginner_launch.bat</code>
+                <button type="button" class="btn ghost beginnerHintMini" data-copy-cmd="beginner_launch.bat" data-i18n="beginnerHint.copy" data-i18n-title="beginnerHint.copyTitle">Copy</button>
               </div>
+              <span class="smallmuted" style="display:block;margin-top:4px;" data-i18n="beginnerHint.advancedFallback">Advanced fallback: python scripts/beginner_preflight.py then python scripts/beginner_launch.py</span>
               <span class="smallmuted" style="display:block;margin-top:4px;" data-i18n="beginnerHint.checklistNote">Longer setup doc: docs/BEGINNER_FIRST_RUN_CHECKLIST.md (also summarized in More help).</span>
             </div>
           </details>
@@ -1063,8 +1116,8 @@
       </div>
       <div class="beginnerHintHelpBody">
         <ul>
-          <li data-i18n="beginnerHint.helpL1">Preflight (repo root): python scripts/beginner_preflight.py — checks FFmpeg, FluidSynth, and SoundFont.</li>
-          <li data-i18n="beginnerHint.helpL2">Launch server: python scripts/beginner_launch.py (or uvicorn app:app from repo root).</li>
+          <li data-i18n="beginnerHint.helpL1">Windows first run (repo root): beginner_setup.bat — prepares venv and Python packages.</li>
+          <li data-i18n="beginnerHint.helpL2">Launch Studio/API: beginner_launch.bat (opens Studio when ready).</li>
           <li data-i18n="beginnerHint.helpL3">In Studio: Import as notes, Record, or Import as audio; double-click a clip to edit.</li>
           <li>
             <span data-i18n="beginnerHint.helpL4a">Verify the backend:</span>
@@ -1127,14 +1180,7 @@
       <div id="studioLastOptimizeRow" class="studioLastOptimizeRow" style="position:relative;" aria-live="polite">
         <span class="studioLastOptimizeLabel muted" data-i18n="lastOpt.label">Last optimize</span>
         <span id="studioLastOptimizeSummary" class="studioLastOptimizeText">—</span>
-        <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details">Details</button>
-        <div id="studioLastOptimizeDetails" class="lastOptDetailsPop hidden" role="dialog" aria-hidden="true" aria-labelledby="lastOptDetailsHeading">
-          <div class="lastOptDetailsHeader">
-            <span id="lastOptDetailsHeading" data-i18n="lastOpt.detailTitle">Last optimize — details</span>
-            <button type="button" id="btnLastOptimizeDetailsClose" class="btn mini ghost" data-i18n-aria-label="lastOpt.detailsCloseAria">×</button>
-          </div>
-          <div id="studioLastOptimizeDetailsBody" class="lastOptDetailsBody"></div>
-        </div>
+        <button type="button" id="btnLastOptimizeDetails" class="btn mini ghost lastOptDetailsBtn hidden" data-i18n="lastOpt.details" data-i18n-title="lastOpt.detailsTitle" title="Details" disabled>Details</button>
       </div>
 
       <div class="timeline">
@@ -1407,16 +1453,19 @@
                   <button type="button" class="btn mini" data-template-id="bluesy_v1" data-i18n="editor.bluesy">Bluesy</button>
                 </div>
               </div>
-              <div class="row" style="gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:4px; font-size:11px;">
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptFixPitch" /><span data-i18n="editor.fixPitch">Fix Pitch</span></label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptTightenRhythm" /><span data-i18n="editor.tightenRhythm">Tighten Rhythm</span></label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="qoptReduceOutliers" /><span data-i18n="editor.reduceOutliers">Reduce Outliers</span></label>
+              <div style="display:none;" aria-hidden="true">
+                <input type="checkbox" id="qoptFixPitch" />
+                <input type="checkbox" id="qoptTightenRhythm" />
+                <input type="checkbox" id="qoptReduceOutliers" />
               </div>
               <div style="font-size:11px; opacity:0.85; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
                 <span id="editorQuickOptimizeMode" class="badge" data-i18n="opt.safe">Safe mode</span>
                 <span id="editorQuickOptimizeModel" class="muted" data-i18n="editor.modelUnset">Model: (unset)</span>
               </div>
-              <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; margin-top:4px;">(no result yet)</div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
+                <div id="editorQuickOptimizeSummary" class="muted" style="font-size:11px; flex:1; min-width:0;">(no result yet)</div>
+                <button id="btnEditorOptimizeDetailsDebug" type="button" class="btn mini ghost" data-i18n="editor.optimizeDetails" title="Optimize Details">Optimize Details</button>
+              </div>
             </div>
             <details class="help" style="margin-top:8px;">
               <summary style="cursor:pointer; font-weight:700;" data-i18n="opt.advanced">Advanced</summary>
@@ -1472,22 +1521,6 @@
                     <div id="editorLlmTestStatus" class="muted" style="min-height:1em; font-size:11px;"></div>
                   </div>
                 </div>
-                <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08);">
-                  <details class="help" style="margin-top:0;">
-                    <summary style="cursor:pointer; font-weight:700;" data-i18n="editor.llmDebug">LLM Debug</summary>
-                    <div style="margin-top:6px; font-size:11px; opacity:0.85;">
-                      <div class="row" style="margin-bottom:6px;">
-                        <button id="btnEditorLlmDebugClear" type="button" class="btn mini" data-i18n="editor.clearDebug">Clear Debug</button>
-                      </div>
-                      <label class="muted" style="margin:0; display:block;" data-i18n="editor.lastRawOutput">Last raw output:</label>
-                      <textarea id="editorLlmDebugRaw" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.lastExtractedPatch">Last extracted patch:</label>
-                      <textarea id="editorLlmDebugExtracted" readonly style="width:100%; min-height:60px; max-height:120px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                      <label class="muted" style="margin:8px 0 0; display:block;" data-i18n="editor.errorsAndAttempt">Errors + attempt:</label>
-                      <textarea id="editorLlmDebugErrors" readonly style="width:100%; min-height:40px; max-height:80px; padding:4px; border:1px solid var(--border); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text); font-size:10px; font-family:ui-monospace,monospace; resize:vertical; box-sizing:border-box; overflow:auto;"></textarea>
-                    </div>
-                  </details>
-                </div>
               </div>
             </details>
             <div class="help" id="editorStatus" style="margin-top:6px;" data-i18n="editor.ready">Ready.</div>
@@ -1495,6 +1528,21 @@
         </div>
       </div>
     </div>
+  </div>
+  <div id="studioLastOptimizeDetails" class="lastOptDetailsPop hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="lastOptDetailsHeading">
+    <div class="lastOptDetailsHeader">
+      <span id="lastOptDetailsHeading" data-i18n="lastOpt.detailTitle">Last optimize — details</span>
+      <button type="button" id="btnLastOptimizeDetailsClose" class="btn mini ghost" data-i18n-aria-label="lastOpt.detailsCloseAria">×</button>
+    </div>
+    <div id="studioLastOptimizeDetailsBody" class="lastOptDetailsBody"></div>
+  </div>
+
+  <div id="studioArrangementDetails" class="lastOptDetailsPop hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="arrangementDetailsHeading">
+    <div class="lastOptDetailsHeader">
+      <span id="arrangementDetailsHeading" data-i18n="arrange.detailTitle">Last Arrangement Details</span>
+      <button type="button" id="btnArrangementDetailsClose" class="btn mini ghost" data-i18n-aria-label="arrange.detailsCloseAria">×</button>
+    </div>
+    <div id="studioArrangementDetailsBody" class="lastOptDetailsBody"></div>
   </div>
 
   <!-- i18n core (PR-G1a) - load before other scripts -->
@@ -1511,8 +1559,12 @@
   <script src="/static/pianoroll/core/rhythm_tighten_loosen.js?v=1"></script>
   <script src="/static/pianoroll/core/phase1_assistant_narrow.js?v=1"></script>
   <script src="/static/pianoroll/core/phase1_deterministic_meta.js?v=1"></script>
+  <script src="/static/pianoroll/core/add_bass_v0.js?v=1"></script>
+  <script src="/static/pianoroll/core/arrangement_patch_v0.js?v=1"></script>
+  <script src="/static/pianoroll/core/arrangement_quality_v0.js?v=1"></script>
   <script src="/static/pianoroll/core/optimize_templates_v1.js"></script>
   <script src="/static/pianoroll/controllers/agent_controller.js"></script>
+  <script src="/static/pianoroll/controllers/arrangement_controller.js"></script>
   <script src="/static/pianoroll/ui/timeline_view.js"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
   <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>

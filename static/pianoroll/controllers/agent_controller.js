@@ -388,9 +388,28 @@
     return out;
   }
 
+  function _buildNoteStateMapFromClip(clip){
+    const out = Object.create(null);
+    const score = clip && clip.score;
+    const tracks = (score && Array.isArray(score.tracks)) ? score.tracks : [];
+    for (const tr of tracks){
+      const notes = (tr && Array.isArray(tr.notes)) ? tr.notes : [];
+      for (const n of notes){
+        if (!n || n.id == null) continue;
+        out[String(n.id)] = {
+          pitch: Number(n.pitch),
+          startBeat: Number(n.startBeat),
+          durationBeat: Number(n.durationBeat),
+        };
+      }
+    }
+    return out;
+  }
+
   /** PR-B3a: Compute patch type summary from ops (pitch/timing/structure/velocity-only). */
-  function _computePatchTypeSummary(ops){
+  function _computePatchTypeSummary(ops, clip){
     const arr = Array.isArray(ops) ? ops : [];
+    const noteStateById = _buildNoteStateMapFromClip(clip);
     let hasPitchChange = false;
     let hasTimingChange = false;
     let hasStructuralChange = false;
@@ -398,14 +417,94 @@
       if (!op || typeof op !== 'object') continue;
       const ot = String(op.op || '');
       if (ot === 'addNote' || ot === 'deleteNote') hasStructuralChange = true;
-      if (ot === 'moveNote') hasTimingChange = true;
+      if (ot === 'moveNote'){
+        const db = Number(op.deltaBeat);
+        if (isFinite(db) && db !== 0) hasTimingChange = true;
+      }
       if (ot === 'setNote'){
-        if (op.pitch != null) hasPitchChange = true;
-        if (op.startBeat != null || op.durationBeat != null) hasTimingChange = true;
+        const noteId = (op.noteId != null) ? String(op.noteId) : '';
+        const before = (noteId && Object.prototype.hasOwnProperty.call(noteStateById, noteId)) ? noteStateById[noteId] : null;
+        if (op.pitch != null){
+          if (before && isFinite(before.pitch)){
+            if (Number(op.pitch) !== before.pitch) hasPitchChange = true;
+          } else {
+            hasPitchChange = true;
+          }
+        }
+        if (op.startBeat != null){
+          if (before && isFinite(before.startBeat)){
+            if (Number(op.startBeat) !== before.startBeat) hasTimingChange = true;
+          } else {
+            hasTimingChange = true;
+          }
+        }
+        if (op.durationBeat != null){
+          if (before && isFinite(before.durationBeat)){
+            if (Number(op.durationBeat) !== before.durationBeat) hasTimingChange = true;
+          } else {
+            hasTimingChange = true;
+          }
+        }
       }
     }
     const isVelocityOnly = arr.length > 0 && !hasPitchChange && !hasTimingChange && !hasStructuralChange;
     return { hasPitchChange, hasTimingChange, hasStructuralChange, isVelocityOnly };
+  }
+
+  /**
+   * Fix Pitch quality scope guard: reject broad pitch edits.
+   * Ratio = unique notes with actual pitch changes / total notes in clip.
+   */
+  function _computePitchChangeScope(ops, clip){
+    const arr = Array.isArray(ops) ? ops : [];
+    const noteStateById = _buildNoteStateMapFromClip(clip);
+    const totalNotes = Object.keys(noteStateById).length;
+    const changed = Object.create(null);
+    for (const op of arr){
+      if (!op || typeof op !== 'object') continue;
+      if (String(op.op || '') !== 'setNote' || op.pitch == null || op.noteId == null) continue;
+      const noteId = String(op.noteId);
+      const before = Object.prototype.hasOwnProperty.call(noteStateById, noteId) ? noteStateById[noteId] : null;
+      if (before && isFinite(before.pitch) && Number(op.pitch) !== before.pitch){
+        changed[noteId] = true;
+      }
+    }
+    const changedNoteCount = Object.keys(changed).length;
+    const ratio = totalNotes > 0 ? (changedNoteCount / totalNotes) : 0;
+    return { changedNoteCount, totalNotes, ratio };
+  }
+
+  /**
+   * Clean Outliers quality signals:
+   * - deleteCount / totalNotes for aggressiveness cap
+   * - significant duration changes as an alternative structural cleanup signal
+   */
+  function _computeOutlierCleanupSignals(ops, clip){
+    const arr = Array.isArray(ops) ? ops : [];
+    const noteStateById = _buildNoteStateMapFromClip(clip);
+    const totalNotes = Object.keys(noteStateById).length;
+    const SIGNIFICANT_DURATION_DELTA_BEAT = 0.25;
+    let deleteCount = 0;
+    let significantDurationChangeCount = 0;
+    for (const op of arr){
+      if (!op || typeof op !== 'object') continue;
+      const kind = String(op.op || '');
+      if (kind === 'deleteNote'){
+        deleteCount += 1;
+        continue;
+      }
+      if (kind !== 'setNote' || op.durationBeat == null || op.noteId == null) continue;
+      const noteId = String(op.noteId);
+      const before = Object.prototype.hasOwnProperty.call(noteStateById, noteId) ? noteStateById[noteId] : null;
+      if (!before || !isFinite(before.durationBeat)) continue;
+      const afterDuration = Number(op.durationBeat);
+      if (!isFinite(afterDuration)) continue;
+      if (Math.abs(afterDuration - before.durationBeat) >= SIGNIFICANT_DURATION_DELTA_BEAT){
+        significantDurationChangeCount += 1;
+      }
+    }
+    const deleteRatio = totalNotes > 0 ? (deleteCount / totalNotes) : 0;
+    return { totalNotes, deleteCount, deleteRatio, significantDurationChangeCount };
   }
 
   function buildPseudoAgentPatch(clip){
@@ -869,6 +968,20 @@
 
           const opsN = patchObj.ops.length;
           if (opsN === 0){
+            if (intent.reduceOutliers){
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: 'no meaningful outlier cleanup',
+                patchSummary: Object.assign({}, patchSummaryBase, {
+                  status: 'failed',
+                  reason: 'no meaningful outlier cleanup',
+                  ops: 0,
+                  byOp: {},
+                  examples: [],
+                }, _llmOutcomeExtra('rejected_quality', { detail: 'no meaningful outlier cleanup' }), _computePatchTypeSummary([])),
+              };
+            }
             if (debugCapture) debugCapture.validateErrors = [];
             return {
               ok: true,
@@ -953,19 +1066,59 @@
           // PR-B3b: Full-mode Quality Gate — velocity-only unacceptable when intent requires pitch/timing
           const gateRequired = !safeMode && (intent.fixPitch || intent.tightenRhythm);
           if (gateRequired && opsN > 0){
-            const ps = _computePatchTypeSummary(patchObj.ops);
+            const ps = _computePatchTypeSummary(patchObj.ops, clip);
+            let missingReason = '';
             if (ps.isVelocityOnly){
+              missingReason = 'quality_velocity_only';
+            } else if (intent.fixPitch && !ps.hasPitchChange){
+              missingReason = 'missing pitch change for Fix Pitch';
+            } else if (intent.fixPitch){
+              const scope = _computePitchChangeScope(patchObj.ops, clip);
+              // Keep tiny clips editable: scope cap applies only when enough notes exist.
+              if (scope.totalNotes >= 4 && scope.ratio > 0.3){
+                missingReason = 'pitch change too broad for Fix Pitch';
+              }
+            } else if (intent.tightenRhythm && !ps.hasTimingChange){
+              missingReason = 'missing timing change for Tighten Rhythm';
+            }
+            if (missingReason){
               const patchSummary = Object.assign({}, patchSummaryBase, {
                 status: 'failed',
-                reason: 'quality_velocity_only',
+                reason: missingReason,
                 ops: opsN,
                 byOp: _opsByOp(patchObj.ops),
                 examples: [],
-              }, ps, _llmOutcomeExtra('rejected_quality', { detail: 'quality_velocity_only' }));
+              }, ps, _llmOutcomeExtra('rejected_quality', { detail: missingReason }));
               return {
                 ok: false,
                 reason: 'patch_rejected',
-                detail: 'quality_velocity_only',
+                detail: missingReason,
+                patchSummary,
+              };
+            }
+          }
+
+          // Clean Outliers quality gate: require meaningful cleanup and prevent over-aggressive deletion.
+          if (intent.reduceOutliers && opsN > 0){
+            const outlierSignals = _computeOutlierCleanupSignals(patchObj.ops, clip);
+            let outlierReason = '';
+            if (outlierSignals.deleteCount < 1 && outlierSignals.significantDurationChangeCount < 1){
+              outlierReason = 'no meaningful outlier cleanup';
+            } else if (outlierSignals.totalNotes > 0 && outlierSignals.deleteRatio > 0.30){
+              outlierReason = 'too aggressive cleanup';
+            }
+            if (outlierReason){
+              const patchSummary = Object.assign({}, patchSummaryBase, {
+                status: 'failed',
+                reason: outlierReason,
+                ops: opsN,
+                byOp: _opsByOp(patchObj.ops),
+                examples: [],
+              }, _computePatchTypeSummary(patchObj.ops, clip), _llmOutcomeExtra('rejected_quality', { detail: outlierReason }));
+              return {
+                ok: false,
+                reason: 'patch_rejected',
+                detail: outlierReason,
                 patchSummary,
               };
             }
@@ -994,7 +1147,7 @@
             ops: opsN,
             byOp: _opsByOp(patchObj.ops),
             examples: [],
-          }, _computePatchTypeSummary(patchObj.ops), _llmOutcomeExtra('applied'));
+          }, _computePatchTypeSummary(patchObj.ops, clip), _llmOutcomeExtra('applied'));
           head.meta.agent = {
             optimizedFromRevisionId: beforeRevisionId,
             appliedAt: _now(),
@@ -1037,15 +1190,26 @@
           if (promptTraceCapture.lastAttempt) out.llmPromptTrace = promptTraceCapture.lastAttempt;
           return _attachLlmOutcomeToReturn(out);
         }
-        if (res1.reason === 'llm_no_valid_json' || res1.reason === 'patch_rejected'){
+        const res1LlmOutcome = (res1 && res1.patchSummary && res1.patchSummary.llm && res1.patchSummary.llm.outcome)
+          ? String(res1.patchSummary.llm.outcome)
+          : (res1 && res1.llmOutcome ? String(res1.llmOutcome) : '');
+        const shouldRetry = (res1.reason === 'llm_no_valid_json')
+          || (res1.reason === 'patch_rejected' && res1LlmOutcome !== 'rejected_quality');
+        if (shouldRetry){
           let fixDetail = '';
           if (res1.reason === 'llm_no_valid_json'){
             fixDetail = 'no valid JSON object found';
-          } else if (res1.reason === 'patch_rejected' && res1.detail === 'quality_velocity_only'){
+          } else if (res1.reason === 'patch_rejected' && (res1.detail === 'quality_velocity_only' || res1.detail === 'missing pitch change for Fix Pitch' || res1.detail === 'missing timing change for Tighten Rhythm')){
             const hintParts = ['velocity-only patch rejected'];
-            if (intent.fixPitch) hintParts.push('output setNote with pitch change');
-            if (intent.tightenRhythm) hintParts.push('output moveNote or setNote startBeat/durationBeat');
-            fixDetail = hintParts.length > 1 ? hintParts.join('; ') + ' — do not output velocity-only' : 'intent requires pitch or timing changes; output setNote with pitch and/or moveNote/setNote startBeat/durationBeat';
+            if (res1.detail === 'missing pitch change for Fix Pitch'){
+              fixDetail = 'missing pitch change for Fix Pitch; output at least one setNote where pitch differs from the source note';
+            } else if (res1.detail === 'missing timing change for Tighten Rhythm'){
+              fixDetail = 'missing timing change for Tighten Rhythm; output at least one moveNote (non-zero deltaBeat) or setNote with changed startBeat/durationBeat';
+            } else {
+              if (intent.fixPitch) hintParts.push('output setNote with pitch change');
+              if (intent.tightenRhythm) hintParts.push('output moveNote or setNote startBeat/durationBeat');
+              fixDetail = hintParts.length > 1 ? hintParts.join('; ') + ' — do not output velocity-only' : 'intent requires pitch or timing changes; output setNote with pitch and/or moveNote/setNote startBeat/durationBeat';
+            }
           } else if (res1.reason === 'patch_rejected'){
             fixDetail = (res1.detail && typeof res1.detail === 'string') ? res1.detail : 'patch validation failed';
             if (fixDetail.length > 200) fixDetail = fixDetail.slice(0, 197) + '...';

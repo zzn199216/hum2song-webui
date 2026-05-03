@@ -25,7 +25,13 @@ const AR = globalThis.H2SInternalActionRegistry;
 
 assert(R && typeof R.assistantSkillIds === 'function', 'registry exposes assistantSkillIds');
 const ids = R.assistantSkillIds();
-assert(JSON.stringify(ids) === JSON.stringify(['add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']), 'four internal skills');
+assert(JSON.stringify(ids) === JSON.stringify(['add_accompaniment', 'add_clip_to_timeline', 'add_track', 'move_instance', 'remove_instance']), 'assistant skill ids sorted');
+
+assert(R.isAssistantSkillEnabled('add_accompaniment') === true, 'add_accompaniment assistant-only enabled');
+assert(AR.isBounded('add_accompaniment') === false, 'add_accompaniment not in executeBounded slice');
+assert(R.getSkill('add_accompaniment').phraseResolverId === 'assistant_add_accompaniment_v1', 'phraseResolverId add_accompaniment');
+assert(R.getSkill('add_accompaniment').confirmPolicy === R.CONFIRM.assistant_add_accompaniment, 'accompaniment confirm policy');
+assert(R.getSkill('add_accompaniment').target === R.TARGET.selected_instance, 'add_accompaniment target instance');
 
 assert(R.isAssistantSkillEnabled('add_clip_to_timeline') === true, 'add_clip_to_timeline enabled when bounded');
 assert(R.isAssistantSkillEnabled('add_track') === true, 'add_track enabled');
@@ -46,6 +52,10 @@ R._setSkillEnabledForTest('add_track', true);
 R._setSkillEnabledForTest('remove_instance', false);
 assert(R.isAssistantSkillEnabled('remove_instance') === false, 'disabled remove_instance');
 R._setSkillEnabledForTest('remove_instance', true);
+
+R._setSkillEnabledForTest('add_accompaniment', false);
+assert(R.isAssistantSkillEnabled('add_accompaniment') === false, 'disabled add_accompaniment');
+R._setSkillEnabledForTest('add_accompaniment', true);
 
 assert(
   AR.isBounded('add_clip_to_timeline') && AR.isBounded('add_track') && AR.isBounded('move_instance') && AR.isBounded('remove_instance'),

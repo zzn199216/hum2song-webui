@@ -372,8 +372,12 @@ async function testRejectedQuality(){
   const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', velocity: 80 }] };
   const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
 
+  let callN = 0;
   globalThis.H2S_LLM_CLIENT = {
-    callChatCompletions: async () => ({ text: rawText }),
+    callChatCompletions: async () => {
+      callN++;
+      return { text: rawText };
+    },
     extractJsonObject: (text) => {
       const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
       return m ? JSON.parse(m[1]) : null;
@@ -397,6 +401,160 @@ async function testRejectedQuality(){
     intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
   });
   assert(res && res.ok === false && res.reason === 'patch_rejected', 'quality reject');
+  assertLlmOutcomeContract(res, 'rejected_quality');
+  assertLlmRetryMeta(res, { totalAttempts: 1, finalAttemptIndex: 1 });
+  assert(callN === 1, 'quality reject should not trigger retry');
+}
+
+async function testRejectedQualityMissingPitchForFixPitch(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  // Not velocity-only, but still no pitch change.
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', startBeat: 0.5 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: false }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'x',
+    templateId: 'fix_pitch_v1',
+    intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+  });
+  assert(res && res.ok === false && res.reason === 'patch_rejected', 'missing pitch quality reject');
+  assert(res.detail === 'missing pitch change for Fix Pitch', 'missing pitch reason detail');
+  assertLlmOutcomeContract(res, 'rejected_quality');
+}
+
+async function testRejectedQualityPitchChangeTooBroadForFixPitch(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const H2SProject = globalThis.H2SProject;
+  const project = {
+    version: 2,
+    timebase: 'beat',
+    bpm: 120,
+    tracks: [{ id: 'trk_0', name: 'Track 1', instrument: 'default', gainDb: 0, muted: false, trackId: 'trk_0' }],
+    clips: {},
+    clipOrder: [],
+    instances: [],
+    ui: { pxPerBeat: 120, playheadBeat: 0 },
+  };
+  const scoreBeat = {
+    version: 2,
+    tracks: [{
+      id: 't0',
+      notes: [
+        { id: 'n0', pitch: 60, velocity: 90, startBeat: 0, durationBeat: 1 },
+        { id: 'n1', pitch: 62, velocity: 90, startBeat: 1, durationBeat: 1 },
+        { id: 'n2', pitch: 64, velocity: 90, startBeat: 2, durationBeat: 1 },
+        { id: 'n3', pitch: 65, velocity: 90, startBeat: 3, durationBeat: 1 },
+      ],
+    }],
+  };
+  const clip = H2SProject.createClipFromScoreBeat(scoreBeat, { id: 'llm_h1_scope', name: 'h1_scope' });
+  project.clips[clip.id] = clip;
+  project.clipOrder.push(clip.id);
+  if (H2SProject.normalizeProjectRevisionChains) H2SProject.normalizeProjectRevisionChains(project);
+  const cid = clip.id;
+
+  // 2 / 4 notes changed -> 50% (>30%) should be rejected.
+  const patch = {
+    version: 1,
+    clipId: cid,
+    ops: [
+      { op: 'setNote', noteId: 'n0', pitch: 61 },
+      { op: 'setNote', noteId: 'n1', pitch: 63 },
+    ],
+  };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: false }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: () => {},
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'x',
+    templateId: 'fix_pitch_v1',
+    intent: { fixPitch: true, tightenRhythm: false, reduceOutliers: false },
+  });
+  assert(res && res.ok === false && res.reason === 'patch_rejected', 'broad pitch scope quality reject');
+  assert(res.detail === 'pitch change too broad for Fix Pitch', 'broad pitch scope reason detail');
+  assertLlmOutcomeContract(res, 'rejected_quality');
+}
+
+async function testRejectedQualityMissingTimingForTightenRhythm(){
+  loadAgentController();
+  const AgentController = require(path.resolve(__dirname, '../../static/pianoroll/controllers/agent_controller.js'));
+  const { project: proj, clip } = makeClip();
+  let project = proj;
+  const cid = clip.id;
+
+  // Not velocity-only, but still no timing change.
+  const patch = { version: 1, clipId: cid, ops: [{ op: 'setNote', noteId: 'n0', pitch: 62 }] };
+  const rawText = '```json\n' + JSON.stringify(patch) + '\n```';
+
+  globalThis.H2S_LLM_CLIENT = {
+    callChatCompletions: async () => ({ text: rawText }),
+    extractJsonObject: (text) => {
+      const m = (text || '').match(/```json\s*([\s\S]*?)\s*```/);
+      return m ? JSON.parse(m[1]) : null;
+    },
+  };
+  globalThis.H2S_LLM_CONFIG = {
+    loadLlmConfig: () => ({ baseUrl: 'https://test', model: 'm', velocityOnly: false }),
+  };
+
+  const ctrl = AgentController.create({
+    getProjectV2: () => project,
+    setProjectFromV2: (p) => { project = p; },
+    persist: () => {},
+    render: () => {},
+  });
+
+  const res = await ctrl.optimizeClip(cid, {
+    requestedPresetId: 'llm_v0',
+    userPrompt: 'x',
+    templateId: 'tighten_rhythm_v1',
+    intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
+  });
+  assert(res && res.ok === false && res.reason === 'patch_rejected', 'missing timing quality reject');
+  assert(res.detail === 'missing timing change for Tighten Rhythm', 'missing timing reason detail');
   assertLlmOutcomeContract(res, 'rejected_quality');
 }
 
@@ -644,6 +802,9 @@ async function main(){
   await testRejectedSafeMode();
   await testRejectedValidation();
   await testRejectedQuality();
+  await testRejectedQualityMissingPitchForFixPitch();
+  await testRejectedQualityPitchChangeTooBroadForFixPitch();
+  await testRejectedQualityMissingTimingForTightenRhythm();
   await testRejectedSemantic();
   await testFailedApplyStub();
   await testFailedApplyMisleadingSubstring();
