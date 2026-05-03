@@ -54,6 +54,8 @@ function redactArrangementDeepLikeApp(value){
   assert(src.includes('_commitArrangementSnapshot(result, goal, clipId, instId)'), 'success/failure path commits snapshot from run result');
   assert(src.includes('promptTrace'), 'snapshot includes promptTrace');
   assert(src.includes('rawPatch'), 'snapshot includes rawPatch');
+  assert(src.includes('qualityReport'), 'snapshot includes qualityReport');
+  assert(src.includes('arrange.detail.qualityWarnings'), 'details render wired for quality');
   assert(src.includes('_openArrangementDetails'), 'open arrangement details');
   assert(src.includes('_renderArrangementDetailsBody'), 'render arrangement details body');
   assert(src.includes('_redactArrangementDeep'), 'redact before storing snapshot');
@@ -113,6 +115,8 @@ function redactArrangementDeepLikeApp(value){
     'arrange.detailsShort', 'arrange.detailTitle', 'arrange.detailsCloseAria',
     'arrange.detail.empty', 'arrange.detail.outcome', 'arrange.detail.copyTrace',
     'arrange.detail.copyUser', 'arrange.detail.copyPatch', 'arrange.detail.copyOk', 'arrange.detail.copyFail',
+    'arrange.detail.qualityWarnings', 'arrange.detail.qualityNone', 'arrange.detail.qualityWarnList',
+    'arrange.quality.short_coverage', 'arrange.quality.questionable_instrument',
   ];
   for (const k of keys){
     assert(typeof en[k] === 'string' && en[k], 'en ' + k);

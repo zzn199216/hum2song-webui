@@ -37,6 +37,7 @@ runOne('scripts/tests/selection_instance_convert.test.js');
 runOne('scripts/tests/arrangement_details_ui.test.js');
 runOne('scripts/tests/add_bass_v0.test.js');
 runOne('scripts/tests/arrangement_patch_v0.test.js');
+runOne('scripts/tests/arrangement_quality_v0.test.js');
 runOne('scripts/tests/arrangement_llm_v0.test.js');
 runOne('scripts/tests/score_heuristic_split.test.js');
 runOne('scripts/tests/score_bar_segment.test.js');

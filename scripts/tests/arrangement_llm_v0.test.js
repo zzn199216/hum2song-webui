@@ -88,7 +88,7 @@ async function testValidPatchOneCommit(){
     kind: 'arrangement_patch_v0',
     version: 1,
     ops: [
-      { op: 'createTrack', trackId: 'trk_acc_1', name: 'Accompaniment', instrument: 'piano' },
+      { op: 'createTrack', trackId: 'trk_acc_1', name: 'Accompaniment', instrument: 'bass' },
       {
         op: 'createClip',
         clipId: 'clip_acc_1',
@@ -119,6 +119,8 @@ async function testValidPatchOneCommit(){
   assert(harness.getCommitCount() === 1, 'should commit once');
   assert(llmCalls === 1, 'one llm call by default');
   assert(Array.isArray(res.summary.createdTrackIds) && res.summary.createdTrackIds[0] === 'trk_acc_1', 'summary track ids');
+  assert(res.qualityReport && res.qualityReport.ok === true, 'quality report present on success');
+  assert(Array.isArray(res.qualityReport.warnings) && res.qualityReport.warnings.length === 0, 'baseline patch has no quality warnings');
   assert(JSON.stringify(harness.getProject().clips[melodyClip.id].score) === beforeMelody, 'melody clip remains unchanged');
 }
 

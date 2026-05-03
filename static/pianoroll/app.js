@@ -3048,6 +3048,7 @@ async optimizeClip(clipId, optOverride){
       promptTrace: this._safeArrangementJsonClone(r.promptTrace),
       rawPatch: this._safeArrangementJsonClone(r.rawPatch),
       arrangementOutcome: this._safeArrangementJsonClone(r.arrangementOutcome),
+      qualityReport: this._safeArrangementJsonClone(r.qualityReport),
     };
     this._lastArrangementSnapshot = this._redactArrangementDeep(snap);
   },
@@ -3106,6 +3107,49 @@ async optimizeClip(clipId, optOverride){
       addRow('arrange.detail.createdTracks', j('createdTrackIds'));
       addRow('arrange.detail.createdClips', j('createdClipIds'));
       addRow('arrange.detail.createdInstances', j('createdInstanceIds'));
+    }
+    const qr = snap.qualityReport && typeof snap.qualityReport === 'object' ? snap.qualityReport : null;
+    if (qr){
+      const warns = Array.isArray(qr.warnings) ? qr.warnings : [];
+      addRow(
+        'arrange.detail.qualityWarnings',
+        warns.length ? String(warns.length) : t('arrange.detail.qualityNone', 'None')
+      );
+      if (warns.length){
+        const detQ = document.createElement('details');
+        detQ.style.marginTop = '8px';
+        const sq = document.createElement('summary');
+        sq.style.cursor = 'pointer';
+        sq.style.fontWeight = '600';
+        sq.textContent = t('arrange.detail.qualityWarnList', 'Quality warnings');
+        detQ.appendChild(sq);
+        const ul = document.createElement('ul');
+        ul.style.margin = '8px 0 0';
+        ul.style.paddingLeft = '20px';
+        ul.style.fontSize = '11px';
+        ul.style.fontFamily = 'ui-monospace, monospace';
+        warns.forEach((w) => {
+          const wi = typeof w === 'object' && w ? w : {};
+          const code = (wi.code != null) ? String(wi.code) : 'unknown';
+          const base = t('arrange.quality.' + code, code);
+          const copy = {};
+          Object.keys(wi).forEach((k) => {
+            if (k === 'severity' || k === 'code') return;
+            copy[k] = wi[k];
+          });
+          let extra = '';
+          try {
+            const keys = Object.keys(copy);
+            if (keys.length) extra = JSON.stringify(copy);
+          } catch (_ex) { extra = ''; }
+          const li = document.createElement('li');
+          li.style.marginBottom = '4px';
+          li.textContent = extra ? (base + ' ' + extra) : base;
+          ul.appendChild(li);
+        });
+        detQ.appendChild(ul);
+        body.appendChild(detQ);
+      }
     }
     const addDetailsTextarea = (summaryKey, textareaRows, jsonObj) => {
       const det = document.createElement('details');

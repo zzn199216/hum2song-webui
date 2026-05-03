@@ -8,6 +8,12 @@
         if (mod && !ROOT.H2SArrangementPatchV0) ROOT.H2SArrangementPatchV0 = mod;
       } catch (_) {}
     }
+    if (!ROOT.H2SArrangementQualityV0){
+      try {
+        const qmod = require('../core/arrangement_quality_v0.js');
+        if (qmod && !ROOT.H2SArrangementQualityV0) ROOT.H2SArrangementQualityV0 = qmod;
+      } catch (_) {}
+    }
   }
 
   function isFiniteNumber(x){
@@ -32,6 +38,24 @@
   function getClipMap(project){
     if (!project || !project.clips || typeof project.clips !== 'object' || Array.isArray(project.clips)) return {};
     return project.clips;
+  }
+
+  function melodyVelocityStats(scoreBeat){
+    let maxV = 0;
+    let n = 0;
+    let sum = 0;
+    const tracks = (scoreBeat && Array.isArray(scoreBeat.tracks)) ? scoreBeat.tracks : [];
+    for (const tr of tracks){
+      const notes = (tr && Array.isArray(tr.notes)) ? tr.notes : [];
+      for (const note of notes){
+        const v = Number(note && note.velocity);
+        if (!isFiniteNumber(v)) continue;
+        n++;
+        sum += v;
+        if (v > maxV) maxV = v;
+      }
+    }
+    return { maxVelocity: maxV, avgVelocity: n ? (sum / n) : 0, noteCount: n };
   }
 
   function countNotes(scoreBeat){
@@ -227,6 +251,7 @@
     validateHooks(hooks);
     const H2SProject = hooks.H2SProject || ROOT.H2SProject;
     const ArrangementPatch = ROOT.H2SArrangementPatchV0;
+    const ArrangementQuality = ROOT.H2SArrangementQualityV0;
 
     function statusLog(msg, extra){
       if (typeof hooks.log === 'function'){
@@ -247,6 +272,7 @@
         llmDebug: null,
         promptTrace: null,
         rawPatch: null,
+        qualityReport: null,
       };
 
       if (goal !== 'add_accompaniment_v0'){
@@ -360,6 +386,21 @@
 
       const patch = parsedPatch;
       const validation = ArrangementPatch.validateArrangementPatchV0(projectV2, patch, { H2SProject: H2SProject });
+
+      let qualityReport = null;
+      if (validation && validation.ok && ArrangementQuality && typeof ArrangementQuality.analyzeArrangementQualityV0 === 'function'){
+        const melStats = melodyVelocityStats(selectedScore);
+        qualityReport = ArrangementQuality.analyzeArrangementQualityV0(
+          projectV2,
+          patch,
+          {
+            selectedClipSpanBeat: selectedClipSpanBeat,
+            melodyMaxVelocity: melStats.maxVelocity > 0 ? melStats.maxVelocity : null,
+          },
+          { H2SProject: H2SProject }
+        );
+      }
+
       if (!validation || !validation.ok){
         return Object.assign({}, resultBase, {
           reason: 'patch_validation_failed',
@@ -368,6 +409,7 @@
           llmDebug: { callCount: 1, model: safeTrim(cfg.model), baseUrl: safeTrim(cfg.baseUrl), outputChars: rawText.length },
           promptTrace: promptTrace,
           rawPatch: patch,
+          qualityReport: qualityReport,
         });
       }
 
@@ -380,6 +422,7 @@
           llmDebug: { callCount: 1, model: safeTrim(cfg.model), baseUrl: safeTrim(cfg.baseUrl), outputChars: rawText.length },
           promptTrace: promptTrace,
           rawPatch: patch,
+          qualityReport: qualityReport,
         });
       }
 
@@ -406,6 +449,7 @@
         },
         promptTrace: promptTrace,
         rawPatch: patch,
+        qualityReport: qualityReport,
       };
     }
 
