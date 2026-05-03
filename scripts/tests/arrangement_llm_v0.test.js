@@ -216,6 +216,8 @@ async function testPromptIncludesRequiredContext(){
   assert(sp.indexOf('no startSec/durationSec/spanSec') >= 0, 'no seconds constraint included');
   assert(sp.indexOf('additive-only') >= 0, 'additive-only constraint included');
 
+  assert(up.indexOf('createTrack') >= 0 && up.indexOf('gainDb') >= 0, 'schema includes createTrack and gainDb');
+
   assert(up.indexOf('Strategy for add_accompaniment_v0:') >= 0, 'add_accompaniment_v0 strategy block header');
   assert(/\bbass-first\b/i.test(up), 'bass-first support guidance');
   assert(up.indexOf('Avoid pad-only') >= 0 || up.indexOf('block-chord-only') >= 0, 'discourages pad/block sustained default');
@@ -237,6 +239,13 @@ async function testPromptIncludesRequiredContext(){
   assert(/prefer one new track/i.test(up), 'default single track preference');
   assert(/explicitly ask[^\n]*two|two new tracks/i.test(up), 'explicit multi-part allows two tracks');
   assert(/two tracks[^\n]*bass[^\n]*drum|bass plus light rhythm/i.test(up), 'two-track pairing guidance');
+
+  assert(/selectedClip\.spanBeat.*target accompaniment length|target accompaniment length.*selectedClip\.spanBeat/i.test(up), 'spanBeat as target accompaniment length');
+  assert(/cover most or all of the selected melody clip/i.test(up), 'cover most/all of melody clip');
+  assert(/much earlier than the melody/i.test(up), 'do not end much earlier than melody');
+  assert(/large silent tail/i.test(up), 'avoid large silent tail');
+  assert(/repeat or continue the pattern until near selectedClip\.spanBeat/i.test(up), 'repeat/continue pattern near spanBeat');
+  assert(/both should roughly cover the selected clip unless one is explicitly a short fill/i.test(up), 'two-track rough coverage unless short fill');
 }
 
 async function testRejectsMissingOrAudioSelection(){
