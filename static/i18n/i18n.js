@@ -101,9 +101,15 @@
 
   function init(opts){
     opts = opts || {};
-    var stored = null;
-    try{ stored = _storage().getItem(LS_KEY); }catch(e){}
-    if (stored && typeof stored === 'string' && stored.trim()){ setLang(stored); return getLang(); }
+    var useStorage = opts.fromStorage !== false;
+    if (useStorage){
+      var stored = null;
+      try{ stored = _storage().getItem(LS_KEY); }catch(e){}
+      if (stored && typeof stored === 'string' && stored.trim()){ setLang(stored); return getLang(); }
+    }
+    if (opts.useNavigator === false){
+      return getLang();
+    }
     var nav = (typeof G.navigator !== 'undefined' && G.navigator && G.navigator.language) ? G.navigator.language : '';
     if (nav && String(nav).toLowerCase().indexOf('zh') === 0){ setLang('zh'); } else { setLang('en'); }
     return getLang();

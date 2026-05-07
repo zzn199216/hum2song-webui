@@ -110,31 +110,55 @@
         if (data.version !== 1) return;
         var loc = data.locale;
         if (loc !== 'en' && loc !== 'zh') return;
-        var I18N = typeof window !== 'undefined' && window.I18N ? window.I18N : null;
-        if (!I18N || typeof I18N.load !== 'function' || typeof I18N.setLang !== 'function') return;
-        var list = typeof I18N.availableLanguages === 'function' ? I18N.availableLanguages() : [];
-        var supported = false;
-        for (var li = 0; li < list.length; li++) {
-          var it = list[li];
-          if (it && it.code === loc) {
-            supported = true;
-            break;
+        try{
+          var _h = typeof location !== 'undefined' ? String(location.hostname || '') : '';
+          if (_h === 'localhost' || _h === '127.0.0.1'){
+            console.debug('[h2s-oss] H2S_HOST_SET_LOCALE apply', loc);
           }
-        }
-        if (!supported) return;
-        I18N.load(loc)
-          .then(function () {
-            I18N.setLang(loc, { persist: false });
-            var sel = document.getElementById('selLang');
-            if (sel) sel.value = loc;
-            var app = getApp();
-            if (app && typeof app._updateI18nLabels === 'function') app._updateI18nLabels();
-            if (app && typeof app._renderBackendReadinessStrip === 'function') app._renderBackendReadinessStrip();
-            if (app && typeof app.render === 'function') app.render();
-          })
-          .catch(function (e) {
-            console.warn('[cloud_project_bridge] H2S_HOST_SET_LOCALE load failed', e);
-          });
+        }catch(e){}
+        var MAX_DEFER = 50;
+        var langSupported = function (I18N, code) {
+          if (code === 'en' || code === 'zh') return true;
+          var list = typeof I18N.availableLanguages === 'function' ? I18N.availableLanguages() : [];
+          for (var li = 0; li < list.length; li++) {
+            var it = list[li];
+            var c = typeof it === 'string' ? it : (it && it.code);
+            if (c === code) return true;
+          }
+          return false;
+        };
+        var tryApply = function (n) {
+          var app = getApp();
+          var I18N = typeof window !== 'undefined' ? window.I18N : null;
+          if (!I18N || typeof I18N.availableLanguages !== 'function') {
+            if (n >= MAX_DEFER) {
+              console.warn('[cloud_project_bridge] H2S_HOST_SET_LOCALE: I18N not ready');
+              return;
+            }
+            setTimeout(function () {
+              tryApply(n + 1);
+            }, 60);
+            return;
+          }
+          if (!langSupported(I18N, loc)) {
+            console.warn('[cloud_project_bridge] H2S_HOST_SET_LOCALE unsupported locale', loc);
+            return;
+          }
+          if (app && typeof app.applyStudioLanguage === 'function') {
+            app.applyStudioLanguage(loc, { persist: false, source: 'host' }).catch(function (e) {
+              console.warn('[cloud_project_bridge] H2S_HOST_SET_LOCALE apply failed', e);
+            });
+            return;
+          }
+          if (n >= MAX_DEFER) {
+            console.warn('[cloud_project_bridge] H2S_HOST_SET_LOCALE: applyStudioLanguage not available');
+            return;
+          }
+          setTimeout(function () {
+            tryApply(n + 1);
+          }, 60);
+        };
+        tryApply(0);
         return;
       }
 
