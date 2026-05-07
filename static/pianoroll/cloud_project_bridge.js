@@ -124,7 +124,7 @@
         if (!supported) return;
         I18N.load(loc)
           .then(function () {
-            I18N.setLang(loc);
+            I18N.setLang(loc, { persist: false });
             var sel = document.getElementById('selLang');
             if (sel) sel.value = loc;
             var app = getApp();

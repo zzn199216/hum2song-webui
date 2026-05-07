@@ -81,6 +81,11 @@ var storage = I18N._storage();
 I18N.setLang('zh');
 assert(storage.getItem('hum2song_studio_lang') === 'zh', 'setLang persists to localStorage/hum2song_studio_lang');
 
+I18N.setLang('en', { persist: false });
+assert(I18N.getLang() === 'en', 'non-persistent setLang updates active language');
+assert(storage.getItem('hum2song_studio_lang') === 'zh', 'non-persistent setLang does not overwrite hum2song_studio_lang');
+I18N.setLang('zh');
+
 assert(I18N.getLang() === 'zh', 'getLang returns current');
 assert(I18N.availableLanguages().length >= 2, 'availableLanguages returns at least en, zh');
 

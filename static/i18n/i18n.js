@@ -31,10 +31,13 @@
     return _lang || 'en';
   }
 
-  function setLang(lang){
+  function setLang(lang, opts){
     if (!lang || typeof lang !== 'string') return;
     _lang = String(lang).trim().toLowerCase().slice(0, 8) || 'en';
-    try{ _storage().setItem(LS_KEY, _lang); }catch(e){}
+    var persist = !(opts && typeof opts === 'object' && opts.persist === false);
+    if (persist){
+      try{ _storage().setItem(LS_KEY, _lang); }catch(e){}
+    }
   }
 
   function _getVal(dict, key){
