@@ -106,6 +106,38 @@
         return;
       }
 
+      case 'H2S_HOST_SET_LOCALE': {
+        if (data.version !== 1) return;
+        var loc = data.locale;
+        if (loc !== 'en' && loc !== 'zh') return;
+        var I18N = typeof window !== 'undefined' && window.I18N ? window.I18N : null;
+        if (!I18N || typeof I18N.load !== 'function' || typeof I18N.setLang !== 'function') return;
+        var list = typeof I18N.availableLanguages === 'function' ? I18N.availableLanguages() : [];
+        var supported = false;
+        for (var li = 0; li < list.length; li++) {
+          var it = list[li];
+          if (it && it.code === loc) {
+            supported = true;
+            break;
+          }
+        }
+        if (!supported) return;
+        I18N.load(loc)
+          .then(function () {
+            I18N.setLang(loc);
+            var sel = document.getElementById('selLang');
+            if (sel) sel.value = loc;
+            var app = getApp();
+            if (app && typeof app._updateI18nLabels === 'function') app._updateI18nLabels();
+            if (app && typeof app._renderBackendReadinessStrip === 'function') app._renderBackendReadinessStrip();
+            if (app && typeof app.render === 'function') app.render();
+          })
+          .catch(function (e) {
+            console.warn('[cloud_project_bridge] H2S_HOST_SET_LOCALE load failed', e);
+          });
+        return;
+      }
+
       case 'H2S_CLOUD_LOAD_PROJECT': {
         var appLoad = getApp();
         if (!appLoad || typeof appLoad.setProjectFromV2 !== 'function') {
