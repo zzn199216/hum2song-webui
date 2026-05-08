@@ -1,70 +1,38 @@
-# Hum2Song MVP（中文版）
+# Hum2Song
 
-Hum2Song 是一个“哼歌成曲”的 MVP 服务：
-- 上传一段短音频（wav/mp3/m4a/ogg/flac）
-- 运行流水线（预处理 → wav→midi → 合成）
-- 下载生成的音频 / MIDI（取决于流水线产物）
+把短**哼唱或人声**转成 **MIDI 和合成音频**。本仓库在本地跑一个 **Web 应用**：**Hum2Song Studio**（`/ui`），并提供 **REST API**。
 
-本仓库目前同时提供 **两套 API**：
-- **契约 API（已冻结，推荐使用）**：`/generate`、`/tasks/{id}`、`/tasks/{id}/download?file_type=...`
-- **旧版 API（临时兼容）**：`/api/v1/...`（仅用于旧测试/旧客户端，未来可能移除）
+**[English README.md](README.md)**
 
-This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip editing, piano roll, LLM Optimize).
-
-**首次本地运行：** 请按精简清单 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) 操作（依赖、SoundFont、健康检查）。
-
-**可选快速自检：** 在项目根目录执行 `python scripts/beginner_preflight.py`（只读检查，不安装任何内容）。详见清单 **0. Quick preflight**。
-
-**启动服务（完成 venv + `pip install` 后）：** 在项目根目录执行 `python scripts/beginner_launch.py`（先跑 preflight，再启动 `uvicorn`，**等待** `/api/v1/health` 就绪后打印 Studio / health / 文档链接）。可选 `--reload`、`--skip-preflight`、**`--open`**（就绪后在浏览器打开 Studio）。与 `uvicorn app:app` 等价 —— 见 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4。
-
-### Quick Start (TL;DR)
-
-1. **前置条件：** Python 3.11+，**FFmpeg** 与 **FluidSynth** 已在 PATH 中，并准备 **SoundFont** 文件 **`assets/piano.sf2`**（仓库不包含；见 [`assets/README.txt`](assets/README.txt)）。可选：复制 `.env.example` 为 `.env` 并调整路径。若缺少任一项，请按 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg) 中的 **Manual install** 小节逐步安装。
-2. 创建 venv 并安装依赖（首次 `pip install` 可能较久，因含较大 ML/音频依赖）：
-   ```powershell
-   python -m venv venv
-   .\venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-3. 启动服务（请在**项目根目录**执行，保证导入正确）：
-   ```powershell
-   python scripts/beginner_launch.py
-   ```
-   或手动：`uvicorn app:app`（开发时可加 `--reload`。）
-4. **自检：** 打开 [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)，查看 `checks`（完整音频链路需关注 `soundfont_exists`、`fluidsynth`、`ffmpeg`）。
-5. 打开 **API 文档**：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-6. 打开 **Studio UI**：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
-
-**说明：** 运行服务与 Studio **不需要** Node.js；Node 仅用于 [测试](#测试)（`scripts/run_frontend_all_tests.js`）。
-
-**Studio（Hum2Song Studio）— 首次运行：**
-- 打开 [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) 开始使用。
-- **快捷键：** R = 录音切换，P = 播放/暂停（按钮），S = 停止并重置播放头（S 仅在播放时显示；不停止录音）。
-- **Quick Optimize：** 选择 Preset + Goals（Fix Pitch / Tighten Rhythm / Reduce Outliers）→ Run Optimize。
-- **Advanced** 默认折叠，内含 Prompt、Regenerate、LLM Settings 和 Debug。
-- **Quality gate：** 在 Full 模式下，若启用 Fix Pitch 或 Tighten Rhythm，velocity-only 补丁会被拒绝一次，并显示可操作的引导。
-- **Tone.js** 默认从本地加载（`/static/pianoroll/vendor/tone/Tone.js`）；仅当 `window.H2S_ALLOW_CDN_TONE === true` 时才尝试 CDN 回退。
-- E2E 验证：参见 [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md)。Phase C 包含录音/导入 → 自动打开编辑器 → Quick Optimize。
+<p align="center">
+  <img src="docs/images/zh/studio-overview.png" alt="Hum2Song Studio — 录音、钢琴卷帘与 Quick Optimize" width="920">
+  <br>
+  <em>Hum2Song Studio — 录音或导入片段，在钢琴卷帘中编辑，再一键优化。</em>
+</p>
 
 ---
 
-## 环境要求
+## Windows：三个一键辅助脚本（仓库根目录）
 
-- **系统：** 文档以 Windows 为主；macOS/Linux 也可用相同 Python/venv 流程（注意路径与激活命令）。
-- **Python 3.11+**
-- **FFmpeg** 在 PATH 中（mp3 转码等）
-- **FluidSynth** 在 PATH 中（MIDI → 音频）；也可在 `.env` 设置 `FLUIDSYNTH_PATH`
-- **SoundFont（必需）：** 默认 **`assets/piano.sf2`**（仓库不附带；见 [`assets/README.txt`](assets/README.txt)，或通过 `SOUND_FONT_PATH` / `SF2_PATH` 指定其他 `.sf2`）
-- 建议使用 `venv` 虚拟环境
+在资源管理器中双击，或在 **CMD / PowerShell** 里于**项目根目录**执行（建议按顺序）：
 
-**可选（次要）：** 若使用容器，根目录 [`Dockerfile`](Dockerfile) 会安装 FFmpeg、FluidSynth 与 Python 依赖 —— 仍需自行提供 SoundFont（例如挂载到 `assets/`）。镜像为 **Python 3.10**，本地开发推荐 **3.11+**。本仓库无 `docker-compose`。
+| 脚本 | 作用 |
+|------|------|
+| **[`beginner_install_audio_deps.bat`](beginner_install_audio_deps.bat)** | 尝试通过 **winget** / **Chocolatey** 安装 **FFmpeg** 与 **FluidSynth**（需已安装其一）。**不会**安装 Python 或音色库。若刚装好 Chocolatey，请**新开终端**再运行一次。 |
+| **[`beginner_setup.bat`](beginner_setup.bat)** | 创建 **`venv`**（如需）并执行 **`pip install -r requirements.txt`**。需已在 `PATH` 中配置 **Python 3.11+**（`python` 或 `py`）。 |
+| **[`beginner_launch.bat`](beginner_launch.bat)** | 启动服务，等价 **`python scripts/beginner_launch.py --open`**（就绪后自动打开浏览器）。可在后面跟参数，例如 **`beginner_launch.bat --reload`**。 |
+
+仍需自备：**Python 3.11+**、**`assets/piano.sf2`** 音色库（见 [`assets/README.txt`](assets/README.txt)），可选复制 [`.env.example`](.env.example) 为 `.env`。脚本失败时请查阅 **[docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md)**。
 
 ---
 
-## 安装与启动（Windows）
+## 本地运行（命令行）
 
-1. 安装 FFmpeg、FluidSynth，并准备好 **`assets/piano.sf2`**（见上文与 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md)）。
-2. 创建环境并安装依赖：
+请在**仓库根目录**操作。
+
+**1. 准备：** Python **3.11+**、**FFmpeg**、**FluidSynth**、**`assets/piano.sf2`**。可选 `.env`。缺失项见 [手动安装](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg)。
+
+**2. 安装**
 
 ```powershell
 python -m venv venv
@@ -72,146 +40,31 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-3. 启动服务（**项目根目录**）：
+macOS / Linux：`python3 -m venv venv`，`source venv/bin/activate`，同样执行 `pip`。
+
+**3. 启动**
 
 ```powershell
 python scripts/beginner_launch.py
 ```
 
-或：`uvicorn app:app`（开发可加 `--reload`；使用启动脚本时：`python scripts/beginner_launch.py --reload`。）
+可加 **`--open`**、**`--reload`**。浏览器打开 **[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)**。
 
-4. 自检：[http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) 查看 `checks`。
-
-- API 文档（Swagger）：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- Studio UI：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+可选：先运行 `python scripts/beginner_preflight.py` 做环境自检（不启动服务）。
 
 ---
 
-## 契约 API（Frozen）
+## Studio 一分钟上手
 
-### 任务状态机
-`queued → running → completed | failed`
+1. **录音**或**导入**音频（如 WAV、MP3、M4A）。
+2. 在 **钢琴卷帘**里按需修改。
+3. **Quick Optimize**（预设 + 目标）；**Advanced** 含 LLM 等（可选）。
 
-### 时间格式
-所有时间字段必须为 **UTC ISO8601**，并以 `Z` 结尾：
-`2025-12-15T10:00:00Z`
-
-### 1）创建任务
-
-`POST /generate`  
-Content-Type：`multipart/form-data`
-
-Query：
-- `output_format`：`mp3|wav`（默认：mp3）
-
-示例：
-
-```bash
-curl -X POST "http://127.0.0.1:8000/generate?output_format=mp3" \
-  -F "file=@./sample.wav"
-```
-
-响应：`202 Accepted`
-
-```json
-{
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "poll_url": "/tasks/550e8400-e29b-41d4-a716-446655440000",
-  "created_at": "2025-12-15T10:00:00Z"
-}
-```
-
-### 2）轮询任务状态
-
-`GET /tasks/{task_id}`
-
-```bash
-curl "http://127.0.0.1:8000/tasks/550e8400-e29b-41d4-a716-446655440000"
-```
-
-响应：`200 OK`
-
-```json
-{
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "running",
-  "progress": 0.4,
-  "stage": "converting",
-  "created_at": "2025-12-15T10:00:00Z",
-  "updated_at": "2025-12-15T10:00:02Z",
-  "result": null,
-  "error": null
-}
-```
-
-完成态示例：
-
-```json
-{
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "progress": 1.0,
-  "stage": "finalizing",
-  "created_at": "2025-12-15T10:00:00Z",
-  "updated_at": "2025-12-15T10:00:10Z",
-  "result": {
-    "file_type": "audio",
-    "output_format": "mp3",
-    "filename": "550e8400-e29b-41d4-a716-446655440000.mp3",
-    "download_url": "/tasks/550e8400-e29b-41d4-a716-446655440000/download?file_type=audio"
-  },
-  "error": null
-}
-```
-
-### 3）下载产物
-
-`GET /tasks/{task_id}/download?file_type=audio|midi`
-
-示例：
-
-```bash
-curl -L \
-  "http://127.0.0.1:8000/tasks/550e8400-e29b-41d4-a716-446655440000/download?file_type=audio" \
-  -o out.mp3
-```
-
-#### 错误码（契约 API）
-- `400`：`file_type` 非法
-- `404`：任务不存在 / 或产物文件在磁盘上丢失
-- `409`：任务未完成 / 或请求的 file_type 尚不可用
-- `413`：上传文件过大
+**快捷键：** **R** 录音 · **P** 播放/暂停 · **S** 停止播放（播放中）。
 
 ---
 
-## 旧版 API（临时兼容）
+## 更多文档
 
-> 仅用于向后兼容旧测试/旧客户端，后续可能移除。
-
-- `POST /api/v1/generate`
-- `GET  /api/v1/tasks/{id}`
-- `GET  /api/v1/tasks/{id}/download?kind=audio|midi`
-
----
-
-## 测试
-
-**Frontend（硬门禁）**：
-
-```powershell
-node scripts/run_frontend_all_tests.js
-```
-
-**Backend（可选）**：
-
-```powershell
-pytest -q
-```
-
----
-
-## 备注
-
-- 可能会看到一些依赖警告（例如 `audioread` 在 Python 3.13 的弃用警告）。  
-  这些 warning 不影响 MVP 功能正确性。
+完整主题索引（API、LLM、Docker、测试、排错等）：**[docs/README_CHS.md](docs/README_CHS.md)**  
+English index: **[docs/README.md](docs/README.md)**

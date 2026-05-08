@@ -6734,38 +6734,97 @@ renderTimeline(){
         }
       }catch(e){}
     },
+    /**
+     * Rebuild Inspector #selLang options from I18N and set value to I18N.getLang().
+     * Required for host locale sync: assigning sel.value before option elements exist is a no-op in browsers.
+     */
+    _syncInspectorLangSelect(){
+      try{
+        if (typeof document === 'undefined' || typeof window.I18N === 'undefined') return;
+        const sel = document.getElementById('selLang');
+        if (!sel) return;
+        const I18N = window.I18N;
+        const list = I18N.availableLanguages();
+        if (!Array.isArray(list) || !list.length) return;
+        const codeOf = (it) => (typeof it === 'string') ? it : (it && it.code);
+        const labelOf = (it) => (typeof it === 'string') ? it : ((it && it.label) ? String(it.label) : '');
+        sel.innerHTML = '';
+        for (const it of list){
+          const opt = document.createElement('option');
+          const v = codeOf(it);
+          opt.value = v ? String(v) : '';
+          opt.textContent = labelOf(it) || opt.value;
+          sel.appendChild(opt);
+        }
+        const cur = I18N.getLang();
+        if (list.some(it => codeOf(it) === cur)) sel.value = cur;
+        else sel.value = codeOf(list[0]) || 'en';
+      }catch(e){
+        console.warn('[i18n] _syncInspectorLangSelect failed', e);
+      }
+    },
+    /**
+     * Single path for switching Studio UI language (Inspector #selLang, i18n labels, render).
+     * @param {string} lang locale code (e.g. en, zh)
+     * @param {{ persist?: boolean, source?: string }} [opts] persist defaults true (standalone dropdown); host uses false
+     */
+    async applyStudioLanguage(lang, opts){
+      opts = opts || {};
+      const persist = opts.persist !== false;
+      try{
+        if (typeof window.I18N === 'undefined' || !lang) return;
+        const I18N = window.I18N;
+        const code = String(lang).trim().toLowerCase().slice(0, 8);
+        if (!code) return;
+        await I18N.load(code);
+        I18N.setLang(code, { persist });
+        this._syncInspectorLangSelect();
+        this._updateI18nLabels();
+        if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
+        this.render();
+      }catch(e){
+        console.warn('[i18n] applyStudioLanguage failed', e);
+        throw e;
+      }
+    },
     _initLangDropdown(){
       try{
         if (typeof document === 'undefined' || typeof window.I18N === 'undefined') return;
         const sel = document.getElementById('selLang');
         if (!sel) return;
         const I18N = window.I18N;
-        I18N.init();
-
-        const populate = () => {
-          const list = I18N.availableLanguages();
-          sel.innerHTML = '';
-          for (const it of list){
-            const opt = document.createElement('option');
-            opt.value = (it && it.code) ? String(it.code) : '';
-            opt.textContent = (it && it.label) ? String(it.label) : opt.value;
-            sel.appendChild(opt);
-          }
-          const cur = I18N.getLang();
-          if (list.some(it => (it && it.code) === cur)) sel.value = cur;
-          else sel.value = (list[0] && list[0].code) || 'en';
+        const parseHostLocaleParam = () => {
+          try{
+            const u = new URL(window.location.href);
+            const v = u.searchParams.get('hostLocale');
+            if (v === 'en' || v === 'zh') return v;
+          }catch(e){}
+          return null;
         };
+        const hostLocale = parseHostLocaleParam();
+        let embedded = false;
+        try{ embedded = Boolean(window.parent && window.parent !== window); }catch(e){ embedded = true; }
+        if (hostLocale){
+          I18N.init({ fromStorage: false, useNavigator: false });
+          I18N.setLang(hostLocale, { persist: false });
+          try{
+            const h = typeof location !== 'undefined' ? String(location.hostname || '') : '';
+            if (h === 'localhost' || h === '127.0.0.1'){
+              console.debug('[h2s-oss] hostLocale bootstrap (no localStorage read/write for initial lang)', hostLocale);
+            }
+          }catch(e){}
+        } else {
+          I18N.init(embedded ? { fromStorage: false, useNavigator: false } : {});
+        }
+
+        const populate = () => { this._syncInspectorLangSelect(); };
 
         const onLangChange = async () => {
           const lang = sel.value;
           if (!lang) return;
           try{
-            await I18N.load(lang);
-            I18N.setLang(lang);
-            this._updateI18nLabels();
-            if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
-            this.render();
-          }catch(e){ console.warn('[i18n] load locale failed', e); }
+            await this.applyStudioLanguage(lang, { persist: true, source: 'user' });
+          }catch(e){ /* applyStudioLanguage already logged */ }
         };
 
         sel.addEventListener('change', onLangChange);
