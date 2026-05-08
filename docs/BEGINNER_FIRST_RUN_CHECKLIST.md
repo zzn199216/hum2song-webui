@@ -1,6 +1,6 @@
 # Beginner first-run checklist
 
-Short path to a **working local** Hum2Song MVP + Studio. For API details see the root `README.md`.
+Short path to a **working local** Hum2Song MVP + Studio. For API details see [`docs/API.md`](API.md).
 
 **If preflight, launch, or `beginner_install_audio_deps.bat` says something is missing:** open **`docs/BEGINNER_FIRST_RUN_CHECKLIST.md`** in your editor and go to **[Manual install (SoundFont, FluidSynth, FFmpeg)](#manual-install-soundfont-fluidsynth-ffmpeg)** — that section is the single place for the manual dependency path (we do not fully automate system tools).
 
