@@ -1,72 +1,46 @@
-# Hum2Song MVP（中文版）
+# Hum2Song
 
-Hum2Song 是一个“哼歌成曲”的 MVP 服务：
-- 上传一段短音频（wav/mp3/m4a/ogg/flac）
-- 运行流水线（预处理 → wav→midi → 合成）
-- 下载生成的音频 / MIDI（取决于流水线产物）
+Hum2Song turns a short **humming or singing clip** into **MIDI and synthesized audio**: upload audio → pipeline (preprocess → pitch/audio-to-MIDI → synthesis) → download results.
 
-本仓库目前同时提供 **两套 API**：
-- **契约 API（已冻结，推荐使用）**：`/generate`、`/tasks/{id}`、`/tasks/{id}/download?file_type=...`
-- **旧版 API（临时兼容）**：`/api/v1/...`（仅用于旧测试/旧客户端，未来可能移除）
+This repository ships:
 
-This repo includes: **Backend API** + **Hum2Song Studio** (browser UI for clip editing, piano roll, LLM Optimize).
+| Component | What it is |
+|-----------|------------|
+| **Backend API** | REST API for async jobs (`POST /generate`, poll, download). |
+| **Hum2Song Studio** | Browser UI at `/ui` for recording/import, piano roll editing, and optional LLM-assisted optimization. |
 
-**First-time local setup:** use the compact checklist [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) (prerequisites, SoundFont, health check).
-
-**Quick machine check (optional):** from the project root, `python scripts/beginner_preflight.py` (read-only; does not install anything). See the checklist section *0. Quick preflight*.
-
-**Start the server (after venv + `pip install`):** from the project root, `python scripts/beginner_launch.py` (runs preflight, starts `uvicorn`, **waits for** `/api/v1/health`, then prints Studio / health / docs URLs). Options: `--reload`, `--skip-preflight`, **`--open`** (open Studio in the browser when ready). Same stack as `uvicorn app:app` — see [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) §4.
-
-### Quick Start (TL;DR)
-
-1. **Prerequisites:** Python 3.11+, **FFmpeg** and **FluidSynth** on your PATH, and a **SoundFont** file at **`assets/piano.sf2`** (not bundled in git — see [`assets/README.txt`](assets/README.txt)). Optional: copy `.env.example` to `.env` and adjust paths. **Missing any of these?** Follow the step-by-step manual path in [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg).
-2. Create venv and install dependencies (first install can take a while because `requirements.txt` includes larger ML/audio packages):
-   ```powershell
-   python -m venv venv
-   .\venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-3. Start the server (from project root; required for correct app import):
-   ```powershell
-   python scripts/beginner_launch.py
-   ```
-   Or manually: `uvicorn app:app` (optional: `--reload` for local development.)
-   - **Export MIDI 404?** Run `python scripts/check_export_routes.py` to verify routes; restart uvicorn to pick up changes.
-4. **Verify environment:** open [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) and check `checks` — for full audio output you want `soundfont_exists`, `fluidsynth`, and `ffmpeg` to reflect a usable setup (see checklist for details).
-5. Open **API docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-6. Open **Studio UI**: [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
-
-**Note:** You do **not** need Node.js to run the server or Studio; Node is only for [frontend tests](#测试) (`scripts/run_frontend_all_tests.js`).
-
-**Studio (Hum2Song Studio) — first run:**
-- Open [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) to start.
-- **Controls:** R = record toggle, P = play/pause (button), S = stop + reset playhead (S appears only while playing; does not stop recording).
-- **Quick Optimize:** Choose Preset + Goals (Fix Pitch / Tighten Rhythm / Reduce Outliers) → Run Optimize.
-- **Advanced** is collapsed by default and contains Prompt, Regenerate, LLM Settings, and Debug.
-- **Quality gate:** In Full mode, if Fix Pitch or Tighten Rhythm is enabled, velocity-only patches are rejected once and you'll see actionable guidance.
-- **Tone.js** loads locally by default (`/static/pianoroll/vendor/tone/Tone.js`); CDN fallback only if `window.H2S_ALLOW_CDN_TONE === true`.
-- **Sampler instruments (e.g. Piano):** Optional; see [docs/INSTRUMENT_LIBRARY.md](docs/INSTRUMENT_LIBRARY.md) for sample asset setup.
-- E2E validation: see [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md). Phase C covers Recording/Import → auto-open editor → Quick Optimize.
+**Languages:** this file is English. For Chinese, see **[README_CHS.md](README_CHS.md)**.
 
 ---
 
-## 环境要求
+## Quick start (local)
 
-- **OS:** Windows is the primary documented path; macOS/Linux work with the same Python/venv flow (adjust paths and venv activation).
-- **Python 3.11+**
-- **FFmpeg** on PATH（mp3 转码等）
-- **FluidSynth** on PATH（MIDI → 音频合成）；也可在 `.env` 中设置 `FLUIDSYNTH_PATH`
-- **SoundFont（必需）：** 默认使用 **`assets/piano.sf2`**（仓库不附带；见 [`assets/README.txt`](assets/README.txt)，可用 `SOUND_FONT_PATH` / `SF2_PATH` 指向其他 `.sf2`）
-- 建议使用 `venv` 虚拟环境
+Do these **from the repository root** so imports resolve correctly.
 
-**Optional (secondary):** If you prefer containers, a root [`Dockerfile`](Dockerfile) installs FFmpeg, FluidSynth, and Python deps — you must still provide a SoundFont (e.g. mount or copy into `assets/`). The image uses **Python 3.10**; local dev above recommends **3.11+**. There is no `docker-compose` in this repo.
+### 1. Prerequisites
 
----
+| Requirement | Why |
+|-------------|-----|
+| **Python 3.11+** | Runs the FastAPI app. |
+| **FFmpeg** on `PATH` | MP3 output and some conversions. |
+| **FluidSynth** on `PATH` (or `FLUIDSYNTH_PATH` in `.env`) | MIDI → WAV/audio. |
+| **SoundFont `.sf2`** | Required for MIDI→audio. Default file: **`assets/piano.sf2`** (not shipped in git — see [`assets/README.txt`](assets/README.txt)). |
 
-## 安装与启动（Windows）
+Optional: copy [`.env.example`](.env.example) to `.env` and set `SOUND_FONT_PATH`, `FLUIDSYNTH_PATH`, or `PORT` as needed.
 
-1. 安装 FFmpeg、FluidSynth，并准备好 **`assets/piano.sf2`**（见上文与 [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md)）。
-2. 创建环境并安装依赖：
+**Stuck on installing FFmpeg, FluidSynth, or a SoundFont?** Follow the step-by-step section **Manual install** in **[docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md#manual-install-soundfont-fluidsynth-ffmpeg)**.
+
+### 2. (Optional) Check your machine
+
+Read-only checks; does not install anything:
+
+```powershell
+python scripts/beginner_preflight.py
+```
+
+### 3. Virtual environment and dependencies
+
+**Windows (PowerShell):**
 
 ```powershell
 python -m venv venv
@@ -74,148 +48,148 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-3. 启动服务（请在**项目根目录**执行）：
+**macOS / Linux:**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+First install may take several minutes (large ML/audio dependencies).
+
+### 4. Start the server
+
+**Recommended** (runs preflight, starts Uvicorn, waits until health is OK, then prints URLs):
 
 ```powershell
 python scripts/beginner_launch.py
 ```
 
-或：`uvicorn app:app`（开发时可加 `--reload`；若用启动脚本则加 `python scripts/beginner_launch.py --reload`。）
+Useful flags: `--reload` (auto-reload on code changes), `--skip-preflight`, **`--open`** (open Studio in the browser when ready).
 
-4. 自检：打开 [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) 查看 `checks`。
+**Equivalent manual command:**
 
-- API 文档（Swagger）：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- Studio UI：[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)
+```powershell
+uvicorn app:app
+```
+
+(Add `--reload` during development.)
+
+### 5. Open in the browser
+
+| Page | URL |
+|------|-----|
+| **Health / diagnostics** | [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) |
+| **API docs (Swagger)** | [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) |
+| **Hum2Song Studio** | [http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui) |
+
+Default port is **8000**; override with `PORT` in `.env` if needed.
+
+**You do not need Node.js** to run the server or Studio. Node is only used for frontend test scripts (`scripts/run_frontend_all_tests.js`).
 
 ---
 
-## 契约 API（Frozen）
+## Using Hum2Song Studio
 
-### 任务状态机
-`queued → running → completed | failed`
+1. Start the server and open **[http://127.0.0.1:8000/ui](http://127.0.0.1:8000/ui)**.
+2. **Record** a clip or **import** an audio file — supported formats include WAV, MP3, M4A, OGG, FLAC.
+3. Edit in the **piano roll** as needed.
+4. **Quick Optimize:** choose a preset and goals (e.g. Fix Pitch, Tighten Rhythm, Reduce Outliers), then run optimize.
+5. **Advanced** (collapsed by default): custom prompt, regenerate, LLM settings, debug. LLM setup is optional; see [Gateway-first LLM](#gateway-first-llm-optional) below.
 
-### 时间格式
-所有时间字段必须为 **UTC ISO8601**，并以 `Z` 结尾：
-`2025-12-15T10:00:00Z`
+**Keyboard shortcuts:** **R** — toggle recording; **P** — play/pause; **S** — stop and reset playhead while playing (does not stop recording).
 
-### 1）创建任务
+Optional sampler instruments (e.g. piano samples): [docs/INSTRUMENT_LIBRARY.md](docs/INSTRUMENT_LIBRARY.md).
 
-`POST /generate`  
-Content-Type：`multipart/form-data`
+Full Studio validation checklist: [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md).
 
-Query：
-- `output_format`：`mp3|wav`（默认：mp3）
+---
 
-示例：
+## HTTP API overview
+
+Hum2Song exposes **two** API styles:
+
+| Style | Status | Notes |
+|-------|--------|--------|
+| **Contract API (frozen)** | **Recommended** | `/generate`, `/tasks/{id}`, `/tasks/{id}/download?file_type=...` |
+| **Legacy** | Compatibility only | `/api/v1/...` — may be removed later |
+
+### Contract API (summary)
+
+- **Task lifecycle:** `queued` → `running` → `completed` | `failed`
+- **Timestamps:** UTC ISO-8601 ending with `Z` (example: `2025-12-15T10:00:00Z`)
+
+**Create a job**
+
+```http
+POST /generate?output_format=mp3
+Content-Type: multipart/form-data
+```
+
+Form field: `file` = audio file.
+
+**Poll status**
+
+```http
+GET /tasks/{task_id}
+```
+
+**Download**
+
+```http
+GET /tasks/{task_id}/download?file_type=audio
+GET /tasks/{task_id}/download?file_type=midi
+```
+
+Example (create job with curl):
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/generate?output_format=mp3" \
   -F "file=@./sample.wav"
 ```
 
-响应：`202 Accepted`
+Typical HTTP errors: `400` bad `file_type`; `404` missing task or file; `409` job not ready or type not available; `413` upload too large.
 
-```json
-{
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "queued",
-  "poll_url": "/tasks/550e8400-e29b-41d4-a716-446655440000",
-  "created_at": "2025-12-15T10:00:00Z"
-}
-```
-
-### 2）轮询任务状态
-
-`GET /tasks/{task_id}`
-
-```bash
-curl "http://127.0.0.1:8000/tasks/550e8400-e29b-41d4-a716-446655440000"
-```
-
-响应：`200 OK`
-
-```json
-{
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "running",
-  "progress": 0.4,
-  "stage": "converting",
-  "created_at": "2025-12-15T10:00:00Z",
-  "updated_at": "2025-12-15T10:00:02Z",
-  "result": null,
-  "error": null
-}
-```
-
-完成态示例：
-
-```json
-{
-  "task_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "progress": 1.0,
-  "stage": "finalizing",
-  "created_at": "2025-12-15T10:00:00Z",
-  "updated_at": "2025-12-15T10:00:10Z",
-  "result": {
-    "file_type": "audio",
-    "output_format": "mp3",
-    "filename": "550e8400-e29b-41d4-a716-446655440000.mp3",
-    "download_url": "/tasks/550e8400-e29b-41d4-a716-446655440000/download?file_type=audio"
-  },
-  "error": null
-}
-```
-
-### 3）下载产物
-
-`GET /tasks/{task_id}/download?file_type=audio|midi`
-
-示例：
-
-```bash
-curl -L \
-  "http://127.0.0.1:8000/tasks/550e8400-e29b-41d4-a716-446655440000/download?file_type=audio" \
-  -o out.mp3
-```
-
-#### 错误码（契约 API）
-- `400`：`file_type` 非法
-- `404`：任务不存在 / 或产物文件在磁盘上丢失
-- `409`：任务未完成 / 或请求的 file_type 尚不可用
-- `413`：上传文件过大
+The Chinese README and historical copies include **full JSON examples** for responses; you can also try flows interactively at **`/docs`**.
 
 ---
 
-## 旧版 API（临时兼容）
+## Gateway-first LLM (optional)
 
-> 仅用于向后兼容旧测试/旧客户端，后续可能移除。
+Studio’s **LLM Optimize** feature expects an **OpenAI-compatible** gateway URL (local proxy, LiteLLM, etc.). Do **not** put provider API keys in the browser for public deployments — use a gateway or server-side proxy.
 
-- `POST /api/v1/generate`
-- `GET  /api/v1/tasks/{id}`
-- `GET  /api/v1/tasks/{id}/download?kind=audio|midi`
+Quick setup: **[docs/LLM_GATEWAY_QUICKSTART.md](docs/LLM_GATEWAY_QUICKSTART.md)**.
 
 ---
 
-## Gateway-first LLM setup
+## Docker
 
-For the Studio LLM (Optimize) feature:
-
-- **Recommended:** Use an OpenAI-compatible gateway endpoint (e.g. a local or self-hosted proxy). The frontend stores only **base URL**, **model**, and an optional **gateway auth token** — not the provider’s real API key.
-- **Security:** Do not put provider API keys in the browser. For public deployments, use a gateway or backend proxy so keys stay server-side. Keep `.env` and `.env.local` out of version control.
-- **Quickstart:** See [docs/LLM_GATEWAY_QUICKSTART.md](docs/LLM_GATEWAY_QUICKSTART.md) to run LLM v0 in ~5 minutes (LiteLLM, UI fields, smoke test).
+A root [`Dockerfile`](Dockerfile) installs FFmpeg, FluidSynth, and Python dependencies. You must still supply a **SoundFont** (e.g. mount or copy into `assets/`). The image uses **Python 3.10**; local development above recommends **3.11+**. There is no `docker-compose` in this repo.
 
 ---
 
-## 测试
+## Troubleshooting
 
-**Frontend（硬门禁）**：
+| Symptom | What to try |
+|---------|-------------|
+| Health shows missing SoundFont / FluidSynth / FFmpeg | Fix paths or install tools; see [BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md). |
+| Export / MIDI route returns 404 | Run `python scripts/check_export_routes.py` and restart Uvicorn after code changes. |
+| Dependency warnings (e.g. Python 3.13 deprecations) | Often harmless for MVP usage. |
+
+More detail: **[docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md)**.
+
+---
+
+## Tests
+
+**Frontend (required for CI-style checks):**
 
 ```powershell
 node scripts/run_frontend_all_tests.js
 ```
 
-**Backend（可选）**：
+**Backend (optional):**
 
 ```powershell
 pytest -q
@@ -223,7 +197,31 @@ pytest -q
 
 ---
 
-## 备注
+## Documentation screenshots (for maintainers)
 
-- 可能会看到一些依赖警告（例如 `audioread` 在 Python 3.13 的弃用警告）。  
-  这些 warning 不影响 MVP 功能正确性。
+Screenshots are **not** included in the repo yet. If you want illustrations in this README, create a folder **`docs/images/`** and add files, then insert Markdown images here.
+
+Suggested captures (filenames are suggestions):
+
+| Suggested filename | What to capture |
+|--------------------|-----------------|
+| `docs/images/studio-overview.png` | Hum2Song Studio main screen after opening `/ui`. |
+| `docs/images/api-docs-swagger.png` | Swagger UI at `/docs` (optional). |
+| `docs/images/health-check.png` | JSON from `/api/v1/health` showing `checks` (optional). |
+
+Example snippet to paste **after** files exist:
+
+```markdown
+![Hum2Song Studio overview](docs/images/studio-overview.png)
+```
+
+---
+
+## More documentation
+
+| Document | Topic |
+|----------|--------|
+| [docs/BEGINNER_FIRST_RUN_CHECKLIST.md](docs/BEGINNER_FIRST_RUN_CHECKLIST.md) | First run, manual installs, verification |
+| [docs/LLM_GATEWAY_QUICKSTART.md](docs/LLM_GATEWAY_QUICKSTART.md) | LLM gateway for Studio |
+| [docs/INSTRUMENT_LIBRARY.md](docs/INSTRUMENT_LIBRARY.md) | Optional sampler instruments |
+| [docs/STUDIO_E2E_CHECKLIST.md](docs/STUDIO_E2E_CHECKLIST.md) | Studio end-to-end checklist |
