@@ -18,6 +18,14 @@ assert.strictEqual(kit.isDrumPresetId('drum'), true);
 assert.strictEqual(kit.isDrumPresetId('drum:electronic'), true);
 assert.strictEqual(kit.isDrumPresetId('bass'), false);
 assert.strictEqual(kit.forcedGroupForPreset('drum:kick'), 'kick');
+for (const presetId of [
+  'drum:kick:electronic',
+  'drum:kick:deep',
+  'drum:kick:dance',
+  'drum:kick:sub',
+]) {
+  assert.strictEqual(kit.forcedGroupForPreset(presetId), 'kick');
+}
 
 function makeVoiceType(name, registry){
   return class FakeVoice {
@@ -87,5 +95,22 @@ const forcedKick = kit.createToneDrumKit(forcedFake.Tone, 'drum:kick');
 forcedKick.triggerAttackRelease(forcedFake.Tone.Frequency(72, 'midi'), 0.2, 0, 1);
 assert.strictEqual(forcedFake.voices.membrane[0].calls.length, 1, 'kick preset should render every pitch as kick');
 assert.strictEqual(forcedFake.voices.metal.reduce((sum, voice) => sum + voice.calls.length, 0), 0, 'kick preset should not render cymbal voices');
+
+const kickVariants = [
+  ['drum:kick:electronic', 36, 7],
+  ['drum:kick:deep', 32, 5],
+  ['drum:kick:dance', 36, 8],
+  ['drum:kick:sub', 24, 2],
+];
+for (const [presetId, expectedMidi, expectedOctaves] of kickVariants) {
+  const presetFake = makeFakeTone();
+  const preset = kit.createToneDrumKit(presetFake.Tone, presetId);
+  preset.triggerAttackRelease(presetFake.Tone.Frequency(72, 'midi'), 1, 0, 1);
+  const kickVoice = presetFake.voices.membrane[0];
+  assert.strictEqual(preset.presetId, presetId);
+  assert.strictEqual(kickVoice.options.octaves, expectedOctaves, `${presetId} should keep its own pitch sweep`);
+  assert.strictEqual(kickVoice.calls[0][0].value, expectedMidi, `${presetId} should keep its own base pitch`);
+  assert.strictEqual(presetFake.voices.metal.reduce((sum, voice) => sum + voice.calls.length, 0), 0, `${presetId} should only render kick voices`);
+}
 
 console.log('GM drum kit tests passed');

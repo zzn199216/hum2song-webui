@@ -25,6 +25,10 @@ for (const key of [
   'drum',
   'drum:electronic',
   'drum:kick',
+  'drum:kick:electronic',
+  'drum:kick:deep',
+  'drum:kick:dance',
+  'drum:kick:sub',
   'drum:snare',
   'drum:hihat',
   'drum:toms',
@@ -53,6 +57,10 @@ assert.strictEqual(manifest.resolveInstrument('bass').engineType, 'builtin_synth
 assert.strictEqual(manifest.resolveInstrument('drum').engineType, 'drum');
 assert.strictEqual(manifest.resolveInstrument('drum:electronic').presetId, 'drum:electronic');
 assert.strictEqual(manifest.resolveInstrument('drum:kick').engineType, 'drum');
+assert.strictEqual(manifest.resolveInstrument('drum:kick:electronic').source, 'opensource');
+assert.strictEqual(manifest.resolveInstrument('drum:kick:deep').engineType, 'drum');
+assert.strictEqual(manifest.resolveInstrument('drum:kick:dance').engineType, 'drum');
+assert.strictEqual(manifest.resolveInstrument('drum:kick:sub').engineType, 'drum');
 assert.strictEqual(manifest.resolveInstrument('sampler:tonejs:piano').engineType, 'sampler');
 assert.strictEqual(manifest.resolveInstrument('piano').samplerPackId, 'tonejs:piano', 'old piano alias should resolve to sampled piano metadata');
 assert.strictEqual(manifest.resolveInstrument('violin').samplerPackId, 'tonejs:violin', 'old violin alias should resolve to sampled violin metadata');
@@ -78,7 +86,19 @@ assert(options.some((option) => option.value === 'sampler:tonejs:guitar-nylon'),
 assert(options.some((option) => option.value === 'sampler:tonejs:flute'), 'dropdown options should include flute');
 assert(options.some((option) => option.value === 'sampler:tonejs:trumpet'), 'dropdown options should include trumpet');
 assert(options.some((option) => option.value === 'sampler:tonejs:xylophone'), 'dropdown options should include xylophone');
-for (const drumKey of ['drum', 'drum:electronic', 'drum:kick', 'drum:snare', 'drum:hihat', 'drum:toms', 'drum:cymbals']) {
+for (const drumKey of [
+  'drum',
+  'drum:electronic',
+  'drum:kick',
+  'drum:kick:electronic',
+  'drum:kick:deep',
+  'drum:kick:dance',
+  'drum:kick:sub',
+  'drum:snare',
+  'drum:hihat',
+  'drum:toms',
+  'drum:cymbals',
+]) {
   assert(options.some((option) => option.value === drumKey), `dropdown options should include ${drumKey}`);
 }
 assert(!options.some((option) => option.value === 'builtin.piano'), 'tracks should keep storing legacy keys, not manifest ids');
@@ -111,7 +131,7 @@ assert(timelineController.includes("textOverflow = 'ellipsis'"), 'compact instru
 const indexHtml = fs.readFileSync(path.join(root, 'static/pianoroll/index.html'), 'utf8');
 const manifestScriptIndex = indexHtml.indexOf('core/instrument_manifest.js');
 const timelineScriptIndex = indexHtml.indexOf('timeline_controller.js');
-const instrumentCacheBust = 'audio-clip-download-icon-v4';
+const instrumentCacheBust = 'kick-presets-v1';
 assert(manifestScriptIndex >= 0, 'index should load the instrument manifest');
 assert(timelineScriptIndex >= 0, 'index should load the timeline controller');
 assert(manifestScriptIndex < timelineScriptIndex, 'manifest should load before timeline controller');
@@ -134,6 +154,10 @@ for (const key of [
   'instrument.name.drums',
   'instrument.name.drumsElectronic',
   'instrument.name.drumKick',
+  'instrument.name.drumKickElectronic',
+  'instrument.name.drumKickDeep',
+  'instrument.name.drumKickDance',
+  'instrument.name.drumKickSub',
   'instrument.name.drumSnare',
   'instrument.name.drumHihat',
   'instrument.name.drumToms',

@@ -10,6 +10,53 @@
   var VERSION = 'gm_drum_kit_v1';
   var PRESET_PREFIX = 'drum';
 
+  var KICK_PRESETS = {
+    'drum:kick:electronic': {
+      midi: 36,
+      outputDb: -2,
+      outputGain: 0.8,
+      maxDuration: 0.4,
+      options: {
+        pitchDecay: 0.03, octaves: 7,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.06 },
+      },
+    },
+    'drum:kick:deep': {
+      midi: 32,
+      outputDb: -2,
+      outputGain: 0.8,
+      maxDuration: 0.65,
+      options: {
+        pitchDecay: 0.06, octaves: 5,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.58, sustain: 0.01, release: 0.18 },
+      },
+    },
+    'drum:kick:dance': {
+      midi: 36,
+      outputDb: -1,
+      outputGain: 0.9,
+      maxDuration: 0.35,
+      options: {
+        pitchDecay: 0.015, octaves: 8,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.04 },
+      },
+    },
+    'drum:kick:sub': {
+      midi: 24,
+      outputDb: -3,
+      outputGain: 0.7,
+      maxDuration: 0.9,
+      options: {
+        pitchDecay: 0.09, octaves: 2,
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.002, decay: 0.78, sustain: 0.02, release: 0.28 },
+      },
+    },
+  };
+
   var GM_GROUPS = {
     kick: [35, 36],
     sideStick: [37],
@@ -44,6 +91,10 @@
   function forcedGroupForPreset(value){
     switch (normalizePresetId(value)){
       case 'drum:kick': return 'kick';
+      case 'drum:kick:electronic': return 'kick';
+      case 'drum:kick:deep': return 'kick';
+      case 'drum:kick:dance': return 'kick';
+      case 'drum:kick:sub': return 'kick';
       case 'drum:snare': return 'snare';
       case 'drum:hihat': return 'hihatClosed';
       case 'drum:toms': return 'tom';
@@ -78,7 +129,10 @@
     if (!Tone) throw new Error('Tone.js is required');
     var normalizedPreset = normalizePresetId(presetId);
     var electronic = normalizedPreset === 'drum:electronic';
-    var output = Tone.Volume ? new Tone.Volume(electronic ? -3 : -1) : new Tone.Gain(electronic ? 0.7 : 0.9);
+    var kickPreset = KICK_PRESETS[normalizedPreset] || null;
+    var outputDb = kickPreset ? kickPreset.outputDb : (electronic ? -3 : -1);
+    var outputGain = kickPreset ? kickPreset.outputGain : (electronic ? 0.7 : 0.9);
+    var output = Tone.Volume ? new Tone.Volume(outputDb) : new Tone.Gain(outputGain);
     var voices = [];
 
     function membrane(options){
@@ -97,7 +151,7 @@
       return connectVoice(new Tone.Synth(options || {}), output, voices);
     }
 
-    var kick = membrane(electronic ? {
+    var kick = membrane(kickPreset ? kickPreset.options : electronic ? {
       pitchDecay: 0.03, octaves: 8,
       oscillator: { type: 'sine' },
       envelope: { attack: 0.001, decay: 0.32, sustain: 0, release: 0.08 },
@@ -162,7 +216,9 @@
       var vel = Math.max(0.01, Math.min(1, Number(velocity) || 0.8));
       if (!voice || typeof voice.triggerAttackRelease !== 'function') return;
       if (group === 'kick'){
-        voice.triggerAttackRelease(Tone.Frequency(36, 'midi'), Math.min(dur, 0.5), time, vel);
+        var kickMidi = kickPreset ? kickPreset.midi : 36;
+        var kickMaxDuration = kickPreset ? kickPreset.maxDuration : 0.5;
+        voice.triggerAttackRelease(Tone.Frequency(kickMidi, 'midi'), Math.min(dur, kickMaxDuration), time, vel);
       } else if (group === 'tom'){
         var tomMidi = forcedGroup ? 45 : Math.max(41, Math.min(50, midi));
         voice.triggerAttackRelease(Tone.Frequency(tomMidi, 'midi'), Math.min(dur, 0.45), time, vel);
