@@ -15,6 +15,8 @@ assert(worker.includes("executionProviders: ['wasm']"), 'worker should use the W
 assert(worker.includes("new URL('../vendor/yamnet-v1/yamnet.onnx?v=yamnet-inline-v1'"), 'worker should use the pinned YAMNet model');
 assert(worker.includes('PATCH_FRAMES = 96') && worker.includes('PATCH_HOP_FRAMES = 96'), 'fast YAMNet patch framing should remain explicit');
 assert(worker.includes('MAX_PATCHES = 32') && worker.includes('samplingMode: \'fast-scan\''), 'long audio should use bounded fast scanning');
+assert(worker.includes('frequencyToBin') && worker.includes('buildMelFilterBank'), 'YAMNet FFT/Mel preprocessing helpers should remain testable');
+assert(worker.includes('message.diagnostic === true') && worker.includes('topRawLabels'), 'raw per-patch diagnostics should require explicit opt-in');
 assert(worker.includes("status: 'ok'") && worker.includes('items: items'), 'worker should return multi-label instrument items');
 assert(worker.includes("{ id: 'piano'") && worker.includes("{ id: 'drums'"), 'worker should map core instruments');
 assert(client.includes('new Worker(workerUrl'), 'client should isolate inference in a browser Worker');

@@ -62,6 +62,7 @@
           requestId: id,
           audio: samples,
           sampleRate: Number(audioBuffer.sampleRate) || 48000,
+          diagnostic: options.diagnostic === true,
         }, [samples.buffer]);
       });
     }

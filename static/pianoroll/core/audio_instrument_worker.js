@@ -21,6 +21,8 @@
   var MEL_MAX_HZ = 7500;
   var LOG_OFFSET = 0.001;
   var sessionPromise = null;
+  var classMapPromise = null;
+  var melBank = null;
   var melWeights = null;
   var hann = null;
 
@@ -116,16 +118,18 @@
   function hzToMel(hz){ return 1127 * Math.log(1 + hz / 700); }
   function melToHz(mel){ return 700 * (Math.exp(mel / 1127) - 1); }
 
-  function buildMelWeights(){
-    if (melWeights) return melWeights;
-    melWeights = new Float32Array(SPECTRUM_BINS * MEL_BANDS);
+  function frequencyToBin(frequency){ return Number(frequency) * FFT_SIZE / SAMPLE_RATE; }
+
+  function buildMelFilterBank(){
+    if (melBank) return melBank;
     var lowMel = hzToMel(MEL_MIN_HZ);
     var highMel = hzToMel(MEL_MAX_HZ);
     var points = [];
     for (var i = 0; i < MEL_BANDS + 2; i++){
       var mel = lowMel + (highMel - lowMel) * i / (MEL_BANDS + 1);
-      points.push(melToHz(mel) / (SAMPLE_RATE / (FFT_SIZE * 2)));
+      points.push(frequencyToBin(melToHz(mel)));
     }
+    var weights = new Float32Array(SPECTRUM_BINS * MEL_BANDS);
     for (var bin = 0; bin < SPECTRUM_BINS; bin++){
       for (var band = 0; band < MEL_BANDS; band++){
         var left = points[band];
@@ -133,10 +137,16 @@
         var right = points[band + 2];
         var rising = center > left ? (bin - left) / (center - left) : 0;
         var falling = right > center ? (right - bin) / (right - center) : 0;
-        melWeights[bin * MEL_BANDS + band] = Math.max(0, Math.min(rising, falling));
+        weights[bin * MEL_BANDS + band] = Math.max(0, Math.min(rising, falling));
       }
     }
-    return melWeights;
+    melBank = { points: points, weights: weights };
+    melWeights = weights;
+    return melBank;
+  }
+
+  function buildMelWeights(){
+    return buildMelFilterBank().weights;
   }
 
   function buildFeatures(samples){
@@ -172,13 +182,44 @@
   }
 
   function selectPatches(patches){
-    if (patches.length <= MAX_PATCHES) return patches;
+    return selectPatchIndices(patches.length).map(function(index){ return patches[index]; });
+  }
+
+  function selectPatchIndices(patchCount){
+    if (patchCount <= MAX_PATCHES) return Array.from({ length: patchCount }, function(_, index){ return index; });
     var selected = new Array(MAX_PATCHES);
-    for (var i = 0; i < MAX_PATCHES; i++){
-      var sourceIndex = Math.round(i * (patches.length - 1) / (MAX_PATCHES - 1));
-      selected[i] = patches[sourceIndex];
-    }
+    for (var i = 0; i < MAX_PATCHES; i++) selected[i] = Math.round(i * (patchCount - 1) / (MAX_PATCHES - 1));
     return selected;
+  }
+
+  function parseClassMap(csv){
+    var lines = String(csv || '').split(/\r?\n/).filter(Boolean);
+    return lines.slice(1).map(function(line){
+      var match = line.match(/^([^,]+),([^,]+),"?(.*)"?$/);
+      return match ? String(match[3]).replace(/""/g, '"').replace(/^"|"$/g, '') : '';
+    });
+  }
+
+  function ensureClassMap(){
+    if (classMapPromise) return classMapPromise;
+    var url = new URL('../vendor/yamnet-v1/yamnet_class_map.csv', self.location.href).href;
+    classMapPromise = fetch(url).then(function(response){
+      if (!response.ok) throw new Error('yamnet_class_map_load_failed');
+      return response.text();
+    }).then(parseClassMap);
+    return classMapPromise;
+  }
+
+  function topRawLabels(scores, classMap){
+    return Array.from(scores).map(function(value, index){
+      var logit = Number(value || 0);
+      return {
+        index: index,
+        label: classMap && classMap[index] ? classMap[index] : ('class_' + index),
+        logit: Number(logit.toFixed(6)),
+        score: Number((1 / (1 + Math.exp(-logit))).toFixed(6)),
+      };
+    }).sort(function(a, b){ return b.score - a.score; }).slice(0, 10);
   }
 
   function ensureOrt(){
@@ -211,20 +252,35 @@
   async function analyze(message){
     var source = message.audio instanceof Float32Array ? message.audio : new Float32Array(message.audio);
     var samples = resampleLinear(source, Number(message.sampleRate) || SAMPLE_RATE);
+    var diagnostic = message.diagnostic === true;
+    var classMap = diagnostic ? await ensureClassMap() : null;
     post({ type: 'progress', requestId: message.requestId, progress: 0, phase: 'preparing' });
     var allPatches = buildFeatures(samples);
-    var patches = selectPatches(allPatches);
+    var patchIndices = selectPatchIndices(allPatches.length);
+    var patches = patchIndices.map(function(index){ return allPatches[index]; });
     var session = await ensureOrt();
     var stats = GROUPS.map(function(group){ return { group: group, sum: 0, peak: 0, active: 0 }; });
+    var diagnostics = diagnostic ? [] : null;
     for (var patchIndex = 0; patchIndex < patches.length; patchIndex++){
       var tensor = new ort.Tensor('float32', patches[patchIndex], [1, 1, PATCH_FRAMES, MEL_BANDS]);
       var outputs = await session.run({ audio: tensor });
       var scores = outputs.class_scores.data;
-      scoreGroups(scores, patches.length).forEach(function(item, index){
+      var groupScores = scoreGroups(scores, patches.length);
+      groupScores.forEach(function(item, index){
         stats[index].sum += item.score;
         stats[index].peak = Math.max(stats[index].peak, item.score);
         if (item.score >= 0.20) stats[index].active += 1;
       });
+      if (diagnostic){
+        diagnostics.push({
+          patchIndex: patchIndices[patchIndex],
+          timestampSec: Number((patchIndices[patchIndex] * PATCH_HOP_FRAMES * HOP_SAMPLES / SAMPLE_RATE).toFixed(3)),
+          topRawLabels: topRawLabels(scores, classMap),
+          groups: groupScores.map(function(item){
+            return { id: item.group.id, name: item.group.name, score: Number(item.score.toFixed(6)) };
+          }),
+        });
+      }
       post({ type: 'progress', requestId: message.requestId, progress: Math.round((patchIndex + 1) / patches.length * 100) });
     }
     var items = stats.map(function(item){
@@ -240,7 +296,7 @@
       };
     }).filter(function(item){ return item.peakScore >= 0.25 && (item.coverage >= 0.02 || item.confidence >= 0.45); })
       .sort(function(a, b){ return b.confidence - a.confidence; });
-    return {
+    var result = {
       status: 'ok',
       analyzerVersion: MODEL_VERSION,
       model: 'YAMNet AudioSet ONNX',
@@ -251,8 +307,34 @@
       samplingMode: 'fast-scan',
       items: items,
     };
+    if (diagnostic) result.diagnostics = diagnostics;
+    return result;
   }
 
+  if (typeof module !== 'undefined' && module.exports){
+    module.exports = {
+      SAMPLE_RATE: SAMPLE_RATE,
+      WINDOW_SAMPLES: WINDOW_SAMPLES,
+      HOP_SAMPLES: HOP_SAMPLES,
+      FFT_SIZE: FFT_SIZE,
+      SPECTRUM_BINS: SPECTRUM_BINS,
+      PATCH_FRAMES: PATCH_FRAMES,
+      PATCH_HOP_FRAMES: PATCH_HOP_FRAMES,
+      MAX_PATCHES: MAX_PATCHES,
+      MEL_BANDS: MEL_BANDS,
+      MEL_MIN_HZ: MEL_MIN_HZ,
+      MEL_MAX_HZ: MEL_MAX_HZ,
+      LOG_OFFSET: LOG_OFFSET,
+      hzToMel: hzToMel,
+      melToHz: melToHz,
+      frequencyToBin: frequencyToBin,
+      buildMelFilterBank: buildMelFilterBank,
+      buildFeatures: buildFeatures,
+      selectPatchIndices: selectPatchIndices,
+    };
+  }
+
+  if (typeof self === 'undefined') return;
   self.onmessage = function(event){
     var message = event.data || {};
     if (message.type !== 'analyze') return;
