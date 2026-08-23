@@ -187,6 +187,7 @@
     var convertErrorBucket = null;
     var convertTaskId = null;
     var separationBusy = false;
+    var advancedStemArmed = false;
 
     function t(key, fb) {
       return (typeof hooks.t === 'function') ? hooks.t(key, fb) : (fb != null ? fb : key);
@@ -379,6 +380,12 @@
               '<span data-i18n-role="wfSeparationSettingsLabel"></span>' +
             '</label>' +
             '<button type="button" class="btn mini primary" data-act="waveSeparate"></button>' +
+            '<button type="button" class="btn mini ghost" data-act="waveArmAdvanced"></button>' +
+            '<label class="h2s-audio-waveform-separation-toggle" data-role="wfAdvancedArmed" hidden>' +
+              '<input type="checkbox" data-role="wfAdvancedToggle">' +
+              '<span data-i18n-role="wfAdvancedArmedLabel"></span>' +
+            '</label>' +
+            '<button type="button" class="btn mini primary" data-act="waveAdvancedSeparate" hidden></button>' +
           '</div>' +
           '<div class="h2s-audio-waveform-separation-controls" data-role="wfSeparationSettings" hidden>' +
             '<div class="h2s-audio-waveform-separation-field">' +
@@ -453,6 +460,8 @@
           });
         }
         if (act === 'waveSeparate') startSeparation();
+        if (act === 'waveArmAdvanced') armAdvancedStem();
+        if (act === 'waveAdvancedSeparate') startAdvancedStemSeparation();
         if (act === 'waveConvert' && typeof hooks.convertToEditable === 'function') {
           var separateBeforeConvert = panel.querySelector('[data-role="wfSeparateBeforeConvert"]');
           var separationPreset = panel.querySelector('[data-role="wfSeparationPreset"]');
@@ -506,6 +515,11 @@
       if (separateBeforeConvertInput) separateBeforeConvertInput.addEventListener('change', syncSeparatorAvailability);
       var separationSettingsToggle = panel.querySelector('[data-role="wfSeparationSettingsToggle"]');
       if (separationSettingsToggle) separationSettingsToggle.addEventListener('change', syncSeparationSettingsVisibility);
+      var advancedToggle = panel.querySelector('[data-role="wfAdvancedToggle"]');
+      if (advancedToggle) advancedToggle.addEventListener('change', function () {
+        advancedStemArmed = !!advancedToggle.checked;
+        syncAdvancedStemUi();
+      });
     }
 
     function syncSeparationSettingsVisibility() {
@@ -523,6 +537,58 @@
       cost.textContent = mode && mode.value === 'separate_and_transcribe'
         ? t('audio.waveform.separationCostTwo', 'Creating audio stems and editable notes uses 2 AI transcription credits.')
         : t('audio.waveform.separationCostOne', 'Creating audio stems uses 1 AI transcription credit.');
+    }
+
+    function syncAdvancedStemUi() {
+      if (!panel) return;
+      var armBtn = panel.querySelector('[data-act="waveArmAdvanced"]');
+      var armed = panel.querySelector('[data-role="wfAdvancedArmed"]');
+      var toggle = panel.querySelector('[data-role="wfAdvancedToggle"]');
+      var runBtn = panel.querySelector('[data-act="waveAdvancedSeparate"]');
+      var busy = separationBusy || _isConvertBusy();
+      if (armBtn) { armBtn.hidden = advancedStemArmed; armBtn.disabled = busy; }
+      if (armed) armed.hidden = !advancedStemArmed;
+      if (toggle) toggle.checked = advancedStemArmed;
+      if (runBtn) { runBtn.hidden = !advancedStemArmed; runBtn.disabled = busy; }
+    }
+
+    async function armAdvancedStem() {
+      if (advancedStemArmed || separationBusy || _isConvertBusy()) return;
+      if (typeof hooks.checkAdvancedStemAvailability === 'function') {
+        var availability = await hooks.checkAdvancedStemAvailability();
+        if (!availability || availability.available !== true) {
+          if (statusEl) statusEl.textContent = t('audio.waveform.advancedInsufficient', 'Advanced stem separation requires 30 regular transcription credits. Current remaining: {n}.').replace('{n}', String(availability && availability.remaining != null ? availability.remaining : 0));
+          return;
+        }
+      }
+      var message = t('audio.waveform.advancedConfirm', 'Advanced stem separation uses a high-cost model and consumes 30 regular transcription credits when a new task starts. Enabling it alone does not consume credits. Continue?');
+      if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !window.confirm(message)) return;
+      advancedStemArmed = true;
+      syncAdvancedStemUi();
+    }
+
+    async function startAdvancedStemSeparation() {
+      if (!advancedStemArmed || separationBusy || _isConvertBusy() || !openCtx || typeof hooks.runAdvancedStemSeparation !== 'function') return;
+      separationBusy = true;
+      advancedStemArmed = false;
+      syncAdvancedStemUi();
+      updateConvertButtons();
+      if (statusEl) statusEl.textContent = t('audio.waveform.advancedRunning', 'Advanced stem separation is running…');
+      try {
+        var result = await hooks.runAdvancedStemSeparation(openCtx.clipId, openCtx.instanceId, {
+          startSec: selStart,
+          durationSec: Math.max(0, selEnd - selStart),
+          onStatus: function (text) { if (statusEl && text) statusEl.textContent = String(text); },
+        });
+        if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
+        if (statusEl) statusEl.textContent = t('audio.waveform.advancedDone', 'Advanced stem separation is complete. Audio stems were preserved.');
+      } catch (err) {
+        if (statusEl) statusEl.textContent = t('audio.waveform.advancedFailed', 'Advanced stem separation failed. Please try again.') + ' (' + (err && err.message ? String(err.message) : 'worker_failed') + ')';
+      } finally {
+        separationBusy = false;
+        syncAdvancedStemUi();
+        updateConvertButtons();
+      }
     }
 
     function syncTwoChoiceButtons(selectRole, groupRole, valueAttribute) {
@@ -687,6 +753,8 @@
         ['waveLen60', 'convert.preset60', '60s'],
         ['wavePreview', 'audio.waveform.preview', 'Preview selection'],
         ['waveSeparate', 'audio.waveform.separate', 'AI stem separation'],
+        ['waveArmAdvanced', 'audio.waveform.advancedArm', 'Enable advanced stem separation'],
+        ['waveAdvancedSeparate', 'audio.waveform.advancedRun', 'Advanced stems · 30 credits'],
         ['waveConvert', 'audio.waveform.convert', 'Convert to editable notes'],
         ['waveRetry', 'audio.waveform.retry', 'Retry conversion'],
         ['waveExtract', 'audio.waveform.extract', 'Extract as new audio clip'],
@@ -706,10 +774,13 @@
         downloadBtn.setAttribute('aria-label', downloadLabel);
         downloadBtn.title = downloadTitle;
       }
+      var advancedLabel = panel.querySelector('[data-i18n-role="wfAdvancedArmedLabel"]');
+      if (advancedLabel) advancedLabel.textContent = t('audio.waveform.advancedArmed', 'Advanced stems · 30 credits');
       updatePreviewButton();
       updateSeparationCost();
       syncSeparatorAvailability();
       updateConvertButtons();
+      syncAdvancedStemUi();
     }
 
     function _isConvertBusy() {
@@ -740,6 +811,7 @@
         retryBtn.hidden = !showRetry;
         retryBtn.disabled = busy || separationBusy;
       }
+      syncAdvancedStemUi();
     }
 
     function setConvertStatus(st) {
@@ -773,6 +845,7 @@
       ctx = ctx || {};
       ensureDom();
       openCtx = { clipId: String(ctx.clipId || ''), instanceId: ctx.instanceId || null };
+      advancedStemArmed = false;
       var transcriptionControls = (typeof hooks.getTranscriptionControls === 'function')
         ? hooks.getTranscriptionControls(openCtx.clipId)
         : null;
@@ -861,6 +934,8 @@
 
     function close() {
       stopPreview();
+      advancedStemArmed = false;
+      syncAdvancedStemUi();
       if (overlay) overlay.hidden = true;
       if (objectUrl) {
         try { URL.revokeObjectURL(objectUrl); } catch (e) {}

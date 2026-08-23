@@ -7266,6 +7266,96 @@ renderTimeline(){
       }
     },
 
+    async _checkAdvancedStemAvailability(){
+      const client = (typeof window !== 'undefined') ? window.H2SAudioWorkerAdvancedStemClient : null;
+      if (!client || typeof client.checkAvailability !== 'function') return { available: false, remaining: 0 };
+      try { return await client.checkAvailability(); } catch (_e) { return { available: false, remaining: 0 }; }
+    },
+
+    async _runAdvancedStemSeparationForClip(clipId, opts){
+      opts = opts || {};
+      if (!this._requireCloudServerFeatureAuth(true)) throw new Error('auth_required');
+      const client = (typeof window !== 'undefined') ? window.H2SAudioWorkerAdvancedStemClient : null;
+      const P = (typeof window !== 'undefined') ? window.H2SProject : null;
+      if (!client || !client.isEnabled || !client.isEnabled() || !P) throw new Error('worker_unavailable');
+      const p2 = this.getProjectV2();
+      const clip = p2 && p2.clips && p2.clips[clipId];
+      const sourceInstanceId = String(opts.sourceAudioInstanceId || '').trim();
+      const sourceInstance = p2 && Array.isArray(p2.instances)
+        ? p2.instances.find((inst) => inst && String(inst.id) === sourceInstanceId && String(inst.clipId) === String(clipId))
+        : null;
+      if (!clip || P.clipKind(clip) !== 'audio' || !sourceInstance) throw new Error('source_audio_not_found');
+      const file = opts.fileOverride || await this._resolveLocalAudioFileForClip(clipId);
+      if (!file) throw new Error('missing_audio');
+      const startSec = Math.max(0, Number(opts.startSec) || 0);
+      const durationSec = Number(opts.durationSec);
+      if (!isFinite(durationSec) || durationSec <= 0 || durationSec > 600.001) throw new Error('audio_too_long');
+      const bpm = Number(p2.bpm || 120);
+      const sourceStartBeat = Number(sourceInstance.startBeat || 0) + startSec * bpm / 60;
+      const audioMeta = clip.audio && typeof clip.audio === 'object'
+        ? (clip.audio.metadata && typeof clip.audio.metadata === 'object' ? clip.audio.metadata : clip.audio)
+        : {};
+      const providerTaskId = String(audioMeta.providerTaskId || audioMeta.sunoTaskId || audioMeta.taskId || '').trim();
+      const providerAudioId = String(audioMeta.providerAudioId || audioMeta.sunoAudioId || audioMeta.audioId || '').trim();
+      const result = await client.separate({
+        file,
+        startSec,
+        durationSec,
+        metadata: {
+          originalAudioClipId: clipId,
+          originalAudioAssetId: clip.audio && clip.audio.assetRef ? String(clip.audio.assetRef) : null,
+          sourceStartTime: startSec,
+          sourceSegmentStartSec: startSec,
+          sourceSegmentDurationSec: durationSec,
+          ...(providerTaskId ? { providerTaskId } : {}),
+          ...(providerAudioId ? { providerAudioId } : {}),
+          alignment: { sourceAudioInstanceId: sourceInstanceId, sourceStartBeat },
+        },
+        onStatus: (status) => {
+          if (typeof opts.onStatus !== 'function') return;
+          const phase = status && status.phase ? String(status.phase) : 'processing';
+          opts.onStatus({ encoding: '正在准备音频…', uploading: '正在上传音频…', processing: '高级精细分轨处理中…' }[phase] || '高级精细分轨处理中…');
+        },
+      });
+      if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
+      const stems = result.manifest && Array.isArray(result.manifest.stems) ? result.manifest.stems : [];
+      const plan = (typeof window.H2SAudioSeparationTimeline === 'object' && window.H2SAudioSeparationTimeline.planTrackIndices)
+        ? window.H2SAudioSeparationTimeline.planTrackIndices(this.project, sourceInstanceId, stems.length)
+        : null;
+      if (!plan || !plan.ok) throw new Error('timeline_placement_failed');
+      if (plan.trackIndices.length) this.ensureTimelineTrackIndex(Math.max.apply(Math, plan.trackIndices));
+      const artifactById = {};
+      (result.artifacts || []).forEach((artifact) => { if (artifact && artifact.artifactId) artifactById[artifact.artifactId] = artifact; });
+      const failures = [];
+      for (let index = 0; index < stems.length; index += 1) {
+        const stem = stems[index] || {};
+        const artifact = artifactById[String(stem.artifactId || stem.stemAssetId || '')];
+        if (!artifact) { failures.push(String(stem.stemType || 'stem') + ': artifact missing'); continue; }
+        try {
+          if (typeof opts.onStatus === 'function') opts.onStatus('正在导入 ' + String(stem.stemType || 'stem') + '…');
+          const downloaded = await client.downloadArtifact(result.workerJobId, artifact.artifactId);
+          const mime = downloaded.mimeType || artifact.mimeType || 'audio/mpeg';
+          const name = String(stem.stemType || 'stem');
+          const fileName = (window.H2SLocalAudioAssets && typeof window.H2SLocalAudioAssets.normalizeAudioDownloadFilename === 'function')
+            ? window.H2SLocalAudioAssets.normalizeAudioDownloadFilename(artifact.filename || (name + '.mp3'), mime, downloaded.buffer, name)
+            : (name + '.mp3');
+          const committed = await this._commitNativeAudioFile(new File([downloaded.buffer], fileName, { type: mime }), {
+            baseName: name,
+            trackIndex: plan.trackIndices[index],
+            startBeat: sourceStartBeat,
+            statusDoneKey: 'io.importAudioStoredLocal',
+          });
+          if (!committed || !committed.ok) throw new Error('audio_materialize_failed');
+        } catch (err) {
+          failures.push(String(stem.stemType || 'stem') + ': ' + ((err && err.message) ? err.message : 'import_failed'));
+        }
+      }
+      const status = failures.length ? '高级分轨完成，但部分 Stem 导入失败：' + failures.join('；') : '高级分轨完成，音频 Stem 已保留。';
+      this._setAudioSeparationStatus(status);
+      this.setImportStatus(status, false);
+      return { ok: true, workerJobId: result.workerJobId, failures };
+    },
+
     _initTopBarImportTranscriptionControls(){
       if (typeof document === 'undefined') return;
       this._initAudioSeparationModal();
@@ -9180,6 +9270,19 @@ renderTimeline(){
             sourceAudioInstanceId: sourceAudioInstanceId,
             separationPreset: options.separationPreset,
             mode: options.mode,
+            onStatus: options.onStatus,
+          });
+        },
+        checkAdvancedStemAvailability(){
+          return self._checkAdvancedStemAvailability();
+        },
+        runAdvancedStemSeparation(clipId, instanceId, options){
+          options = options || {};
+          const sourceAudioInstanceId = self._ensureAudioSeparationSourceInstance(clipId, instanceId);
+          return self._runAdvancedStemSeparationForClip(clipId, {
+            sourceAudioInstanceId,
+            startSec: options.startSec,
+            durationSec: options.durationSec,
             onStatus: options.onStatus,
           });
         },
