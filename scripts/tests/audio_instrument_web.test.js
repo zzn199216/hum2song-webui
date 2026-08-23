@@ -8,10 +8,10 @@ const client = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'core', 'a
 const controller = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'controllers', 'audio_analysis_controller.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'index.html'), 'utf8');
 
-assert(worker.includes("importScripts(new URL('../vendor/onnxruntime-web/ort.wasm.min.js'"), 'worker should load the WASM-only ORT build locally');
+assert(worker.includes("importScripts(new URL('../vendor/onnxruntime-web/ort.wasm.min.js?v=ort-web-118'"), 'worker should load the WASM-only ORT build locally');
 assert(worker.includes('Math.exp(-logit)'), 'worker should convert independent AudioSet logits to probabilities');
 assert(worker.includes("executionProviders: ['wasm']"), 'worker should use the WASM execution provider');
-assert(worker.includes("new URL('../vendor/yamnet-v1/yamnet.onnx'"), 'worker should use the pinned YAMNet model');
+assert(worker.includes("new URL('../vendor/yamnet-v1/yamnet.onnx?v=yamnet-inline-v1'"), 'worker should use the pinned YAMNet model');
 assert(worker.includes('PATCH_FRAMES = 96') && worker.includes('PATCH_HOP_FRAMES = 48'), 'YAMNet patch framing should remain explicit');
 assert(worker.includes("status: 'ok'") && worker.includes('items: items'), 'worker should return multi-label instrument items');
 assert(worker.includes("{ id: 'piano'") && worker.includes("{ id: 'drums'"), 'worker should map core instruments');
@@ -25,6 +25,5 @@ assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxrunti
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxruntime-web', 'ort-wasm.wasm')), 'ORT fallback WASM asset should be vendored');
 assert(fs.statSync(path.join(root, 'static', 'pianoroll', 'vendor', 'yamnet-v1', 'yamnet.onnx')).size > 1000000, 'YAMNet model should be self-contained for browser loading');
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'yamnet-v1', 'yamnet.onnx')), 'YAMNet ONNX graph should be vendored');
-assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'yamnet-v1', 'yamnet.data')), 'YAMNet external weights should be vendored');
 
 console.log('audio_instrument_web.test.js: all passed');
