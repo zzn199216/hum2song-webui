@@ -181,6 +181,8 @@
   "audioAnalysis.rhythm": "リズム",
   "audioAnalysis.harmony": "ハーモニー",
   "audioAnalysis.instruments": "楽器",
+  "audioAnalysis.noInstruments": "明確な楽器を検出できませんでした",
+  "audioAnalysis.instrumentFailed": "楽器認識に失敗しました",
   "cloudAi.preset.internal": "内部デバッグ",
   "cloudAi.preset.basic.description": "小規模な Cloud AI クリーンアップとプレビュー支援。",
   "cloudAi.preset.standard.description": "メロディ、リズム、軽量な編曲支援。",

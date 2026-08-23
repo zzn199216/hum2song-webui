@@ -18,6 +18,7 @@ runOne('scripts/tests/clip_thumbnail_math.test.js');
 runOne('scripts/tests/waveform_peaks.test.js');
 runOne('scripts/tests/audio_analysis_engine.test.js');
 runOne('scripts/tests/audio_analysis_ui.test.js');
+runOne('scripts/tests/audio_instrument_web.test.js');
 
 runOne('scripts/tests/agent_patchsummary_smoke.test.js');
 runOne('scripts/tests/velocity_shape.test.js');

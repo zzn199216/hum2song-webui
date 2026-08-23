@@ -181,6 +181,8 @@
   "audioAnalysis.rhythm": "Rhythm",
   "audioAnalysis.harmony": "Harmony",
   "audioAnalysis.instruments": "Instruments",
+  "audioAnalysis.noInstruments": "No clear instrument detected",
+  "audioAnalysis.instrumentFailed": "Instrument recognition failed",
   "cloudAi.preset.internal": "Internal Debug",
   "cloudAi.preset.basic.description": "Small cloud AI cleanup and preview assistance.",
   "cloudAi.preset.standard.description": "Melody, rhythm, and lightweight arrangement assistance.",

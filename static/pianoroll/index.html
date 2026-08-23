@@ -2175,18 +2175,18 @@
   </div>
 
   <!-- i18n core (PR-G1a) - load before other scripts -->
-  <script src="/static/pianoroll/studio_asset_version.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/h2s_startup_perf.js?v=audio-analysis-v0"></script>
-  <script src="/static/i18n/i18n.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/studio_asset_version.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/h2s_startup_perf.js?v=audio-analysis-v2"></script>
+  <script src="/static/i18n/i18n.js?v=audio-analysis-v2"></script>
   <!-- Tone.js (UMD) - local vendor -->
   <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
-  <script src="/static/pianoroll/project.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/project.js?v=audio-analysis-v2"></script>
   <script src="/static/pianoroll/core/waveform_peaks.js?v=clip-canvas-v1"></script>
-  <script src="/static/pianoroll/core/local_audio_assets.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/core/instrument_manifest.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/core/gm_drum_kit.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/core/local_audio_assets.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/instrument_manifest.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/gm_drum_kit.js?v=audio-analysis-v2"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
   <script src="/static/pianoroll/core/velocity_shape.js?v=1"></script>
   <script src="/static/pianoroll/core/local_transpose.js?v=1"></script>
@@ -2205,12 +2205,12 @@
   <script src="/static/pianoroll/ui/timeline_view.js?v=clip-canvas-v1"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
   <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>
-  <script src="/static/pianoroll/timeline_controller.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/ui/library_view.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/controllers/library_controller.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/ui/selection_view.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/controllers/selection_controller.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/controllers/audio_controller.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/timeline_controller.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/ui/library_view.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/controllers/library_controller.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/ui/selection_view.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/controllers/selection_controller.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/controllers/audio_controller.js?v=audio-analysis-v2"></script>
   <script src="/static/pianoroll/llm_defaults.js"></script>
   <script src="/static/pianoroll/llm_config.js"></script>
   <script src="/static/pianoroll/llm_client.js"></script>
@@ -2227,14 +2227,15 @@
   <script src="/static/pianoroll/controllers/editor_runtime.js?v=clip-edit-v16"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
-  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=audio-analysis-v2"></script>
   <script src="/static/pianoroll/core/audio_convert_segment.js?v=clip-edit-v16"></script>
-  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/core/audio_decode.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/core/audio_analysis.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/audio_decode.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/audio_analysis.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/core/audio_instrument_client.js?v=audio-analysis-v2"></script>
   <script src="/static/pianoroll/internal_action_registry.js"></script>
   <script src="/static/pianoroll/internal_skill_registry.js"></script>
   <style>
@@ -2321,6 +2322,8 @@
     }
     .h2s-audio-analysis-status { margin-top: 7px; }
     .h2s-audio-analysis-grid span, .h2s-audio-analysis-status span { color: var(--muted, #aaa); text-align: right; }
+    .h2s-audio-analysis-instruments { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+    .h2s-audio-analysis-instrument { padding: 2px 5px; border-radius: 5px; background: rgba(73, 143, 255, .18); color: var(--text, #eee) !important; white-space: nowrap; }
     .h2s-audio-analysis-loading, .h2s-audio-analysis-error { margin: 16px 0 10px; font-size: 13px; line-height: 1.5; }
     .h2s-audio-analysis-error { color: var(--danger, #e55); }
     .h2s-audio-analysis-actions { margin-top: 12px; text-align: right; }
@@ -2497,9 +2500,9 @@
     } catch (_err) {}
   })();
   </script>
-  <script src="/static/pianoroll/app.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/cloud_project_bridge.js?v=audio-analysis-v0"></script>
-  <script src="/static/pianoroll/cloud_materials_panel.js?v=audio-analysis-v0"></script>
+  <script src="/static/pianoroll/app.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/cloud_project_bridge.js?v=audio-analysis-v2"></script>
+  <script src="/static/pianoroll/cloud_materials_panel.js?v=audio-analysis-v2"></script>
   <script>
   (function () {
     try {

@@ -181,6 +181,8 @@
   "audioAnalysis.rhythm": "节奏",
   "audioAnalysis.harmony": "和声",
   "audioAnalysis.instruments": "乐器",
+  "audioAnalysis.noInstruments": "未识别到明确乐器",
+  "audioAnalysis.instrumentFailed": "乐器识别失败",
   "cloudAi.preset.internal": "内部调试",
   "cloudAi.preset.basic.description": "适合基础清理、快速预览和轻量辅助。",
   "cloudAi.preset.standard.description": "适合旋律、节奏和轻量编配辅助。",

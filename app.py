@@ -49,6 +49,11 @@ class StudioStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):  # type: ignore[override]
         response = await super().get_response(path, scope)
         normalized = path.replace("\\", "/").lower()
+        if normalized.endswith(".mjs"):
+            # ORT loads its WASM backend through a dynamic module import.  A
+            # text/plain response makes Chromium reject that import before the
+            # runtime can initialize.
+            response.headers["Content-Type"] = "text/javascript; charset=utf-8"
         if normalized.startswith(SAMPLER_STATIC_PREFIX) and normalized.endswith((".mp3", ".ogg", ".wav")):
             response.headers["Cache-Control"] = SAMPLER_CACHE_CONTROL
         return response

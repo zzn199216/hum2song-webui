@@ -4788,6 +4788,9 @@ $('#rngPitchCenter').addEventListener('input', () => {
       // AudioAnalysis V0: compact selected-audio action with session-only cache.
       try{
         if (window.H2SAudioAnalysisController && window.H2SAudioAnalysisController.create){
+          const instrumentClient = (window.H2SAudioInstrumentClient && window.H2SAudioInstrumentClient.create)
+            ? window.H2SAudioInstrumentClient.create({})
+            : null;
           this.audioAnalysisCtrl = window.H2SAudioAnalysisController.create({
             getClip: (clipId) => {
               const p2 = (typeof this.getProjectV2 === 'function') ? this.getProjectV2() : null;
@@ -4796,6 +4799,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             resolveAudioFile: (clipId) => this._resolveLocalAudioFileForClip(clipId),
             engine: window.H2SAudioAnalysis,
             decoder: window.H2SAudioDecode,
+            instrumentAnalyzer: instrumentClient ? ((buffer) => instrumentClient.analyzeAudioBuffer(buffer)) : null,
             t: (key, fallback) => ((window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : (fallback || key)),
           });
         }

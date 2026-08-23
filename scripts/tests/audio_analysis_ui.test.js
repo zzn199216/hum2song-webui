@@ -58,6 +58,20 @@ function makeModal(){
   assert.strictEqual(decodeCount, 1);
   assert.strictEqual(modal.hidden, false);
 
+  const instrumentModal = makeModal();
+  const instrumentController = controllerApi.create({
+    modalEl: instrumentModal,
+    getClip: () => clip,
+    resolveAudioFile: async () => ({ name: 'test.wav' }),
+    decoder: { decodeAudioFile: async () => ({ numberOfChannels: 1, sampleRate: 4, duration: 1, getChannelData: () => new Float32Array([0, 1, 0, -1]) }) },
+    instrumentAnalyzer: async () => ({ status: 'ok', items: [{ id: 'piano', name: '钢琴', confidence: 0.84 }] }),
+    engine,
+    t: (_key, fallback) => fallback,
+  });
+  const instrumentResult = await instrumentController.open(clip.id);
+  assert.strictEqual(instrumentResult.ok, true);
+  assert.ok(instrumentModal._content.innerHTML.includes('钢琴 84%'));
+
   const failingModal = makeModal();
   const failing = controllerApi.create({
     modalEl: failingModal,

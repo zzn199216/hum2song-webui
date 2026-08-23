@@ -21,6 +21,20 @@
     return value == null || !isFinite(Number(value)) ? '—' : Number(value).toFixed(1) + (suffix || '');
   }
 
+  function instrumentsHTML(instruments, t){
+    instruments = instruments || {};
+    t = typeof t === 'function' ? t : function(_key, fallback){ return fallback; };
+    if (instruments.status === 'ok' && Array.isArray(instruments.items) && instruments.items.length){
+      return '<span class="h2s-audio-analysis-instruments">' + instruments.items.map(function(item){
+        var confidence = item && item.confidence != null ? ' ' + Math.round(Number(item.confidence) * 100) + '%' : '';
+        return '<span class="h2s-audio-analysis-instrument">' + escapeHtml(item && item.name || '') + escapeHtml(confidence) + '</span>';
+      }).join('') + '</span>';
+    }
+    if (instruments.status === 'ok') return escapeHtml(t('audioAnalysis.noInstruments', '未识别到明确乐器'));
+    if (instruments.status === 'failed') return escapeHtml(t('audioAnalysis.instrumentFailed', '乐器识别失败'));
+    return escapeHtml(t('audioAnalysis.notAvailable', '暂不可用'));
+  }
+
   function resultHTML(result, t){
     t = typeof t === 'function' ? t : function(_key, fallback){ return fallback; };
     var technical = result.technical || {};
@@ -37,7 +51,7 @@
       '</div>' +
       '<div class="h2s-audio-analysis-status"><b>' + escapeHtml(t('audioAnalysis.rhythm', '节奏')) + '</b><span>' + (rhythm.bpm == null ? escapeHtml(unavailable) : escapeHtml(String(rhythm.bpm) + ' BPM')) + '</span></div>' +
       '<div class="h2s-audio-analysis-status"><b>' + escapeHtml(t('audioAnalysis.harmony', '和声')) + '</b><span>' + (harmony.key == null ? escapeHtml(unavailable) : escapeHtml(String(harmony.key))) + '</span></div>' +
-      '<div class="h2s-audio-analysis-status"><b>' + escapeHtml(t('audioAnalysis.instruments', '乐器')) + '</b><span>' + escapeHtml(unavailable) + '</span></div>';
+      '<div class="h2s-audio-analysis-status"><b>' + escapeHtml(t('audioAnalysis.instruments', '乐器')) + '</b><span>' + instrumentsHTML(instruments, t) + '</span></div>';
   }
 
   function create(opts){
@@ -49,6 +63,7 @@
     var activeClipId = null;
     var engine = opts.engine || (root && root.H2SAudioAnalysis);
     var decoder = opts.decoder || (root && root.H2SAudioDecode);
+    var instrumentAnalyzer = opts.instrumentAnalyzer || null;
     var t = opts.t || function(_key, fallback){ return fallback; };
 
     function cacheKey(clip){
@@ -131,6 +146,13 @@
             clipId: clipId,
             assetId: clip.audio && clip.audio.assetRef ? clip.audio.assetRef : null,
           }});
+          if (typeof instrumentAnalyzer === 'function'){
+            try{
+              result.instruments = await instrumentAnalyzer(buffer, { clipId: clipId });
+            }catch(instrumentError){
+              result.instruments = { status: 'failed', error: String(instrumentError && instrumentError.message || instrumentError || 'instrument_analysis_failed') };
+            }
+          }
           cache.set(key, result);
           if (activeClipId === String(clipId)) renderResult(result);
           return { ok: true, cached: false, result: result };
