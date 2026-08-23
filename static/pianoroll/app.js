@@ -7285,18 +7285,61 @@ renderTimeline(){
         ? p2.instances.find((inst) => inst && String(inst.id) === sourceInstanceId && String(inst.clipId) === String(clipId))
         : null;
       if (!clip || P.clipKind(clip) !== 'audio' || !sourceInstance) throw new Error('source_audio_not_found');
-      const sourceAssetId = clip.audio && typeof clip.audio.assetRef === 'string' ? clip.audio.assetRef.trim() : '';
-      if (!sourceAssetId) throw new Error('missing_audio_asset');
+      const originalSourceAssetId = clip.audio && typeof clip.audio.assetRef === 'string' ? clip.audio.assetRef.trim() : '';
+      if (!originalSourceAssetId) throw new Error('missing_audio_asset');
       const startSec = Math.max(0, Number(opts.startSec) || 0);
       const durationSec = Number(opts.durationSec);
       if (!isFinite(durationSec) || durationSec <= 0 || durationSec > 600.001) throw new Error('audio_too_long');
+      const sourceDurationSec = Number(clip.audio && clip.audio.durationSec) || durationSec;
+      let sourceAssetId = originalSourceAssetId;
+      let providerStartSec = startSec;
+      let providerDurationSec = durationSec;
+      const localAssets = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
+      const conversionClient = (typeof window !== 'undefined') ? window.H2SAudioWorkerConversionClient : null;
+      const isLocalSource = /^localidb:/i.test(originalSourceAssetId);
+      if (isLocalSource) {
+        if (!localAssets || typeof localAssets.getFileForLocalAssetRef !== 'function') throw new Error('missing_audio_asset');
+        const file = await localAssets.getFileForLocalAssetRef(originalSourceAssetId);
+        if (!file) throw new Error('missing_audio_asset');
+        const isFullSource = startSec <= 0.001 && Math.abs(durationSec - sourceDurationSec) <= 0.01;
+        let uploadBuffer;
+        let uploadFileName = file.name || 'advanced-source.wav';
+        let uploadMimeType = file.type || 'audio/wav';
+        let sourceKey;
+        let sourceMetadata = { parentSourceAssetId: originalSourceAssetId, cropVersion: 'studio-wav-pcm16-v1' };
+        if (isFullSource) {
+          uploadBuffer = await file.arrayBuffer();
+          sourceKey = 'studio:' + originalSourceAssetId + '|full|source-v1';
+        } else {
+          if (!conversionClient || typeof conversionClient._segmentToWavArrayBuffer !== 'function') throw new Error('segment_extract_failed');
+          uploadBuffer = await conversionClient._segmentToWavArrayBuffer(file, { startSec: startSec, durationSec: durationSec });
+          uploadFileName = 'studio-advanced-range.wav';
+          uploadMimeType = 'audio/wav';
+          sourceKey = 'studio:' + originalSourceAssetId + '|range:' + startSec.toFixed(3) + ':' + durationSec.toFixed(3) + '|crop:studio-wav-pcm16-v1';
+          sourceMetadata.sourceRange = { startSec: startSec, durationSec: durationSec };
+        }
+        const prepared = await client.prepareSource({
+          audioBuffer: uploadBuffer,
+          filename: uploadFileName,
+          mimeType: uploadMimeType,
+          sourceKey: sourceKey,
+          sourceDurationSec: isFullSource ? sourceDurationSec : durationSec,
+          sourceMetadata: sourceMetadata,
+        });
+        if (!prepared || !prepared.ok || !prepared.sourceAssetId) throw new Error((prepared && prepared.reason) || 'source_prepare_failed');
+        sourceAssetId = prepared.sourceAssetId;
+        providerStartSec = 0;
+        providerDurationSec = Number(prepared.sourceDurationSec) > 0 ? Number(prepared.sourceDurationSec) : (isFullSource ? sourceDurationSec : durationSec);
+      } else if (startSec > 0.001 || Math.abs(durationSec - sourceDurationSec) > 0.01) {
+        throw new Error('advanced_separation_range_unavailable');
+      }
       const bpm = Number(p2.bpm || 120);
       const sourceStartBeat = Number(sourceInstance.startBeat || 0) + startSec * bpm / 60;
       const result = await client.separate({
         sourceAssetId,
-        startSec,
-        durationSec,
-        sourceDurationSec: Number(clip.audio && clip.audio.durationSec) || durationSec,
+        startSec: providerStartSec,
+        durationSec: providerDurationSec,
+        sourceDurationSec: isLocalSource ? providerDurationSec : sourceDurationSec,
         metadata: {
           originalAudioClipId: clipId,
           alignment: { sourceAudioInstanceId: sourceInstanceId, sourceStartBeat },

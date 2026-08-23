@@ -22,6 +22,34 @@
     return base._requestHost('H2S_CLOUD_ADVANCED_STEM_AVAILABILITY', {}, null, { timeoutMs: STATUS_TIMEOUT_MS, stage: 'advanced_stem_availability' });
   }
 
+  async function prepareSource(options) {
+    options = options || {};
+    var base = baseClient();
+    if (!isEnabled() || !base || typeof base._requestHost !== 'function') return { ok: false, reason: 'worker_unavailable' };
+    var audioBuffer = options.audioBuffer instanceof ArrayBuffer ? options.audioBuffer : null;
+    var sourceKey = String(options.sourceKey || '').trim();
+    var durationSec = Number(options.sourceDurationSec);
+    if (!audioBuffer || !sourceKey || !isFinite(durationSec) || durationSec <= 0 || durationSec > MAX_DURATION_SEC + 0.001) {
+      return { ok: false, reason: 'bad_args' };
+    }
+    var prepared = await base._requestHost('H2S_CLOUD_ADVANCED_STEM_SOURCE_PREPARE', {
+      filename: options.filename || 'advanced-source.wav',
+      mimeType: options.mimeType || 'audio/wav',
+      sourceKey: sourceKey,
+      sourceDurationSec: durationSec,
+      sourceMetadata: options.sourceMetadata || {},
+      audioBuffer: audioBuffer,
+    }, [audioBuffer], { timeoutMs: CREATE_TIMEOUT_MS, stage: 'advanced_stem_source_prepare' });
+    var sourceAssetId = prepared && typeof prepared.sourceAssetId === 'string' ? prepared.sourceAssetId.trim() : '';
+    if (!sourceAssetId) throw new Error('source_prepare_failed');
+    return {
+      ok: true,
+      sourceAssetId: sourceAssetId,
+      sourceDurationSec: Number(prepared.sourceDurationSec) > 0 ? Number(prepared.sourceDurationSec) : durationSec,
+      reused: prepared.reused === true,
+    };
+  }
+
   async function separate(options) {
     options = options || {};
     var base = baseClient();
@@ -63,7 +91,7 @@
     return { buffer: response.artifactBuffer, filename: response.filename || 'stem.mp3', mimeType: response.mimeType || 'audio/mpeg' };
   }
 
-  var api = { isEnabled: isEnabled, checkAvailability: checkAvailability, separate: separate, downloadArtifact: downloadArtifact, maxDurationSec: MAX_DURATION_SEC };
+  var api = { isEnabled: isEnabled, checkAvailability: checkAvailability, prepareSource: prepareSource, separate: separate, downloadArtifact: downloadArtifact, maxDurationSec: MAX_DURATION_SEC };
   if (typeof window !== 'undefined') window.H2SAudioWorkerAdvancedStemClient = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

@@ -59,6 +59,21 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   console.log('PASS selection advanced panel');
 })();
 
+(function testAdvancedStemSourcePreparation(){
+  const appSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'app.js'), 'utf8');
+  const clientSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'core', 'audio_worker_advanced_stem_client.js'), 'utf8');
+  assert(appSrc.includes('getFileForLocalAssetRef'), 'advanced stems resolve localidb through the existing local asset store');
+  assert(appSrc.includes('client.prepareSource'), 'advanced stems prepare a provider source before job creation');
+  assert(appSrc.includes("sourceKey = 'studio:' + originalSourceAssetId + '|range:'"), 'range source key is deterministic');
+  assert(appSrc.includes('crop:studio-wav-pcm16-v1'), 'range source key includes crop version');
+  assert(appSrc.includes('_segmentToWavArrayBuffer'), 'range preparation reuses the existing WAV materializer');
+  assert(clientSrc.includes('H2S_CLOUD_ADVANCED_STEM_SOURCE_PREPARE'), 'advanced client exposes source preparation bridge');
+  assert(clientSrc.includes('prepareSource: prepareSource'), 'advanced client exports source preparation');
+  assert(clientSrc.includes('[audioBuffer]'), 'source preparation transfers audio bytes');
+  assert(appSrc.includes('uploadFileAndGenerate'), 'standard audio-to-MIDI path remains present');
+  console.log('PASS advanced stem source preparation wiring');
+})();
+
 (function testWaveformI18n(){
   const en = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'en.json'), 'utf8'));
   const zh = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'zh.json'), 'utf8'));
