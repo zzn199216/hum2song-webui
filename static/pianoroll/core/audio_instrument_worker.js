@@ -294,7 +294,7 @@
         peakScore: Number(item.peak.toFixed(3)),
         coverage: Number(coverage.toFixed(3)),
       };
-    }).filter(function(item){ return item.peakScore >= 0.25 && (item.coverage >= 0.02 || item.confidence >= 0.45); })
+    }).filter(function(item){ return item.confidence > 0.08; })
       .sort(function(a, b){ return b.confidence - a.confidence; });
     var result = {
       status: 'ok',

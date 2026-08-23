@@ -7,6 +7,17 @@ const controllerApi = require('../../static/pianoroll/controllers/audio_analysis
 assert.strictEqual(controllerApi.isAudioClip({ kind: 'audio' }), true);
 assert.strictEqual(controllerApi.isAudioClip({ kind: 'note' }), false);
 assert.ok(controllerApi.resultHTML(engine.analyzeChannels([new Float32Array([0, 1])], 2), (_key, fallback) => fallback).includes('暂不可用'));
+const instrumentDisplay = engine.analyzeChannels([new Float32Array([0, 1])], 2);
+instrumentDisplay.instruments = {
+  status: 'ok',
+  items: [
+    { id: 'below', name: '低置信度', confidence: 0.08 },
+    { id: 'above', name: '超过阈值', confidence: 0.081 },
+  ],
+};
+const instrumentDisplayHtml = controllerApi.resultHTML(instrumentDisplay, (_key, fallback) => fallback);
+assert.ok(instrumentDisplayHtml.includes('超过阈值 8%'));
+assert.ok(!instrumentDisplayHtml.includes('低置信度'));
 assert.notStrictEqual(controllerApi.cacheKeyFor({ id: 'c1', audio: { assetRef: 'localidb:a' } }), controllerApi.cacheKeyFor({ id: 'c1', audio: { assetRef: 'localidb:b' } }));
 
 function makeModal(){
