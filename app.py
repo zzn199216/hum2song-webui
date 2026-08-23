@@ -37,6 +37,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 STATIC_DIR = PROJECT_ROOT / "static"
 SAMPLER_STATIC_PREFIX = "pianoroll/vendor/tonejs-instruments/samples/"
 SAMPLER_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=604800"
+MODEL_STATIC_PREFIX = "pianoroll/vendor/yamnet-v1/"
+ORT_STATIC_PREFIX = "pianoroll/vendor/onnxruntime-web/"
+VERSIONED_MODEL_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 class StudioStaticFiles(StaticFiles):
@@ -54,6 +57,10 @@ class StudioStaticFiles(StaticFiles):
             # text/plain response makes Chromium reject that import before the
             # runtime can initialize.
             response.headers["Content-Type"] = "text/javascript; charset=utf-8"
+        if (normalized.startswith(MODEL_STATIC_PREFIX) and normalized.endswith((".onnx", ".csv"))) or (
+            normalized.startswith(ORT_STATIC_PREFIX) and normalized.endswith((".js", ".wasm"))
+        ):
+            response.headers["Cache-Control"] = VERSIONED_MODEL_CACHE_CONTROL
         if normalized.startswith(SAMPLER_STATIC_PREFIX) and normalized.endswith((".mp3", ".ogg", ".wav")):
             response.headers["Cache-Control"] = SAMPLER_CACHE_CONTROL
         return response

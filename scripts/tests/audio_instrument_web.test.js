@@ -7,6 +7,7 @@ const worker = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'core', 'a
 const client = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'core', 'audio_instrument_client.js'), 'utf8');
 const controller = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'controllers', 'audio_analysis_controller.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'static', 'pianoroll', 'index.html'), 'utf8');
+const app = fs.readFileSync(path.join(root, 'app.py'), 'utf8');
 
 assert(worker.includes("importScripts(new URL('../vendor/onnxruntime-web/ort.wasm.min.js?v=ort-web-118'"), 'worker should load the WASM-only ORT build locally');
 assert(worker.includes('Math.exp(-logit)'), 'worker should convert independent AudioSet logits to probabilities');
@@ -26,5 +27,6 @@ assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxrunti
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxruntime-web', 'ort-wasm.wasm')), 'ORT fallback WASM asset should be vendored');
 assert(fs.statSync(path.join(root, 'static', 'pianoroll', 'vendor', 'yamnet-v1', 'yamnet.onnx')).size > 1000000, 'YAMNet model should be self-contained for browser loading');
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'yamnet-v1', 'yamnet.onnx')), 'YAMNet ONNX graph should be vendored');
+assert(app.includes('public, max-age=31536000, immutable'), 'model and runtime assets should use immutable versioned caching');
 
 console.log('audio_instrument_web.test.js: all passed');
