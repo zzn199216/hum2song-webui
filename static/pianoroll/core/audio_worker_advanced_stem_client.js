@@ -25,19 +25,17 @@
   async function separate(options) {
     options = options || {};
     var base = baseClient();
-    if (!isEnabled() || !base || typeof base._requestHost !== 'function' || typeof base._segmentToWavArrayBuffer !== 'function') return { ok: false, reason: 'worker_unavailable' };
-    var file = options.file;
+    if (!isEnabled() || !base || typeof base._requestHost !== 'function') return { ok: false, reason: 'worker_unavailable' };
+    var sourceAssetId = String(options.sourceAssetId || '').trim();
     var durationSec = Number(options.durationSec);
-    if (!file || !isFinite(durationSec) || durationSec <= 0 || durationSec > MAX_DURATION_SEC + 0.001) return { ok: false, reason: 'bad_args' };
-    emit(options, { phase: 'encoding' });
-    var audioBuffer = await base._segmentToWavArrayBuffer(file, { startSec: Math.max(0, Number(options.startSec) || 0), durationSec: durationSec });
-    emit(options, { phase: 'uploading' });
+    if (!sourceAssetId || !isFinite(durationSec) || durationSec <= 0 || durationSec > MAX_DURATION_SEC + 0.001) return { ok: false, reason: 'bad_args' };
+    emit(options, { phase: 'preparing' });
     var created = await base._requestHost('H2S_CLOUD_ADVANCED_STEM_JOB_CREATE', {
-      filename: 'studio-advanced-stem.wav',
-      mimeType: 'audio/wav',
+      sourceAssetId: sourceAssetId,
+      sourceRange: { startSec: Math.max(0, Number(options.startSec) || 0), durationSec: durationSec },
+      sourceDurationSec: Number(options.sourceDurationSec) > 0 ? Number(options.sourceDurationSec) : durationSec,
       metadata: options.metadata || {},
-      audioBuffer: audioBuffer,
-    }, [audioBuffer], { timeoutMs: CREATE_TIMEOUT_MS, stage: 'advanced_stem_create' });
+    }, null, { timeoutMs: CREATE_TIMEOUT_MS, stage: 'advanced_stem_create' });
     var job = created && created.job ? created.job : {};
     var jobId = typeof job.id === 'string' ? job.id : '';
     if (!jobId) throw new Error('worker_failed');

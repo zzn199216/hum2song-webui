@@ -7285,36 +7285,26 @@ renderTimeline(){
         ? p2.instances.find((inst) => inst && String(inst.id) === sourceInstanceId && String(inst.clipId) === String(clipId))
         : null;
       if (!clip || P.clipKind(clip) !== 'audio' || !sourceInstance) throw new Error('source_audio_not_found');
-      const file = opts.fileOverride || await this._resolveLocalAudioFileForClip(clipId);
-      if (!file) throw new Error('missing_audio');
+      const sourceAssetId = clip.audio && typeof clip.audio.assetRef === 'string' ? clip.audio.assetRef.trim() : '';
+      if (!sourceAssetId) throw new Error('missing_audio_asset');
       const startSec = Math.max(0, Number(opts.startSec) || 0);
       const durationSec = Number(opts.durationSec);
       if (!isFinite(durationSec) || durationSec <= 0 || durationSec > 600.001) throw new Error('audio_too_long');
       const bpm = Number(p2.bpm || 120);
       const sourceStartBeat = Number(sourceInstance.startBeat || 0) + startSec * bpm / 60;
-      const audioMeta = clip.audio && typeof clip.audio === 'object'
-        ? (clip.audio.metadata && typeof clip.audio.metadata === 'object' ? clip.audio.metadata : clip.audio)
-        : {};
-      const providerTaskId = String(audioMeta.providerTaskId || audioMeta.sunoTaskId || audioMeta.taskId || '').trim();
-      const providerAudioId = String(audioMeta.providerAudioId || audioMeta.sunoAudioId || audioMeta.audioId || '').trim();
       const result = await client.separate({
-        file,
+        sourceAssetId,
         startSec,
         durationSec,
+        sourceDurationSec: Number(clip.audio && clip.audio.durationSec) || durationSec,
         metadata: {
           originalAudioClipId: clipId,
-          originalAudioAssetId: clip.audio && clip.audio.assetRef ? String(clip.audio.assetRef) : null,
-          sourceStartTime: startSec,
-          sourceSegmentStartSec: startSec,
-          sourceSegmentDurationSec: durationSec,
-          ...(providerTaskId ? { providerTaskId } : {}),
-          ...(providerAudioId ? { providerAudioId } : {}),
           alignment: { sourceAudioInstanceId: sourceInstanceId, sourceStartBeat },
         },
         onStatus: (status) => {
           if (typeof opts.onStatus !== 'function') return;
           const phase = status && status.phase ? String(status.phase) : 'processing';
-          opts.onStatus({ encoding: '正在准备音频…', uploading: '正在上传音频…', processing: '高级精细分轨处理中…' }[phase] || '高级精细分轨处理中…');
+          opts.onStatus({ preparing: '正在准备高级分轨…', processing: '高级精细分轨处理中…' }[phase] || '高级精细分轨处理中…');
         },
       });
       if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
