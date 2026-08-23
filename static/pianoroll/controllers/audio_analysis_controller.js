@@ -64,6 +64,7 @@
     var engine = opts.engine || (root && root.H2SAudioAnalysis);
     var decoder = opts.decoder || (root && root.H2SAudioDecode);
     var instrumentAnalyzer = opts.instrumentAnalyzer || null;
+    var workerAnalyzer = opts.workerAnalyzer || (root && root.H2SAudioWorkerAnalysisClient);
     var t = opts.t || function(_key, fallback){ return fallback; };
 
     function cacheKey(clip){
@@ -144,10 +145,20 @@
       renderLoading();
       var task = (async function(){
         try{
-          if (!engine || typeof engine.analyzeAudioBuffer !== 'function') throw new Error('analysis_engine_unavailable');
-          if (!decoder || typeof decoder.decodeAudioFile !== 'function') throw new Error('audio_decode_unavailable');
           var file = typeof opts.resolveAudioFile === 'function' ? await opts.resolveAudioFile(clipId) : null;
           if (!file) throw new Error('audio_source_missing');
+          if (workerAnalyzer && typeof workerAnalyzer.analyze === 'function' && workerAnalyzer.isCloudMode && workerAnalyzer.isCloudMode()){
+            var workerResult = await workerAnalyzer.analyze({ file: file, clipId: clipId, onStatus: function(status){
+              var label = contentEl() && contentEl().querySelector ? contentEl().querySelector('[data-role="loading-text"]') : null;
+              if (label && status && status.status) label.textContent = t('audioAnalysis.loading', '正在分析…') + ' ' + String(status.status);
+            }});
+            if (!workerResult || workerResult.ok !== true || !workerResult.result) throw new Error('worker_result_unavailable');
+            cache.set(key, workerResult.result);
+            if (activeClipId === String(clipId)) renderResult(workerResult.result);
+            return { ok: true, cached: false, result: workerResult.result, workerJobId: workerResult.workerJobId };
+          }
+          if (!engine || typeof engine.analyzeAudioBuffer !== 'function') throw new Error('analysis_engine_unavailable');
+          if (!decoder || typeof decoder.decodeAudioFile !== 'function') throw new Error('audio_decode_unavailable');
           var buffer = await decoder.decodeAudioFile(file);
           var result = engine.analyzeAudioBuffer(buffer, { source: {
             clipId: clipId,
