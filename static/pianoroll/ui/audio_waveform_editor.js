@@ -839,11 +839,9 @@
       }
 
       try {
-        var AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) throw new Error('no_audio_context');
-        var ac = new AC();
-        var ab = await file.arrayBuffer();
-        audioBuffer = await ac.decodeAudioData(ab.slice(0));
+        var decoder = (typeof window !== 'undefined') ? window.H2SAudioDecode : null;
+        if (!decoder || typeof decoder.decodeAudioFile !== 'function') throw new Error('audio_decode_unavailable');
+        audioBuffer = await decoder.decodeAudioFile(file);
         if (audioDur <= 0 && audioBuffer) audioDur = audioBuffer.duration;
         peaks = computePeaksFromBuffer(audioBuffer, DEFAULT_PEAKS);
         setFallbackVisible(false, '');
@@ -853,7 +851,6 @@
           if (cs) setConvertStatus(cs);
         }
         redrawCanvas();
-        try { await ac.close(); } catch (e2) {}
       } catch (decErr) {
         setFallbackVisible(true, t('audio.waveform.decodeFailed', 'Waveform preview unavailable. Use the numeric controls below.'));
         if (statusEl) statusEl.textContent = '';

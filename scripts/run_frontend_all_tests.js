@@ -16,6 +16,8 @@ runOne('scripts/run_frontend_bpm_invariants_tests.js');
 runOne('scripts/run_frontend_timeline_unit_tests.js');
 runOne('scripts/tests/clip_thumbnail_math.test.js');
 runOne('scripts/tests/waveform_peaks.test.js');
+runOne('scripts/tests/audio_analysis_engine.test.js');
+runOne('scripts/tests/audio_analysis_ui.test.js');
 
 runOne('scripts/tests/agent_patchsummary_smoke.test.js');
 runOne('scripts/tests/velocity_shape.test.js');

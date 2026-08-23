@@ -4785,6 +4785,24 @@ $('#rngPitchCenter').addEventListener('input', () => {
         console.warn('SelectionController init failed', e);
       }
 
+      // AudioAnalysis V0: compact selected-audio action with session-only cache.
+      try{
+        if (window.H2SAudioAnalysisController && window.H2SAudioAnalysisController.create){
+          this.audioAnalysisCtrl = window.H2SAudioAnalysisController.create({
+            getClip: (clipId) => {
+              const p2 = (typeof this.getProjectV2 === 'function') ? this.getProjectV2() : null;
+              return p2 && p2.clips ? p2.clips[clipId] || null : null;
+            },
+            resolveAudioFile: (clipId) => this._resolveLocalAudioFileForClip(clipId),
+            engine: window.H2SAudioAnalysis,
+            decoder: window.H2SAudioDecode,
+            t: (key, fallback) => ((window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : (fallback || key)),
+          });
+        }
+      }catch(e){
+        console.warn('AudioAnalysisController init failed', e);
+      }
+
       // Audio controller (project playback + clip preview)
       // Editor runtime: modal editing logic is modularized into controllers/editor_runtime.js
       try{
@@ -6303,12 +6321,17 @@ renderTimeline(){
           `</div>` +
         `</details>`
       );
+      const isAudioClip = !!(P && typeof P.clipKind === 'function' && P.clipKind(clip) === 'audio');
+      const audioAnalysisHtml = isAudioClip
+        ? `<div class="row" style="margin-top:8px;"><button type="button" class="btn mini" data-act="audioAnalysis" data-id="${escapeHtml(clipId)}">${escapeHtml(_t('audioAnalysis.open', '分析音频'))}</button></div>`
+        : '';
       const clipDisplayName = clip.name || clipId || 'Untitled';
       box.removeAttribute('data-i18n');
       box.className = '';
       box.innerHTML = (
-        `<div class="kv"><b>Clip</b><input type="text" data-act="inspClipName" data-id="${escapeHtml(clipId)}" data-initial-value="${escapeHtml(clipDisplayName)}" value="${escapeHtml(clipDisplayName)}" style="flex:1; min-width:0; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; box-sizing:border-box;" /></div>` +
-        optimizeBlockHtml +
+         `<div class="kv"><b>Clip</b><input type="text" data-act="inspClipName" data-id="${escapeHtml(clipId)}" data-initial-value="${escapeHtml(clipDisplayName)}" value="${escapeHtml(clipDisplayName)}" style="flex:1; min-width:0; padding:4px 6px; font-size:13px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; box-sizing:border-box;" /></div>` +
+         audioAnalysisHtml +
+         optimizeBlockHtml +
         (historyHtml ? (
           `<details class="clipAdvanced" data-insp-section="history" style="margin-top:6px;"${getInspectorSectionOpen('history') ? ' open' : ''}>` +
             `<summary style="cursor:pointer; user-select:none; opacity:0.8;">History</summary>` +
@@ -6372,6 +6395,11 @@ renderTimeline(){
           if (act === 'inspOpenEditor'){
             ev.preventDefault();
             self.openClipEditor(cid);
+            return;
+          }
+          if (act === 'audioAnalysis'){
+            ev.preventDefault();
+            if (typeof self.openAudioAnalysis === 'function') self.openAudioAnalysis(cid, btn);
             return;
           }
           const p2 = self.getProjectV2();
@@ -9023,6 +9051,13 @@ renderTimeline(){
       if (!LAS || typeof LAS.getFileForLocalAssetRef !== 'function') return null;
       if (!assetRef || typeof LAS.isLocalImportedAudioRef !== 'function' || !LAS.isLocalImportedAudioRef(assetRef)) return null;
       return LAS.getFileForLocalAssetRef(assetRef);
+    },
+
+    openAudioAnalysis(clipId){
+      if (!this.audioAnalysisCtrl || typeof this.audioAnalysisCtrl.open !== 'function'){
+        return Promise.resolve({ ok: false, reason: 'analysis_unavailable' });
+      }
+      return this.audioAnalysisCtrl.open(clipId);
     },
 
     /** Save the exact browser-local source file for a native (green) audio clip. */
