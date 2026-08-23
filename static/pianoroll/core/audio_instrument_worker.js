@@ -12,7 +12,10 @@
   var FFT_SIZE = 512;
   var SPECTRUM_BINS = FFT_SIZE / 2 + 1;
   var PATCH_FRAMES = 96;
-  var PATCH_HOP_FRAMES = 48;
+  // Instrument presence does not need YAMNet's dense 0.48s hop.  A 0.96s
+  // hop plus an evenly distributed cap keeps long-song scans responsive.
+  var PATCH_HOP_FRAMES = 96;
+  var MAX_PATCHES = 32;
   var MEL_BANDS = 64;
   var MEL_MIN_HZ = 125;
   var MEL_MAX_HZ = 7500;
@@ -168,6 +171,16 @@
     return patches;
   }
 
+  function selectPatches(patches){
+    if (patches.length <= MAX_PATCHES) return patches;
+    var selected = new Array(MAX_PATCHES);
+    for (var i = 0; i < MAX_PATCHES; i++){
+      var sourceIndex = Math.round(i * (patches.length - 1) / (MAX_PATCHES - 1));
+      selected[i] = patches[sourceIndex];
+    }
+    return selected;
+  }
+
   function ensureOrt(){
     if (sessionPromise) return sessionPromise;
     importScripts(new URL('../vendor/onnxruntime-web/ort.wasm.min.js?v=ort-web-118', self.location.href).href);
@@ -198,7 +211,9 @@
   async function analyze(message){
     var source = message.audio instanceof Float32Array ? message.audio : new Float32Array(message.audio);
     var samples = resampleLinear(source, Number(message.sampleRate) || SAMPLE_RATE);
-    var patches = buildFeatures(samples);
+    post({ type: 'progress', requestId: message.requestId, progress: 0, phase: 'preparing' });
+    var allPatches = buildFeatures(samples);
+    var patches = selectPatches(allPatches);
     var session = await ensureOrt();
     var stats = GROUPS.map(function(group){ return { group: group, sum: 0, peak: 0, active: 0 }; });
     for (var patchIndex = 0; patchIndex < patches.length; patchIndex++){
@@ -232,6 +247,8 @@
       executionProvider: 'wasm',
       durationSec: Number((samples.length / SAMPLE_RATE).toFixed(3)),
       frames: patches.length,
+      candidateFrames: allPatches.length,
+      samplingMode: 'fast-scan',
       items: items,
     };
   }

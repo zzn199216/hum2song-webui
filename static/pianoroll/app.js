@@ -4799,7 +4799,7 @@ $('#rngPitchCenter').addEventListener('input', () => {
             resolveAudioFile: (clipId) => this._resolveLocalAudioFileForClip(clipId),
             engine: window.H2SAudioAnalysis,
             decoder: window.H2SAudioDecode,
-            instrumentAnalyzer: instrumentClient ? ((buffer) => instrumentClient.analyzeAudioBuffer(buffer)) : null,
+            instrumentAnalyzer: instrumentClient ? ((buffer, options) => instrumentClient.analyzeAudioBuffer(buffer, options)) : null,
             t: (key, fallback) => ((window.I18N && window.I18N.t) ? window.I18N.t(key, fallback) : (fallback || key)),
           });
         }

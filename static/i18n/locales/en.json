@@ -169,6 +169,7 @@
   "audioAnalysis.open": "Analyze audio",
   "audioAnalysis.title": "Audio analysis",
   "audioAnalysis.loading": "Analyzing…",
+  "audioAnalysis.instrumentLoading": "Recognizing instruments…",
   "audioAnalysis.failed": "The audio could not be analyzed. Check that the original file is still available in this browser.",
   "audioAnalysis.retry": "Try again",
   "audioAnalysis.reanalyze": "Re-analyze",

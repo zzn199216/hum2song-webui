@@ -169,6 +169,7 @@
   "audioAnalysis.open": "分析音频",
   "audioAnalysis.title": "音频分析",
   "audioAnalysis.loading": "正在分析…",
+  "audioAnalysis.instrumentLoading": "正在识别乐器…",
   "audioAnalysis.failed": "音频无法分析，请确认源文件仍在本机。",
   "audioAnalysis.retry": "重试",
   "audioAnalysis.reanalyze": "重新分析",

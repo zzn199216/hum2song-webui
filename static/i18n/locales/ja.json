@@ -169,6 +169,7 @@
   "audioAnalysis.open": "音声を分析",
   "audioAnalysis.title": "音声分析",
   "audioAnalysis.loading": "分析中…",
+  "audioAnalysis.instrumentLoading": "楽器を認識中…",
   "audioAnalysis.failed": "音声を分析できませんでした。元のファイルがこのブラウザに残っているか確認してください。",
   "audioAnalysis.retry": "再試行",
   "audioAnalysis.reanalyze": "再分析",

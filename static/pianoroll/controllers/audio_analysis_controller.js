@@ -108,7 +108,14 @@
     function setVisible(value){ if (modal) modal.hidden = !value; }
     function renderLoading(){
       var el = contentEl();
-      if (el) el.innerHTML = '<div class="h2s-audio-analysis-loading">' + escapeHtml(t('audioAnalysis.loading', '正在分析…')) + '</div>';
+      if (el) el.innerHTML = '<div class="h2s-audio-analysis-loading" data-role="loading-text">' + escapeHtml(t('audioAnalysis.loading', '正在分析…')) + '</div>';
+    }
+    function renderInstrumentProgress(progress){
+      var el = contentEl();
+      var label = el && el.querySelector ? el.querySelector('[data-role="loading-text"]') : null;
+      if (!label) return;
+      var value = Math.max(0, Math.min(100, Number(progress) || 0));
+      label.textContent = t('audioAnalysis.instrumentLoading', '正在识别乐器…') + ' ' + Math.round(value) + '%';
     }
     function renderError(error){
       var el = contentEl();
@@ -148,7 +155,10 @@
           }});
           if (typeof instrumentAnalyzer === 'function'){
             try{
-              result.instruments = await instrumentAnalyzer(buffer, { clipId: clipId });
+              result.instruments = await instrumentAnalyzer(buffer, {
+                clipId: clipId,
+                onProgress: renderInstrumentProgress,
+              });
             }catch(instrumentError){
               result.instruments = { status: 'failed', error: String(instrumentError && instrumentError.message || instrumentError || 'instrument_analysis_failed') };
             }
