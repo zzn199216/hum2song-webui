@@ -139,7 +139,7 @@ assert(indexHtml.includes(`project.js?v=${instrumentCacheBust}`), 'index should 
 assert(indexHtml.includes(`controllers/instrument_library_store.js?v=${instrumentCacheBust}`), 'index should cache-bust instrument library store');
 assert(indexHtml.includes(`core/instrument_manifest.js?v=${instrumentCacheBust}`), 'index should cache-bust instrument manifest');
 assert(indexHtml.includes(`timeline_controller.js?v=${instrumentCacheBust}`), 'index should cache-bust timeline picker UI');
-assert(indexHtml.includes('id="btnCreditsEntry"'), 'index should include a Studio credits entry');
+assert(!indexHtml.includes('id="btnCreditsEntry"'), 'Studio should not expose a credits entry in the arranger');
 assert(indexHtml.includes('id="creditsPanel"'), 'index should include a Studio credits panel');
 assert(indexHtml.includes('tonejs-instruments'), 'credits panel should attribute tonejs-instruments samples');
 

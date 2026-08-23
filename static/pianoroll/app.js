@@ -10091,27 +10091,9 @@ renderTimeline(){
         if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); closeHelp(); });
         if (backdrop) backdrop.addEventListener('click', closeHelp);
 
-        const creditsPanel = document.getElementById('creditsPanel');
-        const creditsBackdrop = document.getElementById('creditsBackdrop');
-        const btnCreditsEntry = document.getElementById('btnCreditsEntry');
-        const btnCreditsClose = document.getElementById('btnCreditsClose');
-        const openCredits = () => {
-          if (!creditsPanel) return;
-          creditsPanel.classList.remove('hidden');
-          creditsPanel.setAttribute('aria-hidden', 'false');
-        };
-        const closeCredits = () => {
-          if (!creditsPanel) return;
-          creditsPanel.classList.add('hidden');
-          creditsPanel.setAttribute('aria-hidden', 'true');
-        };
-        if (btnCreditsEntry) btnCreditsEntry.addEventListener('click', (e) => { e.stopPropagation(); openCredits(); });
-        if (btnCreditsClose) btnCreditsClose.addEventListener('click', (e) => { e.stopPropagation(); closeCredits(); });
-        if (creditsBackdrop) creditsBackdrop.addEventListener('click', closeCredits);
         document.addEventListener('keydown', (ev) => {
           if (ev.key !== 'Escape') return;
           if (panel && !panel.classList.contains('hidden')) closeHelp();
-          if (creditsPanel && !creditsPanel.classList.contains('hidden')) closeCredits();
         });
 
         const btnDismiss = document.getElementById('btnBeginnerHintDismiss');
