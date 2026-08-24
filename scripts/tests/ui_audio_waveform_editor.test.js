@@ -76,6 +76,22 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   console.log('PASS advanced stem provider source identity wiring');
 })();
 
+(function testAdvancedStemSilentTracksAreDiscardedBeforePlacement(){
+  const appSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'app.js'), 'utf8');
+  const start = appSrc.indexOf('async _runAdvancedStemSeparationForClip');
+  const end = appSrc.indexOf('_initTopBarImportTranscriptionControls', start);
+  const advancedSrc = appSrc.slice(start, end);
+  assert(advancedSrc.includes('audioAnalysis.isEffectivelySilent(analysis)'), 'advanced stems classify decoded near-silent audio');
+  assert(advancedSrc.includes('discardedSilentStems.push(name)'), 'near-silent stems are discarded instead of imported');
+  assert(advancedSrc.includes('preparedStems.length)'), 'timeline planning uses only audible prepared stems');
+  assert(
+    advancedSrc.indexOf('audioAnalysis.isEffectivelySilent(analysis)') < advancedSrc.indexOf('window.H2SAudioSeparationTimeline.planTrackIndices'),
+    'silence filtering runs before Studio creates destination tracks',
+  );
+  assert(advancedSrc.includes('已自动忽略 '), 'completion status reports discarded empty stems');
+  console.log('PASS advanced stem silent-track filtering');
+})();
+
 (function testAdvancedStemCheckboxIsOneShot(){
   const wfSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'ui', 'audio_waveform_editor.js'), 'utf8');
   assert(wfSrc.includes('toggle.disabled = busy'), 'advanced checkbox is disabled while a task is running');

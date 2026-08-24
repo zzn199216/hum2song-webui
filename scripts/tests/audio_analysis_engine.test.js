@@ -30,6 +30,12 @@ assert.strictEqual(empty.technical.rmsDb, null);
 const quiet = engine.analyzeChannels([new Float32Array([1e-8, -1e-8])], 2);
 assert.ok(quiet.technical.peakDb < -150);
 assert.ok(quiet.technical.rmsDb < -150);
+assert.strictEqual(engine.isEffectivelySilent(quiet), true);
+assert.strictEqual(engine.isEffectivelySilent(empty), true);
+assert.strictEqual(engine.isEffectivelySilent({ technical: { peakDb: -55, rmsDb: -98 } }), true);
+assert.strictEqual(engine.isEffectivelySilent({ technical: { peakDb: -9, rmsDb: -36 } }), false);
+assert.strictEqual(engine.isEffectivelySilent({ technical: { peakDb: -40, rmsDb: -100 } }), false);
+assert.strictEqual(engine.isEffectivelySilent({ technical: { peakDb: -60, rmsDb: -80 } }), false);
 
 const buffer = {
   numberOfChannels: 1,

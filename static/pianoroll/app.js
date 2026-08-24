@@ -7369,41 +7369,74 @@ renderTimeline(){
       });
       if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
       const stems = result.manifest && Array.isArray(result.manifest.stems) ? result.manifest.stems : [];
-      const plan = (typeof window.H2SAudioSeparationTimeline === 'object' && window.H2SAudioSeparationTimeline.planTrackIndices)
-        ? window.H2SAudioSeparationTimeline.planTrackIndices(this.project, sourceInstanceId, stems.length)
-        : null;
-      if (!plan || !plan.ok) throw new Error('timeline_placement_failed');
-      if (plan.trackIndices.length) this.ensureTimelineTrackIndex(Math.max.apply(Math, plan.trackIndices));
       const artifactById = {};
       (result.artifacts || []).forEach((artifact) => { if (artifact && artifact.artifactId) artifactById[artifact.artifactId] = artifact; });
       const failures = [];
+      const discardedSilentStems = [];
+      const preparedStems = [];
       for (let index = 0; index < stems.length; index += 1) {
         const stem = stems[index] || {};
         const artifact = artifactById[String(stem.artifactId || stem.stemAssetId || '')];
         if (!artifact) { failures.push(String(stem.stemType || 'stem') + ': artifact missing'); continue; }
         try {
-          if (typeof opts.onStatus === 'function') opts.onStatus('正在导入 ' + String(stem.stemType || 'stem') + '…');
+          if (typeof opts.onStatus === 'function') opts.onStatus('正在检查 ' + String(stem.stemType || 'stem') + '…');
           const downloaded = await client.downloadArtifact(result.workerJobId, artifact.artifactId);
           const mime = downloaded.mimeType || artifact.mimeType || 'audio/mpeg';
           const name = String(stem.stemType || 'stem');
           const fileName = (window.H2SLocalAudioAssets && typeof window.H2SLocalAudioAssets.normalizeAudioDownloadFilename === 'function')
             ? window.H2SLocalAudioAssets.normalizeAudioDownloadFilename(artifact.filename || (name + '.mp3'), mime, downloaded.buffer, name)
             : (name + '.mp3');
-          const committed = await this._commitNativeAudioFile(new File([downloaded.buffer], fileName, { type: mime }), {
-            baseName: name,
+          const file = new File([downloaded.buffer], fileName, { type: mime });
+          const audioDecode = window.H2SAudioDecode;
+          const audioAnalysis = window.H2SAudioAnalysis;
+          if (audioDecode && typeof audioDecode.decodeAudioFile === 'function' &&
+              audioAnalysis && typeof audioAnalysis.analyzeAudioBuffer === 'function' &&
+              typeof audioAnalysis.isEffectivelySilent === 'function') {
+            try {
+              const decoded = await audioDecode.decodeAudioFile(file);
+              const analysis = audioAnalysis.analyzeAudioBuffer(decoded);
+              if (audioAnalysis.isEffectivelySilent(analysis)) {
+                discardedSilentStems.push(name);
+                continue;
+              }
+            } catch (_silenceCheckError) {
+              // Keep the stem when silence analysis is unavailable; import remains backward compatible.
+            }
+          }
+          preparedStems.push({ stem, artifact, file, name });
+        } catch (err) {
+          failures.push(String(stem.stemType || 'stem') + ': ' + ((err && err.message) ? err.message : 'download_failed'));
+        }
+      }
+      const plan = preparedStems.length === 0
+        ? { ok: true, trackIndices: [] }
+        : ((typeof window.H2SAudioSeparationTimeline === 'object' && window.H2SAudioSeparationTimeline.planTrackIndices)
+            ? window.H2SAudioSeparationTimeline.planTrackIndices(this.project, sourceInstanceId, preparedStems.length)
+            : null);
+      if (!plan || !plan.ok) throw new Error('timeline_placement_failed');
+      if (plan.trackIndices.length) this.ensureTimelineTrackIndex(Math.max.apply(Math, plan.trackIndices));
+      for (let index = 0; index < preparedStems.length; index += 1) {
+        const prepared = preparedStems[index];
+        try {
+          if (typeof opts.onStatus === 'function') opts.onStatus('正在导入 ' + prepared.name + '…');
+          const committed = await this._commitNativeAudioFile(prepared.file, {
+            baseName: prepared.name,
             trackIndex: plan.trackIndices[index],
             startBeat: sourceStartBeat,
             statusDoneKey: 'io.importAudioStoredLocal',
           });
           if (!committed || !committed.ok) throw new Error('audio_materialize_failed');
         } catch (err) {
-          failures.push(String(stem.stemType || 'stem') + ': ' + ((err && err.message) ? err.message : 'import_failed'));
+          failures.push(prepared.name + ': ' + ((err && err.message) ? err.message : 'import_failed'));
         }
       }
-      const status = failures.length ? '高级分轨完成，但部分 Stem 导入失败：' + failures.join('；') : '高级分轨完成，音频 Stem 已保留。';
+      const discardedSuffix = discardedSilentStems.length ? '，已自动忽略 ' + discardedSilentStems.length + ' 条空 Stem' : '';
+      const status = failures.length
+        ? '高级分轨完成，但部分 Stem 导入失败：' + failures.join('；') + discardedSuffix
+        : '高级分轨完成' + discardedSuffix + '，有效音频 Stem 已保留。';
       this._setAudioSeparationStatus(status);
       this.setImportStatus(status, false);
-      return { ok: true, workerJobId: result.workerJobId, failures };
+      return { ok: true, workerJobId: result.workerJobId, failures, discardedSilentStems };
     },
 
     _initTopBarImportTranscriptionControls(){

@@ -11,6 +11,8 @@
 
   var SCHEMA_VERSION = 'audio-analysis-v0';
   var ANALYZER_VERSION = 'audio-analysis-v0';
+  var EFFECTIVE_SILENCE_PEAK_DB = -50;
+  var EFFECTIVE_SILENCE_RMS_DB = -90;
 
   function finite(value){ return typeof value === 'number' && isFinite(value); }
 
@@ -100,11 +102,31 @@
     return result;
   }
 
+  function isEffectivelySilent(analysis, options){
+    options = options || {};
+    var technical = analysis && analysis.technical ? analysis.technical : analysis;
+    technical = technical && typeof technical === 'object' ? technical : {};
+    var peakDb = Number(technical.peakDb);
+    var rmsDb = Number(technical.rmsDb);
+    if (technical.peakDb == null && technical.rmsDb == null) return true;
+    if (!finite(peakDb) || !finite(rmsDb)) return false;
+    var peakThresholdDb = finite(Number(options.peakThresholdDb))
+      ? Number(options.peakThresholdDb)
+      : EFFECTIVE_SILENCE_PEAK_DB;
+    var rmsThresholdDb = finite(Number(options.rmsThresholdDb))
+      ? Number(options.rmsThresholdDb)
+      : EFFECTIVE_SILENCE_RMS_DB;
+    return peakDb <= peakThresholdDb && rmsDb <= rmsThresholdDb;
+  }
+
   return {
     SCHEMA_VERSION: SCHEMA_VERSION,
     ANALYZER_VERSION: ANALYZER_VERSION,
+    EFFECTIVE_SILENCE_PEAK_DB: EFFECTIVE_SILENCE_PEAK_DB,
+    EFFECTIVE_SILENCE_RMS_DB: EFFECTIVE_SILENCE_RMS_DB,
     dbFromLinear: dbFromLinear,
     analyzeChannels: analyzeChannels,
     analyzeAudioBuffer: analyzeAudioBuffer,
+    isEffectivelySilent: isEffectivelySilent,
   };
 });
