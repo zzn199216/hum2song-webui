@@ -148,6 +148,8 @@
   "audio.waveform.advancedRunning": "高度なステム分離を処理中…",
   "audio.waveform.advancedDone": "高度なステム分離が完了しました。音声ステムは保持されています。",
   "audio.waveform.advancedFailed": "高度なステム分離に失敗しました。再試行してください。",
+  "audio.waveform.advancedProviderSourceRequired": "高度なステム分離は現在、Hum2Song Cloud で生成された楽曲全体のみ対応しています。回数は消費されていません。",
+  "audio.waveform.advancedFullSourceRequired": "高度なステム分離は現在、元の音声全体のみ対応しており、選択範囲だけは処理できません。回数は消費されていません。",
   "audio.waveform.separateBeforeConvert": "AIステム分離後にMIDI変換（2回消費）",
   "audio.waveform.separationSettings": "ステム分離設定",
   "audio.waveform.separationMode": "処理方法",

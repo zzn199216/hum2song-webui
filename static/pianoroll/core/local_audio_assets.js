@@ -143,6 +143,12 @@
     return 'la_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
   }
 
+  function _normalizeSourceMetadata(value){
+    var raw = value && typeof value === 'object' ? value : {};
+    var cloudSourceAssetId = typeof raw.cloudSourceAssetId === 'string' ? raw.cloudSourceAssetId.trim() : '';
+    return cloudSourceAssetId ? { cloudSourceAssetId: cloudSourceAssetId } : null;
+  }
+
   /**
    * Store a user-picked File/Blob and return a durable assetRef for ProjectDoc v2.
    * @returns {Promise<{ assetRef: string, id: string }>}
@@ -165,6 +171,8 @@
         createdAt: Date.now(),
       };
       if (options.waveform) rec.waveform = options.waveform;
+      var sourceMetadata = _normalizeSourceMetadata(options.sourceMetadata);
+      if (sourceMetadata) rec.sourceMetadata = sourceMetadata;
       return _putRecord(rec).then(function(){
         return { id: id, assetRef: LOCAL_AUDIO_ASSET_PREFIX + id };
       });
@@ -252,6 +260,21 @@
     });
   }
 
+  /** Read the allowlisted Cloud source identity associated with a local playback copy. */
+  function getSourceMetadataForLocalAssetRef(assetRef){
+    if (!isLocalImportedAudioRef(assetRef) || typeof indexedDB === 'undefined'){
+      return Promise.resolve(null);
+    }
+    var id = localAssetIdFromRef(assetRef);
+    if (!id) return Promise.resolve(null);
+    return _getRecord(id).then(function(rec){
+      return rec ? _normalizeSourceMetadata(rec.sourceMetadata) : null;
+    }).catch(function(e){
+      console.warn('[H2SLocalAudioAssets] source metadata read failed', e);
+      return null;
+    });
+  }
+
   /** Read cached, versioned waveform peak data for a local audio asset. */
   function getWaveformForLocalAssetRef(assetRef){
     if (!isLocalImportedAudioRef(assetRef) || typeof indexedDB === 'undefined'){
@@ -294,6 +317,7 @@
     storeImportedAudioFile: storeImportedAudioFile,
     resolveAssetRefToPlaybackUrl: resolveAssetRefToPlaybackUrl,
     getFileForLocalAssetRef: getFileForLocalAssetRef,
+    getSourceMetadataForLocalAssetRef: getSourceMetadataForLocalAssetRef,
     getWaveformForLocalAssetRef: getWaveformForLocalAssetRef,
     putWaveformForLocalAssetRef: putWaveformForLocalAssetRef,
   };

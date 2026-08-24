@@ -208,6 +208,7 @@
       var res = await app._commitNativeAudioFile(file, {
         baseName: detail.title || title || 'Cloud material',
         statusDoneKey: 'cloudMaterials.importDone',
+        sourceMetadata: { cloudSourceAssetId: assetId },
       });
       if (!res || res.ok !== true) {
         setStatus(t('cloudMaterials.importFailed', 'Import failed.'), true);

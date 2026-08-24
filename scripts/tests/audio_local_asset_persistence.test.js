@@ -34,6 +34,7 @@ function testLocalAudioAssetsModule(){
   assert.strictEqual(LA.isLocalImportedAudioRef('blob:http://x'), false);
   assert.strictEqual(LA.localAssetIdFromRef('localidb:la_abc'), 'la_abc');
   assert.strictEqual(LA.localAssetIdFromRef('http://x'), null);
+  assert.strictEqual(typeof LA.getSourceMetadataForLocalAssetRef, 'function');
   assert.strictEqual(LA.normalizeAudioDownloadFilename('stem.bin', 'audio/wav', null, 'vocals'), 'vocals.wav');
   assert.strictEqual(
     LA.normalizeAudioDownloadFilename('stem.bin', 'application/octet-stream', Buffer.from('RIFF0000WAVE'), 'drums'),

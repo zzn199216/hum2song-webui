@@ -47,6 +47,7 @@ assert(appSrc.includes('_hummingMusicImportedJobIds'), 'auto-import should guard
 assert(appSrc.includes('window.H2S_REQUEST_CLOUD_MATERIAL_CONTENT'), 'auto-import should reuse Cloud Materials content bridge');
 assert(appSrc.includes('h2s-cloud-material-content'), 'auto-import should wait for Cloud material content response');
 assert(appSrc.includes('statusDoneKey: \'hummingMusic.autoImportDone\''), 'auto-import should use a clear generated-music completion status');
+assert(appSrc.includes('sourceMetadata: { cloudSourceAssetId: assetId }'), 'auto-import should preserve the provider-backed Cloud asset identity');
 assert(appSrc.includes('_resolveHummingMusicInsertPlacement'), 'auto-import should place generated audio near the source clip');
 assert(appSrc.includes('humming_music_auto_import_failed'), 'auto-import failure should fall back to Cloud Materials message');
 assert(studioSrc.includes('完整音乐是生成音频素材') || studioSrc.includes('瀹屾暣闊充箰鏄'), 'UI must not imply generated audio is MIDI-editable');

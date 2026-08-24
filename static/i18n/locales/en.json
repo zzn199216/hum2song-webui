@@ -148,6 +148,8 @@
   "audio.waveform.advancedRunning": "Advanced stem separation is running…",
   "audio.waveform.advancedDone": "Advanced stem separation is complete. Audio stems were preserved.",
   "audio.waveform.advancedFailed": "Advanced stem separation failed. Please try again.",
+  "audio.waveform.advancedProviderSourceRequired": "Advanced stem separation currently supports complete music generated through Hum2Song Cloud only.",
+  "audio.waveform.advancedFullSourceRequired": "Advanced stem separation currently supports the complete source audio only.",
   "audio.waveform.separateBeforeConvert": "AI stem separation before MIDI conversion (2 credits)",
   "audio.waveform.separationSettings": "Stem separation settings",
   "audio.waveform.separationMode": "Processing mode",

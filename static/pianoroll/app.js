@@ -7294,43 +7294,58 @@ renderTimeline(){
       let sourceAssetId = originalSourceAssetId;
       let providerStartSec = startSec;
       let providerDurationSec = durationSec;
+      let cloudSourceAssetId = '';
       const localAssets = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
       const conversionClient = (typeof window !== 'undefined') ? window.H2SAudioWorkerConversionClient : null;
       const isLocalSource = /^localidb:/i.test(originalSourceAssetId);
+      const isFullSource = startSec <= 0.001 && Math.abs(durationSec - sourceDurationSec) <= 0.01;
       if (isLocalSource) {
-        if (!localAssets || typeof localAssets.getFileForLocalAssetRef !== 'function') throw new Error('missing_audio_asset');
-        const file = await localAssets.getFileForLocalAssetRef(originalSourceAssetId);
-        if (!file) throw new Error('missing_audio_asset');
-        const isFullSource = startSec <= 0.001 && Math.abs(durationSec - sourceDurationSec) <= 0.01;
-        let uploadBuffer;
-        let uploadFileName = file.name || 'advanced-source.wav';
-        let uploadMimeType = file.type || 'audio/wav';
-        let sourceKey;
-        let sourceMetadata = { parentSourceAssetId: originalSourceAssetId, cropVersion: 'studio-wav-pcm16-v1' };
-        if (isFullSource) {
-          uploadBuffer = await file.arrayBuffer();
-          sourceKey = 'studio:' + originalSourceAssetId + '|full|source-v1';
-        } else {
-          if (!conversionClient || typeof conversionClient._segmentToWavArrayBuffer !== 'function') throw new Error('segment_extract_failed');
-          uploadBuffer = await conversionClient._segmentToWavArrayBuffer(file, { startSec: startSec, durationSec: durationSec });
-          uploadFileName = 'studio-advanced-range.wav';
-          uploadMimeType = 'audio/wav';
-          sourceKey = 'studio:' + originalSourceAssetId + '|range:' + startSec.toFixed(3) + ':' + durationSec.toFixed(3) + '|crop:studio-wav-pcm16-v1';
-          sourceMetadata.sourceRange = { startSec: startSec, durationSec: durationSec };
+        if (localAssets && typeof localAssets.getSourceMetadataForLocalAssetRef === 'function') {
+          const sourceMetadata = await localAssets.getSourceMetadataForLocalAssetRef(originalSourceAssetId);
+          cloudSourceAssetId = sourceMetadata && typeof sourceMetadata.cloudSourceAssetId === 'string'
+            ? sourceMetadata.cloudSourceAssetId.trim()
+            : '';
         }
-        const prepared = await client.prepareSource({
-          audioBuffer: uploadBuffer,
-          filename: uploadFileName,
-          mimeType: uploadMimeType,
-          sourceKey: sourceKey,
-          sourceDurationSec: isFullSource ? sourceDurationSec : durationSec,
-          sourceMetadata: sourceMetadata,
-        });
-        if (!prepared || !prepared.ok || !prepared.sourceAssetId) throw new Error((prepared && prepared.reason) || 'source_prepare_failed');
-        sourceAssetId = prepared.sourceAssetId;
-        providerStartSec = 0;
-        providerDurationSec = Number(prepared.sourceDurationSec) > 0 ? Number(prepared.sourceDurationSec) : (isFullSource ? sourceDurationSec : durationSec);
-      } else if (startSec > 0.001 || Math.abs(durationSec - sourceDurationSec) > 0.01) {
+        if (cloudSourceAssetId && isFullSource) {
+          sourceAssetId = cloudSourceAssetId;
+          providerStartSec = 0;
+          providerDurationSec = sourceDurationSec;
+        } else {
+          if (!localAssets || typeof localAssets.getFileForLocalAssetRef !== 'function') throw new Error('missing_audio_asset');
+          const file = await localAssets.getFileForLocalAssetRef(originalSourceAssetId);
+          if (!file) throw new Error('missing_audio_asset');
+          let uploadBuffer;
+          let uploadFileName = file.name || 'advanced-source.wav';
+          let uploadMimeType = file.type || 'audio/wav';
+          let sourceKey;
+          const sourceMetadata = { parentSourceAssetId: originalSourceAssetId, cropVersion: 'studio-wav-pcm16-v1' };
+          if (isFullSource) {
+            uploadBuffer = await file.arrayBuffer();
+            sourceKey = 'studio:' + originalSourceAssetId + '|full|source-v2';
+          } else {
+            if (!conversionClient || typeof conversionClient._segmentToWavArrayBuffer !== 'function') throw new Error('segment_extract_failed');
+            uploadBuffer = await conversionClient._segmentToWavArrayBuffer(file, { startSec, durationSec });
+            uploadFileName = 'studio-advanced-range.wav';
+            uploadMimeType = 'audio/wav';
+            sourceKey = 'studio:' + originalSourceAssetId + '|range:' + startSec.toFixed(3) + ':' + durationSec.toFixed(3) + '|crop:studio-wav-pcm16-v2';
+            sourceMetadata.sourceRange = { startSec, durationSec };
+          }
+          const prepared = await client.prepareSource({
+            audioBuffer: uploadBuffer,
+            filename: uploadFileName,
+            mimeType: uploadMimeType,
+            sourceKey,
+            sourceDurationSec: isFullSource ? sourceDurationSec : durationSec,
+            sourceMetadata,
+          });
+          if (!prepared || !prepared.ok || !prepared.sourceAssetId) throw new Error((prepared && prepared.reason) || 'source_prepare_failed');
+          sourceAssetId = prepared.sourceAssetId;
+          providerStartSec = 0;
+          providerDurationSec = Number(prepared.sourceDurationSec) > 0
+            ? Number(prepared.sourceDurationSec)
+            : (isFullSource ? sourceDurationSec : durationSec);
+        }
+      } else if (!isFullSource) {
         throw new Error('advanced_separation_range_unavailable');
       }
       const bpm = Number(p2.bpm || 120);
@@ -7342,6 +7357,8 @@ renderTimeline(){
         sourceDurationSec: isLocalSource ? providerDurationSec : sourceDurationSec,
         metadata: {
           originalAudioClipId: clipId,
+          sourceTitle: String(clip.name || '').trim(),
+          ...(cloudSourceAssetId ? { cloudSourceAssetId } : {}),
           alignment: { sourceAudioInstanceId: sourceInstanceId, sourceStartBeat },
         },
         onStatus: (status) => {
@@ -7543,7 +7560,7 @@ renderTimeline(){
     /**
      * Shared path for native audio clips: decode duration, IndexedDB store, create clip + instance, persist.
      * @param {File|Blob} file
-     * @param {{ baseName?: string, statusDoneKey?: string, trackId?: string, trackIndex?: number, startBeat?: number }} opts - baseName overrides stem from file.name; optional i18n key for final status (default io.importAudioStoredLocal)
+     * @param {{ baseName?: string, statusDoneKey?: string, trackId?: string, trackIndex?: number, startBeat?: number, sourceMetadata?: { cloudSourceAssetId?: string } }} opts - baseName overrides stem from file.name; optional i18n key for final status (default io.importAudioStoredLocal)
      * @returns {Promise<{ ok: boolean, reason?: string, clipId?: string, instanceId?: string, trackId?: string, startBeat?: number }>}
      */
     async _commitNativeAudioFile(file, opts){
@@ -7577,7 +7594,7 @@ renderTimeline(){
       }
       let assetRef;
       try{
-        const st = await LAS.storeImportedAudioFile(file, { waveform });
+        const st = await LAS.storeImportedAudioFile(file, { waveform, sourceMetadata: opts.sourceMetadata });
         assetRef = st && st.assetRef ? String(st.assetRef) : '';
       } catch (e){
         console.warn('[App] storeImportedAudioFile failed', e);
@@ -8012,6 +8029,7 @@ renderTimeline(){
           trackId: placement.trackId,
           trackIndex: placement.trackIndex,
           startBeat: placement.startBeat,
+          sourceMetadata: { cloudSourceAssetId: assetId },
         });
         if (!res || res.ok !== true) throw new Error((res && res.reason) || 'audio_insert_failed');
         this._setHummingMusicStatus('完整音乐已生成，并已添加到当前工程。原 MIDI/clip 仍可继续编辑。');

@@ -148,6 +148,8 @@
   "audio.waveform.advancedRunning": "高级分轨正在处理…",
   "audio.waveform.advancedDone": "高级分轨完成，音频 Stem 已保留。",
   "audio.waveform.advancedFailed": "高级分轨失败，请稍后重试。",
+  "audio.waveform.advancedProviderSourceRequired": "高级分轨目前只支持由 Hum2Song 云端生成的完整音乐。此操作未扣除次数。",
+  "audio.waveform.advancedFullSourceRequired": "高级分轨目前只支持处理完整原音频，不能只处理选区。此操作未扣除次数。",
   "audio.waveform.separateBeforeConvert": "先 AI 分轨后转 MIDI（扣除 2 次）",
   "audio.waveform.separationSettings": "分轨设置",
   "audio.waveform.separationMode": "处理方式",

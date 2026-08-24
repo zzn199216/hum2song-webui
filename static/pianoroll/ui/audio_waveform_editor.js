@@ -517,6 +517,12 @@
       if (separationSettingsToggle) separationSettingsToggle.addEventListener('change', syncSeparationSettingsVisibility);
       var advancedToggle = panel.querySelector('[data-role="wfAdvancedToggle"]');
       if (advancedToggle) advancedToggle.addEventListener('change', function () {
+        if (separationBusy || _isConvertBusy()) {
+          advancedStemArmed = false;
+          advancedToggle.checked = false;
+          syncAdvancedStemUi();
+          return;
+        }
         advancedStemArmed = !!advancedToggle.checked;
         syncAdvancedStemUi();
       });
@@ -548,7 +554,7 @@
       var busy = separationBusy || _isConvertBusy();
       if (armBtn) { armBtn.hidden = advancedStemArmed; armBtn.disabled = busy; }
       if (armed) armed.hidden = !advancedStemArmed;
-      if (toggle) toggle.checked = advancedStemArmed;
+      if (toggle) { toggle.checked = advancedStemArmed; toggle.disabled = busy; }
       if (runBtn) { runBtn.hidden = !advancedStemArmed; runBtn.disabled = busy; }
     }
 
@@ -583,9 +589,17 @@
         if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
         if (statusEl) statusEl.textContent = t('audio.waveform.advancedDone', 'Advanced stem separation is complete. Audio stems were preserved.');
       } catch (err) {
-        if (statusEl) statusEl.textContent = t('audio.waveform.advancedFailed', 'Advanced stem separation failed. Please try again.') + ' (' + (err && err.message ? String(err.message) : 'worker_failed') + ')';
+        var errorMessage = err && err.message ? String(err.message) : 'worker_failed';
+        if (statusEl && errorMessage.indexOf('advanced_separation_provider_source_required') >= 0) {
+          statusEl.textContent = t('audio.waveform.advancedProviderSourceRequired', 'Advanced stem separation currently supports complete music generated through Hum2Song Cloud only.');
+        } else if (statusEl && errorMessage.indexOf('advanced_separation_range_unavailable') >= 0) {
+          statusEl.textContent = t('audio.waveform.advancedFullSourceRequired', 'Advanced stem separation currently supports the complete source audio only.');
+        } else if (statusEl) {
+          statusEl.textContent = t('audio.waveform.advancedFailed', 'Advanced stem separation failed. Please try again.') + ' (' + errorMessage + ')';
+        }
       } finally {
         separationBusy = false;
+        advancedStemArmed = false;
         syncAdvancedStemUi();
         updateConvertButtons();
       }
