@@ -9,6 +9,7 @@
   var RESULT_TIMEOUT_MS = 120000;
   var ARTIFACT_TIMEOUT_MS = 10 * 60 * 1000;
   var MAX_DURATION_SEC = 600;
+  var DIRECT_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
   var MODES = { separate_only: true, separate_and_transcribe: true };
   var PRESETS = {
     vocals_instrumental: true,
@@ -60,23 +61,73 @@
 
   async function prepareUploadAudio(base, file, durationSec) {
     var direct = directUploadInfo(file);
-    if (direct) {
+    var sourceOriginalBytes;
+    if (file && typeof file.arrayBuffer === 'function') {
       var originalBuffer = await file.arrayBuffer();
       if (originalBuffer instanceof ArrayBuffer && originalBuffer.byteLength > 0) {
-        return {
-          audioBuffer: originalBuffer,
-          filename: 'studio-audio-clip.' + direct.extension,
-          mimeType: direct.mimeType,
-          sourceEncoding: 'original',
-        };
+        sourceOriginalBytes = originalBuffer.byteLength;
+        if (direct && originalBuffer.byteLength > DIRECT_UPLOAD_MAX_BYTES && typeof base._compressAudioFileForUpload === 'function') {
+          try {
+            var compressed = await base._compressAudioFileForUpload(file, { inputBuffer: originalBuffer });
+            if (
+              compressed &&
+              compressed.audioBuffer instanceof ArrayBuffer &&
+              compressed.audioBuffer.byteLength > 0 &&
+              compressed.audioBuffer.byteLength < originalBuffer.byteLength
+            ) {
+              return {
+                audioBuffer: compressed.audioBuffer,
+                filename: 'studio-audio-clip.' + (direct ? direct.extension : 'wav'),
+                mimeType: direct ? direct.mimeType : 'audio/wav',
+                sourceEncoding: 'original',
+                transportEncoding: compressed.transportEncoding || 'gzip',
+                sourceOriginalBytes: originalBuffer.byteLength,
+                sourceUploadBytes: compressed.audioBuffer.byteLength,
+              };
+            }
+          } catch (_e) {}
+        }
+        if (direct) {
+          return {
+            audioBuffer: originalBuffer,
+            filename: 'studio-audio-clip.' + direct.extension,
+            mimeType: direct.mimeType,
+            sourceEncoding: 'original',
+            sourceOriginalBytes: originalBuffer.byteLength,
+            sourceUploadBytes: originalBuffer.byteLength,
+          };
+        }
       }
     }
     var wavBuffer = await base._segmentToWavArrayBuffer(file, { startSec: 0, durationSec: durationSec });
+    if (wavBuffer.byteLength > DIRECT_UPLOAD_MAX_BYTES && typeof base._compressAudioFileForUpload === 'function') {
+      try {
+        var compressedWav = await base._compressAudioFileForUpload(file, { inputBuffer: wavBuffer });
+        if (
+          compressedWav &&
+          compressedWav.audioBuffer instanceof ArrayBuffer &&
+          compressedWav.audioBuffer.byteLength > 0 &&
+          compressedWav.audioBuffer.byteLength < wavBuffer.byteLength
+        ) {
+          return {
+            audioBuffer: compressedWav.audioBuffer,
+            filename: 'studio-audio-clip.wav',
+            mimeType: 'audio/wav',
+            sourceEncoding: 'wav_fallback',
+            transportEncoding: compressedWav.transportEncoding || 'gzip',
+            sourceOriginalBytes: sourceOriginalBytes,
+            sourceUploadBytes: compressedWav.audioBuffer.byteLength,
+          };
+        }
+      } catch (_e) {}
+    }
     return {
       audioBuffer: wavBuffer,
       filename: 'studio-audio-clip.wav',
       mimeType: 'audio/wav',
       sourceEncoding: 'wav_fallback',
+      sourceOriginalBytes: sourceOriginalBytes,
+      sourceUploadBytes: wavBuffer.byteLength,
     };
   }
 
@@ -109,10 +160,15 @@
       mode: mode,
       separationPreset: preset,
       separatorOption: separatorOption,
-      metadata: Object.assign({}, options.metadata || {}, { sourceEncoding: preparedUpload.sourceEncoding }),
+      metadata: Object.assign({}, options.metadata || {}, {
+        sourceEncoding: preparedUpload.sourceEncoding,
+        sourceOriginalBytes: preparedUpload.sourceOriginalBytes,
+        sourceUploadBytes: preparedUpload.sourceUploadBytes,
+      }),
       transcriptionTarget: options.transcriptionTarget || 'auto',
       cleanupStrength: options.cleanupStrength == null ? 50 : options.cleanupStrength,
       preserveRawCandidates: options.preserveRawCandidates === true,
+      transportEncoding: preparedUpload.transportEncoding,
       audioBuffer: audioBuffer,
     }, [audioBuffer], { timeoutMs: CREATE_TIMEOUT_MS, stage: 'separation_create' });
     var job = created && created.job ? created.job : {};
@@ -178,6 +234,7 @@
     separatorOptions: Object.keys(SEPARATOR_OPTIONS),
     modes: Object.keys(MODES),
     maxDurationSec: MAX_DURATION_SEC,
+    directUploadMaxBytes: DIRECT_UPLOAD_MAX_BYTES,
     _timeouts: {
       createMs: CREATE_TIMEOUT_MS,
       statusMs: STATUS_TIMEOUT_MS,

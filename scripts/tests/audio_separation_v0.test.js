@@ -28,10 +28,10 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'advanced-stem-paid-warning-v5'"));
-  assert(html.includes('studio_asset_version.js?v=advanced-stem-paid-warning-v5'));
-  assert(html.includes('audio_worker_separation_client.js?v=advanced-stem-paid-warning-v5'));
-  assert(html.includes('app.js?v=advanced-stem-paid-warning-v5'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'standard-separation-lossless-v7'"));
+  assert(html.includes('studio_asset_version.js?v=standard-separation-lossless-v7'));
+  assert(html.includes('audio_worker_separation_client.js?v=standard-separation-lossless-v7'));
+  assert(html.includes('app.js?v=standard-separation-lossless-v7'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -160,6 +160,7 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const previousWindow = global.window;
   let createPayload = null;
   let wavEncodeCalls = 0;
+  let compressionCalls = 0;
   global.window = {
     H2SAudioWorkerConversionClient: {
       isEnabled: () => true,
@@ -167,6 +168,14 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
       _segmentToWavArrayBuffer: async () => {
         wavEncodeCalls += 1;
         return new ArrayBuffer(8);
+      },
+      _compressAudioFileForUpload: async (file, options) => {
+        compressionCalls += 1;
+        assert(options.inputBuffer instanceof ArrayBuffer);
+        if (file.name === 'large-no-gain.mp3') {
+          return { audioBuffer: new ArrayBuffer(options.inputBuffer.byteLength + 1), transportEncoding: 'gzip' };
+        }
+        return { audioBuffer: new ArrayBuffer(1024), transportEncoding: 'gzip' };
       },
       _requestHost: async (type, payload) => {
         if (type === 'H2S_CLOUD_AUDIO_SEPARATION_JOB_CREATE') {
@@ -229,6 +238,46 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert.strictEqual(createPayload.mimeType, 'audio/mpeg');
   assert.strictEqual(createPayload.audioBuffer, originalMp3Buffer);
   assert.strictEqual(createPayload.metadata.sourceEncoding, 'original');
+  assert.strictEqual(createPayload.metadata.sourceOriginalBytes, 12);
+  assert.strictEqual(createPayload.metadata.sourceUploadBytes, 12);
+  assert.strictEqual(compressionCalls, 0, 'files at or below 5 MB must bypass compression');
+  const largeMp3Buffer = new ArrayBuffer((5 * 1024 * 1024) + 1);
+  const compressedMp3 = await client.separate({
+    file: {
+      name: 'large-compress.mp3',
+      type: 'audio/mpeg',
+      arrayBuffer: async () => largeMp3Buffer,
+    },
+    durationSec: 180,
+    mode: 'separate_only',
+    separationPreset: 'four_stem',
+  });
+  assert.strictEqual(compressedMp3.ok, true);
+  assert.strictEqual(createPayload.filename, 'studio-audio-clip.mp3');
+  assert.strictEqual(createPayload.mimeType, 'audio/mpeg');
+  assert.strictEqual(createPayload.audioBuffer.byteLength, 1024);
+  assert.strictEqual(createPayload.transportEncoding, 'gzip');
+  assert.strictEqual(createPayload.metadata.sourceEncoding, 'original');
+  assert.strictEqual(createPayload.metadata.sourceOriginalBytes, largeMp3Buffer.byteLength);
+  assert.strictEqual(createPayload.metadata.sourceUploadBytes, 1024);
+  const noGainBuffer = new ArrayBuffer((5 * 1024 * 1024) + 1);
+  const noGainMp3 = await client.separate({
+    file: {
+      name: 'large-no-gain.mp3',
+      type: 'audio/mpeg',
+      arrayBuffer: async () => noGainBuffer,
+    },
+    durationSec: 180,
+    mode: 'separate_only',
+    separationPreset: 'four_stem',
+  });
+  assert.strictEqual(noGainMp3.ok, true);
+  assert.strictEqual(createPayload.filename, 'studio-audio-clip.mp3');
+  assert.strictEqual(createPayload.audioBuffer, noGainBuffer);
+  assert.strictEqual(createPayload.transportEncoding, undefined);
+  assert.strictEqual(createPayload.metadata.sourceEncoding, 'original');
+  assert.strictEqual(compressionCalls, 2, 'only files over 5 MB should attempt compression');
+  assert.strictEqual(client.directUploadMaxBytes, 5 * 1024 * 1024);
   assert.strictEqual(wavEncodeCalls, 2, 'supported MP3 input must bypass WAV expansion');
   const tooLong = await client.separate({
     file: { name: 'mix.wav' },

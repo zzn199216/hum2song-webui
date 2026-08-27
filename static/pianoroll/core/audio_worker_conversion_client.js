@@ -146,6 +146,26 @@
     return ab;
   }
 
+  async function compressAudioFileForUpload(file, options) {
+    options = options || {};
+    var CompressionStreamCtor = window.CompressionStream;
+    if (typeof CompressionStreamCtor !== 'function') return null;
+    var input = options.inputBuffer instanceof ArrayBuffer ? options.inputBuffer : await file.arrayBuffer();
+    if (!(input instanceof ArrayBuffer) || !input.byteLength) return null;
+    try {
+      var source = new Blob([input]).stream();
+      var compressed = await new Response(source.pipeThrough(new CompressionStreamCtor('gzip'))).arrayBuffer();
+      if (!(compressed instanceof ArrayBuffer) || !compressed.byteLength) return null;
+      return {
+        audioBuffer: compressed,
+        transportEncoding: 'gzip',
+        originalBytes: input.byteLength,
+      };
+    } catch (_e) {
+      return null;
+    }
+  }
+
   async function segmentToWavArrayBuffer(file, segment) {
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) throw new Error('worker_unavailable');
@@ -323,6 +343,7 @@
     isCloudMode: isCloudMode,
     convert: convert,
     _encodeWav: encodeWav,
+    _compressAudioFileForUpload: compressAudioFileForUpload,
     _segmentToWavArrayBuffer: segmentToWavArrayBuffer,
     _requestHost: requestHost,
     _normalizeTranscriptionControls: normalizeTranscriptionControls,
