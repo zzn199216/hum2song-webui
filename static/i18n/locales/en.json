@@ -144,7 +144,7 @@
   "audio.waveform.advancedArmed": "Advanced stems · 30 credits",
   "audio.waveform.advancedRun": "Advanced stems · 30 credits",
   "audio.waveform.advancedConfirm": "Advanced stem separation uses a high-cost model to split more independent instrument stems. Each new task uses 30 regular transcription credits. Enabling it alone does not consume credits; credits are used only when the task starts. Continue?",
-  "audio.waveform.advancedInsufficient": "Advanced stem separation requires 30 regular transcription credits. Current remaining: {n}.",
+  "audio.waveform.advancedInsufficient": "Insufficient balance. Advanced stem separation is a paid feature and requires 30 regular transcription credits per run. Current remaining: {n}. Please purchase credits before using it.",
   "audio.waveform.advancedRunning": "Advanced stem separation is running…",
   "audio.waveform.advancedDone": "Advanced stem separation is complete. Audio stems were preserved.",
   "audio.waveform.advancedFailed": "Advanced stem separation failed. Please try again.",

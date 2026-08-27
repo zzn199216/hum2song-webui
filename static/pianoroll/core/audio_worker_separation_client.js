@@ -37,6 +37,49 @@
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
+  function directUploadInfo(file) {
+    if (!file || typeof file.arrayBuffer !== 'function') return null;
+    var type = String(file.type || '').split(';')[0].trim().toLowerCase();
+    var name = String(file.name || '').trim().toLowerCase();
+    var byType = {
+      'audio/wav': { mimeType: 'audio/wav', extension: 'wav' },
+      'audio/x-wav': { mimeType: 'audio/wav', extension: 'wav' },
+      'audio/mpeg': { mimeType: 'audio/mpeg', extension: 'mp3' },
+      'audio/mp3': { mimeType: 'audio/mpeg', extension: 'mp3' },
+      'audio/mp4': { mimeType: 'audio/mp4', extension: 'm4a' },
+      'audio/m4a': { mimeType: 'audio/mp4', extension: 'm4a' },
+      'audio/x-m4a': { mimeType: 'audio/mp4', extension: 'm4a' },
+    };
+    if (byType[type]) return byType[type];
+    if (type && type !== 'application/octet-stream') return null;
+    if (/\.mp3$/i.test(name)) return byType['audio/mpeg'];
+    if (/\.m4a$/i.test(name)) return byType['audio/mp4'];
+    if (/\.wav$/i.test(name) || /\.wave$/i.test(name)) return byType['audio/wav'];
+    return null;
+  }
+
+  async function prepareUploadAudio(base, file, durationSec) {
+    var direct = directUploadInfo(file);
+    if (direct) {
+      var originalBuffer = await file.arrayBuffer();
+      if (originalBuffer instanceof ArrayBuffer && originalBuffer.byteLength > 0) {
+        return {
+          audioBuffer: originalBuffer,
+          filename: 'studio-audio-clip.' + direct.extension,
+          mimeType: direct.mimeType,
+          sourceEncoding: 'original',
+        };
+      }
+    }
+    var wavBuffer = await base._segmentToWavArrayBuffer(file, { startSec: 0, durationSec: durationSec });
+    return {
+      audioBuffer: wavBuffer,
+      filename: 'studio-audio-clip.wav',
+      mimeType: 'audio/wav',
+      sourceEncoding: 'wav_fallback',
+    };
+  }
+
   async function separate(options) {
     options = options || {};
     var base = baseClient();
@@ -57,15 +100,16 @@
     if (durationSec > MAX_DURATION_SEC + 0.001) return { ok: false, reason: 'audio_too_long' };
 
     emit(options, { phase: 'encoding' });
-    var audioBuffer = await base._segmentToWavArrayBuffer(file, { startSec: 0, durationSec: durationSec });
+    var preparedUpload = await prepareUploadAudio(base, file, durationSec);
+    var audioBuffer = preparedUpload.audioBuffer;
     emit(options, { phase: 'uploading' });
     var created = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_JOB_CREATE', {
-      filename: 'studio-audio-clip.wav',
-      mimeType: 'audio/wav',
+      filename: preparedUpload.filename,
+      mimeType: preparedUpload.mimeType,
       mode: mode,
       separationPreset: preset,
       separatorOption: separatorOption,
-      metadata: options.metadata || {},
+      metadata: Object.assign({}, options.metadata || {}, { sourceEncoding: preparedUpload.sourceEncoding }),
       transcriptionTarget: options.transcriptionTarget || 'auto',
       cleanupStrength: options.cleanupStrength == null ? 50 : options.cleanupStrength,
       preserveRawCandidates: options.preserveRawCandidates === true,

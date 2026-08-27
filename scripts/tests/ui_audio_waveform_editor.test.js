@@ -100,6 +100,19 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   console.log('PASS advanced stem checkbox is one-shot');
 })();
 
+(function testAdvancedStemInsufficientBalanceIsVisible(){
+  const wfSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'ui', 'audio_waveform_editor.js'), 'utf8');
+  const en = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'en.json'), 'utf8'));
+  const zh = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'zh.json'), 'utf8'));
+  assert(wfSrc.includes('window.alert(insufficientMessage)'), 'insufficient advanced-stem balance produces a visible alert');
+  assert(wfSrc.includes('statusEl.textContent = insufficientMessage'), 'insufficient balance remains visible in the waveform status area');
+  assert(zh['audio.waveform.advancedInsufficient'].includes('余额不足'));
+  assert(zh['audio.waveform.advancedInsufficient'].includes('付费功能'));
+  assert(zh['audio.waveform.advancedInsufficient'].includes('购买'));
+  assert(en['audio.waveform.advancedInsufficient'].includes('paid feature'));
+  console.log('PASS advanced stem insufficient-balance notice');
+})();
+
 (function testWaveformI18n(){
   const en = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'en.json'), 'utf8'));
   const zh = JSON.parse(fs.readFileSync(path.join(repoRoot, 'static', 'i18n', 'locales', 'zh.json'), 'utf8'));

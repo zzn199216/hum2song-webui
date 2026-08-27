@@ -28,10 +28,10 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'advanced-stem-kie-upload-silence-v4'"));
-  assert(html.includes('studio_asset_version.js?v=advanced-stem-kie-upload-silence-v4'));
-  assert(html.includes('audio_worker_separation_client.js?v=advanced-stem-kie-upload-silence-v4'));
-  assert(html.includes('app.js?v=advanced-stem-kie-upload-silence-v4'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'advanced-stem-paid-warning-v5'"));
+  assert(html.includes('studio_asset_version.js?v=advanced-stem-paid-warning-v5'));
+  assert(html.includes('audio_worker_separation_client.js?v=advanced-stem-paid-warning-v5'));
+  assert(html.includes('app.js?v=advanced-stem-paid-warning-v5'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -159,11 +159,15 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
 (async function testPayloadIncludesPresetAndTenMinuteClientLimit(){
   const previousWindow = global.window;
   let createPayload = null;
+  let wavEncodeCalls = 0;
   global.window = {
     H2SAudioWorkerConversionClient: {
       isEnabled: () => true,
       isCloudMode: () => true,
-      _segmentToWavArrayBuffer: async () => new ArrayBuffer(8),
+      _segmentToWavArrayBuffer: async () => {
+        wavEncodeCalls += 1;
+        return new ArrayBuffer(8);
+      },
       _requestHost: async (type, payload) => {
         if (type === 'H2S_CLOUD_AUDIO_SEPARATION_JOB_CREATE') {
           createPayload = payload;
@@ -189,6 +193,9 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert.strictEqual(createPayload.separationPreset, 'vocals_bass_drums');
   assert.strictEqual(createPayload.mode, 'separate_and_transcribe');
   assert.strictEqual(createPayload.separatorOption, 'demucs');
+  assert.strictEqual(createPayload.filename, 'studio-audio-clip.wav');
+  assert.strictEqual(createPayload.mimeType, 'audio/wav');
+  assert.strictEqual(createPayload.metadata.sourceEncoding, 'wav_fallback');
   const invalidUvr = await client.separate({
     file: { name: 'mix.wav' },
     durationSec: 20,
@@ -206,6 +213,23 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   });
   assert.strictEqual(validUvr.ok, true);
   assert.strictEqual(createPayload.separatorOption, 'uvr5_ensemble_vocal_full');
+  const originalMp3Buffer = new ArrayBuffer(12);
+  const directMp3 = await client.separate({
+    file: {
+      name: '原始音乐.mp3',
+      type: 'audio/mpeg',
+      arrayBuffer: async () => originalMp3Buffer,
+    },
+    durationSec: 87.92,
+    mode: 'separate_only',
+    separationPreset: 'four_stem',
+  });
+  assert.strictEqual(directMp3.ok, true);
+  assert.strictEqual(createPayload.filename, 'studio-audio-clip.mp3');
+  assert.strictEqual(createPayload.mimeType, 'audio/mpeg');
+  assert.strictEqual(createPayload.audioBuffer, originalMp3Buffer);
+  assert.strictEqual(createPayload.metadata.sourceEncoding, 'original');
+  assert.strictEqual(wavEncodeCalls, 2, 'supported MP3 input must bypass WAV expansion');
   const tooLong = await client.separate({
     file: { name: 'mix.wav' },
     durationSec: 600.01,

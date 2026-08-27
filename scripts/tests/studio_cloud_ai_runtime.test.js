@@ -41,7 +41,7 @@ for (const src of requiredVersionedScripts) {
   assert(!/[\\/?#]/.test(assetVersion), src + ' cache-bust version should be a plain marker');
 }
 
-assert(ver === 'advanced-stem-kie-upload-silence-v4', 'studio_asset_version.js should use the current Studio release marker');
+assert(ver === 'advanced-stem-paid-warning-v5', 'studio_asset_version.js should use the current Studio release marker');
 assert(scriptVersion('studio_asset_version.js') === ver, 'index.html should load studio_asset_version.js with the studio asset version marker');
 assert(scriptVersion('h2s_startup_perf.js') === ver, 'index.html should load startup perf with the studio asset version marker');
 assert(scriptVersion('app.js') === ver, 'index.html should load app.js with the studio asset version marker');
@@ -64,6 +64,7 @@ assert(bridge.includes('function isCloudModeRequested'), 'bridge should centrali
 assert(bridge.includes('document.referrer'), 'bridge should detect Cloud embed via referrer');
 assert(bridge.includes('rerenderAiSettingsDrawerIfOpen'), 'bridge should refresh open AI Settings drawer on cloud boot');
 assert(bridge.includes('H2S_SCHEDULE_CLOUD_AI_STATUS'), 'bridge should defer cloud AI status until interactive or drawer');
+assert(bridge.includes('presets.some(function (p) { return p.id === configured; })'), 'bridge should ignore retired or stale cloud AI model profile ids');
 assert(bridge.includes('h2s_startup_perf.js') === false, 'bridge file should not embed perf script');
 assert(index.includes('h2s_startup_perf.js?v=' + scriptVersion('h2s_startup_perf.js')), 'index should load startup perf helper');
 

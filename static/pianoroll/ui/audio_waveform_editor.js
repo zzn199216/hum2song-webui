@@ -563,7 +563,13 @@
       if (typeof hooks.checkAdvancedStemAvailability === 'function') {
         var availability = await hooks.checkAdvancedStemAvailability();
         if (!availability || availability.available !== true) {
-          if (statusEl) statusEl.textContent = t('audio.waveform.advancedInsufficient', 'Advanced stem separation requires 30 regular transcription credits. Current remaining: {n}.').replace('{n}', String(availability && availability.remaining != null ? availability.remaining : 0));
+          var remaining = availability && availability.remaining != null ? availability.remaining : 0;
+          var insufficientMessage = t(
+            'audio.waveform.advancedInsufficient',
+            'Insufficient balance. Advanced stem separation is a paid feature and requires 30 regular transcription credits per run. Current remaining: {n}. Please purchase credits before using it.'
+          ).replace('{n}', String(remaining));
+          if (statusEl) statusEl.textContent = insufficientMessage;
+          if (typeof window !== 'undefined' && typeof window.alert === 'function') window.alert(insufficientMessage);
           return;
         }
       }

@@ -144,7 +144,7 @@
   "audio.waveform.advancedArmed": "高度な分離 · 30回",
   "audio.waveform.advancedRun": "高度な分離 · 30回",
   "audio.waveform.advancedConfirm": "高度なステム分離は高コストのモデルを使用し、より多くの独立した楽器ステムに分離します。新しいタスクごとに通常の採譜回数を30回消費します。有効化だけでは消費せず、タスク開始時に消費します。続行しますか？",
-  "audio.waveform.advancedInsufficient": "高度なステム分離には通常の採譜回数が30回必要です。現在の残り: {n}回。",
+  "audio.waveform.advancedInsufficient": "残高が不足しています。高度なステム分離は有料機能で、1回につき通常の採譜回数を30回消費します。現在の残りは{n}回です。回数を購入してからご利用ください。",
   "audio.waveform.advancedRunning": "高度なステム分離を処理中…",
   "audio.waveform.advancedDone": "高度なステム分離が完了しました。音声ステムは保持されています。",
   "audio.waveform.advancedFailed": "高度なステム分離に失敗しました。再試行してください。",

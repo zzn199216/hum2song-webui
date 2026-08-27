@@ -203,11 +203,13 @@
   }
 
   function selectedCloudAiPresetId(cfg) {
-    if (cfg && typeof cfg.modelProfileId === 'string' && cfg.modelProfileId.trim()) return cfg.modelProfileId.trim();
-    if (cfg && typeof cfg.presetId === 'string' && cfg.presetId.trim()) return cfg.presetId.trim();
+    var presets = availableCloudAiPresets();
+    var configured = '';
+    if (cfg && typeof cfg.modelProfileId === 'string' && cfg.modelProfileId.trim()) configured = cfg.modelProfileId.trim();
+    else if (cfg && typeof cfg.presetId === 'string' && cfg.presetId.trim()) configured = cfg.presetId.trim();
+    if (configured && presets.some(function (p) { return p.id === configured; })) return configured;
     var stored = '';
     try { stored = String(localStorage.getItem('h2s_cloud_ai_selected_model_profile_id') || localStorage.getItem('h2s_cloud_ai_selected_preset_id') || '').trim(); } catch (_e) {}
-    var presets = availableCloudAiPresets();
     if (stored && presets.some(function (p) { return p.id === stored; })) return stored;
     var preferred = presets.find(function (p) { return p.id === 'auto'; }) || presets.find(function (p) { return p.id === 'qwen36_flash' || p.id === 'free_basic' || p.id === 'preview_standard'; });
     return (preferred || presets[0] || {}).id || '';

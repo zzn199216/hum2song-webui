@@ -723,7 +723,7 @@ async function testCloudSmallClipPromptStaysBounded(){
   const prevLlmConfig = globalThis.H2S_LLM_CONFIG;
   globalThis.H2S_CLOUD_MODE = true;
   globalThis.H2S_LLM_CONFIG = {
-    loadLlmConfig: () => ({ baseUrl: '', model: '', authToken: 'LOCAL_TOKEN_SHOULD_NOT_BE_USED', modelProfileId: 'minimax_m27_highspeed' }),
+    loadLlmConfig: () => ({ baseUrl: '', model: '', authToken: 'LOCAL_TOKEN_SHOULD_NOT_BE_USED', modelProfileId: 'qwen36_plus' }),
   };
   globalThis.H2S_CLOUD_LLM_CLIENT = {
     callChatCompletions: async (cfg, messages, callOpts) => {
@@ -752,7 +752,7 @@ async function testCloudSmallClipPromptStaysBounded(){
       intent: { fixPitch: false, tightenRhythm: true, reduceOutliers: false },
     });
     assert(res && res.ok === true, 'cloud optimize succeeds');
-    assert(capturedCfg && capturedCfg.modelProfileId === 'minimax_m27_highspeed', 'cloud optimize should carry selected modelProfileId');
+    assert(capturedCfg && capturedCfg.modelProfileId === 'qwen36_plus', 'cloud optimize should carry selected modelProfileId');
     assert(capturedCfg.callOpts && capturedCfg.callOpts.maxOutputTokens === 8192, '24-note optimize requests 8192 output tokens');
     assert(capturedCfg.callOpts && capturedCfg.callOpts.task === 'studio_ai_optimize', 'cloud optimize sends task metadata');
     assert(capturedCfg.callOpts && capturedCfg.callOpts.noteCount === 24, 'cloud optimize sends note count metadata');
