@@ -2322,9 +2322,10 @@
       display: flex; justify-content: space-between; gap: 10px; padding: 7px 8px;
       border-radius: 6px; background: rgba(255,255,255,.045); font-size: 12px;
     }
-    .h2s-audio-analysis-status { margin-top: 7px; }
+    .h2s-audio-analysis-status { align-items: flex-start; margin-top: 7px; }
+    .h2s-audio-analysis-status > span { flex: 1 1 0; min-width: 0; }
     .h2s-audio-analysis-grid span, .h2s-audio-analysis-status span { color: var(--muted, #aaa); text-align: right; }
-    .h2s-audio-analysis-instruments { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+    .h2s-audio-analysis-instruments { display: flex; flex: 1 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 100%; min-width: 0; line-height: 1.35; }
     .h2s-audio-analysis-instrument { padding: 2px 5px; border-radius: 5px; background: rgba(73, 143, 255, .18); color: var(--text, #eee) !important; white-space: nowrap; }
     .h2s-audio-analysis-loading, .h2s-audio-analysis-error { margin: 16px 0 10px; font-size: 13px; line-height: 1.5; }
     .h2s-audio-analysis-error { color: var(--danger, #e55); }

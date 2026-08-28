@@ -24,8 +24,11 @@
   function instrumentsHTML(instruments, t){
     instruments = instruments || {};
     t = typeof t === 'function' ? t : function(_key, fallback){ return fallback; };
-    if (instruments.status === 'ok' && Array.isArray(instruments.items) && instruments.items.length){
-      return '<span class="h2s-audio-analysis-instruments">' + instruments.items.map(function(item){
+    var items = Array.isArray(instruments.items) ? instruments.items.filter(function(item){
+      return item && Number(item.confidence) > 0.08;
+    }) : [];
+    if (instruments.status === 'ok' && items.length){
+      return '<span class="h2s-audio-analysis-instruments">' + items.map(function(item){
         var confidence = item && item.confidence != null ? ' ' + Math.round(Number(item.confidence) * 100) + '%' : '';
         return '<span class="h2s-audio-analysis-instrument">' + escapeHtml(item && item.name || '') + escapeHtml(confidence) + '</span>';
       }).join('') + '</span>';

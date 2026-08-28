@@ -18,6 +18,7 @@ assert(worker.includes('MAX_PATCHES = 32') && worker.includes('samplingMode: \'f
 assert(worker.includes('frequencyToBin') && worker.includes('buildMelFilterBank'), 'YAMNet FFT/Mel preprocessing helpers should remain testable');
 assert(worker.includes('message.diagnostic === true') && worker.includes('topRawLabels'), 'raw per-patch diagnostics should require explicit opt-in');
 assert(worker.includes("status: 'ok'") && worker.includes('items: items'), 'worker should return multi-label instrument items');
+assert(worker.includes('item.confidence > 0.08'), 'worker should keep every instrument above the display confidence threshold');
 assert(worker.includes("{ id: 'piano'") && worker.includes("{ id: 'drums'"), 'worker should map core instruments');
 assert(client.includes('new Worker(workerUrl'), 'client should isolate inference in a browser Worker');
 assert(client.includes('[samples.buffer]'), 'audio samples should transfer instead of clone');
