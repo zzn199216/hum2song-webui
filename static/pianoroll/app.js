@@ -2045,69 +2045,19 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     if (!docKey) return;
     const prevV2 = app._projectV2 || _readLS(docKey);
 
-    const p2 = _projectV1ToV2(app.project);
-    if (!p2) return;
-
-    
-// Preserve v2-only track fields (currently: instrument, gainDb).
-try{
-  if (prevV2 && Array.isArray(prevV2.tracks) && Array.isArray(p2.tracks)){
-      const instByTid = new Map();
-      const gainByTid = new Map();
-      const mutedByTid = new Map();
-      const roleByTid = new Map();
-      for (const t of prevV2.tracks){
-        const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
-        if (!tid) continue;
-        if (typeof t.instrument === 'string' && t.instrument) instByTid.set(tid, t.instrument);
-        if (typeof t.gainDb === 'number' && isFinite(t.gainDb)) gainByTid.set(tid, t.gainDb);
-        if (typeof t.muted === 'boolean') mutedByTid.set(tid, t.muted);
-        if (typeof t.role === 'string' && t.role) roleByTid.set(tid, t.role);
+    let p2 = null;
+    try{
+      const P = (typeof window !== 'undefined') ? window.H2SProject : null;
+      p2 = P && typeof P.mergeProjectV1ViewIntoV2 === 'function'
+        ? P.mergeProjectV1ViewIntoV2(prevV2, app.project)
+        : _projectV1ToV2(app.project);
+      if (!p2) return;
+      if (P && typeof P.normalizeProjectRevisionChains === 'function'){
+        P.normalizeProjectRevisionChains(p2);
       }
-
-    for (const t of p2.tracks){
-      const tid = (t && (t.trackId || t.id)) ? String(t.trackId || t.id) : null;
-      if (!tid) continue;
-
-      // Keep id/trackId consistent (compat).
-      if (!t.id) t.id = tid;
-      if (!t.trackId) t.trackId = tid;
-
-      const inst = instByTid.get(tid);
-      if (typeof inst === 'string' && inst) t.instrument = inst;
-
-      const g = gainByTid.get(tid);
-      if (typeof g === 'number' && isFinite(g)) t.gainDb = g;
-
-      const m = mutedByTid.get(tid);
-      if (typeof m === 'boolean') t.muted = m;
-
-      const role = roleByTid.get(tid);
-      if (typeof role === 'string' && role) t.role = role;
-
-      // Ensure defaults for v2-only fields when missing from v1 migration.
-      if (typeof t.instrument !== 'string' || !t.instrument) t.instrument = 'default';
-      if (typeof t.gainDb !== 'number' || !isFinite(t.gainDb)) t.gainDb = 0;
-      if (typeof t.muted !== 'boolean') t.muted = false;
-    }
-  }
-  // Preserve clip revision chain (revisionId, parentRevisionId, revisions) so Undo Optimize works.
-  if (prevV2 && prevV2.clips && typeof prevV2.clips === 'object' && p2.clips && typeof p2.clips === 'object'){
-    for (const cid of Object.keys(p2.clips)){
-      const prevClip = prevV2.clips[cid];
-      if (!prevClip) continue;
-      const dst = p2.clips[cid];
-      if (dst && prevClip.revisionId != null) dst.revisionId = prevClip.revisionId;
-      if (dst && prevClip.parentRevisionId !== undefined) dst.parentRevisionId = prevClip.parentRevisionId;
-      if (dst && prevClip.revisions != null) dst.revisions = prevClip.revisions;
-      if (dst && prevClip.updatedAt != null) dst.updatedAt = prevClip.updatedAt;
-    }
-  }
-  if (typeof window !== 'undefined' && window.H2SProject && typeof window.H2SProject.normalizeProjectRevisionChains === 'function'){
-    window.H2SProject.normalizeProjectRevisionChains(p2);
-  }
-} catch(e){
+    } catch(e){
       console.warn('[persist] v2 merge failed', e);
+      return;
     }
 
     _writeLS(docKey, p2);

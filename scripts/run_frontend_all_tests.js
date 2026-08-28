@@ -9,11 +9,13 @@ function runOne(script){
   }
 }
 
+runOne('scripts/tests/studio_source_syntax.test.js');
 runOne('scripts/run_frontend_contract_tests.js');
 runOne('scripts/run_frontend_editor_contract_tests.js');
 runOne('scripts/run_frontend_numeric_invariants_tests.js');
 runOne('scripts/run_frontend_bpm_invariants_tests.js');
 runOne('scripts/run_frontend_timeline_unit_tests.js');
+runOne('scripts/tests/project_v1_v2_persistence_compat.test.js');
 runOne('scripts/tests/clip_thumbnail_math.test.js');
 runOne('scripts/tests/waveform_peaks.test.js');
 runOne('scripts/tests/audio_analysis_engine.test.js');

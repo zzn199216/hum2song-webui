@@ -1909,6 +1909,95 @@ function beginNewClipRevision(project, clipId, opts){
     return p2;
   }
 
+  function isProjectRecord(value){
+    return !!(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  function cloneProjectValue(value){
+    return value === undefined ? undefined : deepClone(value);
+  }
+
+  function mergeProjectRecord(previous, regenerated){
+    if (Array.isArray(regenerated)) return cloneProjectValue(regenerated);
+    if (!isProjectRecord(regenerated)) return cloneProjectValue(regenerated);
+    const out = isProjectRecord(previous) ? cloneProjectValue(previous) : {};
+    for (const key of Object.keys(regenerated)){
+      const next = regenerated[key];
+      if (next === undefined) continue;
+      out[key] = mergeProjectRecord(isProjectRecord(previous) ? previous[key] : undefined, next);
+    }
+    return out;
+  }
+
+  function projectEntityId(value){
+    if (!value || typeof value !== 'object') return null;
+    const raw = value.trackId != null ? value.trackId : value.id;
+    return raw == null || String(raw) === '' ? null : String(raw);
+  }
+
+  function mergeProjectEntityArray(previousItems, regeneratedItems){
+    const previousById = new Map();
+    for (const item of (Array.isArray(previousItems) ? previousItems : [])){
+      const id = projectEntityId(item);
+      if (id) previousById.set(id, item);
+    }
+    return (Array.isArray(regeneratedItems) ? regeneratedItems : []).map(function(item){
+      const id = projectEntityId(item);
+      return mergeProjectRecord(id ? previousById.get(id) : undefined, item);
+    });
+  }
+
+  /**
+   * Merge edits made through the legacy v1 projection back into canonical v2.
+   * Regenerated collection membership/order wins, while fields unknown to v1 are
+   * retained on matching entities. Inputs are never mutated.
+   */
+  function mergeProjectV1ViewIntoV2(previousV2, projectV1){
+    const regeneratedV2 = migrateProjectV1toV2(projectV1);
+    if (!isProjectRecord(previousV2) || !isProjectV2(previousV2)) return regeneratedV2;
+
+    const merged = mergeProjectRecord(previousV2, regeneratedV2);
+    merged.tracks = mergeProjectEntityArray(previousV2.tracks, regeneratedV2.tracks);
+    const previousTracksById = new Map();
+    for (const track of (Array.isArray(previousV2.tracks) ? previousV2.tracks : [])){
+      const id = projectEntityId(track);
+      if (id) previousTracksById.set(id, track);
+    }
+    for (const track of merged.tracks){
+      const previousTrack = previousTracksById.get(projectEntityId(track));
+      if (!previousTrack) continue;
+      // v1 migration currently fills defaults instead of carrying these values.
+      for (const key of ['instrument', 'gainDb', 'muted', 'role']){
+        if (Object.prototype.hasOwnProperty.call(previousTrack, key)){
+          track[key] = cloneProjectValue(previousTrack[key]);
+        }
+      }
+    }
+
+    merged.instances = mergeProjectEntityArray(previousV2.instances, regeneratedV2.instances);
+
+    const previousClips = isProjectRecord(previousV2.clips) ? previousV2.clips : {};
+    const regeneratedClips = isProjectRecord(regeneratedV2.clips) ? regeneratedV2.clips : {};
+    merged.clips = {};
+    for (const clipId of Object.keys(regeneratedClips)){
+      const previousClip = previousClips[clipId];
+      const clip = mergeProjectRecord(previousClip, regeneratedClips[clipId]);
+      if (isProjectRecord(previousClip)){
+        for (const key of ['revisionId', 'parentRevisionId', 'revisions', 'updatedAt']){
+          if (Object.prototype.hasOwnProperty.call(previousClip, key)){
+            clip[key] = cloneProjectValue(previousClip[key]);
+          }
+        }
+      }
+      merged.clips[clipId] = clip;
+    }
+    merged.clipOrder = cloneProjectValue(regeneratedV2.clipOrder);
+
+    normalizeProjectRevisionChains(merged);
+    repairClipOrderV2(merged);
+    return merged;
+  }
+
   
   /* -------------------- T3-0b load() + migration guard -------------------- */
 
@@ -2204,6 +2293,7 @@ function toggleClipAB(projectV2, clipId){
     scoreSecToBeat,
     scoreBeatToSec,
     migrateProjectV1toV2,
+    mergeProjectV1ViewIntoV2,
 
     // load / schema versioning (T3-0b)
     loadProjectDoc,
