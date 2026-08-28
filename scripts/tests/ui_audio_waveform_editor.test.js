@@ -129,7 +129,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   assert(zh['audio.waveform.title'] === '音频片段编辑');
   assert(zh['audio.waveform.separatorOption.demucs'] === '稳定分轨（推荐）');
   assert(zh['audio.waveform.separatorOption.uvr5'] === '人声增强（实验）');
-  assert(zh['audio.waveform.separatorOption.advanced'] === '高级分轨（30 次）');
+  assert(zh['audio.waveform.separatorOption.advanced'] === 'suno分轨（30稳定分轨次数消耗）');
   assert(zh['audio.waveform.advancedCost'].includes('30 次'));
   assert(zh['audio.waveform.uvr5Hint'].includes('仍在测试'));
   assert(!zh['audio.waveform.separatorOption.demucs'].includes('当前默认'));

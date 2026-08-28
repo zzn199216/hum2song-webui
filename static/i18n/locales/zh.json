@@ -154,7 +154,7 @@
   "audio.waveform.separatorOption": "分轨方案",
   "audio.waveform.separatorOption.demucs": "稳定分轨（推荐）",
   "audio.waveform.separatorOption.uvr5": "人声增强（实验）",
-  "audio.waveform.separatorOption.advanced": "高级分轨（30 次）",
+  "audio.waveform.separatorOption.advanced": "suno分轨（30稳定分轨次数消耗）",
   "audio.waveform.advancedHint": "使用高成本精细模型拆分更多独立乐器，只生成音频轨。",
   "audio.waveform.advancedCost": "每次执行高级分轨消耗 30 次常规分轨次数，真正开始任务时才扣除。",
   "audio.waveform.uvr5Hint": "“人声增强”仍在测试，处理更慢，且只输出人声和伴奏两轨。",
