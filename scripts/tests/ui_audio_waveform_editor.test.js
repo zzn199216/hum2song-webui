@@ -93,12 +93,17 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   console.log('PASS advanced stem silent-track filtering');
 })();
 
-(function testAdvancedStemCheckboxIsOneShot(){
+(function testAdvancedStemIsASeparatorChoice(){
   const wfSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'ui', 'audio_waveform_editor.js'), 'utf8');
-  assert(wfSrc.includes('toggle.disabled = busy'), 'advanced checkbox is disabled while a task is running');
-  assert(/finally \{[\s\S]*advancedStemArmed = false;[\s\S]*syncAdvancedStemUi\(\);/.test(wfSrc), 'advanced checkbox resets after every task outcome');
-  assert(wfSrc.includes("advancedToggle.checked = false"), 'busy-time checkbox changes are reverted');
-  console.log('PASS advanced stem checkbox is one-shot');
+  assert(wfSrc.includes('data-separator-option-value="advanced_stems"'), 'advanced stems are presented inside the separator-choice group');
+  assert(wfSrc.includes('value="advanced_stems" data-advanced-option'), 'advanced stems participate in the single select state');
+  assert(wfSrc.includes("requestedSeparator === 'advanced_stems'"), 'the shared separation action dispatches the advanced provider');
+  assert(wfSrc.includes('advancedOption.disabled = midiEnabled'), 'advanced audio-only separation cannot be combined with MIDI conversion');
+  assert(wfSrc.includes('transcribeOption.disabled = uvrSelected || advancedSelected'), 'advanced selection disables the incompatible transcription mode');
+  assert(!wfSrc.includes('data-role="wfAdvancedToggle"'), 'the redundant advanced checkbox was removed');
+  assert(!wfSrc.includes('data-act="waveArmAdvanced"'), 'the redundant advanced arming button was removed');
+  assert(!wfSrc.includes('data-act="waveAdvancedSeparate"'), 'the redundant second execution button was removed');
+  console.log('PASS advanced stems are one mutually exclusive separator choice');
 })();
 
 (function testAdvancedStemInsufficientBalanceIsVisible(){
@@ -120,9 +125,12 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   assert(en['audio.waveform.title'] === 'Audio segment editor');
   assert(en['audio.waveform.separatorOption.demucs'] === 'Stable separation (recommended)');
   assert(en['audio.waveform.separatorOption.uvr5'] === 'Vocal enhancement (experimental)');
+  assert(en['audio.waveform.separatorOption.advanced'] === 'Advanced stems (30 credits)');
   assert(zh['audio.waveform.title'] === '音频片段编辑');
   assert(zh['audio.waveform.separatorOption.demucs'] === '稳定分轨（推荐）');
   assert(zh['audio.waveform.separatorOption.uvr5'] === '人声增强（实验）');
+  assert(zh['audio.waveform.separatorOption.advanced'] === '高级分轨（30 次）');
+  assert(zh['audio.waveform.advancedCost'].includes('30 次'));
   assert(zh['audio.waveform.uvr5Hint'].includes('仍在测试'));
   assert(!zh['audio.waveform.separatorOption.demucs'].includes('当前默认'));
   assert(zh['audio.waveform.missingFile'].includes('重新导入'));
