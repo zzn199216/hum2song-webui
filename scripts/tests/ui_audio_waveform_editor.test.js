@@ -81,11 +81,12 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   const start = appSrc.indexOf('async _runAdvancedStemSeparationForClip');
   const end = appSrc.indexOf('_initTopBarImportTranscriptionControls', start);
   const advancedSrc = appSrc.slice(start, end);
-  assert(advancedSrc.includes('audioAnalysis.isEffectivelySilent(analysis)'), 'advanced stems classify decoded near-silent audio');
+  assert(appSrc.includes('audioAnalysis.isEffectivelySilent(analysis)'), 'shared stem preparation classifies decoded near-silent audio');
+  assert(advancedSrc.includes('_prepareSeparatedAudioStemParts(file, name, { discardWholeSilent: true })'), 'advanced stems use shared silence preparation');
   assert(advancedSrc.includes('discardedSilentStems.push(name)'), 'near-silent stems are discarded instead of imported');
   assert(advancedSrc.includes('preparedStems.length)'), 'timeline planning uses only audible prepared stems');
   assert(
-    advancedSrc.indexOf('audioAnalysis.isEffectivelySilent(analysis)') < advancedSrc.indexOf('window.H2SAudioSeparationTimeline.planTrackIndices'),
+    advancedSrc.indexOf('_prepareSeparatedAudioStemParts(file, name') < advancedSrc.indexOf('window.H2SAudioSeparationTimeline.planTrackIndices'),
     'silence filtering runs before Studio creates destination tracks',
   );
   assert(advancedSrc.includes('已自动忽略 '), 'completion status reports discarded empty stems');

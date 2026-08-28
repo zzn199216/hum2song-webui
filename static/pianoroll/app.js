@@ -1714,6 +1714,7 @@
         trackIndex,
         startSec: _beatToSec(inst.startBeat || 0, bpm),
         transpose: inst.transpose || 0,
+        gainDb: (typeof inst.gainDb === 'number' && isFinite(inst.gainDb)) ? inst.gainDb : 0,
         groupId: (inst.groupId != null) ? String(inst.groupId) : null,
         placementBatchId: (inst.placementBatchId != null) ? String(inst.placementBatchId) : null,
       });
@@ -2869,6 +2870,17 @@ setTrackGainDb(trackId, gainDb){
   const v = Number(gainDb);
   t.gainDb = (Number.isFinite(v) ? Math.max(-30, Math.min(6, v)) : 0);
   this.setProjectFromV2(p2);
+},
+
+setInstanceGainDb(instanceId, gainDb){
+  const p2 = this.getProjectV2();
+  if (!p2 || !Array.isArray(p2.instances)) return false;
+  const instance = p2.instances.find(x => x && String(x.id) === String(instanceId || ''));
+  if (!instance) return false;
+  const value = Number(gainDb);
+  instance.gainDb = Number.isFinite(value) ? Math.max(-60, Math.min(24, value)) : 0;
+  this.setProjectFromV2(p2);
+  return true;
 },
 
 
@@ -4736,6 +4748,8 @@ $('#rngPitchCenter').addEventListener('input', () => {
     onRemoveInstance: (instId) => this.deleteInstance(instId),
     onUndoTimeline: () => this.undoLastTimelineEdit(),
             getConvertLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('cliplib.convertSegment') : 'Convert selected segment'),
+            getInstanceVolumeLabel: () => ((window.I18N && window.I18N.t) ? window.I18N.t('inspector.instanceVolume') : 'Clip volume'),
+            onSetInstanceGainDb: (instanceId, gainDb) => this.setInstanceGainDb(instanceId, gainDb),
             getAutoSeparationLabel: () => 'AI 自动分轨',
             onOpenAudioSeparation: (clipId, instId, trigger) => this.openAudioSeparation({ clipId: clipId, sourceAudioInstanceId: instId, trigger: trigger }),
             getAudioSegmentPanelOpts: (inst) => {
@@ -7118,6 +7132,136 @@ renderTimeline(){
       });
     },
 
+    async _prepareSeparatedAudioStemParts(file, baseName, options){
+      options = options || {};
+      const original = {
+        discardedSilent: false,
+        trimmed: false,
+        parts: [{ file: file, baseName: baseName, startOffsetSec: 0 }],
+      };
+      const audioDecode = (typeof window !== 'undefined') ? window.H2SAudioDecode : null;
+      if (!audioDecode || typeof audioDecode.decodeAudioFile !== 'function') return original;
+      try {
+        const decoded = await audioDecode.decodeAudioFile(file);
+        const audioAnalysis = window.H2SAudioAnalysis;
+        if (audioAnalysis && typeof audioAnalysis.analyzeAudioBuffer === 'function' &&
+            typeof audioAnalysis.isEffectivelySilent === 'function') {
+          const analysis = audioAnalysis.analyzeAudioBuffer(decoded);
+          if (audioAnalysis.isEffectivelySilent(analysis)) {
+            return options.discardWholeSilent === true
+              ? { discardedSilent: true, trimmed: false, parts: [] }
+              : original;
+          }
+        }
+        const segmenter = window.H2SAudioStemSilenceSegments;
+        if (!segmenter || typeof segmenter.findAudibleRanges !== 'function' ||
+            typeof segmenter.encodeWavSegment !== 'function') return original;
+        const ranges = segmenter.findAudibleRanges(decoded);
+        if (!ranges.length) return original;
+        if (typeof segmenter.coversWholeBuffer === 'function' && segmenter.coversWholeBuffer(ranges, decoded)) {
+          return original;
+        }
+        const duplicateGroups = typeof segmenter.groupNearDuplicateRanges === 'function'
+          ? segmenter.groupNearDuplicateRanges(decoded, ranges)
+          : ranges.map(function (_range, index) {
+              return { rangeIndex: index, canonicalRangeIndex: index, similarity: 1 };
+            });
+        const parts = [];
+        for (let index = 0; index < ranges.length; index += 1) {
+          const range = ranges[index];
+          const group = duplicateGroups[index] || { canonicalRangeIndex: index, similarity: 1 };
+          const canonicalPartIndex = Number(group.canonicalRangeIndex);
+          let partFile = null;
+          if (canonicalPartIndex >= 0 && canonicalPartIndex < index && parts[canonicalPartIndex]) {
+            partFile = parts[canonicalPartIndex].file;
+          } else {
+            const blob = segmenter.encodeWavSegment(decoded, range.startSec, range.endSec);
+            if (!blob) return original;
+            partFile = new File([blob], String(baseName || 'stem') + '-part-' + String(index + 1) + '.wav', { type: 'audio/wav' });
+          }
+          const partLabel = ranges.length > 1 ? (baseName + ' ' + String(index + 1)) : baseName;
+          parts.push({
+            file: partFile,
+            baseName: partLabel,
+            startOffsetSec: range.startSec,
+            duplicateOfPartIndex: canonicalPartIndex >= 0 && canonicalPartIndex < index ? canonicalPartIndex : null,
+            duplicateSimilarity: Number(group.similarity) || 0,
+            instanceGainDb: Number.isFinite(Number(group.relativeGainDb)) ? Number(group.relativeGainDb) : 0,
+          });
+        }
+        return parts.length
+          ? { discardedSilent: false, trimmed: true, parts: parts }
+          : original;
+      } catch (_stemSegmentError) {
+        // If decoding or silence detection is unavailable, retain the provider file unchanged.
+        return original;
+      }
+    },
+
+    _addNativeAudioClipInstance(clipId, opts){
+      opts = opts || {};
+      const P = window.H2SProject;
+      if (!P || typeof P.createInstanceV2 !== 'function') return { ok: false, reason: 'no_project_helpers' };
+      let p2 = this.getProjectV2();
+      if (!p2) p2 = _projectV1ToV2(this.project);
+      const clip = p2 && p2.clips && p2.clips[String(clipId || '')];
+      if (!clip || (typeof P.clipKind === 'function' && P.clipKind(clip) !== 'audio')) {
+        return { ok: false, reason: 'source_clip_not_found' };
+      }
+      const requestedTrackId = (typeof opts.trackId === 'string' && opts.trackId.trim()) ? opts.trackId.trim() : '';
+      const ti = Number.isFinite(opts.trackIndex)
+        ? Math.max(0, Math.floor(opts.trackIndex))
+        : (Number.isFinite(this.state.activeTrackIndex) ? Math.max(0, Math.floor(this.state.activeTrackIndex)) : 0);
+      const track = requestedTrackId
+        ? ((p2.tracks || []).find(function (item) { return item && String(item.trackId || item.id) === requestedTrackId; }) || null)
+        : ((p2.tracks && p2.tracks.length) ? p2.tracks[Math.min(ti, p2.tracks.length - 1)] : null);
+      const trackId = requestedTrackId || ((track && (track.trackId || track.id)) ? String(track.trackId || track.id) : 'trk_0');
+      const startBeat = Number.isFinite(opts.startBeat) ? Math.max(0, Number(opts.startBeat)) : 0;
+      const instance = P.createInstanceV2(clip.id, startBeat, trackId);
+      instance.gainDb = Math.max(-60, Math.min(24, Number(opts.instanceGainDb) || 0));
+      if (!Array.isArray(p2.instances)) p2.instances = [];
+      p2.instances.push(instance);
+      if (typeof P.normalizeProjectV2 === 'function') P.normalizeProjectV2(p2);
+      this.state.selectedClipId = clip.id;
+      this.state.selectedInstanceId = instance.id;
+      this.setProjectFromV2(p2);
+      return { ok: true, clipId: clip.id, instanceId: instance.id, trackId: trackId, startBeat: startBeat, reused: true };
+    },
+
+    async _commitPreparedSeparatedAudioParts(parts, opts){
+      opts = opts || {};
+      const committedByPartIndex = [];
+      for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+        const part = parts[partIndex];
+        const startBeat = Math.max(0, Number(opts.sourceStartBeat) || 0) +
+          Math.max(0, Number(part.startOffsetSec) || 0) * (Number(opts.bpm) || 120) / 60;
+        const canonicalIndex = part.duplicateOfPartIndex === null || part.duplicateOfPartIndex === undefined
+          ? -1
+          : Number(part.duplicateOfPartIndex);
+        let committed = null;
+        if (Number.isInteger(canonicalIndex) && canonicalIndex >= 0 && canonicalIndex < partIndex && committedByPartIndex[canonicalIndex]) {
+          committed = this._addNativeAudioClipInstance(committedByPartIndex[canonicalIndex].clipId, {
+            trackIndex: opts.trackIndex,
+            trackId: opts.trackId,
+            startBeat: startBeat,
+            instanceGainDb: part.instanceGainDb,
+          });
+        } else {
+          committed = await this._commitNativeAudioFile(part.file, {
+            baseName: part.baseName,
+            trackIndex: opts.trackIndex,
+            trackId: opts.trackId,
+            startBeat: startBeat,
+            instanceGainDb: part.instanceGainDb,
+            statusDoneKey: opts.statusDoneKey || 'io.importAudioStoredLocal',
+          });
+        }
+        if (!committed || !committed.ok) throw new Error((committed && committed.reason) || 'audio_materialize_failed');
+        committedByPartIndex[partIndex] = committed;
+      }
+      return { ok: true, committed: committedByPartIndex };
+    },
+
     async _runAudioSeparationForClip(clipId, opts){
       opts = opts || {};
       if (!this._requireCloudServerFeatureAuth(true)) throw new Error('auth_required');
@@ -7219,13 +7363,13 @@ renderTimeline(){
                 ? LAS.normalizeAudioDownloadFilename(stemNameCandidate, stemMime, downloaded.buffer, item.stem)
                 : (item.stem + '.wav');
               const stemFile = new File([downloaded.buffer], stemFilename, { type: stemMime });
-              const committed = await this._commitNativeAudioFile(stemFile, {
-                baseName: item.stem,
+              const prepared = await this._prepareSeparatedAudioStemParts(stemFile, item.stem, { discardWholeSilent: false });
+              await this._commitPreparedSeparatedAudioParts(prepared.parts, {
                 trackIndex: trackIndex,
-                startBeat: sourceStartBeat,
+                sourceStartBeat: sourceStartBeat,
+                bpm: bpm,
                 statusDoneKey: 'io.importAudioStoredLocal',
               });
-              if (!committed || !committed.ok) throw new Error((committed && committed.reason) || 'audio_materialize_failed');
             } else {
               const text = new TextDecoder('utf-8').decode(new Uint8Array(downloaded.buffer));
               const scoreDoc = JSON.parse(text);
@@ -7387,23 +7531,12 @@ renderTimeline(){
             ? window.H2SLocalAudioAssets.normalizeAudioDownloadFilename(artifact.filename || (name + '.mp3'), mime, downloaded.buffer, name)
             : (name + '.mp3');
           const file = new File([downloaded.buffer], fileName, { type: mime });
-          const audioDecode = window.H2SAudioDecode;
-          const audioAnalysis = window.H2SAudioAnalysis;
-          if (audioDecode && typeof audioDecode.decodeAudioFile === 'function' &&
-              audioAnalysis && typeof audioAnalysis.analyzeAudioBuffer === 'function' &&
-              typeof audioAnalysis.isEffectivelySilent === 'function') {
-            try {
-              const decoded = await audioDecode.decodeAudioFile(file);
-              const analysis = audioAnalysis.analyzeAudioBuffer(decoded);
-              if (audioAnalysis.isEffectivelySilent(analysis)) {
-                discardedSilentStems.push(name);
-                continue;
-              }
-            } catch (_silenceCheckError) {
-              // Keep the stem when silence analysis is unavailable; import remains backward compatible.
-            }
+          const prepared = await this._prepareSeparatedAudioStemParts(file, name, { discardWholeSilent: true });
+          if (prepared.discardedSilent) {
+            discardedSilentStems.push(name);
+            continue;
           }
-          preparedStems.push({ stem, artifact, file, name });
+          preparedStems.push({ stem, artifact, file, name, parts: prepared.parts });
         } catch (err) {
           failures.push(String(stem.stemType || 'stem') + ': ' + ((err && err.message) ? err.message : 'download_failed'));
         }
@@ -7419,13 +7552,12 @@ renderTimeline(){
         const prepared = preparedStems[index];
         try {
           if (typeof opts.onStatus === 'function') opts.onStatus('正在导入 ' + prepared.name + '…');
-          const committed = await this._commitNativeAudioFile(prepared.file, {
-            baseName: prepared.name,
+          await this._commitPreparedSeparatedAudioParts(prepared.parts, {
             trackIndex: plan.trackIndices[index],
-            startBeat: sourceStartBeat,
+            sourceStartBeat: sourceStartBeat,
+            bpm: bpm,
             statusDoneKey: 'io.importAudioStoredLocal',
           });
-          if (!committed || !committed.ok) throw new Error('audio_materialize_failed');
         } catch (err) {
           failures.push(prepared.name + ': ' + ((err && err.message) ? err.message : 'import_failed'));
         }
@@ -7673,6 +7805,7 @@ renderTimeline(){
         ? Math.max(0, Number(opts.startBeat))
         : ((p2.ui && typeof p2.ui.playheadBeat === 'number' && isFinite(p2.ui.playheadBeat)) ? Math.max(0, p2.ui.playheadBeat) : 0);
       const inst = P.createInstanceV2(clip.id, startBeat, trackId);
+      inst.gainDb = Math.max(-60, Math.min(24, Number(opts.instanceGainDb) || 0));
       if (!Array.isArray(p2.instances)) p2.instances = [];
       p2.instances.push(inst);
       if (typeof P.normalizeProjectV2 === 'function') P.normalizeProjectV2(p2);
@@ -8701,6 +8834,41 @@ renderTimeline(){
       }
     },
 
+    _addRepeatedNoteInstancesForSource(noteClipId, sourceAudioClipId, sourceAudioInstanceId){
+      const sourceClipId = String(sourceAudioClipId || '').trim();
+      const anchorSourceId = String(sourceAudioInstanceId || '').trim();
+      if (!noteClipId || !sourceClipId || !anchorSourceId || !window.H2SProject || typeof window.H2SProject.createInstance !== 'function') return [];
+      const instances = Array.isArray(this.project && this.project.instances) ? this.project.instances : [];
+      const noteInstances = instances.filter(function (instance) {
+        return instance && String(instance.clipId || '') === String(noteClipId);
+      });
+      const anchorNote = noteInstances.length ? noteInstances[noteInstances.length - 1] : null;
+      if (!anchorNote || typeof window.H2SProject.planRepeatedNoteInstancePlacementsV1 !== 'function') return [];
+      const anchorSource = instances.find(function (instance) { return instance && String(instance.id || '') === anchorSourceId; });
+      anchorNote.gainDb = anchorSource && Number.isFinite(Number(anchorSource.gainDb)) ? Number(anchorSource.gainDb) : 0;
+      const placements = window.H2SProject.planRepeatedNoteInstancePlacementsV1(
+        this.project,
+        sourceClipId,
+        anchorSourceId,
+        anchorNote,
+      );
+      const created = [];
+      for (let index = 0; index < placements.length; index += 1) {
+        const placement = placements[index];
+        const alreadyExists = noteInstances.some(function (noteInstance) {
+          return Number(noteInstance.trackIndex || 0) === Number(placement.trackIndex || 0) &&
+            Math.abs(Number(noteInstance.startSec || 0) - Number(placement.startSec || 0)) <= 0.001;
+        });
+        if (alreadyExists) continue;
+        const repeatedInstance = window.H2SProject.createInstance(noteClipId, placement.startSec, placement.trackIndex);
+        repeatedInstance.gainDb = Number.isFinite(Number(placement.gainDb)) ? Number(placement.gainDb) : 0;
+        this.project.instances.push(repeatedInstance);
+        noteInstances.push(repeatedInstance);
+        created.push(repeatedInstance.id);
+      }
+      return created;
+    },
+
     /**
      * Materialize a ScoreDoc onto the timeline (auto-split by user prefs or single clip).
      * Not audio stem separation — phrase/pitch-range clip splitting only.
@@ -8771,6 +8939,7 @@ renderTimeline(){
         if (opts.sourceAudioInstanceId) clip.meta.sourceAudioInstanceId = String(opts.sourceAudioInstanceId);
         this.project.clips.unshift(clip);
         this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
+        this._addRepeatedNoteInstancesForSource(clip.id, opts.sourceAudioClipId, opts.sourceAudioInstanceId);
         persist();
         this.render();
         log('Clip added: ' + clip.name);
@@ -8824,6 +8993,7 @@ renderTimeline(){
       if (opts.sourceAudioInstanceId) clip.meta.sourceAudioInstanceId = String(opts.sourceAudioInstanceId);
       this.project.clips.unshift(clip);
       this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
+      this._addRepeatedNoteInstancesForSource(clip.id, opts.sourceAudioClipId, opts.sourceAudioInstanceId);
       persist();
       this.render();
       log('Clip added: ' + clip.name);

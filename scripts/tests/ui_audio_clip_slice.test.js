@@ -112,6 +112,7 @@ function testAppV1ProjectionSource(){
   assert(src.includes("P.clipKind(c) === 'audio'"), 'v2 audio branch in _projectV2ToV1View');
   assert(src.includes("clipV1.kind = 'audio'"), 'clipV1 kind audio');
   assert(src.includes('clipV1.audio'), 'clipV1 audio field');
+  assert(src.includes('gainDb: (typeof inst.gainDb'), 'v2 instance gain survives the v1 UI projection');
 }
 
 function testGuardsSource(){

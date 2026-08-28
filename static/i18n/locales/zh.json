@@ -611,6 +611,7 @@
   "inspector.timelineSelection": "时间轴选择",
   "inspector.timelineSelectionHint": "时间轴上的选中实例（开始/移调/编辑）。",
   "inspector.selectInstanceHint": "在时间轴上选择片段实例。",
+  "inspector.instanceVolume": "片段音量",
   "inspector.actions": "操作",
   "inspector.exportProjectJson": "导出项目 JSON",
   "inspector.exportSelectedClipJson": "导出所选片段 JSON",

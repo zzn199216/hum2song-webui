@@ -602,6 +602,7 @@
         const tid = (project.tracks && project.tracks[ti] && project.tracks[ti].id) ? project.tracks[ti].id : defaultTrackId;
         inst.trackId = tid;
       }
+      inst.gainDb = clamp(isFiniteNumber(Number(inst.gainDb)) ? Number(inst.gainDb) : 0, -60, 24);
       if ('trackIndex' in inst) delete inst.trackIndex;
       if ('startSec' in inst) delete inst.startSec;
     }
@@ -862,7 +863,8 @@
       clipId,
       startSec: Math.max(0, Number(startSec || 0)),
       trackIndex: Math.max(0, Number(trackIndex || 0)),
-      transpose: 0
+      transpose: 0,
+      gainDb: 0
     };
   }
 
@@ -944,6 +946,34 @@
     const startSec = (isFiniteNumber(only.startSec) && Number(only.startSec) >= 0) ? Number(only.startSec) : fallbackStart;
     const trackIndex = (isFiniteNumber(only.trackIndex) && Number(only.trackIndex) >= 0) ? Math.floor(Number(only.trackIndex)) : fallbackTrack;
     return _audioConvertNotePlacement(projectV1, startSec, trackIndex, 'single_source_instance');
+  }
+
+  /** Plan additional note instances when one repeated audio Clip is converted to notes. */
+  function planRepeatedNoteInstancePlacementsV1(projectV1, sourceClipId, anchorSourceInstanceId, anchorNoteInstance){
+    if (!projectV1 || !anchorNoteInstance) return [];
+    const sourceId = String(sourceClipId || '').trim();
+    const anchorId = String(anchorSourceInstanceId || '').trim();
+    if (!sourceId || !anchorId) return [];
+    const instances = Array.isArray(projectV1.instances) ? projectV1.instances : [];
+    const sources = instances.filter(inst => inst && String(inst.clipId || '') === sourceId);
+    const anchorSource = sources.find(inst => String(inst.id || '') === anchorId);
+    if (!anchorSource || sources.length < 2) return [];
+    const anchorStartSec = Math.max(0, Number(anchorSource.startSec) || 0);
+    const noteStartSec = Math.max(0, Number(anchorNoteInstance.startSec) || 0);
+    const noteTrackIndex = Math.max(0, Math.floor(Number(anchorNoteInstance.trackIndex) || 0));
+    const placements = [];
+    for (const source of sources){
+      if (String(source.id || '') === anchorId) continue;
+      const startSec = Math.max(0, noteStartSec + Math.max(0, Number(source.startSec) || 0) - anchorStartSec);
+      if (placements.some(item => item.trackIndex === noteTrackIndex && Math.abs(item.startSec - startSec) <= 0.001)) continue;
+      placements.push({
+        sourceInstanceId: String(source.id || ''),
+        startSec,
+        trackIndex: noteTrackIndex,
+        gainDb: clamp(isFiniteNumber(Number(source.gainDb)) ? Number(source.gainDb) : 0, -60, 24),
+      });
+    }
+    return placements;
   }
 
   /* -------------------- T1-1 ProjectDoc v2 helpers (beats) -------------------- */
@@ -1365,7 +1395,8 @@ function beginNewClipRevision(project, clipId, opts){
       clipId: String(clipId),
       trackId: String(trackId),
       startBeat: Math.max(0, normalizeBeat(Number(startBeat || 0))),
-      transpose: 0
+      transpose: 0,
+      gainDb: 0
     };
   }
 
@@ -1475,6 +1506,7 @@ function beginNewClipRevision(project, clipId, opts){
       if (!inst.trackId || !project.tracks.some(t => t.id === inst.trackId)) inst.trackId = defaultTrackId;
       inst.startBeat = Math.max(0, normalizeBeat(Number(inst.startBeat || 0)));
       inst.transpose = coerceTranspose(inst.transpose);
+      inst.gainDb = clamp(isFiniteNumber(Number(inst.gainDb)) ? Number(inst.gainDb) : 0, -60, 24);
       // strip v1 fields
       if ('startSec' in inst) delete inst.startSec;
       if ('trackIndex' in inst) delete inst.trackIndex;
@@ -1572,6 +1604,7 @@ function beginNewClipRevision(project, clipId, opts){
           clipId: clip.id,
           instanceId: inst.id,
           assetRef,
+          instanceGainDb: clamp(isFiniteNumber(Number(inst.gainDb)) ? Number(inst.gainDb) : 0, -60, 24),
         });
         continue;
       }
@@ -1580,6 +1613,8 @@ function beginNewClipRevision(project, clipId, opts){
 
       const instStartBeat = Number(inst.startBeat || 0);
       const instTranspose = coerceTranspose(inst.transpose);
+      const instanceGainDb = clamp(isFiniteNumber(Number(inst.gainDb)) ? Number(inst.gainDb) : 0, -60, 24);
+      const instanceGainLinear = Math.pow(10, instanceGainDb / 20);
 
       for (const trk of clip.score.tracks){
         const notes = Array.isArray(trk.notes) ? trk.notes : [];
@@ -1595,7 +1630,7 @@ function beginNewClipRevision(project, clipId, opts){
 
           // legality / clamps (this is NOT music optimization; it's validity enforcement)
           const pitch = clamp(Math.round(Number(n.pitch) + instTranspose), 0, 127);
-          const velocity = clamp(Math.round(Number(n.velocity)), 1, 127);
+          const velocity = clamp(Math.round(Number(n.velocity) * instanceGainLinear), 1, 127);
 
           // Avoid NaN
           if (!isFinite(startSec) || !isFinite(durationSec)){
@@ -1848,7 +1883,8 @@ function beginNewClipRevision(project, clipId, opts){
         clipId: String(inst.clipId || ''),
         trackId,
         startBeat,
-        transpose: coerceTranspose(inst.transpose)
+        transpose: coerceTranspose(inst.transpose),
+        gainDb: clamp(isFiniteNumber(Number(inst.gainDb)) ? Number(inst.gainDb) : 0, -60, 24)
       });
       const lastInst = instances[instances.length - 1];
       if (inst.groupId != null && String(inst.groupId).trim()) lastInst.groupId = String(inst.groupId);
@@ -2101,6 +2137,7 @@ function toggleClipAB(projectV2, clipId){
     createClipFromScore,
     createInstance,
     resolveAudioConvertPlacementV1,
+    planRepeatedNoteInstancePlacementsV1,
     isTimelineTrackEmpty,
     resolveNotePlacementTrackBelow,
 

@@ -71,7 +71,7 @@ async function main(){
   };
   const flat = {
     tracks: [{ trackId: 'blue', notes: [{ pitch: 60, velocity: 100, startSec: 0, durationSec: 0.5 }] }],
-    audioSegments: [{ trackId: 'green', startSec: 1, durationSec: 2, assetRef: 'localidb:green' }],
+    audioSegments: [{ trackId: 'green', startSec: 1, durationSec: 2, assetRef: 'localidb:green', instanceGainDb: 4 }],
   };
 
   function Synth(){
@@ -161,7 +161,7 @@ async function main(){
 
   assert.deepStrictEqual(resolvedRefs, ['localidb:green'], 'green audio should resolve through the playback asset resolver');
   assert.strictEqual(noteStarts.length, 1, 'blue MIDI should still render');
-  assert.deepStrictEqual(audioStarts, [{ time: 1, offset: 0, duration: 2, gainDb: -6 }], 'green audio should render at its timeline position and gain');
+  assert.deepStrictEqual(audioStarts, [{ time: 1, offset: 0, duration: 2, gainDb: -2 }], 'WAV export should combine track and per-instance gain');
   assert.strictEqual(offlineDuration, 4.5, 'WAV duration should include the audio tail, not only MIDI notes');
   assert.strictEqual(masterGainDb, -9, 'offline render should use the same master gain as P playback');
   assert.strictEqual(downloaded, true, 'mixed WAV should be downloaded');

@@ -59,7 +59,7 @@ function testComputeMatchesFlattenMixed(){
   p2.clips['cn'] = cn;
   p2.clipOrder = ['ca', 'cn'];
   p2.instances = [
-    { id: 'ia', clipId: 'ca', trackId: tid, startBeat: 0, transpose: 0 },
+    { id: 'ia', clipId: 'ca', trackId: tid, startBeat: 0, transpose: 0, gainDb: -3 },
     { id: 'in', clipId: 'cn', trackId: tid, startBeat: 4, transpose: 0 },
   ];
   P.normalizeProjectV2(p2);
@@ -77,6 +77,9 @@ function testComputeMatchesFlattenMixed(){
   assert.strictEqual(sched.items.length, 1, 'one schedule row');
   assert.strictEqual(sched.items[0].assetRef, 'blob:test');
   assert.strictEqual(sched.items[0].t, 0);
+  assert.strictEqual(flat.audioSegments[0].instanceGainDb, -3);
+  assert.strictEqual(sched.items[0].instanceGainDb, -3);
+  assert.strictEqual(sched.items[0].gainDb, -3);
   assert.ok(Math.abs(sched.items[0].dur - 2) < 1e-9, 'duration sec');
   assert.strictEqual(sched.skipped.length, 0);
 }
@@ -144,12 +147,55 @@ function testGainDbPassedThrough(){
   assert.ok(Math.abs(sched.items[0].t - 0.5) < 1e-9, 'relative start');
 }
 
+function testTrackAndInstanceGainAreCombined(){
+  const AC = loadAudioController();
+  const flat = {
+    audioSegments: [{ trackId: 't1', startSec: 0, durationSec: 1, assetRef: 'x', instanceGainDb: 4 }],
+  };
+  const sched = AC.computeAudioPlaybackSchedule(flat, 0, new Map([['t1', { muted: false, gainDb: -6 }]]));
+  assert.strictEqual(sched.items[0].instanceGainDb, 4);
+  assert.strictEqual(sched.items[0].gainDb, -2);
+}
+
+function testInstanceGainMigratesIntoProjectV2(){
+  const P = loadH2SProject();
+  const p2 = P.migrateProjectV1toV2({
+    version: 1,
+    bpm: 120,
+    tracks: [{ id: 't1', name: 'Track 1' }],
+    clips: [{ id: 'a1', kind: 'audio', name: 'Loop', audio: { assetRef: 'x', durationSec: 1 }, meta: { spanSec: 1 } }],
+    instances: [{ id: 'i1', clipId: 'a1', trackIndex: 0, startSec: 0, transpose: 0, gainDb: -7.5 }],
+    ui: { playheadSec: 0, pxPerSec: 100 },
+  });
+  assert.strictEqual(p2.instances[0].gainDb, -7.5);
+  assert.strictEqual(P.flatten(p2).audioSegments[0].instanceGainDb, -7.5);
+}
+
+function testEditableNoteRepeatGainScalesVelocity(){
+  const P = loadH2SProject();
+  const p2 = P.defaultProjectV2();
+  const tid = P.SCHEMA_V2.DEFAULT_TRACK_ID;
+  const clip = P.createClipFromScoreBeat({
+    version: 2,
+    tracks: [{ id: 'score', notes: [{ id: 'n1', pitch: 60, velocity: 100, startBeat: 0, durationBeat: 1 }] }],
+  }, { id: 'note_loop', name: 'Loop notes' });
+  p2.clips[clip.id] = clip;
+  p2.clipOrder = [clip.id];
+  p2.instances = [{ id: 'note_repeat', clipId: clip.id, trackId: tid, startBeat: 0, transpose: 0, gainDb: -6 }];
+  P.normalizeProjectV2(p2);
+  const flat = P.flatten(p2);
+  assert.strictEqual(flat.tracks[0].notes[0].velocity, 50, 'per-instance note gain scales the shared Clip without copying notes');
+}
+
 function main(){
   testComputeMatchesFlattenMixed();
   testMutedTrackSkipped();
   testEmptyAssetRefSkipped();
   testNoteOnlyFlattenNoAudioItems();
   testGainDbPassedThrough();
+  testTrackAndInstanceGainAreCombined();
+  testInstanceGainMigratesIntoProjectV2();
+  testEditableNoteRepeatGainScalesVelocity();
   console.log('audio_playback_slice.test.js: all passed');
 }
 

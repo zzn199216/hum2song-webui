@@ -596,6 +596,7 @@
   "inspector.timelineSelection": "タイムライン選択",
   "inspector.timelineSelectionHint": "タイムライン上の選択インスタンス（開始/トランスポーズ/編集）。",
   "inspector.selectInstanceHint": "タイムライン上のクリップインスタンスを選択してください。",
+  "inspector.instanceVolume": "クリップ音量",
   "inspector.actions": "操作",
   "inspector.exportProjectJson": "プロジェクト JSON を書き出し",
   "inspector.exportSelectedClipJson": "選択クリップ JSON を書き出し",

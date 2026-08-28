@@ -611,6 +611,7 @@
   "inspector.timelineSelection": "Timeline Selection",
   "inspector.timelineSelectionHint": "Selected instance on timeline (start/transpose/edit).",
   "inspector.selectInstanceHint": "Select a clip instance on timeline.",
+  "inspector.instanceVolume": "Clip volume",
   "inspector.actions": "Actions",
   "inspector.exportProjectJson": "Export Project JSON",
   "inspector.exportSelectedClipJson": "Export Selected Clip JSON",

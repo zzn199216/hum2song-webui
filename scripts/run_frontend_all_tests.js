@@ -17,6 +17,7 @@ runOne('scripts/run_frontend_timeline_unit_tests.js');
 runOne('scripts/tests/clip_thumbnail_math.test.js');
 runOne('scripts/tests/waveform_peaks.test.js');
 runOne('scripts/tests/audio_analysis_engine.test.js');
+runOne('scripts/tests/audio_stem_silence_segments.test.js');
 runOne('scripts/tests/audio_analysis_ui.test.js');
 runOne('scripts/tests/audio_worker_analysis_client.test.js');
 runOne('scripts/tests/audio_instrument_web.test.js');

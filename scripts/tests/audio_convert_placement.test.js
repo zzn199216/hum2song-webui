@@ -17,6 +17,7 @@ if (globalThis.window && globalThis.window.H2SProject) {
 }
 const H2SProject = globalThis.H2SProject;
 assert(H2SProject && typeof H2SProject.resolveAudioConvertPlacementV1 === 'function', 'resolveAudioConvertPlacementV1');
+assert(typeof H2SProject.planRepeatedNoteInstancePlacementsV1 === 'function', 'planRepeatedNoteInstancePlacementsV1');
 
 function baseProject(playheadSec){
   return {
@@ -113,6 +114,27 @@ function baseProject(playheadSec){
   assert.strictEqual(r.startSec, 5);
   assert.strictEqual(r.trackIndex, 2, 'explicit instance on track 1 → note on track 2');
   console.log('PASS explicit instance id → aligned below source despite multiple');
+})();
+
+(function testRepeatedAudioInstancesPlanOneSharedNoteClipAtEveryRepeat(){
+  const proj = baseProject(0);
+  proj.instances = [
+    { id: 'audio_1', clipId: 'loop_audio', startSec: 2, trackIndex: 0, gainDb: -3 },
+    { id: 'audio_2', clipId: 'loop_audio', startSec: 10, trackIndex: 0, gainDb: 0 },
+    { id: 'audio_3', clipId: 'loop_audio', startSec: 18, trackIndex: 0, gainDb: 2 },
+    { id: 'other', clipId: 'other_audio', startSec: 4, trackIndex: 0 },
+  ];
+  const placements = H2SProject.planRepeatedNoteInstancePlacementsV1(
+    proj,
+    'loop_audio',
+    'audio_2',
+    { id: 'note_anchor', clipId: 'loop_notes', startSec: 10, trackIndex: 1 },
+  );
+  assert.deepStrictEqual(placements, [
+    { sourceInstanceId: 'audio_1', startSec: 2, trackIndex: 1, gainDb: -3 },
+    { sourceInstanceId: 'audio_3', startSec: 18, trackIndex: 1, gainDb: 2 },
+  ]);
+  console.log('PASS repeated audio instances → one shared note Clip at all repeat positions');
 })();
 
 (function testAppWiringStrings(){

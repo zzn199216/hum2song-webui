@@ -32,6 +32,8 @@
     const onArrangementDetails = opts.onArrangementDetails || function(){};
     const getHasArrangementDetails = opts.getHasArrangementDetails || function(){ return false; };
     const getConvertLabel = opts.getConvertLabel || function(){ return 'Convert to editable'; };
+    const getInstanceVolumeLabel = opts.getInstanceVolumeLabel || function(){ return 'Clip volume'; };
+    const onSetInstanceGainDb = opts.onSetInstanceGainDb || function(){};
     const getAddBassLabel = opts.getAddBassLabel || function(){ return 'Add Bass'; };
     const getAddAccompanimentLabel = opts.getAddAccompanimentLabel || function(){ return 'Add accompaniment'; };
     const getAddAccompanimentMoreInstructionsLabel = opts.getAddAccompanimentMoreInstructionsLabel || function(){ return 'More instructions (optional)'; };
@@ -75,10 +77,21 @@
       const btnArrDet = rootEl.querySelector('[data-act="arrangementDetails"]');
       const btnTranscriptionSettings = rootEl.querySelector('[data-act="transcriptionSettings"]');
       const btnAudioSeparation = rootEl.querySelector('[data-act="audioSeparation"]');
+      const instanceGainInput = rootEl.querySelector('[data-field="instanceGainDb"]');
 
       const sel = currentSelectedInstance();
       const inst = sel ? sel.inst : null;
       if (!inst) return;
+
+      if (instanceGainInput){
+        const output = rootEl.querySelector('[data-role="instanceGainDbValue"]');
+        instanceGainInput.addEventListener('input', () => {
+          if (output) output.textContent = Number(instanceGainInput.value || 0).toFixed(1) + ' dB';
+        });
+        instanceGainInput.addEventListener('change', () => {
+          onSetInstanceGainDb(inst.id, Number(instanceGainInput.value || 0));
+        });
+      }
 
       if (btnEdit){
         btnEdit.addEventListener('click', (e) => {
@@ -180,6 +193,8 @@
           clipId: inst.clipId,
           startSec: inst.startSec,
           transpose: inst.transpose || 0,
+          instanceGainDb: inst.gainDb || 0,
+          instanceVolumeLabel: getInstanceVolumeLabel(),
           fmtSec,
           escapeHtml,
           isAudio,

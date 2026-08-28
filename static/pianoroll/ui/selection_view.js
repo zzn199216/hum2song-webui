@@ -59,6 +59,8 @@
     const isAudio = !!opts.isAudio;
     const convertLabel = (opts.convertLabel != null && String(opts.convertLabel)) ? String(opts.convertLabel) : 'Convert selected segment';
     const showAudioSegment = !!opts.showAudioSegment;
+    const instanceGainDb = Math.max(-60, Math.min(24, Number(opts.instanceGainDb) || 0));
+    const instanceVolumeLabel = String(opts.instanceVolumeLabel || 'Clip volume');
     const addBassLabel = (opts.addBassLabel != null && String(opts.addBassLabel)) ? String(opts.addBassLabel) : 'Add Bass';
     const addAccompLabel = (opts.addAccompanimentLabel != null && String(opts.addAccompanimentLabel)) ? String(opts.addAccompanimentLabel) : 'Add accompaniment';
     const addAccompBadge = (opts.addAccompanimentBadgeLabel != null && String(opts.addAccompanimentBadgeLabel)) ? String(opts.addAccompanimentBadgeLabel) : 'Experimental';
@@ -114,11 +116,17 @@
     const arrangementDetailsRow = showArrDet
       ? `<div class="row" style="margin-top:8px; flex-wrap:wrap; gap:4px;"><button type="button" id="btnSelArrangementDetails" class="btn mini ghost lastOptDetailsBtn" data-act="arrangementDetails" data-i18n="arrange.detailsShort" style="font-size:10px !important;">${escapeHtml(arrDetLabel)}</button></div>`
       : '';
+    const instanceGainRow =
+      `<div class="kv"><b>${escapeHtml(instanceVolumeLabel)}</b><span style="display:flex;align-items:center;gap:6px;min-width:150px;">` +
+          `<input type="range" min="-60" max="24" step="0.1" value="${instanceGainDb}" data-field="instanceGainDb" style="width:105px;" />` +
+          `<output data-role="instanceGainDbValue">${instanceGainDb.toFixed(1)} dB</output>` +
+        `</span></div>`;
 
     return `
       <div class="kv"><b>Clip</b><span>${escapeHtml(clipName)}</span></div>
       <div class="kv"><b>Start</b><span>${fmtSec(startSec)}</span></div>
       <div class="kv"><b>Transpose</b><span>${transpose}</span></div>
+      ${instanceGainRow}
       <div class="row" style="margin-top:10px;">
         ${editBtn}
         ${audioConvertBtn}

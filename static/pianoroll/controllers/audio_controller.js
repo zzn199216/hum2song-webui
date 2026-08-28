@@ -118,7 +118,7 @@
   /**
    * Pure helper: flatten v2 output + per-track mute/gain meta -> schedule rows for audio playback.
    * Does not depend on Tone (Node-testable). Skips muted tracks and empty assetRef.
-   * @returns {{ items: Array<{ trackId: string, t: number, dur: number, assetRef: string, gainDb: number }>, skipped: Array<{ reason: string, trackId?: string }> }}
+   * @returns {{ items: Array<{ trackId: string, t: number, dur: number, assetRef: string, gainDb: number, instanceGainDb: number }>, skipped: Array<{ reason: string, trackId?: string }> }}
    */
   function computeAudioPlaybackSchedule(flat2, startAtSec, metaByTrackId){
     const items = [];
@@ -144,8 +144,10 @@
       const absStart = Number(seg.startSec || 0);
       const dur = Math.max(0.01, Number(seg.durationSec || 0));
       const t = Math.max(0, absStart - startAt);
-      const gainDb = Number.isFinite(Number(meta.gainDb)) ? Number(meta.gainDb) : 0;
-      items.push({ trackId: tid, t, dur, assetRef, gainDb });
+      const trackGainDb = Number.isFinite(Number(meta.gainDb)) ? Number(meta.gainDb) : 0;
+      const instanceGainDb = Number.isFinite(Number(seg.instanceGainDb)) ? Number(seg.instanceGainDb) : 0;
+      const gainDb = clamp(trackGainDb + instanceGainDb, -96, 24);
+      items.push({ trackId: tid, t, dur, assetRef, gainDb, instanceGainDb });
     }
     return { items, skipped };
   }
@@ -267,14 +269,16 @@
       }catch(e){}
       try{
         if (node.volume && Number.isFinite(meta.gainDb)){
-          node.volume.value = meta.muted ? -96 : meta.gainDb;
+          const instanceGainDb = Number.isFinite(Number(node.__h2sInstanceGainDb)) ? Number(node.__h2sInstanceGainDb) : 0;
+          node.volume.value = meta.muted ? -96 : clamp(meta.gainDb + instanceGainDb, -96, 24);
         }
       }catch(e){}
     }
 
-    function _rememberRuntimeNode(trackId, node){
+    function _rememberRuntimeNode(trackId, node, instanceGainDb){
       const tid = _trackKey(trackId);
       if (!tid || !node) return;
+      node.__h2sInstanceGainDb = Number.isFinite(Number(instanceGainDb)) ? Number(instanceGainDb) : 0;
       let set = runtimeNodesByTrackId.get(tid);
       if (!set){
         set = new Set();
@@ -898,7 +902,7 @@ vel = clamp(vel, 0.01, 1);
       const dest = (player.toDestination && player.toDestination.call) ? player.toDestination() : player;
       if (dest && dest.volume && Number.isFinite(item.gainDb)) dest.volume.value = item.gainDb;
     }catch(e){}
-    _rememberRuntimeNode(item.trackId, player);
+    _rememberRuntimeNode(item.trackId, player, item.instanceGainDb);
     _transientPlaybackNodes.push(player);
     if (item.t + item.dur > maxT) maxT = item.t + item.dur;
     (function(pl, dur, t, trackId){

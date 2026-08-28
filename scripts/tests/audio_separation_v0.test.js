@@ -28,10 +28,11 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'standard-separation-lossless-v7'"));
-  assert(html.includes('studio_asset_version.js?v=standard-separation-lossless-v7'));
-  assert(html.includes('audio_worker_separation_client.js?v=standard-separation-lossless-v7'));
-  assert(html.includes('app.js?v=standard-separation-lossless-v7'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'stem-waveform-repeat-gain-v1'"));
+  assert(html.includes('studio_asset_version.js?v=stem-waveform-repeat-gain-v1'));
+  assert(html.includes('audio_worker_separation_client.js?v=stem-waveform-repeat-gain-v1'));
+  assert(html.includes('audio_stem_silence_segments.js?v=stem-waveform-repeat-gain-v1'));
+  assert(html.includes('app.js?v=stem-waveform-repeat-gain-v1'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -42,6 +43,8 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const audioHtml = view.selectionBoxInnerHTML({ ...common, isAudio: true, showAudioSegment: false });
   const midiHtml = view.selectionBoxInnerHTML({ ...common, isAudio: false, showAudioSegment: false });
   assert(audioHtml.includes('data-act="audioSeparation"'));
+  assert(audioHtml.includes('data-field="instanceGainDb"'), 'audio instances expose independent gain');
+  assert(midiHtml.includes('data-field="instanceGainDb"'), 'editable-note repeats expose the same independent gain');
   assert(!midiHtml.includes('data-act="audioSeparation"'));
   console.log('PASS separation entry is audio-only');
 })();
@@ -84,6 +87,17 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(app.includes('artifact.filename || downloaded.filename'));
   assert(app.includes("artifactMime || 'audio/wav'"));
   assert(app.includes('LAS.normalizeAudioDownloadFilename(stemNameCandidate'));
+  assert(app.includes('_prepareSeparatedAudioStemParts'));
+  assert(app.includes('groupNearDuplicateRanges'));
+  assert(app.includes('instanceGainDb: Number.isFinite(Number(group.relativeGainDb))'));
+  assert(app.includes('duplicateOfPartIndex'));
+  assert(app.includes('_commitPreparedSeparatedAudioParts'));
+  assert(app.includes('_addNativeAudioClipInstance'));
+  assert(app.includes('part.startOffsetSec'));
+  assert(app.includes('discardWholeSilent: true'));
+  assert(app.includes('_addRepeatedNoteInstancesForSource'));
+  assert(app.includes('planRepeatedNoteInstancePlacementsV1'));
+  assert(app.includes('window.H2SProject.createInstance(noteClipId'));
   console.log('PASS waveform, library, and segment transcription separation entries');
 })();
 
