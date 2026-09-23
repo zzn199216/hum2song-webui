@@ -445,6 +445,8 @@
     .beginnerHintBar a{ color:var(--accent2); }
     /* Must win over .beginnerHintBar { display:flex } so Dismiss can hide the bar */
     .beginnerHintBar.hidden{ display:none !important; }
+    html:not(.h2sCloudMode) .h2sCloudOnly,
+    html.h2sCloudMode .h2sLocalOnly{ display:none !important; }
     .beginnerHintActions{
       flex-shrink:0; align-self:flex-start;
       display:flex; flex-direction:column; align-items:stretch; gap:6px;
@@ -1538,13 +1540,16 @@
     <div class="beginnerHintBody">
       <div class="beginnerHintTitle" data-i18n="beginnerHint.title">First steps in Studio</div>
       <ol>
-        <li>
+        <li class="h2sCloudOnly" data-i18n="beginnerHint.cloudStep1">Click Record at the top and hum a melody, or use Import audio to upload a recording.</li>
+        <li class="h2sCloudOnly" data-i18n="beginnerHint.cloudStep2">Wait a moment. The recording becomes a note clip in the library on the left.</li>
+        <li class="h2sCloudOnly" data-i18n="beginnerHint.cloudStep3">Double-click the clip to open the editor, fix notes or change instruments, then click Save at the top.</li>
+        <li class="h2sLocalOnly">
           <span data-i18n="beginnerHint.stepStudio1a">In the top bar, use </span><strong data-i18n="top.importAudio">Import audio</strong><span data-i18n="beginnerHint.stepStudio1b"> or </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.stepStudio1c">. Turn off “Make editable notes” beside Import audio if you want original audio only. Double-click a note clip in the library to edit.</span>
         </li>
-        <li>
+        <li class="h2sLocalOnly">
           <span data-i18n="beginnerHint.step4a">If something looks wrong: open </span><a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a><span data-i18n="beginnerHint.step4b"> in a new tab.</span>
         </li>
-        <li>
+        <li class="h2sLocalOnly">
           <details class="beginnerHintSetupDetails">
             <summary data-i18n="beginnerHint.setupSummary">Windows first run (recommended)</summary>
             <div class="beginnerHintSetupBody">
@@ -1576,27 +1581,31 @@
     <div class="beginnerHintHelpBackdrop" id="beginnerHintHelpBackdrop" aria-hidden="true"></div>
     <div class="beginnerHintHelpCard" role="document">
       <div class="beginnerHintHelpHeader">
-        <h3 id="beginnerHintHelpHeading" data-i18n="beginnerHint.helpTitle">Quick checklist (local)</h3>
+        <h3 id="beginnerHintHelpHeading">
+          <span class="h2sLocalOnly" data-i18n="beginnerHint.helpTitle">Quick checklist (local)</span>
+          <span class="h2sCloudOnly" data-i18n="beginnerHint.helpTitleCloud">Quick tips</span>
+        </h3>
         <button type="button" id="btnBeginnerHintHelpClose" class="btnClose" data-i18n="beginnerHint.helpClose">Close</button>
       </div>
       <div class="beginnerHintHelpBody">
         <ul>
-          <li data-i18n="beginnerHint.helpL1">Windows first run (repo root): beginner_setup.bat — prepares venv and Python packages.</li>
-          <li data-i18n="beginnerHint.helpL2">Launch Studio/API: beginner_launch.bat (opens Studio when ready).</li>
+          <li class="h2sLocalOnly" data-i18n="beginnerHint.helpL1">Windows first run (repo root): beginner_setup.bat — prepares venv and Python packages.</li>
+          <li class="h2sLocalOnly" data-i18n="beginnerHint.helpL2">Launch Studio/API: beginner_launch.bat (opens Studio when ready).</li>
           <li data-i18n="beginnerHint.helpL3">In Studio: Import as notes, Record, or Import as audio; double-click a clip to edit.</li>
-          <li>
+          <li class="h2sCloudOnly" data-i18n="beginnerHint.helpCloudRetry">If conversion fails, make sure the recording is clear with no backing music, check your remaining credits, and try again.</li>
+          <li class="h2sLocalOnly">
             <span data-i18n="beginnerHint.helpL4a">Verify the backend:</span>
             <a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a>
             <span data-i18n="beginnerHint.helpL4b">— JSON shows checks (soundfont, ffmpeg, fluidsynth).</span>
           </li>
         </ul>
-        <div class="beginnerHintHelpFailTitle" data-i18n="beginnerHint.helpFailuresTitle">Common issues</div>
-        <ul>
+        <div class="beginnerHintHelpFailTitle h2sLocalOnly" data-i18n="beginnerHint.helpFailuresTitle">Common issues</div>
+        <ul class="h2sLocalOnly">
           <li data-i18n="beginnerHint.helpF1">Missing SoundFont: add a .sf2 under assets/ (default assets/piano.sf2).</li>
           <li data-i18n="beginnerHint.helpF2">Port in use or bind error: stop other servers or change PORT in .env.</li>
           <li data-i18n="beginnerHint.helpF3">First pip install is slow: large ML/audio dependencies are expected.</li>
         </ul>
-        <p class="beginnerHintHelpDocNote smallmuted" data-i18n="beginnerHint.helpDocNote">The full checklist file lives in your repo clone: docs/BEGINNER_FIRST_RUN_CHECKLIST.md</p>
+        <p class="beginnerHintHelpDocNote smallmuted h2sLocalOnly" data-i18n="beginnerHint.helpDocNote">The full checklist file lives in your repo clone: docs/BEGINNER_FIRST_RUN_CHECKLIST.md</p>
         <div class="beginnerHintRestoreWrap">
           <button type="button" id="btnBeginnerHintRestore" class="btn ghost beginnerHintRestoreBtn" data-i18n="beginnerHint.showAgain">Show getting started bar again</button>
         </div>
@@ -2504,6 +2513,7 @@
       }
     } catch (_err) {}
   })();
+  if (window.H2S_CLOUD_MODE === true) document.documentElement.classList.add('h2sCloudMode');
   </script>
   <script src="/static/pianoroll/app.js?v=suno-stem-label-v1"></script>
   <script src="/static/pianoroll/cloud_project_bridge.js?v=suno-stem-label-v1"></script>
