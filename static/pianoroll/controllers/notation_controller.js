@@ -8,7 +8,7 @@
     const t=(cn,en)=>zh()?cn:en;
     let pref=N.preferences(),renderKey='',generation=0,redo=[],raf=0,exportUrl=null,exportGeneration=0;
     let pageJob=0,slots=[],screenModel=null,screenOptions=null,screenPlan=null,currentPage=0,visibleHits=[],selectedHits=new Set(),playingHits=new Set();
-    const pageCache=new Map(),hitItems=new WeakMap();
+    const pageCache=new Map(),hitItems=new WeakMap(),slotKeys=new WeakMap();
     let staffDrag=null,suppressClickUntil=0,rollPosition=null;
     const draft=()=>rt.state.modal.draftScore;
     const bpm=()=>Number(app.getProjectV2().bpm) || 120;
@@ -70,16 +70,21 @@
       for(const p of positions)if(!wanted.has(p.index) && p.slot.firstChild){p.slot.replaceChildren();changed=true;}
       // One page per frame keeps scrolling and pointer events responsive. Cache
       // unchanged pages across edits; never retain the whole engraved score.
-      const pending=visible.filter(p=>!p.slot.firstChild).sort((a,b)=>Math.abs(a.index-currentPage)-Math.abs(b.index-currentPage));
+      const pageKey=p=>{const spec=screenPlan.pages[p.index];return JSON.stringify([screenOptions,p.index,screenPlan.pages.length,spec.height,spec.rows.map(r=>[r.y,r.offset,r.noteBase,r.lane.name,r.lane.index,r.bar,r.count,r.lane.bars.slice(r.bar,r.bar+r.count)])]);};
+      const pending=visible.map(p=>({...p,key:pageKey(p)})).filter(p=>!p.slot.firstChild || slotKeys.get(p.slot)!==p.key).sort((a,b)=>Math.abs(a.index-currentPage)-Math.abs(b.index-currentPage));
       const p=pending[0];
       if(p){
-        const spec=screenPlan.pages[p.index];
-        const key=JSON.stringify([screenOptions,p.index,screenPlan.pages.length,spec.height,spec.rows.map(r=>[r.y,r.offset,r.noteBase,r.lane.name,r.lane.index,r.bar,r.count,r.lane.bars.slice(r.bar,r.bar+r.count)])]);
+        const key=p.key;
         let entry=pageCache.get(key);
         try{
-          if(!entry){const rendered=V.render(screenModel,{...screenOptions,plan:screenPlan,pageIndex:p.index});entry=rendered.pages[0];entry.querySelectorAll('[data-hit]').forEach(e=>hitItems.set(e,rendered.registry[Number(e.dataset.hit)]));}
+          if(!entry){
+            // A reused SVG is patched in place; its old cache key must not point
+            // to the edited result (notably when undoing or cancelling a drag).
+            const previous=p.slot.querySelector('svg');for(const [cachedKey,value] of pageCache)if(value===previous)pageCache.delete(cachedKey);
+            const rendered=V.render(screenModel,{...screenOptions,plan:screenPlan,pageIndex:p.index,reusePage:previous});entry=rendered.pages[0];entry.querySelectorAll('[data-hit]').forEach(e=>hitItems.set(e,rendered.registry[Number(e.dataset.hit)]));
+          }
           pageCache.delete(key);pageCache.set(key,entry);while(pageCache.size>4)pageCache.delete(pageCache.keys().next().value);
-          p.slot.append(entry);changed=true;
+          if(p.slot.firstChild!==entry)p.slot.replaceChildren(entry);slotKeys.set(p.slot,key);changed=true;
         }catch(err){p.slot.textContent=t('此页无法显示：','Unable to display this page: ')+err.message;}
       }
       if(changed)refreshHits();if(pending.length>1)queuePages();
@@ -141,19 +146,19 @@
     }
     // Capture on the persistent surface: SVG note elements are replaced by live engraving.
     surface.addEventListener('pointerdown',e=>{
-      if(pref.view!=='staff' || e.button!==0 || e.shiftKey || staffDrag)return;
+      if(pref.view==='roll' || e.button!==0 || e.shiftKey || staffDrag)return;
       const h=e.target.closest('[data-hit]'),item=h && hitItems.get(h);
       if(!item || item.refs.length!==1)return;
       const matrix=h.ownerSVGElement.getScreenCTM();if(!matrix)return;
       e.preventDefault();rt.modalStop();select(item,false);surface.focus({preventScroll:true});
       const note=selectedNotes()[0];if(!note)return;
-      staffDrag={pointerId:e.pointerId,startY:e.clientY,scale:Math.hypot(matrix.c,matrix.d),
+      staffDrag={pointerId:e.pointerId,startY:e.clientY,scale:Math.hypot(matrix.c,matrix.d),step:pref.view==='staff'?5:12,plan:screenPlan,
         score:clone(draft()),dirty:rt.state.modal.dirty,refs:clone(item.refs),pitch:note.pitch,current:note.pitch,key:pref.key};
       surface.setPointerCapture(e.pointerId);surface.classList.add('is-dragging');audition.play(note.pitch,note.velocity);
     });
     surface.addEventListener('pointermove',e=>{
       const d=staffDrag;if(!d || d.pointerId!==e.pointerId)return;e.preventDefault();
-      const steps=Math.round((d.startY-e.clientY)/(5*d.scale));
+      const steps=Math.round((d.startY-e.clientY)/(d.step*d.scale));
       const pitch=N.transposeStaff(d.pitch,steps,d.key);if(pitch===d.current)return;
       d.current=pitch;rt.state.modal.draftScore=N.edit(d.score,d.refs,{pitch},bpm());
       rt.state.modal.dirty=d.dirty || pitch!==d.pitch;audition.play(pitch,selectedNotes()[0].velocity);invalidate();
@@ -217,11 +222,17 @@
         if(ticket!==generation || !rt.state.modal.show)return;
         const model=N.project(draft(),bpm(),pref);
         const footer=model.approximated?t('节奏为显示近似；播放保留原始时值。','Rhythm is approximated for display; playback retains original timing.'):'';
-        screenModel=model;screenOptions={mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width,key:pref.key,clef:pref.clef,grid:pref.grid,meter:model.meter.text};screenPlan=V.layout(model,screenOptions);
-        const scrollTop=surface.scrollTop;slots=screenPlan.pages.map((p,i)=>{const slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页','Page '+(i+1)));slot.style.height=p.height+'px';return slot;});
-        surface.replaceChildren(...slots);surface.scrollTop=scrollTop;visibleHits=[];queuePages();
+        screenModel=model;screenOptions={mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width,key:pref.key,clef:pref.clef,grid:pref.grid,meter:model.meter.text};
+        const frozen=staffDrag && staffDrag.plan;
+        // Pitch does not change voices or rhythm. Hold page geometry during a
+        // gesture, then allow ledger-line spacing to reflow once on release.
+        screenPlan=frozen?{...frozen,pages:frozen.pages.map(p=>({...p,rows:p.rows.map(r=>({...r,lane:model.lanes.find(l=>l.trackId===r.lane.trackId && l.index===r.lane.index)}))}))}:V.layout(model,screenOptions);
+        const scrollTop=surface.scrollTop;
+        while(slots.length>screenPlan.pages.length)slots.pop().remove();
+        screenPlan.pages.forEach((p,i)=>{let slot=slots[i];if(!slot){slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页','Page '+(i+1)));slots.push(slot);surface.append(slot);}slot.style.height=p.height+'px';});
+        surface.scrollTop=scrollTop;queuePages();
         notice.textContent=model.approximated?t(model.approximated+' 个音符按显示精度记谱，原始演奏节奏未改变。',model.approximated+' notes approximated for display. Original timing is unchanged.'):t('点选音符 · ↑↓ 改音高 · ←→ 移动 · 双击休止符插入','Select notes · ↑↓ pitch · ←→ timing · Double-click a rest to insert');
-        if(pref.view==='staff')notice.textContent=t('上下拖动音符改音高 · 松手完成 · Esc 取消。','Drag notes vertically to change pitch · Release to apply · Esc to cancel. ')+(model.approximated?' '+notice.textContent:'');
+        notice.textContent=t('按住音符上下拖动改音高 · 松手完成 · Esc 取消。','Hold and drag notes vertically to change pitch · Release to apply · Esc to cancel. ')+(model.approximated?' '+notice.textContent:'');
         hint.textContent=t('显示设置不改变演奏','Display settings preserve performance');syncSelection();
       }).catch(err=>{if(ticket!==generation)return;surface.replaceChildren();slots=[];visibleHits=[];screenPlan=null;pageLabel.textContent='—';notice.textContent=t('无法显示乐谱：','Unable to display score: ')+err.message;renderKey='';});
     };

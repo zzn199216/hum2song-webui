@@ -11,7 +11,7 @@
   function text(svg,x,y,value,size,extra){
     const e=el('text',Object.assign({x,y,fill:'#253246','font-size':size || 14,'font-family':'Arial, Microsoft YaHei, sans-serif'},extra || {}),value); svg.append(e); return e;
   }
-  const loading={};
+  const loading={},pageData=new WeakMap();
   function load(name){
     const filenames={staff:'vexflow-4.2.5.js',pdf:'jspdf-4.2.1.js'};
     if(name==='staff' && root.Vex) return Promise.resolve();
@@ -83,6 +83,9 @@
     const first=o.pageIndex==null?0:o.pageIndex,end=o.pageIndex==null?pageCount:first+1;
     for(let pageIndex=first;pageIndex<end;pageIndex++){
       const pageHeight=plan.pages[pageIndex].height;
+      const frameKey=JSON.stringify([pageWidth,pageHeight,margin,mode,screen,pageIndex,pageCount,o.title,o.bpm,o.footer,model.pref,model.meter]);
+      const old=pageData.get(o.reusePage),reuse=old && old.frameKey===frameKey?o.reusePage:null;
+      const oldRows=new Map(reuse?old.rows.map(r=>[r.key,r]):[]),rowEntries=[];
       let svg,ctx,VF;
       if(mode==='staff'){
         VF=root.Vex.Flow;
@@ -99,6 +102,13 @@
       text(svg,pageWidth-margin,109,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'end',fill:'#718096'});
       const pageRows=plan.pages[pageIndex].rows;
       for(const [ri,row] of pageRows.entries()){
+        // A system owns cross-measure ties, beams and accidental state. Preserve
+        // every unchanged system, including its DOM nodes and interaction targets.
+        const key=JSON.stringify([row.lane.trackId,row.lane.index,row.bar,row.count]);
+        const signature=JSON.stringify([row.y,row.offset,row.noteBase,row.height,row.lane.name,row.lane.bars.slice(row.bar,row.bar+row.count)]);
+        const cached=oldRows.get(key);
+        if(cached && cached.signature===signature){rowEntries.push(cached);registry.push(...cached.hits);continue;}
+        const group=el('g',{'data-notation-row':key}),hitStart=registry.length;svg.append(group);
         const y=row.y+row.offset;
         text(svg,margin,row.y-6,row.lane.name+(row.lane.index?' · '+(row.lane.index+1):''),10,{fill:'#718096'});
         let previous=null,previousNumberX=null;
@@ -168,7 +178,7 @@
               refs.forEach((ref,j)=>{
                 const yy=base-(refs.length-1-j)*30;
                 const sp=ref?N.spelling(ref.pitch,model.pref.key):null;
-                text(svg,xx,yy,sp?String(sp.degree):'0',22,{'text-anchor':'middle','font-weight':500});
+                text(svg,xx,yy,sp?String(sp.degree):'0',22,{'text-anchor':'middle','font-weight':500,class:'notation-degree'});
                 if(sp && sp.accidental) text(svg,xx-12,yy-5,sp.accidental==='b'?'♭':'♯',13,{'text-anchor':'end'});
                 if(sp) for(let k=0;k<Math.abs(sp.octave);k++) svg.append(el('circle',{cx:xx,cy:sp.octave>0?yy-24-k*5:yy+15+k*5,r:1.5,fill:'#253246'}));
                 const lines=token.duration==='8'?1:token.duration==='16'?2:token.duration==='32'?3:token.duration==='64'?4:0;
@@ -187,11 +197,23 @@
             });
           }
         }
+        // VexFlow and our own SVG primitives share one detached system group.
+        while(group.nextSibling)group.append(group.nextSibling);
+        group.querySelectorAll('.notation-hit').forEach(h=>group.append(h));
+        rowEntries.push({key,signature,group,hits:registry.slice(hitStart)});
       }
-      text(svg,margin,pageHeight-40,o.footer || '',10,{fill:'#718096'});
-      if(screen)text(svg,pageWidth/2,pageHeight-18,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'middle',fill:'#718096'});
-      // Ties and later voices must not cover interaction targets.
-      svg.querySelectorAll('.notation-hit').forEach(h=>svg.append(h));
+      const footer=el('g',{class:'notation-footer'});svg.append(footer);
+      text(footer,margin,pageHeight-40,o.footer || '',10,{fill:'#718096'});
+      if(screen)text(footer,pageWidth/2,pageHeight-18,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'middle',fill:'#718096'});
+      if(reuse){
+        const keep=new Set(rowEntries.map(r=>r.group));for(const r of old.rows)if(!keep.has(r.group))r.group.remove();
+        let next=reuse.querySelector('.notation-footer');
+        for(const r of [...rowEntries].reverse()){if(r.group.nextSibling!==next)reuse.insertBefore(r.group,next);next=r.group;}
+        svg=reuse;
+      }
+      let index=registry.length-rowEntries.reduce((n,r)=>n+r.hits.length,0);
+      for(const row of rowEntries)for(const h of row.group.querySelectorAll('.notation-hit')){if(h.dataset.hit!==String(index))h.dataset.hit=String(index);index++;}
+      pageData.set(svg,{frameKey,rows:rowEntries});
       pages.push(svg);
     }
     return {pages,registry};
