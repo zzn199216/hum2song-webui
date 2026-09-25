@@ -7206,12 +7206,26 @@ renderTimeline(){
             startBeat: startBeat,
             instanceGainDb: part.instanceGainDb,
             statusDoneKey: opts.statusDoneKey || 'io.importAudioStoredLocal',
+            separationStem: opts.separationStem,
           });
         }
         if (!committed || !committed.ok) throw new Error((committed && committed.reason) || 'audio_materialize_failed');
         committedByPartIndex[partIndex] = committed;
       }
       return { ok: true, committed: committedByPartIndex };
+    },
+
+    _setSeparatedTrackIdentity(trackIndex, stem, instrumentOverride){
+      const p2 = this.getProjectV2();
+      const track = p2 && p2.tracks && p2.tracks[trackIndex];
+      if (!track) return;
+      const names = { drums: 'Drums', bass: 'Bass', vocals: 'Vocals', other: 'Other', instrumental: 'Instrumental' };
+      if (!Object.prototype.hasOwnProperty.call(names, stem)) return;
+      track.name = names[stem];
+      track.instrument = instrumentOverride || (stem === 'drums' ? 'drum' : stem === 'bass' ? 'bass' : 'default');
+      // Write canonical v2 first. persist() intentionally preserves its instrument
+      // over the legacy view, which otherwise resets the imported stem to piano.
+      this.setProjectFromV2(p2, { render: false });
     },
 
     async _runAudioSeparationForClip(clipId, opts){
@@ -7251,7 +7265,7 @@ renderTimeline(){
       if (separatorOption === 'uvr5_ensemble_vocal_full' && (mode !== 'separate_only' || separationPreset !== 'vocals_instrumental')) {
         throw new Error('uvr5_separate_only');
       }
-      const controls = this.getAudioTranscriptionControls(clipId);
+      const controls = opts.transcriptionControls || this.getAudioTranscriptionControls(clipId);
       const placementOffsetSec = Math.max(0, Number(opts.placementOffsetSec) || 0);
       const bpm = Number(p2.bpm || 120);
       const effectiveSourceStartBeat = Number(sourceInstanceV2.startBeat || 0) + placementOffsetSec * bpm / 60;
@@ -7302,6 +7316,7 @@ renderTimeline(){
           try {
             const downloaded = await client.downloadArtifact(result.workerJobId, artifact.artifactId);
             const trackIndex = plan.trackIndices[index];
+            this._setSeparatedTrackIdentity(trackIndex, item.stem);
             if (item.kind === 'audio') {
               const LAS = window.H2SLocalAudioAssets;
               const artifactMime = (artifact.mimeType && artifact.mimeType !== 'application/octet-stream')
@@ -7320,17 +7335,16 @@ renderTimeline(){
                 trackIndex: trackIndex,
                 sourceStartBeat: sourceStartBeat,
                 bpm: bpm,
+                separationStem: item.stem,
                 statusDoneKey: 'io.importAudioStoredLocal',
               });
             } else {
               const text = new TextDecoder('utf-8').decode(new Uint8Array(downloaded.buffer));
               const scoreDoc = JSON.parse(text);
-              if (item.stem === 'drums' && this.project.tracks && this.project.tracks[trackIndex]) {
-                this.project.tracks[trackIndex].instrument = 'drum';
-                this.project.tracks[trackIndex].name = 'Drums';
-              }
+              if (!(scoreDoc.tracks || []).some((track) => Array.isArray(track.notes) && track.notes.length)) continue;
               const materialized = this._materializeScoreDocToTimeline(scoreDoc, {
                 baseName: item.stem,
+                separationStem: item.stem,
                 sourceTaskId: result.workerJobId,
                 workerJobId: result.workerJobId,
                 workerConversionSource: 'audio_separation_demucs',
@@ -7596,6 +7610,7 @@ renderTimeline(){
           separationPreset: preset ? preset.value : 'four_stem',
           mode: 'separate_and_transcribe',
           fileOverride: file,
+          transcriptionControls: this.getTopBarImportTranscriptionControls(),
         });
       }
       else if (toNotes) await this.pickWavAndGenerate(this.getTopBarImportTranscriptionControls());
@@ -7740,6 +7755,7 @@ renderTimeline(){
         name: baseName,
         bpm: projBpm,
       });
+      if (opts.separationStem) clip.meta = Object.assign({}, clip.meta, { separationStem: opts.separationStem });
       if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
       p2.clips[clip.id] = clip;
       if (!Array.isArray(p2.clipOrder)) p2.clipOrder = [];
@@ -8854,6 +8870,17 @@ renderTimeline(){
         if (typeof this.ensureTimelineTrackIndex === 'function'){
           this.ensureTimelineTrackIndex(placeTrackIndex);
         }
+        const p2 = this.getProjectV2();
+        const sourceClip = p2 && p2.clips && p2.clips[String(opts.sourceAudioClipId)];
+        const stem = sourceClip && sourceClip.meta && sourceClip.meta.separationStem;
+        if (stem) {
+          const sourceInstance = (p2.instances || []).find((inst) =>
+            opts.sourceAudioInstanceId ? inst.id === opts.sourceAudioInstanceId : inst.clipId === opts.sourceAudioClipId);
+          const sourceTrack = sourceInstance && (p2.tracks || []).find((track) =>
+            String(track.trackId || track.id) === String(sourceInstance.trackId));
+          this._setSeparatedTrackIdentity(placeTrackIndex, stem, sourceTrack && sourceTrack.instrument);
+          opts.separationStem = stem;
+        }
       }
 
       const clampPlaceTrack = () => {
@@ -8880,6 +8907,7 @@ renderTimeline(){
         placeTrackIndex = clampPlaceTrack();
         const clip = P.createClipFromScore(score, { name: importBaseName, sourceTaskId: opts.sourceTaskId || undefined });
         if (!clip.meta) clip.meta = {};
+        if (opts.separationStem) clip.meta.separationStem = opts.separationStem;
         if (typeof score.tempo_bpm === 'number') clip.meta.sourceTempoBpm = score.tempo_bpm;
         else if (typeof score.bpm === 'number') clip.meta.sourceTempoBpm = score.bpm;
         if (opts.workerJobId) clip.meta.workerJobId = opts.workerJobId;
@@ -8893,6 +8921,14 @@ renderTimeline(){
         this.addClipToTimeline(clip.id, placeStartSec, placeTrackIndex);
         this._addRepeatedNoteInstancesForSource(clip.id, opts.sourceAudioClipId, opts.sourceAudioInstanceId);
         persist();
+        if (opts.separationStem) {
+          const canonical = this.getProjectV2();
+          const savedClip = canonical && canonical.clips && canonical.clips[clip.id];
+          if (savedClip) {
+            savedClip.meta = Object.assign({}, savedClip.meta, { separationStem: opts.separationStem });
+            this.setProjectFromV2(canonical, { render: false });
+          }
+        }
         this.render();
         log('Clip added: ' + clip.name);
         return { ok: true, clipCount: 1, clipIds: [clip.id] };
@@ -9072,6 +9108,10 @@ renderTimeline(){
         });
         if (!res || !res.ok || !res.scoreDoc) return { ok: false, reason: (res && res.reason) || 'worker_unavailable' };
         const workerJobId = res.workerJobId || null;
+        if (!(res.scoreDoc.tracks || []).some((track) => Array.isArray(track.notes) && track.notes.length)) {
+          this.setImportStatus(_t('convert.noEditableNotes', 'No editable notes detected. No MIDI clip was added.'), false);
+          return { ok: true, workerJobId, clipId: null };
+        }
         const mat = this._materializeWorkerFileScoreAsClip(file, res.scoreDoc, workerJobId, {
           kind,
           baseName: opts.baseName,
@@ -9091,6 +9131,9 @@ renderTimeline(){
     async _tryWorkerConvertAudioClipToEditable(clipId, file, seg, opts){
       opts = opts || {};
       const controls = opts.transcriptionControls || this.getAudioTranscriptionControls(clipId);
+      const sourceProject = this.getProjectV2();
+      const sourceClip = sourceProject && sourceProject.clips && sourceProject.clips[clipId];
+      const separationStem = sourceClip && sourceClip.meta && sourceClip.meta.separationStem;
       const client = (typeof window !== 'undefined') ? window.H2SAudioWorkerConversionClient : null;
       if (!client || typeof client.isEnabled !== 'function' || !client.isEnabled() || typeof client.convert !== 'function'){
         return { ok: false, reason: 'worker_unavailable' };
@@ -9111,6 +9154,7 @@ renderTimeline(){
           transcriptionTarget: controls.transcriptionTarget,
           cleanupStrength: controls.cleanupStrength,
           preserveRawCandidates: controls.preserveRawCandidates,
+          separationStem,
           onStatus: (status) => {
             const workerJobId = status && status.jobId ? String(status.jobId) : null;
             this._setAudioConvertState(clipId, {
@@ -9127,6 +9171,12 @@ renderTimeline(){
         });
         if (!res || !res.ok || !res.scoreDoc) return { ok: false, reason: (res && res.reason) || 'worker_unavailable' };
         const workerJobId = res.workerJobId || null;
+        if (!(res.scoreDoc.tracks || []).some((track) => Array.isArray(track.notes) && track.notes.length)) {
+          this._clearAudioConvertState(clipId);
+          const t = window.I18N && window.I18N.t ? window.I18N.t.bind(window.I18N) : (_key, fallback) => fallback;
+          this.setImportStatus(t('convert.noEditableNotes', 'No editable notes detected. No MIDI clip was added.'), false);
+          return { ok: true, workerJobId, clipId: null };
+        }
         this._setAudioConvertState(clipId, {
           phase: 'processing',
           taskId: workerJobId,
@@ -9307,6 +9357,13 @@ renderTimeline(){
         });
         const fallbackTxt = this._audioConvertStatusText(clipId);
         if (fallbackTxt) this.setImportStatus(fallbackTxt, true);
+        const sourceProject = this.getProjectV2();
+        const sourceClip = sourceProject && sourceProject.clips && sourceProject.clips[clipId];
+        if (sourceClip && sourceClip.meta && sourceClip.meta.separationStem === 'drums') {
+          // The legacy pitched fallback cannot produce GM drum events.
+          this.setImportStatus(fallbackTxt, false);
+          return { ok: false, reason: 'worker_unavailable' };
+        }
       }
       await this.uploadFileAndGenerate(file, uploadOpts);
       return { ok: true };

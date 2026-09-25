@@ -1,4 +1,5 @@
 {
+  "convert.noEditableNotes": "編集可能な音符が検出されなかったため、MIDIクリップは追加されませんでした。",
   "common.ok": "OK",
   "common.cancel": "キャンセル",
   "common.close": "閉じる",

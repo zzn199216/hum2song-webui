@@ -28,11 +28,11 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'clip-notation-v8-20260925'"));
-  assert(html.includes('studio_asset_version.js?v=clip-notation-v8-20260925'));
-  assert(html.includes('audio_worker_separation_client.js?v=clip-notation-v8-20260925'));
-  assert(html.includes('audio_stem_silence_segments.js?v=clip-notation-v8-20260925'));
-  assert(html.includes('app.js?v=clip-notation-v8-20260925'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'stem-transcription-v1-20260926'"));
+  assert(html.includes('studio_asset_version.js?v=stem-transcription-v1-20260926'));
+  assert(html.includes('audio_worker_separation_client.js?v=stem-transcription-v1-20260926'));
+  assert(html.includes('audio_stem_silence_segments.js?v=stem-transcription-v1-20260926'));
+  assert(html.includes('app.js?v=stem-transcription-v1-20260926'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -86,7 +86,7 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(app.includes("transcriptionControls.separateFirst = opts.separateFirst === true"));
   assert(app.includes('durationSecOverride: seg.durationSec'));
   assert(app.includes('placementOffsetSec: seg.startSec'));
-  assert(app.includes("this.project.tracks[trackIndex].instrument = 'drum'"));
+  assert(app.includes('this._setSeparatedTrackIdentity(trackIndex, item.stem)'));
   assert(app.includes('artifact.filename || downloaded.filename'));
   assert(app.includes("artifactMime || 'audio/wav'"));
   assert(app.includes('LAS.normalizeAudioDownloadFilename(stemNameCandidate'));

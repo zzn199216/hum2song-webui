@@ -1,4 +1,5 @@
 {
+  "convert.noEditableNotes": "No editable notes detected. No MIDI clip was added.",
   "common.ok": "OK",
   "common.cancel": "Cancel",
   "common.close": "Close",

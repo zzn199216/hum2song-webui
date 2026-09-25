@@ -1,4 +1,5 @@
 {
+  "convert.noEditableNotes": "未检测到可编辑音符，未添加 MIDI 片段。",
   "common.ok": "确定",
   "common.cancel": "取消",
   "common.close": "关闭",
