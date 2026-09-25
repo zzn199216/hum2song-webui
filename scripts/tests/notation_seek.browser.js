@@ -22,9 +22,9 @@ async page=>{
   const sought=await page.evaluate(()=>H2SApp.state.modal.cursorSec);
   check(sought>target.sec,'Drag cap must move shared cursor');
   await page.locator('#btnClipPlay').click();
-  await page.waitForFunction(()=>H2SApp.state.modal.isPlaying && document.querySelector('#btnClipPlay').textContent==='Ⅱ');
+  await page.waitForFunction(()=>H2SApp.state.modal.isPlaying && document.querySelector('#btnClipPlay').textContent==='Ⅱ',null,{timeout:5000}).catch(()=>{throw Error(mode+' Play did not enter playing state');});
   await page.mouse.click(target.x,target.y);
-  await page.waitForFunction(s=>H2SApp.state.modal.isPlaying && H2SApp.state.modal.cursorSec>=s && H2SApp.state.modal.cursorSec<s+.5,target.sec);
+  await page.waitForFunction(s=>H2SApp.state.modal.isPlaying && H2SApp.state.modal.cursorSec>=s && H2SApp.state.modal.cursorSec<s+.5,target.sec,{timeout:5000}).catch(()=>{throw Error(mode+' live seek did not restart at target');});
   await page.locator('#btnClipPlay').click();
   const paused=await page.evaluate(()=>H2SApp.state.modal.cursorSec);
   await page.waitForTimeout(180);
