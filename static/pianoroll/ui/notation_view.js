@@ -58,7 +58,6 @@
       bar+=count;
     }
     if(rows.length>320) throw new Error('Too many score pages. Split this clip before exporting.');
-    const pageRowsList=[[]];let nextY=146;
     for(const row of rows){
       const events=row.lane.bars.slice(row.bar,row.bar+row.count).flat();
       row.offset=0;row.noteBase=85;row.height=174;
@@ -72,8 +71,32 @@
         row.noteBase+=(chord-1)*30;row.height+=(chord-1)*30;
       }
       if(row.height>880)throw new Error('This chord is too large to fit a score page. Use the piano roll to split it.');
-      if(nextY+row.height>1050 && pageRowsList[pageRowsList.length-1].length){pageRowsList.push([]);nextY=146;}
-      row.y=nextY;pageRowsList[pageRowsList.length-1].push(row);nextY+=row.height;
+    }
+    // Paginate complete time systems, not individual voice rows. Screen pages
+    // can grow vertically; fixed A4 pages explicitly identify oversized continuations.
+    const systems=[];
+    for(const row of rows){
+      let system=systems[systems.length-1];
+      if(!system || system[0].bar!==row.bar){system=[];systems.push(system);}
+      system.push(row);
+    }
+    const pageRowsList=[[]];let nextY=166;
+    const newPage=()=>{if(pageRowsList.at(-1).length)pageRowsList.push([]);nextY=166;};
+    for(const system of systems){
+      const height=system.reduce((n,r)=>n+r.height,0);
+      if(nextY+height>1050)newPage();
+      const chunks=[[]];let chunkHeight=0;
+      for(const row of system){
+        if(!screen && chunkHeight+row.height>884 && chunks.at(-1).length){chunks.push([]);chunkHeight=0;}
+        chunks.at(-1).push(row);chunkHeight+=row.height;
+      }
+      chunks.forEach((chunk,part)=>{
+        if(part)newPage();
+        chunk[0].systemLabel={bar:system[0].bar,count:system[0].count,voices:system.length,part:part+1,parts:chunks.length};
+        for(const row of chunk){row.y=nextY;pageRowsList.at(-1).push(row);nextY+=row.height;}
+        nextY+=28;
+      });
+      if(chunks.length>1)nextY=1051; // Never mix a continued system with a new time range.
     }
     return {pageWidth,margin,contentWidth,screen,mode,pages:pageRowsList.map(rows=>({rows,height:screen?Math.max(300,...rows.map(r=>r.y+r.height+64)):1123}))};
   }
@@ -83,7 +106,7 @@
     const first=o.pageIndex==null?0:o.pageIndex,end=o.pageIndex==null?pageCount:first+1;
     for(let pageIndex=first;pageIndex<end;pageIndex++){
       const pageHeight=plan.pages[pageIndex].height;
-      const frameKey=JSON.stringify([pageWidth,pageHeight,margin,mode,screen,pageIndex,pageCount,o.title,o.bpm,o.footer,model.pref,model.meter]);
+      const frameKey=JSON.stringify([pageWidth,pageHeight,margin,mode,screen,pageIndex,pageCount,o.title,o.bpm,o.footer,o.language,model.pref,model.meter]);
       const old=pageData.get(o.reusePage),reuse=old && old.frameKey===frameKey?o.reusePage:null;
       const oldRows=new Map(reuse?old.rows.map(r=>[r.key,r]):[]),rowEntries=[];
       let svg,ctx,VF;
@@ -93,6 +116,7 @@
         r.resize(pageWidth,pageHeight);ctx=r.getContext();ctx.setFillStyle('#253246');ctx.setStrokeStyle('#253246');svg=host.querySelector('svg');
       }else svg=el('svg',{xmlns:NS,width:pageWidth,height:pageHeight});
       svg.setAttribute('viewBox','0 0 '+pageWidth+' '+pageHeight);svg.setAttribute('class','notation-page'+(screen?' notation-screen':''));svg.setAttribute('aria-label',(o.title || 'Clip')+' · '+(pageIndex+1));
+      if(screen){svg.style.width='100%';svg.style.height='auto';}
       svg.prepend(el('rect',{width:pageWidth,height:pageHeight,fill:'#fffefa'}));
       text(svg,margin,43,'HUM2SONG  /  '+(mode==='staff'?'STAFF':'NUMBERED NOTATION'),10,{'letter-spacing':2,fill:'#718096'});
       const title=String(o.title || 'Untitled clip');
@@ -105,10 +129,16 @@
         // A system owns cross-measure ties, beams and accidental state. Preserve
         // every unchanged system, including its DOM nodes and interaction targets.
         const key=JSON.stringify([row.lane.trackId,row.lane.index,row.bar,row.count]);
-        const signature=JSON.stringify([row.y,row.offset,row.noteBase,row.height,row.lane.name,row.lane.bars.slice(row.bar,row.bar+row.count)]);
+        const signature=JSON.stringify([row.y,row.offset,row.noteBase,row.height,row.systemLabel,row.lane.name,row.lane.bars.slice(row.bar,row.bar+row.count)]);
         const cached=oldRows.get(key);
         if(cached && cached.signature===signature){rowEntries.push(cached);registry.push(...cached.hits);continue;}
         const group=el('g',{'data-notation-row':key}),hitStart=registry.length,anchors=[];svg.append(group);
+        if(row.systemLabel){
+          const g=row.systemLabel,range=(g.bar+1)+'–'+(g.bar+g.count),zh=o.language==='zh';
+          const label=(zh?'第 '+range+' 小节':'Measures '+range)+(g.voices>1?(zh?' · '+g.voices+' 个声部同时演奏':' · '+g.voices+' simultaneous voices'):'')+(g.parts>1?(zh?' · 续组 '+g.part+'/'+g.parts:' · Part '+g.part+'/'+g.parts):'');
+          text(svg,margin,row.y-26,label,12,{class:'notation-system-label','font-weight':600,fill:'#197f74'});
+          svg.append(el('line',{x1:margin,y1:row.y-20,x2:pageWidth-margin,y2:row.y-20,stroke:'#b8d9d2','stroke-width':1}));
+        }
         const y=row.y+row.offset;
         text(svg,margin,row.y-6,row.lane.name+(row.lane.index?' · '+(row.lane.index+1):''),10,{fill:'#718096'});
         let previous=null,previousNumberX=null;

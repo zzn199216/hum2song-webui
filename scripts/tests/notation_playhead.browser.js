@@ -32,7 +32,7 @@ async page=>{
   // Probe the middle of a rest, next system, and a later page without waiting a minute.
   const steps=await page.evaluate(()=>{const model=H2SNotation.project(H2SApp.state.modal.draftScore,100,{view:document.getElementById('modal').dataset.noteView}),s=document.querySelector('#notationSurface'),css=getComputedStyle(s),width=Math.max(320,Math.floor(s.clientWidth-parseFloat(css.paddingLeft)-parseFloat(css.paddingRight))),plan=H2SNotationView.layout(model,{mode:document.getElementById('modal').dataset.noteView,layout:'screen',width});return {next:plan.pages[0].rows[1].bar*4+.25,later:plan.pages[1].rows[0].bar*4+.25};});
   await page.evaluate(()=>{H2SApp.state.modal.isPlaying=true;H2SApp.state.modal.cursorSec=.75*.6;H2SApp.editorRt.modalRequestDraw();});
-  await page.waitForFunction(()=>[...document.querySelectorAll('.notation-playhead')].some(e=>e.style.display!== 'none'));
+  await page.waitForFunction(()=>[...document.querySelectorAll('.notation-playhead')].some(e=>e.style.display!== 'none') && !document.querySelector('#notationSurface .is-playing'));
   const rest=await page.evaluate(()=>({playingNotes:document.querySelectorAll('#notationSurface .is-playing').length,marker:!!document.querySelector('.notation-playhead:not([style*="none"])')}));
   check(rest.marker && rest.playingNotes===0,'Playhead must continue through rests');
   for(const beat of [steps.next,steps.later]){

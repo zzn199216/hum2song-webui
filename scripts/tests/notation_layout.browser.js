@@ -23,7 +23,7 @@ async page=>{
         if(ids.size!==input.tracks[0].notes.length)throw Error('Dropped source notes');
         if(rendered.pages.some(p=>p.outerHTML.includes('NaN')))throw Error('Invalid SVG coordinates');
         const vb=rendered.pages[0].viewBox.baseVal;
-        if(width && rendered.pages.some(p=>p.viewBox.baseVal.width!==width || p.viewBox.baseVal.height>1123))throw Error('Screen pagination does not use available width');
+        if(width && rendered.pages.some(p=>p.viewBox.baseVal.width!==width))throw Error('Screen pagination does not use available width');
         const plan=V.layout(model,options),last=V.render(model,{...options,plan,pageIndex:plan.pages.length-1});
         if(last.pages.length!==1 || last.pages[0].getAttribute('aria-label')!==rendered.pages.at(-1).getAttribute('aria-label'))throw Error('Lazy page differs from complete export');
         const idsOnLast=JSON.stringify(last.registry),lastHits=rendered.pages.at(-1).querySelectorAll('[data-hit]');

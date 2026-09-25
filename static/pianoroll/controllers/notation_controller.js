@@ -11,6 +11,9 @@
     const pageCache=new Map(),hitItems=new WeakMap(),slotKeys=new WeakMap();
     let playbackRows=[],followRows=[],followKey=null;
     let seekDrag=null,staffDrag=null,suppressClickUntil=0,rollPosition=null;
+    const sizes=[50,60,75,90,100,110,125,150];
+    let notationSize=100,zoomAnchor=null;
+    try{const stored=Number(localStorage.getItem('h2s.notation.size'));if(sizes.includes(stored))notationSize=stored;}catch(_){}
     const draft=()=>rt.state.modal.draftScore;
     const bpm=()=>Number(app.getProjectV2().bpm) || 120;
     const refs=()=>rt.state.modal.selection && rt.state.modal.selection.noteRefs || [];
@@ -50,6 +53,12 @@
     const keySelect=field(settings,'调号','Key',Object.keys(N.KEYS).map(k=>[k,'1 = '+k]),v=>{pref.key=v;invalidate();});
     const clefSelect=field(settings,'谱号','Clef',[['treble',t('高音','Treble')],['bass',t('低音','Bass')]],v=>{pref.clef=v;invalidate();});
     const gridSelect=field(settings,'显示精度','Display grid',[[4,'1/16'],[8,'1/32'],[16,'1/64']],v=>{pref.grid=Number(v);invalidate();});
+    const sizeSelect=field(settings,'谱面大小','Score size',sizes.map(n=>[n,n+'%']),v=>{
+      finishSeek(false);finishStaffDrag(false);
+      zoomAnchor=screenPlan?.pages[currentPage]?.rows[0]?.bar ?? null;
+      notationSize=Number(v);try{localStorage.setItem('h2s.notation.size',v);}catch(_){}
+      invalidate();
+    });sizeSelect.id='notationSize';sizeSelect.value=notationSize;
     const hint=document.createElement('span');hint.className='notation-hint';settings.append(hint);
     const surface=document.createElement('div');surface.id='notationSurface';surface.className='notation-surface';surface.hidden=true;surface.setAttribute('role','tabpanel');surface.tabIndex=0;settings.after(surface);
     const pager=document.createElement('nav');pager.className='notation-pager';pager.hidden=true;pager.setAttribute('aria-label',t('乐谱分页','Score pages'));surface.after(pager);
@@ -100,7 +109,9 @@
       const bounds=surface.getBoundingClientRect(),positions=slots.map((slot,index)=>({slot,index,rect:slot.getBoundingClientRect()}));
       const visible=positions.filter(p=>p.rect.bottom>bounds.top-100 && p.rect.top<bounds.bottom+100);
       const active=positions.find(p=>p.rect.bottom>bounds.top+Math.min(120,surface.clientHeight/3)) || positions[positions.length-1];
-      currentPage=active?active.index:0;pageLabel.textContent=t('第 '+(currentPage+1)+' 页 / 共 '+slots.length+' 页',(currentPage+1)+' / '+slots.length+' pages');
+      currentPage=active?active.index:0;
+      const rows=screenPlan.pages[currentPage].rows,range=(rows[0].bar+1)+'–'+(rows.at(-1).bar+rows.at(-1).count);
+      pageLabel.textContent=t('第 '+(currentPage+1)+' 页 / 共 '+slots.length+' 页 · 小节 '+range,(currentPage+1)+' / '+slots.length+' pages · Measures '+range);
       previousPage.disabled=currentPage===0;nextPage.disabled=currentPage===slots.length-1;
       const wanted=new Set(visible.map(p=>p.index));let changed=false;
       for(const p of positions)if(!wanted.has(p.index) && p.slot.firstChild){p.slot.replaceChildren();changed=true;}
@@ -295,13 +306,13 @@
       // Legacy selection annotates notes with UI-only _trackId/_noteIndex.
       // Selecting/previewing a note must not trigger a full engraving pass.
       const width=surfaceWidth();
-      const key=JSON.stringify([draft(),pref,bpm(),width],(k,v)=>k.startsWith('_')?undefined:v);if(key===renderKey)return;renderKey=key;
+      const key=JSON.stringify([draft(),pref,bpm(),width,notationSize],(k,v)=>k.startsWith('_')?undefined:v);if(key===renderKey)return;renderKey=key;
       const ticket=++generation;notice.textContent=t('正在排版…','Engraving…');
       Promise.resolve(pref.view==='staff'?V.load('staff'):null).then(()=>{
         if(ticket!==generation || !rt.state.modal.show)return;
         const model=N.project(draft(),bpm(),pref);
         const footer=model.approximated?t('节奏为显示近似；播放保留原始时值。','Rhythm is approximated for display; playback retains original timing.'):'';
-        screenModel=model;screenOptions={mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width,key:pref.key,clef:pref.clef,grid:pref.grid,meter:model.meter.text};
+        screenModel=model;screenOptions={mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width:Math.max(320,Math.round(width*100/notationSize)),language:zh()?'zh':'en',key:pref.key,clef:pref.clef,grid:pref.grid,meter:model.meter.text};
         const frozen=staffDrag && staffDrag.plan;
         // Pitch does not change voices or rhythm. Hold page geometry during a
         // gesture, then allow ledger-line spacing to reflow once on release.
@@ -309,9 +320,12 @@
         const leader=model.lanes[0];followKey=null;followRows=[];
         screenPlan.pages.forEach((p,page)=>p.rows.forEach(row=>{if(row.lane.trackId===leader.trackId && row.lane.index===leader.index)followRows.push({page,key:page+':'+row.bar,from:row.bar*model.barTicks/16,to:(row.bar+row.count)*model.barTicks/16,top:row.y+20,bottom:row.y+row.height-30});}));
         const scrollTop=surface.scrollTop;
+        const displayWidth=Math.max(width,320*notationSize/100);
         while(slots.length>screenPlan.pages.length)slots.pop().remove();
-        screenPlan.pages.forEach((p,i)=>{let slot=slots[i];if(!slot){slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页','Page '+(i+1)));slots.push(slot);surface.append(slot);}slot.style.height=p.height+'px';});
-        surface.scrollTop=scrollTop;queuePages();
+        screenPlan.pages.forEach((p,i)=>{let slot=slots[i];if(!slot){slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slots.push(slot);surface.append(slot);}const range=(p.rows[0].bar+1)+'–'+(p.rows.at(-1).bar+p.rows.at(-1).count);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页 · 小节 '+range,'Page '+(i+1)+' · Measures '+range));slot.style.width=displayWidth+'px';slot.style.height=(p.height*displayWidth/screenPlan.pageWidth)+'px';});
+        surface.scrollTop=scrollTop;
+        if(zoomAnchor!=null){const index=screenPlan.pages.findIndex(p=>p.rows.some(r=>zoomAnchor>=r.bar && zoomAnchor<r.bar+r.count));if(index>=0)surface.scrollTop+=slots[index].getBoundingClientRect().top-surface.getBoundingClientRect().top;zoomAnchor=null;}
+        queuePages();
         notice.textContent=model.approximated?t(model.approximated+' 个音符按显示精度记谱，原始演奏节奏未改变。',model.approximated+' notes approximated for display. Original timing is unchanged.'):t('点选音符 · ↑↓ 改音高 · ←→ 移动 · 双击休止符插入','Select notes · ↑↓ pitch · ←→ timing · Double-click a rest to insert');
         notice.textContent=t('点击谱面空白定位 · 拖动绿线顶端调整进度 · 上下拖音符改音高 · Esc 取消。','Click blank score to seek · Drag the green cap to scrub · Drag notes vertically for pitch · Esc cancels. ')+(model.approximated?' '+notice.textContent:'');
         hint.textContent=t('显示设置不改变演奏','Display settings preserve performance');syncSelection();
@@ -360,7 +374,7 @@
       const ticket=++exportGeneration;exportBlob=null;pdfButton.disabled=svgButton.disabled=true;preview.replaceChildren();exportPages=[];exportStatus.textContent=t('正在生成预览…','Preparing preview…');
       try{if(exportMode.value==='staff')await V.load('staff');if(ticket!==exportGeneration)return;
         const model=N.project(exportDraft,exportBpm,exportPref);
-        exportPages=V.render(model,{mode:exportMode.value,bpm:exportBpm,title:exportName,footer:model.approximated?t('节奏按显示精度近似记谱','Rhythm approximated to the selected display grid'):''}).pages;
+        exportPages=V.render(model,{mode:exportMode.value,bpm:exportBpm,title:exportName,language:zh()?'zh':'en',footer:model.approximated?t('节奏按显示精度近似记谱','Rhythm approximated to the selected display grid'):''}).pages;
         // Show frozen score pages immediately, then preview the very same PDF that will download.
         preview.replaceChildren(...exportPages.map(p=>{const copy=p.cloneNode(true);copy.querySelectorAll('.notation-hit').forEach(e=>e.remove());return copy;}));svgButton.disabled=false;
         exportStatus.textContent=t(exportPages.length+' 页 · 正在生成 PDF…',exportPages.length+' pages · Preparing PDF…');
