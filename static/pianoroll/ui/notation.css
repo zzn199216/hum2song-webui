@@ -82,3 +82,7 @@
 .editor-piano-key:hover { filter:brightness(1.12); }
 .editor-piano-key.is-sounding { background:#4c91ff; color:white; }
 .editor-piano-key:focus-visible { outline:2px solid #4c91ff; outline-offset:-2px; }
+
+/* Editing follows the available window; only export previews use A4 pages. */
+.notation-surface { align-items:stretch; scrollbar-gutter:stable; }
+.notation-surface .notation-page.notation-screen { width:100%; min-width:320px; max-width:none; height:auto; }

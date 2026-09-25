@@ -32,11 +32,24 @@
   }
   function render(model,options){
     const o=options || {}, mode=o.mode || 'staff', pages=[],registry=[];
+    const screen=o.layout==='screen';
+    const pageWidth=screen?Math.max(320,Math.floor(Number(o.width)||794)):794;
+    const margin=screen?(pageWidth<600?20:36):46, contentWidth=pageWidth-margin*2;
     const rows=[];
     // Dense measures receive a complete line instead of squeezed symbols.
     for(let bar=0;bar<model.bars;){
       const dense=model.lanes.some(l=>(l.bars[bar] || []).length>10 || (l.bars[bar+1] || []).length>10);
-      const count=dense?1:Math.min(2,model.bars-bar);
+      let count=dense?1:Math.min(2,model.bars-bar);
+      if(screen){
+        // Reflow measures at a constant glyph size; do not stretch an A4 image.
+        count=0;let required=mode==='staff'?90:0;
+        while(bar+count<model.bars && count<8){
+          const events=Math.max(...model.lanes.map(l=>(l.bars[bar+count] || []).length));
+          const measure=Math.max(180,events*(mode==='staff'?26:30)+36);
+          if(count && required+measure>contentWidth)break;
+          required+=measure;count++;
+        }
+      }
       for(const lane of model.lanes){
         if(lane.index && !lane.bars.slice(bar,bar+count).some(events=>events.some(e=>!e.rest))) continue;
         rows.push({lane,bar,count});
@@ -58,31 +71,33 @@
         row.noteBase+=(chord-1)*30;row.height+=(chord-1)*30;
       }
       if(row.height>880)throw new Error('This chord is too large to fit a score page. Use the piano roll to split it.');
-      if(nextY+row.height>1050 && pageRowsList[pageRowsList.length-1].length){pageRowsList.push([]);nextY=146;}
+      if(!screen && nextY+row.height>1050 && pageRowsList[pageRowsList.length-1].length){pageRowsList.push([]);nextY=146;}
       row.y=nextY;pageRowsList[pageRowsList.length-1].push(row);nextY+=row.height;
     }
     const pageCount=pageRowsList.length;
     for(let pageIndex=0;pageIndex<pageCount;pageIndex++){
+      const pageHeight=screen?Math.max(300,nextY+38):1123;
       let svg,ctx,VF;
       if(mode==='staff'){
         VF=root.Vex.Flow;
         const host=document.createElement('div'), r=new VF.Renderer(host,VF.Renderer.Backends.SVG);
-        r.resize(794,1123);ctx=r.getContext();ctx.setFillStyle('#253246');ctx.setStrokeStyle('#253246');svg=host.querySelector('svg');
-      }else svg=el('svg',{xmlns:NS,width:794,height:1123});
-      svg.setAttribute('viewBox','0 0 794 1123');svg.setAttribute('class','notation-page');svg.setAttribute('aria-label',(o.title || 'Clip')+' · '+(pageIndex+1));
-      svg.prepend(el('rect',{width:794,height:1123,fill:'#fffefa'}));
-      text(svg,46,43,'HUM2SONG  /  '+(mode==='staff'?'STAFF':'NUMBERED NOTATION'),10,{'letter-spacing':2,fill:'#718096'});
+        r.resize(pageWidth,pageHeight);ctx=r.getContext();ctx.setFillStyle('#253246');ctx.setStrokeStyle('#253246');svg=host.querySelector('svg');
+      }else svg=el('svg',{xmlns:NS,width:pageWidth,height:pageHeight});
+      svg.setAttribute('viewBox','0 0 '+pageWidth+' '+pageHeight);svg.setAttribute('class','notation-page'+(screen?' notation-screen':''));svg.setAttribute('aria-label',(o.title || 'Clip')+' · '+(pageIndex+1));
+      svg.prepend(el('rect',{width:pageWidth,height:pageHeight,fill:'#fffefa'}));
+      text(svg,margin,43,'HUM2SONG  /  '+(mode==='staff'?'STAFF':'NUMBERED NOTATION'),10,{'letter-spacing':2,fill:'#718096'});
       const title=String(o.title || 'Untitled clip');
-      text(svg,46,81,title.length>48?title.slice(0,47)+'…':title,26,{'font-weight':600});
-      text(svg,46,109,(mode==='jianpu'?'1 = '+model.pref.key+'    ':'')+model.meter.text+'    ♩ = '+o.bpm,13);
-      text(svg,748,109,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'end',fill:'#718096'});
+      const titleLimit=screen?Math.max(14,Math.floor(contentWidth/16)):48;
+      text(svg,margin,81,title.length>titleLimit?title.slice(0,titleLimit-1)+'…':title,26,{'font-weight':600});
+      text(svg,margin,109,(mode==='jianpu'?'1 = '+model.pref.key+'    ':'')+model.meter.text+'    ♩ = '+o.bpm,13);
+      if(!screen)text(svg,pageWidth-margin,109,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'end',fill:'#718096'});
       const pageRows=pageRowsList[pageIndex];
       for(const [ri,row] of pageRows.entries()){
         const y=row.y+row.offset;
-        text(svg,46,row.y-6,row.lane.name+(row.lane.index?' · '+(row.lane.index+1):''),10,{fill:'#718096'});
+        text(svg,margin,row.y-6,row.lane.name+(row.lane.index?' · '+(row.lane.index+1):''),10,{fill:'#718096'});
         let previous=null,previousNumberX=null;
         for(let bi=0;bi<row.count;bi++){
-          const bar=row.bar+bi,tokens=row.lane.bars[bar],x=46+bi*(702/row.count),width=702/row.count;
+          const bar=row.bar+bi,tokens=row.lane.bars[bar],x=margin+bi*(contentWidth/row.count),width=contentWidth/row.count;
           text(svg,x+4,y+10,bar+1,10,{fill:'#8994a3'});
           if(mode==='staff'){
             const stave=new VF.Stave(x,y+7,width).setContext(ctx);
@@ -115,10 +130,14 @@
               if(token.tieIn && previous){
                 new VF.StaveTie({first_note:previous,last_note:note,first_indices:token.refs.map((_,i)=>i),last_indices:token.refs.map((_,i)=>i)}).setContext(ctx).draw();
               }else if(token.tieIn){
-                new VF.StaveTie({last_note:note,last_indices:token.refs.map((_,i)=>i)}).setContext(ctx).draw();
+                // VexFlow defaults the omitted side to [0], even for partial ties.
+                // Both index arrays must cover the chord at a system/page boundary.
+                const indices=token.refs.map((_,i)=>i);
+                new VF.StaveTie({last_note:note,first_indices:indices,last_indices:indices}).setContext(ctx).draw();
               }
               if(token.tieOut && i===tokens.length-1 && bi===row.count-1){
-                new VF.StaveTie({first_note:note,first_indices:token.refs.map((_,i)=>i)}).setContext(ctx).draw();
+                const indices=token.refs.map((_,i)=>i);
+                new VF.StaveTie({first_note:note,first_indices:indices,last_indices:indices}).setContext(ctx).draw();
               }
               if(token.rest) hit(svg,registry,token,xx-6,y+38,22,35);
               else token.refs.forEach((ref,j)=>{
@@ -163,7 +182,7 @@
           }
         }
       }
-      text(svg,46,1083,o.footer || '',10,{fill:'#718096'});
+      text(svg,margin,pageHeight-40,o.footer || '',10,{fill:'#718096'});
       // Ties and later voices must not cover interaction targets.
       svg.querySelectorAll('.notation-hit').forEach(h=>svg.append(h));
       pages.push(svg);

@@ -49,6 +49,14 @@
     const gridSelect=field(settings,'显示精度','Display grid',[[4,'1/16'],[8,'1/32'],[16,'1/64']],v=>{pref.grid=Number(v);invalidate();});
     const hint=document.createElement('span');hint.className='notation-hint';settings.append(hint);
     const surface=document.createElement('div');surface.id='notationSurface';surface.className='notation-surface';surface.hidden=true;surface.setAttribute('role','tabpanel');surface.tabIndex=0;settings.after(surface);
+    const surfaceWidth=()=>{const css=getComputedStyle(surface);return Math.max(320,Math.floor(surface.clientWidth-parseFloat(css.paddingLeft)-parseFloat(css.paddingRight)));};
+    let observedWidth=0;
+    const resizeObserver=new ResizeObserver(()=>{
+      if(!rt.state.modal.show || pref.view==='roll' || !surface.clientWidth)return;
+      const width=surfaceWidth();if(width===observedWidth)return;observedWidth=width;
+      finishStaffDrag(false);invalidate();
+    });
+    resizeObserver.observe(surface);
     const notice=document.createElement('div');notice.className='notation-notice';notice.setAttribute('role','status');surface.before(notice);
     modal.classList.add('notation-enabled');modal.dataset.details='false';
     const audition=root.H2SEditorAudition.create(rt,err=>{notice.textContent=t('试听不可用：','Preview unavailable: ')+err.message;});
@@ -164,13 +172,14 @@
       if(!rt.state.modal.show)return;syncSelection();
       // Legacy selection annotates notes with UI-only _trackId/_noteIndex.
       // Selecting/previewing a note must not trigger a full engraving pass.
-      const key=JSON.stringify([draft(),pref,bpm()],(k,v)=>k.startsWith('_')?undefined:v);if(key===renderKey)return;renderKey=key;
+      const width=surfaceWidth();
+      const key=JSON.stringify([draft(),pref,bpm(),width],(k,v)=>k.startsWith('_')?undefined:v);if(key===renderKey)return;renderKey=key;
       const ticket=++generation;notice.textContent=t('正在排版…','Engraving…');
       Promise.resolve(pref.view==='staff'?V.load('staff'):null).then(()=>{
         if(ticket!==generation || !rt.state.modal.show)return;
         const model=N.project(draft(),bpm(),pref);
         const footer=model.approximated?t('节奏为显示近似；播放保留原始时值。','Rhythm is approximated for display; playback retains original timing.'):'';
-        const rendered=V.render(model,{mode:pref.view,bpm:bpm(),title:clip().name,footer});
+        const rendered=V.render(model,{mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width});
         registry=rendered.registry;pages=rendered.pages;surface.replaceChildren(...pages);
         notice.textContent=model.approximated?t(model.approximated+' 个音符按显示精度记谱，原始演奏节奏未改变。',model.approximated+' notes approximated for display. Original timing is unchanged.'):t('点选音符 · ↑↓ 改音高 · ←→ 移动 · 双击休止符插入','Select notes · ↑↓ pitch · ←→ timing · Double-click a rest to insert');
         if(pref.view==='staff')notice.textContent=t('上下拖动音符改音高 · 松手完成 · Esc 取消。','Drag notes vertically to change pitch · Release to apply · Esc to cancel. ')+(model.approximated?' '+notice.textContent:'');
