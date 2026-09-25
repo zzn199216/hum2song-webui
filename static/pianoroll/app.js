@@ -4560,7 +4560,7 @@ if (typeof localStorage !== 'undefined') {
       $('#btnModalSave').addEventListener('click', () => this.closeModal(true));
 
       $('#btnClipPlay').addEventListener('click', (ev) => { try{ _unlockAudioFromGesture(); }catch(e){} return this.modalPlay(); });
-      $('#btnClipStop').addEventListener('click', () => this.modalStop());
+      $('#btnClipStop').addEventListener('click', () => this.modalStop(true));
       $('#btnInsertNote').addEventListener('click', () => this.modalInsertNote());
       $('#btnDeleteNote').addEventListener('click', () => this.modalDeleteSelectedNotes());
       $('#selSnap').addEventListener('change', () => {

@@ -10,7 +10,7 @@
     let pageJob=0,slots=[],screenModel=null,screenOptions=null,screenPlan=null,currentPage=0,visibleHits=[],selectedHits=new Set(),playingHits=new Set();
     const pageCache=new Map(),hitItems=new WeakMap(),slotKeys=new WeakMap();
     let playbackRows=[],followRows=[],followKey=null;
-    let staffDrag=null,suppressClickUntil=0,rollPosition=null;
+    let seekDrag=null,staffDrag=null,suppressClickUntil=0,rollPosition=null;
     const draft=()=>rt.state.modal.draftScore;
     const bpm=()=>Number(app.getProjectV2().bpm) || 120;
     const refs=()=>rt.state.modal.selection && rt.state.modal.selection.noteRefs || [];
@@ -68,7 +68,7 @@
         for(const row of V.playbackRows(svg)){
           const marker=document.createElementNS('http://www.w3.org/2000/svg','g');marker.setAttribute('class','notation-playhead');marker.setAttribute('aria-hidden','true');marker.style.display='none';
           const line=document.createElementNS(marker.namespaceURI,'line');line.setAttribute('y1',row.top);line.setAttribute('y2',row.bottom);line.setAttribute('x1','0');line.setAttribute('x2','0');
-          const cap=document.createElementNS(marker.namespaceURI,'path');cap.setAttribute('d','M -5 '+(row.top-5)+' L 5 '+(row.top-5)+' L 0 '+row.top+' Z');marker.append(line,cap);svg.append(marker);
+          const cap=document.createElementNS(marker.namespaceURI,'path');cap.setAttribute('d','M -5 '+(row.top-5)+' L 5 '+(row.top-5)+' L 0 '+row.top+' Z');const handle=document.createElementNS(marker.namespaceURI,'rect');handle.setAttribute('class','notation-seek-handle');handle.setAttribute('x','-12');handle.setAttribute('y',row.top-17);handle.setAttribute('width','24');handle.setAttribute('height','19');marker.append(line,cap,handle);svg.append(marker);
           playbackRows.push({...row,marker});
         }
       }
@@ -144,7 +144,7 @@
     function switchView(mode){
       const grid=document.querySelector('.editorGridWrap');
       if(pref.view==='roll' && !document.getElementById('canvasWrap').hidden)rollPosition={top:grid.scrollTop,left:grid.scrollLeft};
-      finishStaffDrag(false);audition.stop();rt.modalEndEdgeScroll();generation++;pref.view=mode;modal.dataset.noteView=mode;surface.hidden=mode==='roll';pager.hidden=mode==='roll';document.getElementById('canvasWrap').hidden=mode!=='roll';settings.hidden=mode==='roll';notice.hidden=mode==='roll';
+      finishSeek(false);finishStaffDrag(false);audition.stop();rt.modalEndEdgeScroll();generation++;pref.view=mode;modal.dataset.noteView=mode;surface.hidden=mode==='roll';pager.hidden=mode==='roll';document.getElementById('canvasWrap').hidden=mode!=='roll';settings.hidden=mode==='roll';notice.hidden=mode==='roll';
       cancelAnimationFrame(pageJob);pageJob=0;hidePlayheads();screenPlan=null;pageCache.clear();startHighlight();
       for(const b of tabs.children){const selected=b.dataset.view===mode;b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1;}
       surface.setAttribute('aria-labelledby','notation-tab-'+mode);keySelect.value=pref.key;clefSelect.value=pref.clef;gridSelect.value=pref.grid;
@@ -153,6 +153,9 @@
     function selectedNotes(){const selected=new Set(refs().map(r=>r.trackId+'\0'+r.noteId));const out=[];for(const tr of draft().tracks || [])for(const n of tr.notes || [])if(selected.has(String(tr.id)+'\0'+String(n.id)))out.push(n);return out;}
     function syncSelection(){
       if(!rt.state.modal.show)return;
+      const play=document.getElementById('btnClipPlay'),playing=rt.state.modal.isPlaying;
+      play.textContent=playing?'Ⅱ':'▶';play.setAttribute('aria-label',playing?t('暂停片段','Pause clip'):t('播放片段','Play clip'));play.title=play.getAttribute('aria-label');
+      document.getElementById('btnClipStop').title=t('停止并回到开头','Stop and return to start');
       const notes=selectedNotes(),one=notes.length===1?notes[0]:null;
       noteLabel.textContent=notes.length?t('已选 '+notes.length+' 个音','Selected: '+notes.length):t('选择音符开始编辑','Select a note to edit');
       [pitchInput,startInput,lengthInput,velInput,durationInput].forEach(e=>{e.disabled=!one;});
@@ -178,11 +181,50 @@
     function select(item,extend){
       const m=rt.state.modal;m.selection={noteRefs:extend?[...refs()]:[],tool:'pointer'};
       for(const r of item.refs){const found=m.selection.noteRefs.findIndex(x=>x.trackId===r.trackId && x.noteId===r.noteId);if(found<0)m.selection.noteRefs.push(r);else if(extend)m.selection.noteRefs.splice(found,1);}
-      m.cursorSec=item.beat*60/bpm();m.selectedCell=item.refs.length?null:{startSec:m.cursorSec,pitch:60,trackId:item.trackId};rt.modalSyncLegacySelectionFromRefs();rt.modalUpdateSelectionUI();syncSelection();startHighlight();
+      rt.modalSeek(item.beat*60/bpm());m.selectedCell=item.refs.length?null:{startSec:m.cursorSec,pitch:60,trackId:item.trackId};rt.modalSyncLegacySelectionFromRefs();rt.modalUpdateSelectionUI();syncSelection();startHighlight();
     }
+    function seekPoint(e,preferred){
+      const svg=preferred?preferred.marker.ownerSVGElement:e.target.closest('svg');if(!svg)return null;
+      const matrix=svg.getScreenCTM();if(!matrix)return null;
+      const point=new DOMPoint(e.clientX,e.clientY).matrixTransform(matrix.inverse());
+      const row=preferred || playbackRows.find(r=>r.marker.ownerSVGElement===svg && point.y>=r.top-20 && point.y<=r.bottom);
+      if(!row || !row.anchors.length)return null;
+      let i=0;while(i+1<row.anchors.length && row.anchors[i+1].x<=point.x)i++;
+      const a=row.anchors[i],b=row.anchors[i+1] || a;
+      const fraction=b.x>a.x?Math.max(0,Math.min(1,(point.x-a.x)/(b.x-a.x))):0;
+      const beat=Math.max(row.from,Math.min(row.to-0.0001,a.beat+(b.beat-a.beat)*fraction));
+      return {row,seconds:beat*60/bpm()};
+    }
+    function finishSeek(commit){
+      const d=seekDrag;if(!d)return;seekDrag=null;surface.classList.remove('is-seeking');
+      if(!commit)rt.state.modal.cursorSec=d.before;
+      if(surface.hasPointerCapture(d.id))surface.releasePointerCapture(d.id);
+      suppressClickUntil=performance.now()+400;startHighlight();
+      if(commit && d.playing)rt.modalPlay();
+    }
+    surface.addEventListener('pointerdown',e=>{
+      if(pref.view==='roll' || e.button!==0 || e.shiftKey || staffDrag || seekDrag)return;
+      const handle=e.target.closest('.notation-seek-handle');
+      if(!handle && e.target.closest('[data-hit]'))return;
+      const preferred=handle && playbackRows.find(r=>r.marker===handle.parentNode);
+      const point=seekPoint(e,preferred);if(!point)return;
+      e.preventDefault();surface.focus({preventScroll:true});
+      const playing=rt.state.modal.isPlaying || rt._modalPlayPending;rt.modalStop();
+      seekDrag={id:e.pointerId,row:point.row,before:rt.state.modal.cursorSec,playing};
+      rt.state.modal.cursorSec=point.seconds;startHighlight();
+      surface.setPointerCapture(e.pointerId);surface.classList.add('is-seeking');
+    });
+    surface.addEventListener('pointermove',e=>{
+      if(!seekDrag || e.pointerId!==seekDrag.id)return;e.preventDefault();
+      const point=seekPoint(e,seekDrag.row);if(point){rt.state.modal.cursorSec=point.seconds;startHighlight();}
+    });
+    surface.addEventListener('pointerup',e=>{if(seekDrag && e.pointerId===seekDrag.id)finishSeek(true);});
+    surface.addEventListener('pointercancel',()=>finishSeek(false));
+    surface.addEventListener('lostpointercapture',()=>finishSeek(false));
+    root.addEventListener('blur',()=>finishSeek(false));
     // Capture on the persistent surface: SVG note elements are replaced by live engraving.
     surface.addEventListener('pointerdown',e=>{
-      if(pref.view==='roll' || e.button!==0 || e.shiftKey || staffDrag)return;
+      if(pref.view==='roll' || e.button!==0 || e.shiftKey || staffDrag || seekDrag)return;
       const h=e.target.closest('[data-hit]'),item=h && hitItems.get(h);
       if(!item || item.refs.length!==1)return;
       const matrix=h.ownerSVGElement.getScreenCTM();if(!matrix)return;
@@ -222,6 +264,7 @@
     rt.modalUndoLastEdit=function(){const before=clone(draft()),ui=clone(rt.state.modal.selection);const result=originalUndo();if(result){redo.push({score:before,selection:ui});invalidate();}return result;};
     function redoEdit(){if(!redo.length)return;const item=redo.pop();originalCapture('redo');rt.state.modal.draftScore=item.score;rt.state.modal.selection=item.selection;rt.modalSyncLegacySelectionFromRefs();rt.state.modal.dirty=JSON.stringify(draft())!==JSON.stringify(rt.state.modal.savedScore);invalidate();}
     document.addEventListener('keydown',e=>{
+      if(seekDrag){e.preventDefault();e.stopImmediatePropagation();if(e.key==='Escape')finishSeek(false);return;}
       if(staffDrag){e.preventDefault();e.stopImmediatePropagation();if(e.key==='Escape')finishStaffDrag(false);return;}
       if(dialog.open){e.stopImmediatePropagation();return;}
       if(!rt.state.modal.show || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable)return;
@@ -230,7 +273,7 @@
     const originalOpen=rt.openClipEditor.bind(rt),originalClose=rt.closeModal.bind(rt),originalDraw=rt.modalDraw.bind(rt);
     rt.openClipEditor=function(id){originalOpen(id);if(!rt.state.modal.show || rt.state.modal.clipId!==id)return;rollPosition=null;surface.scrollTop=0;pref=N.preferences(clip().meta && clip().meta.notation);redo=[];switchView(pref.view);startHighlight();};
     rt.closeModal=function(save){
-      finishStaffDrag(false);audition.dispose();rt.modalEndEdgeScroll();
+      finishSeek(false);finishStaffDrag(false);audition.dispose();rt.modalEndEdgeScroll();
       const id=rt.state.modal.clipId, shouldSave=save && rt.state.modal.show;
       const originalScore=shouldSave?clone(clip().score):null;
       const originalMeta=shouldSave?clone(clip().meta || {}):null, originalRevision=shouldSave?clip().revisionId:null;
@@ -270,7 +313,7 @@
         screenPlan.pages.forEach((p,i)=>{let slot=slots[i];if(!slot){slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页','Page '+(i+1)));slots.push(slot);surface.append(slot);}slot.style.height=p.height+'px';});
         surface.scrollTop=scrollTop;queuePages();
         notice.textContent=model.approximated?t(model.approximated+' 个音符按显示精度记谱，原始演奏节奏未改变。',model.approximated+' notes approximated for display. Original timing is unchanged.'):t('点选音符 · ↑↓ 改音高 · ←→ 移动 · 双击休止符插入','Select notes · ↑↓ pitch · ←→ timing · Double-click a rest to insert');
-        notice.textContent=t('按住音符上下拖动改音高 · 松手完成 · Esc 取消。','Hold and drag notes vertically to change pitch · Release to apply · Esc to cancel. ')+(model.approximated?' '+notice.textContent:'');
+        notice.textContent=t('点击谱面空白定位 · 拖动绿线顶端调整进度 · 上下拖音符改音高 · Esc 取消。','Click blank score to seek · Drag the green cap to scrub · Drag notes vertically for pitch · Esc cancels. ')+(model.approximated?' '+notice.textContent:'');
         hint.textContent=t('显示设置不改变演奏','Display settings preserve performance');syncSelection();
       }).catch(err=>{if(ticket!==generation)return;surface.replaceChildren();slots=[];visibleHits=[];screenPlan=null;pageLabel.textContent='—';notice.textContent=t('无法显示乐谱：','Unable to display score: ')+err.message;renderKey='';});
     };

@@ -3632,7 +3632,7 @@
 // ---- Playback inside modal (Clip Editor) ----
 modalTogglePlay(){
   if (!this.state.modal.show) return;
-  if (this.state.modal.isPlaying) return this.modalStop();
+  if (this.state.modal.isPlaying || this._modalPlayPending) return this.modalStop();
   return this.modalPlay();
 },
 
@@ -3648,7 +3648,7 @@ async modalPlay(){
     }
     return;
   }
-  if (this.state.modal.isPlaying){
+  if (this.state.modal.isPlaying || this._modalPlayPending){
     this.modalStop();
     if (_mpLog){
       try{
@@ -3660,7 +3660,10 @@ async modalPlay(){
 
   const _mpT0 = _mpLog ? _perfClipNow() : 0;
 
+  const session = this._modalPlaySession = (this._modalPlaySession || 0) + 1;
+  this._modalPlayPending = true;
   const ok = await this.ensureTone();
+  if (session !== this._modalPlaySession || !this.state.modal.show) return;
   const _mpAfterEnsure = _mpLog ? _perfClipNow() : 0;
   if (!ok){
     if (_mpLog){
@@ -3672,6 +3675,7 @@ async modalPlay(){
         });
       }catch(e){}
     }
+    this._modalPlayPending = false;
     alert('Tone.js not available.');
     return;
   }
@@ -3689,10 +3693,13 @@ async modalPlay(){
     // IMPORTANT: Tone.start() must be called from a user gesture (button click).
     // modalPlay() is invoked by the Play button handler, so we can await safely here.
     try { await Tone.start(); } catch(e){}
+    if (session !== this._modalPlaySession || !this.state.modal.show) return;
+    this._modalPlayPending = false;
     _mpAfterToneStart = _mpLog ? _perfClipNow() : 0;
 
     score = H2SProject.ensureScoreIds(H2SProject.deepClone(this.state.modal.draftScore));
     startAt = this.state.modal.cursorSec || 0;
+    this._modalPlaybackStart = startAt;
     _mpAfterScore = _mpLog ? _perfClipNow() : 0;
 
     const synth = new Tone.PolySynth(Tone.Synth).toDestination();
@@ -3709,9 +3716,9 @@ async modalPlay(){
     for (const tr of (score.tracks || [])){
       for (const n of (tr.notes || [])){
         const end = (Number(n.start)||0) + (Number(n.duration)||0);
-        if (end < startAt) continue;
+        if (end <= startAt) continue;
         const rel = Math.max(0, (Number(n.start)||0) - startAt);
-        const dur = Math.max(0, Number(n.duration)||0);
+        const dur = Math.max(0, end - Math.max(startAt, Number(n.start)||0));
         maxT = Math.max(maxT, rel + dur);
 	        Tone.Transport.schedule((time) => {
 	          const pitch = H2SProject.clamp(Math.round((n.pitch || 60)), 0, 127);
@@ -3740,7 +3747,7 @@ async modalPlay(){
 
   // If no notes after cursor, treat as a no-op but still reset cursor to 0 for UX.
   if (!(maxT > 0)){
-    this.state.modal.cursorSec = 0;
+    this.modalStop(true);
     let _mpDrawErr = null;
     try{
       this.modalRequestDraw();
@@ -3815,7 +3822,7 @@ async modalPlay(){
 
   // progress ticker (uses closure vars; do NOT reference them elsewhere)
   const tick = () => {
-    if (!this.state.modal.isPlaying) return;
+    if (!this.state.modal.isPlaying || session !== this._modalPlaySession) return;
     const _perfPb = _h2sDevPerfTimingEnabled() && typeof performance !== 'undefined' && typeof performance.now === 'function';
     const t0 = _perfPb ? performance.now() : 0;
     const sec = startAt + (Tone.Transport.seconds || 0);
@@ -3837,13 +3844,12 @@ async modalPlay(){
 
     // Auto-stop when finished, and reset to start.
     if ((Tone.Transport.seconds || 0) >= maxT){
-      this.modalStop();
-      this.state.modal.cursorSec = 0;
+      this.modalStop(true);
       return;
     }
-    requestAnimationFrame(tick);
+    this._modalRAF = requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
+  this._modalRAF = requestAnimationFrame(tick);
 },
     modalEndEdgeScroll(){
       if(this._editorEdgeRAF)cancelAnimationFrame(this._editorEdgeRAF);
@@ -4008,7 +4014,7 @@ async modalPlay(){
       let tSec = Coords ? Coords.xToTime(px, this.state.modal) : ((px - padL) / pxPerSec);
       tSec = Math.max(0, tSec);
       tSec = this.modalQuantize(tSec, ev);
-      this.state.modal.cursorSec = tSec;
+      this.modalSeek(tSec);
 
       // pitch from y
       const pitchWin = this.modalPitchWindow();
@@ -4196,7 +4202,7 @@ async modalPlay(){
           let tSec = Coords ? Coords.xToTime(mq.x0, m) : ((mq.x0 - (m.padL || 60)) / this.modalEffectivePxPerSec());
           tSec = Math.max(0, tSec);
           tSec = this.modalQuantize(tSec, ev);
-          m.cursorSec = tSec;
+          this.modalSeek(tSec);
           const pitchWin = this.modalPitchWindow();
           const pitch = Coords
             ? Coords.yToPitch(mq.y0, m, pitchWin.pitchMin, pitchWin.pitchMax)
@@ -4256,7 +4262,21 @@ async modalPlay(){
       }
     },
 
-    modalStop(){
+    modalSeek(seconds){
+      const playing=this.state.modal.isPlaying || this._modalPlayPending;
+      this.modalStop();
+      this.state.modal.cursorSec=Math.max(0,Number(seconds)||0);
+      this.modalRequestDraw();
+      if(playing)return this.modalPlay();
+    },
+
+    modalStop(reset=false){
+  this._modalPlaySession=(this._modalPlaySession || 0)+1;
+  this._modalPlayPending=false;
+  if(this.state.modal.isPlaying && window.Tone){
+    this.state.modal.cursorSec=(this._modalPlaybackStart || 0)+(Tone.Transport.seconds || 0);
+  }
+  if(reset)this.state.modal.cursorSec=0;
   const _msLog = _h2sDevPerfTimingEnabled();
   if (!this.state.modal.show){
     if (_msLog){
@@ -4298,6 +4318,10 @@ async modalPlay(){
     }
     _msAfterTransport = _msLog ? _perfClipNow() : 0;
 
+    if(this.state.modal.synth){
+      try{this.state.modal.synth.releaseAll();this.state.modal.synth.dispose();}catch(_){}
+      this.state.modal.synth=null;
+    }
     this.state.modal.isPlaying = false;
     $('#editorStatus').textContent = 'Stopped.';
     // Hide DOM overlay so canvas playhead is shown again

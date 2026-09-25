@@ -95,3 +95,6 @@
 .notation-pager { flex-shrink:0; display:flex; align-items:center; justify-content:center; gap:22px; padding:9px 16px; background:#172131; border-top:1px solid #344055; color:#c4d0e2; font-size:12px; }
 .notation-page-position { min-width:130px; text-align:center; font-variant-numeric:tabular-nums; }
 .notation-surface { overflow-anchor:none; }
+
+.notation-seek-handle { fill:transparent; pointer-events:all; cursor:ew-resize; touch-action:none; }
+.notation-surface.is-seeking { cursor:ew-resize; user-select:none; touch-action:none; }
