@@ -20,7 +20,7 @@ const ver = verMatch[1];
 function scriptVersion(src) {
   const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const m = index.match(new RegExp('<script\\s+src="/static/pianoroll/' + escaped + '\\?v=([^"]+)"'));
-  return m ? m[1] : '';
+  return m ? new URLSearchParams('v=' + m[1].replace(/&amp;/g, '&')).get('v') : '';
 }
 
 const requiredVersionedScripts = [
@@ -41,7 +41,7 @@ for (const src of requiredVersionedScripts) {
   assert(!/[\\/?#]/.test(assetVersion), src + ' cache-bust version should be a plain marker');
 }
 
-assert(ver === 'cloud-first-steps-v1', 'studio_asset_version.js should use the current Studio release marker');
+assert(ver === 'clip-notation-v1-20260925', 'studio_asset_version.js should use the current Studio release marker');
 assert(scriptVersion('studio_asset_version.js') === ver, 'index.html should load studio_asset_version.js with the studio asset version marker');
 assert(scriptVersion('h2s_startup_perf.js') === ver, 'index.html should load startup perf with the studio asset version marker');
 assert(scriptVersion('app.js') === ver, 'index.html should load app.js with the studio asset version marker');

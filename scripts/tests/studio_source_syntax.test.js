@@ -9,6 +9,10 @@ const repoRoot = path.resolve(__dirname, '../..');
 const files = [
   'static/pianoroll/app.js',
   'static/pianoroll/project.js',
+  'static/pianoroll/core/notation.js',
+  'static/pianoroll/ui/notation_view.js',
+  'static/pianoroll/ui/editor_audition.js',
+  'static/pianoroll/controllers/notation_controller.js',
 ];
 
 for (const relativePath of files) {

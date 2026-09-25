@@ -1682,6 +1682,7 @@
         })) : [],
         meta: {
           agent: (meta && meta.agent) ? meta.agent : null,
+          notation: (meta && meta.notation) ? H2SProject.deepClone(meta.notation) : null,
           notes: (typeof meta.notes === 'number') ? meta.notes : 0,
           pitchMin: (typeof meta.pitchMin === 'number') ? meta.pitchMin : null,
           pitchMax: (typeof meta.pitchMax === 'number') ? meta.pitchMax : null,
@@ -4794,6 +4795,7 @@ commitV2: (p2, reason) => this.commitV2(p2, reason),
 persistFromV1: (reason) => this.persistFromV1(reason),
 H2SProject: (typeof window !== 'undefined') ? window.H2SProject : null,
           });
+          if (window.H2SNotationController) this.notationCtrl = window.H2SNotationController.create(this, this.editorRt);
           log('EditorRuntime ready.');
         } else {
           console.warn('[EditorRuntime] Not available (script missing).');
@@ -9474,6 +9476,7 @@ renderTimeline(){
             sourceAudioInstanceId: sourceAudioInstanceId,
             separationPreset: options.separationPreset,
             mode: options.mode,
+            separatorOption: options.separatorOption,
             onStatus: options.onStatus,
           });
         },

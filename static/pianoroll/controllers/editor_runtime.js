@@ -179,7 +179,6 @@
       // ---- Pitch view sizing / scroll policy ----
       // Enable native vertical scrolling only when pitch range is large enough.
       // Keeps the default view big/readable for normal clips.
-      const PITCH_SCROLL_THRESHOLD = 36;
       const PITCH_ROWS_FULL = 128;
       const PITCH_PAD_T = 20;
       const PITCH_PAD_B = 10;
@@ -999,6 +998,7 @@
     },
 
     closeModal(save){
+      this.modalEndEdgeScroll();
       if (!this.state.modal.show) return;
       this.modalStop();
 
@@ -1180,17 +1180,11 @@
       const velocityCanvas = $('#velocityCanvas');
       const velocityLaneWrap = $('#velocityLaneWrap');
       const st = H2SProject.scoreStats(this.state.modal.draftScore);
-      const span = Math.max(4, st.spanSec);
+      const spareBeats = 8 * 60 / (this.project.bpm || 120);
+      const span = Math.max(4, st.spanSec + spareBeats);
       const w = (H2SEditorCoords && typeof H2SEditorCoords.contentWidthForSpan === 'function')
         ? H2SEditorCoords.contentWidthForSpan(span, this.state.modal)
         : Math.max(1200, Math.ceil(span * this.modalEffectivePxPerSec()) + 140);
-
-      // Pitch view policy:
-      // - If pitch range (padded) exceeds visible rows -> enable native vertical scrolling over full 0..127.
-      // - Else -> keep a readable view (no vertical scroll).
-      const pitchSpan = (st.count > 0) ? (st.maxPitch - st.minPitch + 1) : 0;
-      // draw() adds top/bottom pad=2 rows (≈ +4 rows); count them so we don't "almost fit but no scroll".
-      const pitchSpanPadded = pitchSpan > 0 ? (pitchSpan + 4) : 0;
 
       const gridAreaH = (gridWrap && gridWrap.clientHeight > 0) ? gridWrap.clientHeight : wrap.clientHeight;
       const wrapH = Math.max(320, gridAreaH - 2);
@@ -1199,23 +1193,14 @@
       const ROW_H = Math.max(12, Math.round(16 * (Number(this.state.modal.pitchZoom || 1))));
       this.state.modal.rowH = ROW_H;
 
-      const rowsCanFit = Math.max(12, Math.floor((wrapH - PITCH_PAD_T - PITCH_PAD_B) / ROW_H));
-      const visibleRows = Math.min(PITCH_SCROLL_THRESHOLD, rowsCanFit);
+      // A short melody is not a smaller instrument. Keep the full MIDI range
+      // available and frame the melody by scrolling, not cropping the canvas.
+      this.state.modal.usePitchVScroll = true;
+      this.state.modal.pitchViewRows = PITCH_ROWS_FULL;
 
-      const wantVScroll = pitchSpanPadded > visibleRows;
-      this.state.modal.usePitchVScroll = !!wantVScroll;
-
-      // Non-scroll mode: use visibleRows as the view (don't artificially shrink further).
-      this.state.modal.pitchViewRows = wantVScroll ? PITCH_ROWS_FULL : visibleRows;
-
-      // canvas: width is content-based; height depends on scroll policy.
+      // Keep a stable coordinate system for dragging through every octave.
       canvas.width = w;
-      if (wantVScroll){
-        const wantH = PITCH_PAD_T + PITCH_PAD_B + (PITCH_ROWS_FULL * ROW_H);
-        canvas.height = Math.max(wrapH, wantH);
-      } else {
-        canvas.height = wrapH;
-      }
+      canvas.height = Math.max(wrapH, PITCH_PAD_T + PITCH_PAD_B + PITCH_ROWS_FULL * ROW_H);
       canvas.style.width = w + 'px';
       canvas.style.height = canvas.height + 'px';
 
@@ -3860,6 +3845,37 @@ async modalPlay(){
   };
   requestAnimationFrame(tick);
 },
+    modalEndEdgeScroll(){
+      if(this._editorEdgeRAF)cancelAnimationFrame(this._editorEdgeRAF);
+      this._editorEdgeRAF=0;this._editorEdgePointer=null;
+    },
+
+    modalUpdateEdgeScroll(ev){
+      const m=this.state.modal;
+      if(!m.show || !['drag_note','resize_note'].includes(m.mode)){this.modalEndEdgeScroll();return;}
+      this._editorEdgePointer={clientX:ev.clientX,clientY:ev.clientY,pointerId:ev.pointerId,altKey:ev.altKey,shiftKey:ev.shiftKey,buttons:ev.buttons};
+      if(this._editorEdgeRAF || this._editorEdgeTicking)return;
+      let previous=performance.now();
+      const tick=now=>{
+        this._editorEdgeRAF=0;
+        const p=this._editorEdgePointer,grid=$('.editorGridWrap'),canvas=$('#canvas');
+        if(!p || !grid || !m.show || !['drag_note','resize_note'].includes(m.mode)){this.modalEndEdgeScroll();return;}
+        const b=grid.getBoundingClientRect(),margin=36,dt=Math.min(40,now-previous)/1000;previous=now;
+        const velocity=(pos,lo,hi)=>pos<lo+margin?-Math.min(600,(lo+margin-pos)*18):pos>hi-margin?Math.min(600,(pos-hi+margin)*18):0;
+        const vx=velocity(p.clientX,b.left+(m.padL || 60),b.left+grid.clientWidth);
+        const vy=m.mode==='drag_note'?velocity(p.clientY,b.top,b.top+grid.clientHeight):0;
+        if(vx>0 && grid.scrollLeft+grid.clientWidth>=canvas.width-100)this.modalResizeCanvasToContent();
+        const oldX=grid.scrollLeft,oldY=grid.scrollTop;
+        grid.scrollLeft+=vx*dt;grid.scrollTop+=vy*dt;
+        if(grid.scrollLeft!==oldX || grid.scrollTop!==oldY){
+          this._editorEdgeTicking=true;
+          try{this.modalPointerMove(p);}finally{this._editorEdgeTicking=false;}
+        }
+        if(this._editorEdgePointer && !this._editorEdgeRAF)this._editorEdgeRAF=requestAnimationFrame(tick);
+      };
+      this._editorEdgeRAF=requestAnimationFrame(tick);
+    },
+
     modalPointerDown(ev){
       if (!this.state.modal.show) return;
       const target = ev.target;
@@ -3962,6 +3978,8 @@ async modalPlay(){
           { mergeKey: 'move:' + String(hit.noteId) + ':' + String(hit.type) },
         );
         this.state.modal.mode = (hit.type === 'resize' || hit.type === 'resize_left') ? 'resize_note' : 'drag_note';
+        if(canvas && ev.pointerId!=null)canvas.setPointerCapture(ev.pointerId);
+        this.modalUpdateEdgeScroll(ev);
         _h2sDragPerfSessionBegin(this, this.state.modal.mode);
         $('#editorStatus').textContent = (hit.type === 'resize' || hit.type === 'resize_left') ? 'Resize note...' : 'Drag note...';
         this.modalRequestDraw();
@@ -4016,6 +4034,7 @@ async modalPlay(){
     modalPointerMove(ev){
       if (!this.state.modal.show) return;
       const m = this.state.modal;
+      if(m.mode==='drag_note' || m.mode==='resize_note')this.modalUpdateEdgeScroll(ev);
       this.modalUpdateHoverCursor(ev);
       const _sess = this._h2sDragPerf;
       const _track = _h2sDevPerfTimingEnabled() && _sess && (m.mode === 'resize_velocity_lane' || m.mode === 'drag_velocity' || m.mode === 'drag_note' || m.mode === 'resize_note');
@@ -4150,6 +4169,7 @@ async modalPlay(){
     },
 
     modalPointerUp(ev){
+      this.modalEndEdgeScroll();
       if (!this.state.modal.show) return;
       const m = this.state.modal;
       const canvas = $('#canvas');
@@ -4315,6 +4335,11 @@ async modalPlay(){
 
       // Sanity: in Node, we don't have document; avoid accidental usage.
       impl.__isBrowser = (typeof document !== 'undefined');
+      if(typeof window!=='undefined' && typeof window.addEventListener==='function'){
+        const endGesture=()=>{impl.modalEndEdgeScroll();if(impl.state.modal.show && ['drag_note','resize_note'].includes(impl.state.modal.mode))impl.modalPointerUp();};
+        window.addEventListener('blur',endGesture);
+        window.addEventListener('pointercancel',endGesture);
+      }
 
       // Expose injected helpers for debugging (optional)
       impl.__deps = { H2SProject, persist, log, render, $, $$, fmtSec, escapeHtml };
