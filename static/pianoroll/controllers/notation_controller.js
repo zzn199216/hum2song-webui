@@ -75,7 +75,7 @@
       syncSelection();startHighlight();if(rt.state.modal.isPlaying && pref.view!=='roll')movePlayheads(Number(rt.state.modal.cursorSec || 0)*bpm()/60);
     }
     function hidePlayheads(){for(const row of playbackRows)row.marker.style.display='none';followKey=null;}
-    function movePlayheads(beat){
+    function movePlayheads(beat,follow=true){
       if(!screenPlan)return;
       for(const row of playbackRows){
         if(beat<row.from || beat>=row.to){if(row.marker.style.display!=='none')row.marker.style.display='none';continue;}
@@ -86,6 +86,7 @@
         const ratio=b.beat>a.beat?Math.max(0,Math.min(1,(beat-a.beat)/(b.beat-a.beat))):0;
         row.marker.setAttribute('transform','translate('+(a.x+(b.x-a.x)*ratio)+' 0)');row.marker.style.display='';
       }
+      if(!follow)return;
       const target=followRows.find(r=>beat>=r.from && beat<r.to);if(!target || target.key===followKey)return;followKey=target.key;
       const slot=slots[target.page];if(!slot)return;
       const bounds=surface.getBoundingClientRect(),rect=slot.getBoundingClientRect(),scale=rect.width/screenPlan.pageWidth;
@@ -177,7 +178,7 @@
     function select(item,extend){
       const m=rt.state.modal;m.selection={noteRefs:extend?[...refs()]:[],tool:'pointer'};
       for(const r of item.refs){const found=m.selection.noteRefs.findIndex(x=>x.trackId===r.trackId && x.noteId===r.noteId);if(found<0)m.selection.noteRefs.push(r);else if(extend)m.selection.noteRefs.splice(found,1);}
-      m.cursorSec=item.beat*60/bpm();m.selectedCell=item.refs.length?null:{startSec:m.cursorSec,pitch:60,trackId:item.trackId};rt.modalSyncLegacySelectionFromRefs();rt.modalUpdateSelectionUI();syncSelection();
+      m.cursorSec=item.beat*60/bpm();m.selectedCell=item.refs.length?null:{startSec:m.cursorSec,pitch:60,trackId:item.trackId};rt.modalSyncLegacySelectionFromRefs();rt.modalUpdateSelectionUI();syncSelection();startHighlight();
     }
     // Capture on the persistent surface: SVG note elements are replaced by live engraving.
     surface.addEventListener('pointerdown',e=>{
@@ -274,7 +275,15 @@
       }).catch(err=>{if(ticket!==generation)return;surface.replaceChildren();slots=[];visibleHits=[];screenPlan=null;pageLabel.textContent='—';notice.textContent=t('无法显示乐谱：','Unable to display score: ')+err.message;renderKey='';});
     };
     function startHighlight(){cancelAnimationFrame(raf);raf=0;
-      if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){for(const e of playingHits)e.classList.remove('is-playing');playingHits.clear();hidePlayheads();return;}
+      if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){
+        for(const e of playingHits)e.classList.remove('is-playing');playingHits.clear();
+        if(rt.state.modal.show && pref.view!=='roll'){
+          // Like the roll's stopped cursor, retain the shared transport position.
+          // Draw once without an idle animation loop or forced scrolling.
+          followKey=null;movePlayheads(Number(rt.state.modal.cursorSec || 0)*bpm()/60,false);
+        }else hidePlayheads();
+        return;
+      }
       const tick=()=>{raf=0;if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){startHighlight();return;}
         const beat=Number(rt.state.modal.cursorSec || 0)*bpm()/60;
         movePlayheads(beat);

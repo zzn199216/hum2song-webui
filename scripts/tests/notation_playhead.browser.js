@@ -17,7 +17,17 @@ async page=>{
   await page.waitForFunction(x=>document.querySelector('.notation-playhead:not([style*="none"])')?.getAttribute('transform')!==x,start.x);
   check(await page.evaluate(()=>playQA.calls)===start.calls,'Moving playhead must not re-engrave score');
   await page.locator('#btnClipStop').click();
-  await page.waitForFunction(()=>[...document.querySelectorAll('.notation-playhead')].every(e=>e.style.display==='none'));
+  await page.waitForFunction(()=>!H2SApp.state.modal.isPlaying && !!document.querySelector('.notation-playhead:not([style*="none"])') && !document.querySelector('#notationSurface .is-playing'));
+  const stopped=await page.evaluate(async()=>{
+   const marker=document.querySelector('.notation-playhead:not([style*="none"])'),x=marker.getAttribute('transform'),sec=H2SApp.state.modal.cursorSec;
+   let changes=0;const observer=new MutationObserver(records=>changes+=records.length);observer.observe(marker,{attributes:true});
+   await new Promise(resolve=>setTimeout(resolve,200));observer.disconnect();
+   return {sec,unchanged:sec===H2SApp.state.modal.cursorSec && x===marker.getAttribute('transform'),changes};
+  });
+  check(stopped.sec>0 && stopped.unchanged && stopped.changes===0,'Stopped cursor must remain still without animation');
+  await page.locator('#btnClipPlay').click();
+  await page.waitForFunction(sec=>H2SApp.state.modal.isPlaying && H2SApp.state.modal.cursorSec>sec,stopped.sec);
+  await page.locator('#btnClipStop').click();
   // Probe the middle of a rest, next system, and a later page without waiting a minute.
   const steps=await page.evaluate(()=>{const model=H2SNotation.project(H2SApp.state.modal.draftScore,100,{view:document.getElementById('modal').dataset.noteView}),s=document.querySelector('#notationSurface'),css=getComputedStyle(s),width=Math.max(320,Math.floor(s.clientWidth-parseFloat(css.paddingLeft)-parseFloat(css.paddingRight))),plan=H2SNotationView.layout(model,{mode:document.getElementById('modal').dataset.noteView,layout:'screen',width});return {next:plan.pages[0].rows[1].bar*4+.25,later:plan.pages[1].rows[0].bar*4+.25};});
   await page.evaluate(()=>{H2SApp.state.modal.isPlaying=true;H2SApp.state.modal.cursorSec=.75*.6;H2SApp.editorRt.modalRequestDraw();});
@@ -32,8 +42,8 @@ async page=>{
   const state=await page.evaluate(()=>({page:document.querySelector('.notation-page-position').textContent,mounted:document.querySelectorAll('#notationSurface svg').length,svgExportClean:!H2SNotationView.cleanSvg(document.querySelector('#notationSurface svg')).includes('notation-playhead')}));
   check(state.mounted<=3 && state.svgExportClean,'Playback must preserve lazy pages and clean export');
   await page.evaluate(()=>{H2SApp.state.modal.isPlaying=false;H2SApp.editorRt.modalRequestDraw();H2SNotationView.render=playQA.render;});
-  await page.waitForFunction(()=>[...document.querySelectorAll('.notation-playhead')].every(e=>e.style.display==='none'));
-  results.push({mode,realTransport:true,rests:true,...state});
+  await page.waitForFunction(()=>!!document.querySelector('.notation-playhead:not([style*="none"])') && !document.querySelector('#notationSurface .is-playing'));
+  results.push({mode,realTransport:true,rests:true,stoppedCursor:true,resumes:true,idleMarkerMutations:stopped.changes,...state});
  }
  check(await page.evaluate(()=>JSON.stringify(H2SApp.state.modal.draftScore,(k,v)=>k.startsWith('_')?undefined:v))===original,'Playback changed MIDI');
  const tabs=[];
