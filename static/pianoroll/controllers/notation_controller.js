@@ -9,6 +9,7 @@
     let pref=N.preferences(),renderKey='',generation=0,redo=[],raf=0,exportUrl=null,exportGeneration=0;
     let pageJob=0,slots=[],screenModel=null,screenOptions=null,screenPlan=null,currentPage=0,visibleHits=[],selectedHits=new Set(),playingHits=new Set();
     const pageCache=new Map(),hitItems=new WeakMap(),slotKeys=new WeakMap();
+    let playbackRows=[],followRows=[],followKey=null;
     let staffDrag=null,suppressClickUntil=0,rollPosition=null;
     const draft=()=>rt.state.modal.draftScore;
     const bpm=()=>Number(app.getProjectV2().bpm) || 120;
@@ -58,7 +59,41 @@
     function goPage(index){if(!slots.length)return;const slot=slots[Math.max(0,Math.min(slots.length-1,index))];surface.scrollTop+=slot.getBoundingClientRect().top-surface.getBoundingClientRect().top;queuePages();}
     function queuePages(){if(!pageJob && rt.state.modal.show && pref.view!=='roll')pageJob=requestAnimationFrame(updatePages);}
     surface.addEventListener('scroll',queuePages,{passive:true});
-    function refreshHits(){visibleHits=[];for(const slot of slots)for(const e of slot.querySelectorAll('[data-hit]'))visibleHits.push(e);syncSelection();startHighlight();}
+    function refreshHits(){
+      visibleHits=[];playbackRows=[];
+      for(const slot of slots){
+        for(const e of slot.querySelectorAll('[data-hit]'))visibleHits.push(e);
+        const svg=slot.querySelector('svg');if(!svg)continue;
+        svg.querySelectorAll('.notation-playhead').forEach(e=>e.remove());
+        for(const row of V.playbackRows(svg)){
+          const marker=document.createElementNS('http://www.w3.org/2000/svg','g');marker.setAttribute('class','notation-playhead');marker.setAttribute('aria-hidden','true');marker.style.display='none';
+          const line=document.createElementNS(marker.namespaceURI,'line');line.setAttribute('y1',row.top);line.setAttribute('y2',row.bottom);line.setAttribute('x1','0');line.setAttribute('x2','0');
+          const cap=document.createElementNS(marker.namespaceURI,'path');cap.setAttribute('d','M -5 '+(row.top-5)+' L 5 '+(row.top-5)+' L 0 '+row.top+' Z');marker.append(line,cap);svg.append(marker);
+          playbackRows.push({...row,marker});
+        }
+      }
+      syncSelection();startHighlight();if(rt.state.modal.isPlaying && pref.view!=='roll')movePlayheads(Number(rt.state.modal.cursorSec || 0)*bpm()/60);
+    }
+    function hidePlayheads(){for(const row of playbackRows)row.marker.style.display='none';followKey=null;}
+    function movePlayheads(beat){
+      if(!screenPlan)return;
+      for(const row of playbackRows){
+        if(beat<row.from || beat>=row.to){if(row.marker.style.display!=='none')row.marker.style.display='none';continue;}
+        // Engraved note spacing is nonlinear. Interpolate between actual glyph
+        // anchors, including rests, rather than assuming equal pixels per beat.
+        let i=0;while(i+1<row.anchors.length && row.anchors[i+1].beat<=beat)i++;
+        const a=row.anchors[i],b=row.anchors[i+1] || a;
+        const ratio=b.beat>a.beat?Math.max(0,Math.min(1,(beat-a.beat)/(b.beat-a.beat))):0;
+        row.marker.setAttribute('transform','translate('+(a.x+(b.x-a.x)*ratio)+' 0)');row.marker.style.display='';
+      }
+      const target=followRows.find(r=>beat>=r.from && beat<r.to);if(!target || target.key===followKey)return;followKey=target.key;
+      const slot=slots[target.page];if(!slot)return;
+      const bounds=surface.getBoundingClientRect(),rect=slot.getBoundingClientRect(),scale=rect.width/screenPlan.pageWidth;
+      const top=rect.top+target.top*scale,bottom=rect.top+target.bottom*scale;
+      // Follow once per system, so manual scrolling within a system is not
+      // immediately pulled back on the next animation frame.
+      if(top<bounds.top+8 || bottom>bounds.bottom-8){surface.scrollTop+=top-bounds.top-24;queuePages();}
+    }
     function updatePages(){
       pageJob=0;if(!screenPlan || !rt.state.modal.show || pref.view==='roll')return;
       const bounds=surface.getBoundingClientRect(),positions=slots.map((slot,index)=>({slot,index,rect:slot.getBoundingClientRect()}));
@@ -109,7 +144,7 @@
       const grid=document.querySelector('.editorGridWrap');
       if(pref.view==='roll' && !document.getElementById('canvasWrap').hidden)rollPosition={top:grid.scrollTop,left:grid.scrollLeft};
       finishStaffDrag(false);audition.stop();rt.modalEndEdgeScroll();generation++;pref.view=mode;modal.dataset.noteView=mode;surface.hidden=mode==='roll';pager.hidden=mode==='roll';document.getElementById('canvasWrap').hidden=mode!=='roll';settings.hidden=mode==='roll';notice.hidden=mode==='roll';
-      cancelAnimationFrame(pageJob);pageJob=0;screenPlan=null;pageCache.clear();startHighlight();
+      cancelAnimationFrame(pageJob);pageJob=0;hidePlayheads();screenPlan=null;pageCache.clear();startHighlight();
       for(const b of tabs.children){const selected=b.dataset.view===mode;b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1;}
       surface.setAttribute('aria-labelledby','notation-tab-'+mode);keySelect.value=pref.key;clefSelect.value=pref.clef;gridSelect.value=pref.grid;
       if(mode==='roll'){rt.modalResizeCanvasToContent();if(rollPosition){grid.scrollTop=rollPosition.top;grid.scrollLeft=rollPosition.left;}else rt.modalAutoScrollPitchToCenter();}
@@ -199,7 +234,7 @@
       const originalScore=shouldSave?clone(clip().score):null;
       const originalMeta=shouldSave?clone(clip().meta || {}):null, originalRevision=shouldSave?clip().revisionId:null;
       const savedDraft=shouldSave?clone(rt.state.modal.savedScore):null, editedDraft=shouldSave?clone(draft()):null;
-      generation++;cancelAnimationFrame(raf);cancelAnimationFrame(pageJob);pageJob=0;screenPlan=null;pageCache.clear();slots=[];visibleHits=[];selectedHits.clear();playingHits.clear();surface.replaceChildren();closeExport();const result=originalClose(save);
+      generation++;cancelAnimationFrame(raf);cancelAnimationFrame(pageJob);pageJob=0;screenPlan=null;pageCache.clear();slots=[];visibleHits=[];playbackRows=[];followRows=[];followKey=null;selectedHits.clear();playingHits.clear();surface.replaceChildren();closeExport();const result=originalClose(save);
       if(shouldSave){const p=app.getProjectV2(),c=p.clips[id];
         if(c){const nextScore=N.reconcileSavedScore(originalScore,savedDraft,editedDraft,c.score);
           if(JSON.stringify(nextScore)!==JSON.stringify(originalScore) && c.revisionId===originalRevision){
@@ -227,6 +262,8 @@
         // Pitch does not change voices or rhythm. Hold page geometry during a
         // gesture, then allow ledger-line spacing to reflow once on release.
         screenPlan=frozen?{...frozen,pages:frozen.pages.map(p=>({...p,rows:p.rows.map(r=>({...r,lane:model.lanes.find(l=>l.trackId===r.lane.trackId && l.index===r.lane.index)}))}))}:V.layout(model,screenOptions);
+        const leader=model.lanes[0];followKey=null;followRows=[];
+        screenPlan.pages.forEach((p,page)=>p.rows.forEach(row=>{if(row.lane.trackId===leader.trackId && row.lane.index===leader.index)followRows.push({page,key:page+':'+row.bar,from:row.bar*model.barTicks/16,to:(row.bar+row.count)*model.barTicks/16,top:row.y+20,bottom:row.y+row.height-30});}));
         const scrollTop=surface.scrollTop;
         while(slots.length>screenPlan.pages.length)slots.pop().remove();
         screenPlan.pages.forEach((p,i)=>{let slot=slots[i];if(!slot){slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页','Page '+(i+1)));slots.push(slot);surface.append(slot);}slot.style.height=p.height+'px';});
@@ -237,9 +274,10 @@
       }).catch(err=>{if(ticket!==generation)return;surface.replaceChildren();slots=[];visibleHits=[];screenPlan=null;pageLabel.textContent='—';notice.textContent=t('无法显示乐谱：','Unable to display score: ')+err.message;renderKey='';});
     };
     function startHighlight(){cancelAnimationFrame(raf);raf=0;
-      if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){for(const e of playingHits)e.classList.remove('is-playing');playingHits.clear();return;}
+      if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){for(const e of playingHits)e.classList.remove('is-playing');playingHits.clear();hidePlayheads();return;}
       const tick=()=>{raf=0;if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){startHighlight();return;}
         const beat=Number(rt.state.modal.cursorSec || 0)*bpm()/60;
+        movePlayheads(beat);
         const next=new Set(visibleHits.filter(e=>{const item=hitItems.get(e);return item.refs.length && beat>=item.beat && beat<item.beat+item.duration;}));
         for(const e of playingHits)if(!next.has(e))e.classList.remove('is-playing');for(const e of next)if(!playingHits.has(e))e.classList.add('is-playing');playingHits=next;
         raf=requestAnimationFrame(tick);

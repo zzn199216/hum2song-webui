@@ -108,7 +108,7 @@
         const signature=JSON.stringify([row.y,row.offset,row.noteBase,row.height,row.lane.name,row.lane.bars.slice(row.bar,row.bar+row.count)]);
         const cached=oldRows.get(key);
         if(cached && cached.signature===signature){rowEntries.push(cached);registry.push(...cached.hits);continue;}
-        const group=el('g',{'data-notation-row':key}),hitStart=registry.length;svg.append(group);
+        const group=el('g',{'data-notation-row':key}),hitStart=registry.length,anchors=[];svg.append(group);
         const y=row.y+row.offset;
         text(svg,margin,row.y-6,row.lane.name+(row.lane.index?' · '+(row.lane.index+1):''),10,{fill:'#718096'});
         let previous=null,previousNumberX=null;
@@ -143,6 +143,7 @@
             beams.forEach(b=>b.setContext(ctx).draw());
             notes.forEach((note,i)=>{
               const token=tokens[i], xx=note.getAbsoluteX(), ys=note.getYs();
+              anchors.push({beat:token.from/16,x:xx+6});
               if(token.tieIn && previous){
                 new VF.StaveTie({first_note:previous,last_note:note,first_indices:token.refs.map((_,i)=>i),last_indices:token.refs.map((_,i)=>i)}).setContext(ctx).draw();
               }else if(token.tieIn){
@@ -173,6 +174,7 @@
             tokens.forEach((token,i)=>{
               // Readable proportional spacing, shared rhythmic model with the staff renderer.
               const xx=left+(consumed+0.35)*usable/weightTotal,base=y+row.noteBase;
+              anchors.push({beat:token.from/16,x:xx});
               consumed+=weights[i];
               const refs=token.rest?[null]:[...token.refs].sort((a,b)=>b.pitch-a.pitch);
               refs.forEach((ref,j)=>{
@@ -196,11 +198,12 @@
               previousNumberX=token.tieOut?xx:null;
             });
           }
+          anchors.push({beat:(bar+1)*model.barTicks/16,x:x+width-5});
         }
         // VexFlow and our own SVG primitives share one detached system group.
         while(group.nextSibling)group.append(group.nextSibling);
         group.querySelectorAll('.notation-hit').forEach(h=>group.append(h));
-        rowEntries.push({key,signature,group,hits:registry.slice(hitStart)});
+        rowEntries.push({key,signature,group,hits:registry.slice(hitStart),playback:{key,anchors,from:row.bar*model.barTicks/16,to:(row.bar+row.count)*model.barTicks/16,top:row.y+20,bottom:row.y+row.height-30}});
       }
       const footer=el('g',{class:'notation-footer'});svg.append(footer);
       text(footer,margin,pageHeight-40,o.footer || '',10,{fill:'#718096'});
@@ -219,7 +222,7 @@
     return {pages,registry};
   }
   function cleanSvg(svg){
-    const copy=svg.cloneNode(true);copy.querySelectorAll('.notation-hit').forEach(e=>e.remove());
+    const copy=svg.cloneNode(true);copy.querySelectorAll('.notation-hit,.notation-playhead').forEach(e=>e.remove());
     copy.setAttribute('xmlns',NS);return new XMLSerializer().serializeToString(copy);
   }
   async function pdf(pages){
@@ -237,5 +240,6 @@
     }
     return doc.output('blob');
   }
-  root.H2SNotationView={render,layout,load,pdf,cleanSvg};
+  function playbackRows(svg){return (pageData.get(svg)?.rows || []).map(r=>r.playback);}
+  root.H2SNotationView={render,layout,load,pdf,cleanSvg,playbackRows};
 })(window);
