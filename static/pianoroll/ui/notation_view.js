@@ -30,8 +30,9 @@
       'aria-label':refs.length?'Note '+refs.map(r=>r.pitch).join(', ')+' · beat '+(token.from/16+1):'Rest · beat '+(token.from/16+1)});
     svg.append(rect);
   }
-  function render(model,options){
-    const o=options || {}, mode=o.mode || 'staff', pages=[],registry=[];
+  // Plan without creating SVG nodes, so the editor can engrave visible pages only.
+  function layout(model,options){
+    const o=options || {}, mode=o.mode || 'staff';
     const screen=o.layout==='screen';
     const pageWidth=screen?Math.max(320,Math.floor(Number(o.width)||794)):794;
     const margin=screen?(pageWidth<600?20:36):46, contentWidth=pageWidth-margin*2;
@@ -71,12 +72,17 @@
         row.noteBase+=(chord-1)*30;row.height+=(chord-1)*30;
       }
       if(row.height>880)throw new Error('This chord is too large to fit a score page. Use the piano roll to split it.');
-      if(!screen && nextY+row.height>1050 && pageRowsList[pageRowsList.length-1].length){pageRowsList.push([]);nextY=146;}
+      if(nextY+row.height>1050 && pageRowsList[pageRowsList.length-1].length){pageRowsList.push([]);nextY=146;}
       row.y=nextY;pageRowsList[pageRowsList.length-1].push(row);nextY+=row.height;
     }
-    const pageCount=pageRowsList.length;
-    for(let pageIndex=0;pageIndex<pageCount;pageIndex++){
-      const pageHeight=screen?Math.max(300,nextY+38):1123;
+    return {pageWidth,margin,contentWidth,screen,mode,pages:pageRowsList.map(rows=>({rows,height:screen?Math.max(300,...rows.map(r=>r.y+r.height+64)):1123}))};
+  }
+  function render(model,options){
+    const o=options || {}, plan=o.plan || layout(model,o), pages=[],registry=[];
+    const {pageWidth,margin,contentWidth,screen,mode}=plan,pageCount=plan.pages.length;
+    const first=o.pageIndex==null?0:o.pageIndex,end=o.pageIndex==null?pageCount:first+1;
+    for(let pageIndex=first;pageIndex<end;pageIndex++){
+      const pageHeight=plan.pages[pageIndex].height;
       let svg,ctx,VF;
       if(mode==='staff'){
         VF=root.Vex.Flow;
@@ -90,8 +96,8 @@
       const titleLimit=screen?Math.max(14,Math.floor(contentWidth/16)):48;
       text(svg,margin,81,title.length>titleLimit?title.slice(0,titleLimit-1)+'…':title,26,{'font-weight':600});
       text(svg,margin,109,(mode==='jianpu'?'1 = '+model.pref.key+'    ':'')+model.meter.text+'    ♩ = '+o.bpm,13);
-      if(!screen)text(svg,pageWidth-margin,109,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'end',fill:'#718096'});
-      const pageRows=pageRowsList[pageIndex];
+      text(svg,pageWidth-margin,109,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'end',fill:'#718096'});
+      const pageRows=plan.pages[pageIndex].rows;
       for(const [ri,row] of pageRows.entries()){
         const y=row.y+row.offset;
         text(svg,margin,row.y-6,row.lane.name+(row.lane.index?' · '+(row.lane.index+1):''),10,{fill:'#718096'});
@@ -183,6 +189,7 @@
         }
       }
       text(svg,margin,pageHeight-40,o.footer || '',10,{fill:'#718096'});
+      if(screen)text(svg,pageWidth/2,pageHeight-18,(pageIndex+1)+' / '+pageCount,12,{'text-anchor':'middle',fill:'#718096'});
       // Ties and later voices must not cover interaction targets.
       svg.querySelectorAll('.notation-hit').forEach(h=>svg.append(h));
       pages.push(svg);
@@ -208,5 +215,5 @@
     }
     return doc.output('blob');
   }
-  root.H2SNotationView={render,load,pdf,cleanSvg};
+  root.H2SNotationView={render,layout,load,pdf,cleanSvg};
 })(window);

@@ -23,7 +23,11 @@ async page=>{
         if(ids.size!==input.tracks[0].notes.length)throw Error('Dropped source notes');
         if(rendered.pages.some(p=>p.outerHTML.includes('NaN')))throw Error('Invalid SVG coordinates');
         const vb=rendered.pages[0].viewBox.baseVal;
-        if(width && (vb.width!==width || rendered.pages.length!==1))throw Error('Screen does not use available width');
+        if(width && rendered.pages.some(p=>p.viewBox.baseVal.width!==width || p.viewBox.baseVal.height>1123))throw Error('Screen pagination does not use available width');
+        const plan=V.layout(model,options),last=V.render(model,{...options,plan,pageIndex:plan.pages.length-1});
+        if(last.pages.length!==1 || last.pages[0].getAttribute('aria-label')!==rendered.pages.at(-1).getAttribute('aria-label'))throw Error('Lazy page differs from complete export');
+        const idsOnLast=JSON.stringify(last.registry),lastHits=rendered.pages.at(-1).querySelectorAll('[data-hit]');
+        if(idsOnLast!==JSON.stringify([...lastHits].map(h=>rendered.registry[Number(h.dataset.hit)])))throw Error('Lazy page lost source identities');
         if(!width && (vb.width!==794 || vb.height!==1123))throw Error('Print layout changed');
         if(JSON.stringify(input)!==before)throw Error('Projection or engraving mutated MIDI');
         result.push({case:i,clef,mode,width:width||'A4',pages:rendered.pages.length,notes:ids.size,height:vb.height});
@@ -31,7 +35,8 @@ async page=>{
     }
     const input=score(Array.from({length:64},(_,i)=>note('flow'+i,60,i,1))),model=N.project(input,120,{});
     const narrow=V.render(model,{mode:'staff',layout:'screen',width:600}),wide=V.render(model,{mode:'staff',layout:'screen',width:1700});
-    if(wide.pages[0].viewBox.baseVal.height>=narrow.pages[0].viewBox.baseVal.height)throw Error('Wider viewport must reflow to fewer systems');
+    const height=r=>r.pages.reduce((n,p)=>n+p.viewBox.baseVal.height,0);
+    if(height(wide)>=height(narrow))throw Error('Wider viewport must reflow to fewer systems');
     return {cases:result,narrowHeight:narrow.pages[0].viewBox.baseVal.height,wideHeight:wide.pages[0].viewBox.baseVal.height};
   });
   assert(results.cases.length===64,'Missing regression cases');

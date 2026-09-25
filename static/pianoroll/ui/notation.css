@@ -86,3 +86,9 @@
 /* Editing follows the available window; only export previews use A4 pages. */
 .notation-surface { align-items:stretch; scrollbar-gutter:stable; }
 .notation-surface .notation-page.notation-screen { width:100%; min-width:320px; max-width:none; height:auto; }
+.notation-page-slot { flex:none; position:relative; min-width:320px; background:#fffefa; border-radius:3px; box-shadow:0 6px 24px #1b304529; }
+.notation-page-slot:empty::before { content:attr(aria-label); position:absolute; top:24px; left:36px; color:#718096; font-size:12px; }
+.notation-page-slot .notation-page { box-shadow:none; }
+.notation-pager { flex-shrink:0; display:flex; align-items:center; justify-content:center; gap:22px; padding:9px 16px; background:#172131; border-top:1px solid #344055; color:#c4d0e2; font-size:12px; }
+.notation-page-position { min-width:130px; text-align:center; font-variant-numeric:tabular-nums; }
+.notation-surface { overflow-anchor:none; }

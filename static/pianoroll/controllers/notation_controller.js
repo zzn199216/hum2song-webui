@@ -6,7 +6,9 @@
     const modal=document.getElementById('modal');if(!modal || !N || !V)return;
     const zh=()=>String((root.I18N && root.I18N.getLang && root.I18N.getLang()) || document.documentElement.lang || '').startsWith('zh');
     const t=(cn,en)=>zh()?cn:en;
-    let pref=N.preferences(),renderKey='',generation=0,registry=[],pages=[],redo=[],raf=0,exportUrl=null,exportGeneration=0;
+    let pref=N.preferences(),renderKey='',generation=0,redo=[],raf=0,exportUrl=null,exportGeneration=0;
+    let pageJob=0,slots=[],screenModel=null,screenOptions=null,screenPlan=null,currentPage=0,visibleHits=[],selectedHits=new Set(),playingHits=new Set();
+    const pageCache=new Map(),hitItems=new WeakMap();
     let staffDrag=null,suppressClickUntil=0,rollPosition=null;
     const draft=()=>rt.state.modal.draftScore;
     const bpm=()=>Number(app.getProjectV2().bpm) || 120;
@@ -49,6 +51,39 @@
     const gridSelect=field(settings,'显示精度','Display grid',[[4,'1/16'],[8,'1/32'],[16,'1/64']],v=>{pref.grid=Number(v);invalidate();});
     const hint=document.createElement('span');hint.className='notation-hint';settings.append(hint);
     const surface=document.createElement('div');surface.id='notationSurface';surface.className='notation-surface';surface.hidden=true;surface.setAttribute('role','tabpanel');surface.tabIndex=0;settings.after(surface);
+    const pager=document.createElement('nav');pager.className='notation-pager';pager.hidden=true;pager.setAttribute('aria-label',t('乐谱分页','Score pages'));surface.after(pager);
+    const previousPage=button(pager,'上一页','Previous',()=>goPage(currentPage-1),'btn mini');
+    const pageLabel=document.createElement('span');pageLabel.className='notation-page-position';pager.append(pageLabel);
+    const nextPage=button(pager,'下一页','Next',()=>goPage(currentPage+1),'btn mini');
+    function goPage(index){if(!slots.length)return;const slot=slots[Math.max(0,Math.min(slots.length-1,index))];surface.scrollTop+=slot.getBoundingClientRect().top-surface.getBoundingClientRect().top;queuePages();}
+    function queuePages(){if(!pageJob && rt.state.modal.show && pref.view!=='roll')pageJob=requestAnimationFrame(updatePages);}
+    surface.addEventListener('scroll',queuePages,{passive:true});
+    function refreshHits(){visibleHits=[];for(const slot of slots)for(const e of slot.querySelectorAll('[data-hit]'))visibleHits.push(e);syncSelection();startHighlight();}
+    function updatePages(){
+      pageJob=0;if(!screenPlan || !rt.state.modal.show || pref.view==='roll')return;
+      const bounds=surface.getBoundingClientRect(),positions=slots.map((slot,index)=>({slot,index,rect:slot.getBoundingClientRect()}));
+      const visible=positions.filter(p=>p.rect.bottom>bounds.top-100 && p.rect.top<bounds.bottom+100);
+      const active=positions.find(p=>p.rect.bottom>bounds.top+Math.min(120,surface.clientHeight/3)) || positions[positions.length-1];
+      currentPage=active?active.index:0;pageLabel.textContent=t('第 '+(currentPage+1)+' 页 / 共 '+slots.length+' 页',(currentPage+1)+' / '+slots.length+' pages');
+      previousPage.disabled=currentPage===0;nextPage.disabled=currentPage===slots.length-1;
+      const wanted=new Set(visible.map(p=>p.index));let changed=false;
+      for(const p of positions)if(!wanted.has(p.index) && p.slot.firstChild){p.slot.replaceChildren();changed=true;}
+      // One page per frame keeps scrolling and pointer events responsive. Cache
+      // unchanged pages across edits; never retain the whole engraved score.
+      const pending=visible.filter(p=>!p.slot.firstChild).sort((a,b)=>Math.abs(a.index-currentPage)-Math.abs(b.index-currentPage));
+      const p=pending[0];
+      if(p){
+        const spec=screenPlan.pages[p.index];
+        const key=JSON.stringify([screenOptions,p.index,screenPlan.pages.length,spec.height,spec.rows.map(r=>[r.y,r.offset,r.noteBase,r.lane.name,r.lane.index,r.bar,r.count,r.lane.bars.slice(r.bar,r.bar+r.count)])]);
+        let entry=pageCache.get(key);
+        try{
+          if(!entry){const rendered=V.render(screenModel,{...screenOptions,plan:screenPlan,pageIndex:p.index});entry=rendered.pages[0];entry.querySelectorAll('[data-hit]').forEach(e=>hitItems.set(e,rendered.registry[Number(e.dataset.hit)]));}
+          pageCache.delete(key);pageCache.set(key,entry);while(pageCache.size>4)pageCache.delete(pageCache.keys().next().value);
+          p.slot.append(entry);changed=true;
+        }catch(err){p.slot.textContent=t('此页无法显示：','Unable to display this page: ')+err.message;}
+      }
+      if(changed)refreshHits();if(pending.length>1)queuePages();
+    }
     const surfaceWidth=()=>{const css=getComputedStyle(surface);return Math.max(320,Math.floor(surface.clientWidth-parseFloat(css.paddingLeft)-parseFloat(css.paddingRight)));};
     let observedWidth=0;
     const resizeObserver=new ResizeObserver(()=>{
@@ -68,7 +103,8 @@
     function switchView(mode){
       const grid=document.querySelector('.editorGridWrap');
       if(pref.view==='roll' && !document.getElementById('canvasWrap').hidden)rollPosition={top:grid.scrollTop,left:grid.scrollLeft};
-      finishStaffDrag(false);audition.stop();rt.modalEndEdgeScroll();generation++;pref.view=mode;modal.dataset.noteView=mode;surface.hidden=mode==='roll';document.getElementById('canvasWrap').hidden=mode!=='roll';settings.hidden=mode==='roll';notice.hidden=mode==='roll';
+      finishStaffDrag(false);audition.stop();rt.modalEndEdgeScroll();generation++;pref.view=mode;modal.dataset.noteView=mode;surface.hidden=mode==='roll';pager.hidden=mode==='roll';document.getElementById('canvasWrap').hidden=mode!=='roll';settings.hidden=mode==='roll';notice.hidden=mode==='roll';
+      cancelAnimationFrame(pageJob);pageJob=0;screenPlan=null;pageCache.clear();startHighlight();
       for(const b of tabs.children){const selected=b.dataset.view===mode;b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1;}
       surface.setAttribute('aria-labelledby','notation-tab-'+mode);keySelect.value=pref.key;clefSelect.value=pref.clef;gridSelect.value=pref.grid;
       if(mode==='roll'){rt.modalResizeCanvasToContent();if(rollPosition){grid.scrollTop=rollPosition.top;grid.scrollLeft=rollPosition.left;}else rt.modalAutoScrollPitchToCenter();}
@@ -85,7 +121,9 @@
       shorter.disabled=higher.disabled=deleteButton.disabled=!notes.length;
       undoButton.disabled=!root.H2SProjectLastUndo.canUndo('editor');redoButton.disabled=!redo.length;
       const selected=new Set(refs().map(r=>r.trackId+'\0'+r.noteId));
-      surface.querySelectorAll('[data-hit]').forEach(e=>{const h=registry[Number(e.dataset.hit)];e.classList.toggle('is-selected',h && h.refs.some(r=>selected.has(r.trackId+'\0'+r.noteId)));});
+      const next=new Set(visibleHits.filter(e=>hitItems.get(e).refs.some(r=>selected.has(r.trackId+'\0'+r.noteId))));
+      for(const e of selectedHits)if(!next.has(e))e.classList.remove('is-selected');
+      for(const e of next)if(!selectedHits.has(e))e.classList.add('is-selected');selectedHits=next;
     }
     function apply(patch){if(!refs().length)return;rt.modalStop();const next=N.edit(draft(),refs(),patch,bpm());if(JSON.stringify(next)===JSON.stringify(draft()))return;rt.modalCaptureEditorUndo('notation_edit');rt.state.modal.draftScore=next;rt.state.modal.dirty=true;invalidate();}
     function insert(){
@@ -104,7 +142,7 @@
     // Capture on the persistent surface: SVG note elements are replaced by live engraving.
     surface.addEventListener('pointerdown',e=>{
       if(pref.view!=='staff' || e.button!==0 || e.shiftKey || staffDrag)return;
-      const h=e.target.closest('[data-hit]'),item=h && registry[Number(h.dataset.hit)];
+      const h=e.target.closest('[data-hit]'),item=h && hitItems.get(h);
       if(!item || item.refs.length!==1)return;
       const matrix=h.ownerSVGElement.getScreenCTM();if(!matrix)return;
       e.preventDefault();rt.modalStop();select(item,false);surface.focus({preventScroll:true});
@@ -131,10 +169,10 @@
     surface.addEventListener('pointercancel',()=>finishStaffDrag(false));
     surface.addEventListener('lostpointercapture',()=>finishStaffDrag(false));
     root.addEventListener('blur',()=>{finishStaffDrag(false);audition.stop();});
-    surface.addEventListener('click',e=>{if(e.detail && performance.now()<suppressClickUntil)return;const h=e.target.closest('[data-hit]');if(h)select(registry[Number(h.dataset.hit)],e.shiftKey);});
-    surface.addEventListener('dblclick',e=>{const h=e.target.closest('[data-hit]');if(h && !registry[Number(h.dataset.hit)].refs.length){select(registry[Number(h.dataset.hit)],false);insert();}});
+    surface.addEventListener('click',e=>{if(e.detail && performance.now()<suppressClickUntil)return;const h=e.target.closest('[data-hit]');if(h)select(hitItems.get(h),e.shiftKey);});
+    surface.addEventListener('dblclick',e=>{const h=e.target.closest('[data-hit]');if(h && !hitItems.get(h).refs.length){select(hitItems.get(h),false);insert();}});
     surface.addEventListener('keydown',e=>{
-      if((e.key==='Enter' || e.key===' ') && e.target.dataset.hit!=null){e.preventDefault();select(registry[Number(e.target.dataset.hit)],e.shiftKey);return;}
+      if((e.key==='Enter' || e.key===' ') && e.target.dataset.hit!=null){e.preventDefault();select(hitItems.get(e.target),e.shiftKey);return;}
       if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key) && refs().length){e.preventDefault();apply(e.key==='ArrowUp'?{pitchDelta:e.shiftKey?12:1}:e.key==='ArrowDown'?{pitchDelta:e.shiftKey?-12:-1}:{moveBeat:(e.key==='ArrowRight'?1:-1)/pref.grid});}
     });
     // Keep all three views in the existing history. Redo stores the inverse snapshots of existing undo.
@@ -149,14 +187,14 @@
       if((e.ctrlKey || e.metaKey) && ((e.key.toLowerCase()==='z' && e.shiftKey) || e.key.toLowerCase()==='y')){e.preventDefault();e.stopImmediatePropagation();redoEdit();}
     },true);
     const originalOpen=rt.openClipEditor.bind(rt),originalClose=rt.closeModal.bind(rt),originalDraw=rt.modalDraw.bind(rt);
-    rt.openClipEditor=function(id){originalOpen(id);if(!rt.state.modal.show || rt.state.modal.clipId!==id)return;rollPosition=null;pref=N.preferences(clip().meta && clip().meta.notation);redo=[];switchView(pref.view);startHighlight();};
+    rt.openClipEditor=function(id){originalOpen(id);if(!rt.state.modal.show || rt.state.modal.clipId!==id)return;rollPosition=null;surface.scrollTop=0;pref=N.preferences(clip().meta && clip().meta.notation);redo=[];switchView(pref.view);startHighlight();};
     rt.closeModal=function(save){
       finishStaffDrag(false);audition.dispose();rt.modalEndEdgeScroll();
       const id=rt.state.modal.clipId, shouldSave=save && rt.state.modal.show;
       const originalScore=shouldSave?clone(clip().score):null;
       const originalMeta=shouldSave?clone(clip().meta || {}):null, originalRevision=shouldSave?clip().revisionId:null;
       const savedDraft=shouldSave?clone(rt.state.modal.savedScore):null, editedDraft=shouldSave?clone(draft()):null;
-      generation++;cancelAnimationFrame(raf);closeExport();const result=originalClose(save);
+      generation++;cancelAnimationFrame(raf);cancelAnimationFrame(pageJob);pageJob=0;screenPlan=null;pageCache.clear();slots=[];visibleHits=[];selectedHits.clear();playingHits.clear();surface.replaceChildren();closeExport();const result=originalClose(save);
       if(shouldSave){const p=app.getProjectV2(),c=p.clips[id];
         if(c){const nextScore=N.reconcileSavedScore(originalScore,savedDraft,editedDraft,c.score);
           if(JSON.stringify(nextScore)!==JSON.stringify(originalScore) && c.revisionId===originalRevision){
@@ -169,7 +207,7 @@
     };
     rt.modalDraw=function(){
       if(pref.view==='roll'){originalDraw();if(rt.state.modal.show)audition.syncKeyboard();syncSelection();return;}
-      if(!rt.state.modal.show)return;syncSelection();
+      if(!rt.state.modal.show)return;syncSelection();startHighlight();
       // Legacy selection annotates notes with UI-only _trackId/_noteIndex.
       // Selecting/previewing a note must not trigger a full engraving pass.
       const width=surfaceWidth();
@@ -179,17 +217,23 @@
         if(ticket!==generation || !rt.state.modal.show)return;
         const model=N.project(draft(),bpm(),pref);
         const footer=model.approximated?t('节奏为显示近似；播放保留原始时值。','Rhythm is approximated for display; playback retains original timing.'):'';
-        const rendered=V.render(model,{mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width});
-        registry=rendered.registry;pages=rendered.pages;surface.replaceChildren(...pages);
+        screenModel=model;screenOptions={mode:pref.view,bpm:bpm(),title:clip().name,footer,layout:'screen',width,key:pref.key,clef:pref.clef,grid:pref.grid,meter:model.meter.text};screenPlan=V.layout(model,screenOptions);
+        const scrollTop=surface.scrollTop;slots=screenPlan.pages.map((p,i)=>{const slot=document.createElement('section');slot.className='notation-page-slot';slot.dataset.page=String(i+1);slot.setAttribute('aria-label',t('第 '+(i+1)+' 页','Page '+(i+1)));slot.style.height=p.height+'px';return slot;});
+        surface.replaceChildren(...slots);surface.scrollTop=scrollTop;visibleHits=[];queuePages();
         notice.textContent=model.approximated?t(model.approximated+' 个音符按显示精度记谱，原始演奏节奏未改变。',model.approximated+' notes approximated for display. Original timing is unchanged.'):t('点选音符 · ↑↓ 改音高 · ←→ 移动 · 双击休止符插入','Select notes · ↑↓ pitch · ←→ timing · Double-click a rest to insert');
         if(pref.view==='staff')notice.textContent=t('上下拖动音符改音高 · 松手完成 · Esc 取消。','Drag notes vertically to change pitch · Release to apply · Esc to cancel. ')+(model.approximated?' '+notice.textContent:'');
         hint.textContent=t('显示设置不改变演奏','Display settings preserve performance');syncSelection();
-      }).catch(err=>{if(ticket!==generation)return;surface.replaceChildren();notice.textContent=t('无法显示乐谱：','Unable to display score: ')+err.message;renderKey='';});
+      }).catch(err=>{if(ticket!==generation)return;surface.replaceChildren();slots=[];visibleHits=[];screenPlan=null;pageLabel.textContent='—';notice.textContent=t('无法显示乐谱：','Unable to display score: ')+err.message;renderKey='';});
     };
-    function startHighlight(){cancelAnimationFrame(raf);const tick=()=>{if(!rt.state.modal.show)return;if(pref.view!=='roll'){
-      const seconds=Number(rt.state.modal.cursorSec || 0),beat=seconds*bpm()/60;
-      surface.querySelectorAll('[data-hit]').forEach(e=>{const item=registry[Number(e.dataset.hit)];e.classList.toggle('is-playing',!!(rt.state.modal.isPlaying && item && item.refs.length && beat>=item.beat && beat<item.beat+item.duration));});
-    }raf=requestAnimationFrame(tick);};raf=requestAnimationFrame(tick);}
+    function startHighlight(){cancelAnimationFrame(raf);raf=0;
+      if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){for(const e of playingHits)e.classList.remove('is-playing');playingHits.clear();return;}
+      const tick=()=>{raf=0;if(!rt.state.modal.show || pref.view==='roll' || !rt.state.modal.isPlaying){startHighlight();return;}
+        const beat=Number(rt.state.modal.cursorSec || 0)*bpm()/60;
+        const next=new Set(visibleHits.filter(e=>{const item=hitItems.get(e);return item.refs.length && beat>=item.beat && beat<item.beat+item.duration;}));
+        for(const e of playingHits)if(!next.has(e))e.classList.remove('is-playing');for(const e of next)if(!playingHits.has(e))e.classList.add('is-playing');playingHits=next;
+        raf=requestAnimationFrame(tick);
+      };raf=requestAnimationFrame(tick);
+    }
 
     const dialog=document.createElement('dialog');dialog.className='notation-export';dialog.setAttribute('aria-label',t('导出乐谱预览','Score export preview'));
     const exportHeader=document.createElement('div');exportHeader.className='notation-export-header';dialog.append(exportHeader);
