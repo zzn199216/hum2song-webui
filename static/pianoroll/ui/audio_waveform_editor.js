@@ -187,6 +187,7 @@
     var convertErrorBucket = null;
     var convertTaskId = null;
     var separationBusy = false;
+    var silenceSplitBusy = false;
 
     function t(key, fb) {
       return (typeof hooks.t === 'function') ? hooks.t(key, fb) : (fb != null ? fb : key);
@@ -366,6 +367,7 @@
             '<button type="button" class="btn mini primary" data-act="waveConvert"></button>' +
             '<button type="button" class="btn mini" data-act="waveRetry" hidden></button>' +
             '<button type="button" class="btn mini" data-act="waveExtract"></button>' +
+            '<button type="button" class="btn mini" data-act="waveSplitSilence"></button>' +
             '<button type="button" class="btn mini ghost" data-act="waveCloseBtn"></button>' +
             '<button type="button" class="btn mini h2s-audio-waveform-download-icon" data-act="waveDownloadOriginal" aria-label="Download audio">' +
               '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -455,6 +457,7 @@
           });
         }
         if (act === 'waveSeparate') startSeparation();
+        if (act === 'waveSplitSilence') startSilenceSplit();
         if (act === 'waveConvert' && typeof hooks.convertToEditable === 'function') {
           var separateBeforeConvert = panel.querySelector('[data-role="wfSeparateBeforeConvert"]');
           var separationPreset = panel.querySelector('[data-role="wfSeparationPreset"]');
@@ -530,8 +533,47 @@
         : t('audio.waveform.separationCostOne', 'Creating audio stems uses 1 AI transcription credit.');
     }
 
+    async function startSilenceSplit() {
+      if (silenceSplitBusy || separationBusy || _isConvertBusy() || !openCtx || typeof hooks.splitAudioAtSilence !== 'function') return;
+      var target = openCtx;
+      silenceSplitBusy = true;
+      stopPreview();
+      updateConvertButtons();
+      if (statusEl) {
+        statusEl.classList.remove('is-error');
+        statusEl.setAttribute('role', 'status');
+        statusEl.textContent = t('audio.waveform.splitSilenceRunning', 'Splitting at silent gaps…');
+      }
+      try {
+        var result = await hooks.splitAudioAtSilence(target.clipId, target.instanceId);
+        if (openCtx !== target) return;
+        if (result && result.ok) {
+          if (result.changed) close();
+          else if (statusEl) statusEl.textContent = t('audio.waveform.splitSilenceNoChange', 'No long silent gaps found. The audio was kept unchanged.');
+        } else {
+          var key = result && result.reason === 'source_instance_required' ? 'audio.waveform.splitSilenceNeedInstance'
+            : result && result.reason === 'source_changed' ? 'audio.waveform.splitSilenceSourceChanged'
+            : 'audio.waveform.splitSilenceFailed';
+          if (statusEl) {
+            statusEl.classList.add('is-error');
+            statusEl.setAttribute('role', 'alert');
+            statusEl.textContent = t(key, 'Could not split this audio. The original clip was kept.');
+          }
+        }
+      } catch (_splitError) {
+        if (openCtx === target && statusEl) {
+          statusEl.classList.add('is-error');
+          statusEl.setAttribute('role', 'alert');
+          statusEl.textContent = t('audio.waveform.splitSilenceFailed', 'Could not split this audio. The original clip was kept.');
+        }
+      } finally {
+        silenceSplitBusy = false;
+        updateConvertButtons();
+      }
+    }
+
     async function startAdvancedStemSeparation() {
-      if (separationBusy || _isConvertBusy() || !openCtx || typeof hooks.runAdvancedStemSeparation !== 'function') return;
+      if (separationBusy || silenceSplitBusy || _isConvertBusy() || !openCtx || typeof hooks.runAdvancedStemSeparation !== 'function') return;
       separationBusy = true;
       updateConvertButtons();
       try {
@@ -645,7 +687,7 @@
       }
       if (advancedSelected && mode) mode.value = 'separate_only';
       if (transcribeOption) transcribeOption.disabled = uvrSelected || advancedSelected;
-      if (preset) preset.disabled = uvrSelected || advancedSelected || separationBusy || _isConvertBusy();
+      if (preset) preset.disabled = uvrSelected || advancedSelected || separationBusy || silenceSplitBusy || _isConvertBusy();
       var hint = panel.querySelector('[data-role="wfSeparatorOptionHint"]');
       if (hint) hint.textContent = advancedSelected
         ? t('audio.waveform.advancedHint', 'High-cost fine separation creates more independent instrument stems and audio tracks only.')
@@ -663,7 +705,7 @@
     }
 
     async function startSeparation() {
-      if (separationBusy || _isConvertBusy() || !openCtx) return;
+      if (separationBusy || silenceSplitBusy || _isConvertBusy() || !openCtx) return;
       var preset = panel.querySelector('[data-role="wfSeparationPreset"]');
       var mode = panel.querySelector('[data-role="wfSeparationMode"]');
       var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
@@ -781,6 +823,7 @@
         ['waveConvert', 'audio.waveform.convert', 'Convert to editable notes'],
         ['waveRetry', 'audio.waveform.retry', 'Retry conversion'],
         ['waveExtract', 'audio.waveform.extract', 'Extract as new audio clip'],
+        ['waveSplitSilence', 'audio.waveform.splitSilence', 'Split audio', 'audio.waveform.splitSilenceTitle'],
         ['waveCloseBtn', 'common.cancel', 'Cancel'],
       ];
       btnMap.forEach(function (row) {
@@ -817,19 +860,23 @@
       var separationPreset = panel.querySelector('[data-role="wfSeparationPreset"]');
       var separationMode = panel.querySelector('[data-role="wfSeparationMode"]');
       var separatorOption = panel.querySelector('[data-role="wfSeparatorOption"]');
+      var splitBtn = panel.querySelector('[data-act="waveSplitSilence"]');
+      var extractBtn = panel.querySelector('[data-act="waveExtract"]');
       var busy = _isConvertBusy();
-      if (convertBtn) convertBtn.disabled = busy || separationBusy;
-      if (separateBtn) separateBtn.disabled = busy || separationBusy;
-      if (separateBeforeConvert) separateBeforeConvert.disabled = busy || separationBusy;
-      if (separationSettingsToggle) separationSettingsToggle.disabled = busy || separationBusy;
-      if (separationPreset) separationPreset.disabled = busy || separationBusy;
-      if (separationMode) separationMode.disabled = busy || separationBusy;
-      if (separatorOption) separatorOption.disabled = busy || separationBusy;
+      if (splitBtn) splitBtn.disabled = busy || separationBusy || silenceSplitBusy || typeof hooks.splitAudioAtSilence !== 'function';
+      if (extractBtn) extractBtn.disabled = silenceSplitBusy;
+      if (convertBtn) convertBtn.disabled = busy || separationBusy || silenceSplitBusy;
+      if (separateBtn) separateBtn.disabled = busy || separationBusy || silenceSplitBusy;
+      if (separateBeforeConvert) separateBeforeConvert.disabled = busy || separationBusy || silenceSplitBusy;
+      if (separationSettingsToggle) separationSettingsToggle.disabled = busy || separationBusy || silenceSplitBusy;
+      if (separationPreset) separationPreset.disabled = busy || separationBusy || silenceSplitBusy;
+      if (separationMode) separationMode.disabled = busy || separationBusy || silenceSplitBusy;
+      if (separatorOption) separatorOption.disabled = busy || separationBusy || silenceSplitBusy;
       syncSeparatorAvailability();
       if (retryBtn) {
         var showRetry = convertPhase === 'failed' || convertPhase === 'timed_out';
         retryBtn.hidden = !showRetry;
-        retryBtn.disabled = busy || separationBusy;
+        retryBtn.disabled = busy || separationBusy || silenceSplitBusy;
       }
     }
 

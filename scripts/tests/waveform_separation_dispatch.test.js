@@ -32,3 +32,7 @@ for (const separatorOption of ['demucs', 'uvr5_ensemble_vocal_full']) {
   assert.strictEqual(call.options.onStatus, onStatus);
 }
 console.log('PASS waveform separation adapter preserves selected provider and callback');
+
+app.splitAudioClipAtSilence = (clipId, instanceId) => ({ clipId, instanceId });
+assert.deepStrictEqual(hooks.splitAudioAtSilence('split-clip', 'split-instance'), { clipId: 'split-clip', instanceId: 'split-instance' });
+console.log('PASS waveform manual splitting targets only the selected timeline occurrence');

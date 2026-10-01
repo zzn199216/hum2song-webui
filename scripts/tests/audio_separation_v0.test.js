@@ -28,11 +28,11 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'suno-timeout-recovery-v1-20261001'"));
-  assert(html.includes('studio_asset_version.js?v=suno-timeout-recovery-v1-20261001'));
-  assert(html.includes('audio_worker_separation_client.js?v=suno-timeout-recovery-v1-20261001'));
-  assert(html.includes('audio_stem_silence_segments.js?v=suno-timeout-recovery-v1-20261001'));
-  assert(html.includes('app.js?v=suno-timeout-recovery-v1-20261001'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'manual-audio-split-v1-20261001'"));
+  assert(html.includes('studio_asset_version.js?v=manual-audio-split-v1-20261001'));
+  assert(html.includes('audio_worker_separation_client.js?v=manual-audio-split-v1-20261001'));
+  assert(html.includes('audio_stem_silence_segments.js?v=manual-audio-split-v1-20261001'));
+  assert(html.includes('app.js?v=manual-audio-split-v1-20261001'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -68,7 +68,7 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(waveform.includes('transcribeOption.disabled = uvrSelected'));
   assert(waveform.includes('value="uvr5_ensemble_vocal_full" data-uvr5-option hidden disabled'));
   assert(waveform.includes("uvrOption.disabled = !uvr5EnsembleUiEnabled() || midiEnabled"));
-  assert(waveform.includes("preset.disabled = uvrSelected || advancedSelected || separationBusy || _isConvertBusy()"));
+  assert(waveform.includes("preset.disabled = uvrSelected || advancedSelected || separationBusy || silenceSplitBusy || _isConvertBusy()"));
   assert(waveform.includes("requestedSeparator === 'advanced_stems'"));
   assert(waveform.includes('startAdvancedStemSeparation()'));
   assert(waveform.includes("audio.waveform.uvr5FailedRefunded"));
@@ -91,8 +91,9 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(app.includes("artifactMime || 'audio/wav'"));
   assert(app.includes('LAS.normalizeAudioDownloadFilename(stemNameCandidate'));
   assert(app.includes('_prepareSeparatedAudioStemParts'));
-  assert(app.includes('groupNearDuplicateRanges'));
-  assert(app.includes('instanceGainDb: Number.isFinite(Number(group.relativeGainDb))'));
+  assert(app.includes('options.splitSilence !== true'), 'stem splitting requires an explicit action');
+  assert(!app.includes('groupNearDuplicateRanges'), 'manual audio split keeps original phrase differences');
+  assert(waveform.includes('data-act="waveSplitSilence"'), 'splitting is a waveform-editor action');
   assert(app.includes('duplicateOfPartIndex'));
   assert(app.includes('_commitPreparedSeparatedAudioParts'));
   assert(app.includes('_addNativeAudioClipInstance'));
