@@ -127,7 +127,7 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('data-i18n="transcription.separationPreset.fourStem"') !== -1, 'separation preset choices should be localized');
   assert(indexHtml.indexOf('data-i18n="audio.waveform.separationHelp"') !== -1, 'separation dialog help should be localized');
   assert(indexHtml.indexOf('data-i18n="audio.waveform.separationStart"') !== -1, 'separation dialog action should be localized');
-  assert(indexHtml.indexOf('suno-separation-confirm-v1-20261001') !== -1, 'current Studio release should bump the script cache version');
+  assert(indexHtml.indexOf('suno-source-precision-v1-20261001') !== -1, 'current Studio release should bump the script cache version');
 }
 
 // Last optimize: staleness uses revision + project doc key (see app.js)
@@ -156,7 +156,7 @@ if (fs.existsSync(i18nCorePath)) {
 var assetVersionPath = path.join(__dirname, '../../static/pianoroll/studio_asset_version.js');
 if (fs.existsSync(assetVersionPath)) {
   var assetVersionSrc = fs.readFileSync(assetVersionPath, 'utf8');
-  assert(assetVersionSrc.indexOf('suno-separation-confirm-v1-20261001') !== -1, 'Studio asset version should match the current release');
+  assert(assetVersionSrc.indexOf('suno-source-precision-v1-20261001') !== -1, 'Studio asset version should match the current release');
 }
 
 var bridgePath = path.join(__dirname, '../../static/pianoroll/cloud_project_bridge.js');

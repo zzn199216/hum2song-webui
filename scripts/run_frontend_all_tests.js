@@ -60,6 +60,7 @@ runOne('scripts/tests/audio_convert_status.test.js');
 runOne('scripts/tests/audio_convert_segment.test.js');
 runOne('scripts/tests/audio_transcription_controls.test.js');
 runOne('scripts/tests/audio_separation_v0.test.js');
+runOne('scripts/tests/advanced_stem_source_precision.test.js');
 runOne('scripts/tests/waveform_separation_dispatch.test.js');
 runOne('scripts/tests/ui_audio_waveform_editor.test.js');
 runOne('scripts/tests/dark_select_styling.test.js');

@@ -373,6 +373,7 @@
               '</svg>' +
             '</button>' +
           '</div>' +
+          '<div class="h2s-audio-waveform-status" data-role="wfStatus" role="status" aria-live="polite" aria-atomic="true"></div>' +
           '<div class="row h2s-audio-waveform-separation-actions">' +
             '<label class="h2s-audio-waveform-separation-toggle">' +
               '<input type="checkbox" data-role="wfSeparationSettingsToggle">' +
@@ -417,7 +418,6 @@
             '<div class="muted" data-role="wfSeparatorOptionHint"></div>' +
             '<div class="muted" data-role="wfSeparationCost"></div>' +
           '</div>' +
-          '<div class="muted" data-role="wfStatus" style="margin-top:8px;font-size:11px;min-height:1.2em;"></div>' +
         '</div>';
       document.body.appendChild(overlay);
       panel = overlay.querySelector('.h2s-audio-waveform-panel');
@@ -550,6 +550,11 @@
         }
         var message = t('audio.waveform.advancedConfirm', 'Advanced stem separation uses a high-cost model to split more independent instrument stems. Each new task uses 30 regular transcription credits. Credits are used only when the task starts. Continue?');
         if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !window.confirm(message)) return;
+        if (statusEl) {
+          statusEl.classList.remove('is-error');
+          statusEl.setAttribute('role', 'status');
+          statusEl.setAttribute('aria-live', 'polite');
+        }
         if (statusEl) statusEl.textContent = t('audio.waveform.advancedRunning', 'Advanced stem separation is running…');
         var result = await hooks.runAdvancedStemSeparation(openCtx.clipId, openCtx.instanceId, {
           startSec: selStart,
@@ -557,15 +562,33 @@
           onStatus: function (text) { if (statusEl && text) statusEl.textContent = String(text); },
         });
         if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
-        if (statusEl) statusEl.textContent = t('audio.waveform.advancedDone', 'Advanced stem separation is complete. Audio stems were preserved.');
+        if (statusEl) {
+          statusEl.textContent = result.failures && result.failures.length
+            ? t('audio.waveform.advancedPartial', 'Suno separation completed, but {n} stems could not be imported.').replace('{n}', String(result.failures.length))
+            : t('audio.waveform.advancedDone', 'Advanced stem separation is complete. Audio stems were preserved.');
+          if (result.failures && result.failures.length) {
+            statusEl.classList.add('is-error');
+            statusEl.setAttribute('role', 'alert');
+            statusEl.setAttribute('aria-live', 'assertive');
+          }
+          if (typeof statusEl.scrollIntoView === 'function') statusEl.scrollIntoView({ block: 'nearest' });
+        }
       } catch (err) {
         var errorMessage = err && err.message ? String(err.message) : 'worker_failed';
-        if (statusEl && errorMessage.indexOf('advanced_separation_provider_source_required') >= 0) {
+        if (statusEl && errorMessage.indexOf('advanced_source_too_large') >= 0) {
+          statusEl.textContent = t('audio.waveform.advancedUploadTooLarge', 'Suno separation supports source audio up to 20 MB. Please use a smaller audio file.');
+        } else if (statusEl && errorMessage.indexOf('advanced_separation_provider_source_required') >= 0) {
           statusEl.textContent = t('audio.waveform.advancedProviderSourceRequired', 'Advanced stem separation currently supports complete music generated through Hum2Song Cloud only.');
         } else if (statusEl && errorMessage.indexOf('advanced_separation_range_unavailable') >= 0) {
           statusEl.textContent = t('audio.waveform.advancedFullSourceRequired', 'Advanced stem separation currently supports the complete source audio only.');
         } else if (statusEl) {
           statusEl.textContent = t('audio.waveform.advancedFailed', 'Advanced stem separation failed. Please try again.') + ' (' + errorMessage + ')';
+        }
+        if (statusEl) {
+          statusEl.classList.add('is-error');
+          statusEl.setAttribute('role', 'alert');
+          statusEl.setAttribute('aria-live', 'assertive');
+          if (typeof statusEl.scrollIntoView === 'function') statusEl.scrollIntoView({ block: 'nearest' });
         }
       } finally {
         separationBusy = false;

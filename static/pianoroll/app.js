@@ -7416,11 +7416,10 @@ renderTimeline(){
             ? sourceMetadata.cloudSourceAssetId.trim()
             : '';
         }
-        if (cloudSourceAssetId && isFullSource) {
-          sourceAssetId = cloudSourceAssetId;
-          providerStartSec = 0;
-          providerDurationSec = sourceDurationSec;
-        } else {
+        // Stage the actual local audio, including Cloud playback copies. Cloud
+        // metadata can round 118.44s to 118.4s; mixing those two duration sources
+        // incorrectly rejects a complete selection before provider submission.
+        {
           if (!localAssets || typeof localAssets.getFileForLocalAssetRef !== 'function') throw new Error('missing_audio_asset');
           const file = await localAssets.getFileForLocalAssetRef(originalSourceAssetId);
           if (!file) throw new Error('missing_audio_asset');
@@ -7440,6 +7439,7 @@ renderTimeline(){
             sourceKey = 'studio:' + originalSourceAssetId + '|range:' + startSec.toFixed(3) + ':' + durationSec.toFixed(3) + '|crop:studio-wav-pcm16-v2';
             sourceMetadata.sourceRange = { startSec, durationSec };
           }
+          if (uploadBuffer.byteLength > 20 * 1024 * 1024) throw new Error('advanced_source_too_large');
           const prepared = await client.prepareSource({
             audioBuffer: uploadBuffer,
             filename: uploadFileName,
