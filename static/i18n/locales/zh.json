@@ -142,7 +142,7 @@
   "audio.waveform.downloadTitle": "下载当前音频文件",
   "audio.waveform.separate": "AI 自动分轨",
   "audio.waveform.advancedRun": "高级分轨 · 30次",
-  "audio.waveform.advancedConfirm": "高级分轨会使用高成本精细模型，可自动拆分更多独立乐器音轨。每次执行新的高级分轨将消耗 30 次常规分轨次数，真正开始任务时才扣除。确定开始吗？",
+  "audio.waveform.advancedConfirm": "此功能使用 Suno 进行分轨，成本较高。每次执行新的分轨任务将消耗 30 次常规分轨次数，任务真正开始时才扣除。确定开始吗？",
   "audio.waveform.advancedInsufficient": "余额不足。高级分轨是付费功能，每次需要消耗 30 次常规分轨次数；当前剩余 {n} 次。请先购买次数后再使用。",
   "audio.waveform.advancedRunning": "高级分轨正在处理…",
   "audio.waveform.advancedDone": "高级分轨完成，音频 Stem 已保留。",
