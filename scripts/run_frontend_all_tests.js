@@ -12,6 +12,7 @@ function runOne(script){
 runOne('scripts/tests/studio_source_syntax.test.js');
 runOne('scripts/tests/notation.test.js');
 runOne('scripts/tests/notation_system_pages.test.js');
+runOne('scripts/tests/notation_pdf.test.js');
 runOne('scripts/tests/editor_audition.test.js');
 runOne('scripts/run_frontend_contract_tests.js');
 runOne('scripts/run_frontend_editor_contract_tests.js');

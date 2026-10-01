@@ -9,7 +9,7 @@ require('../../static/pianoroll/project.js');
 const P = window.H2SProject;
 const segmenter = require('../../static/pianoroll/core/audio_stem_silence_segments.js');
 const analysis = require('../../static/pianoroll/core/audio_analysis.js');
-const source = fs.readFileSync(path.join(__dirname, '../../static/pianoroll/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../static/pianoroll/app.js'), 'utf8').replace(/\r\n/g, '\n');
 function extract(start, end) {
   const a = source.indexOf(start), b = source.indexOf(end, a + start.length);
   assert(a >= 0 && b > a, start);

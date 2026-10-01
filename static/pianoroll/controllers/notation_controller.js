@@ -355,6 +355,7 @@
     const exportTitle=document.createElement('strong');exportTitle.textContent=t('导出乐谱','Export score');exportHeader.append(exportTitle);
     const exportMode=field(exportHeader,'格式','Notation',[['staff',t('五线谱','Staff')],['jianpu',t('简谱','Numbered')]],()=>renderExport());
     const pdfButton=button(exportHeader,'下载 PDF','Download PDF',()=>downloadPDF());
+    const retryButton=button(exportHeader,'重试','Retry',()=>renderExport());retryButton.hidden=true;
     const svgButton=button(exportHeader,'下载 SVG','Download SVG',()=>{
       if(!exportPages.length)return;
       const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('xmlns','http://www.w3.org/2000/svg');svg.setAttribute('width','794');svg.setAttribute('height',String(1123*exportPages.length));
@@ -364,25 +365,38 @@
     button(exportHeader,'返回编辑','Back to editing',()=>closeExport());
     const exportStatus=document.createElement('div');exportStatus.className='notation-export-status';exportStatus.setAttribute('role','status');dialog.append(exportStatus);
     const preview=document.createElement('div');preview.className='notation-export-pages';dialog.append(preview);document.body.append(dialog);
-    let exportPages=[],exportDraft=null,exportPref=null,exportBpm=120,exportName='',exportBlob=null;
+    let exportPages=[],exportDraft=null,exportPref=null,exportBpm=120,exportName='',exportBlob=null,exportAbort=null,exportCache=null;
     const fileName=()=>String(exportName || 'clip').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').slice(0,90)+'-'+exportMode.value;
-    function download(blob,name){const a=document.createElement('a'),u=URL.createObjectURL(blob);a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),10000);}
+    function download(blob,name){const a=document.createElement('a'),u=URL.createObjectURL(blob);a.href=u;a.download=name;a.hidden=true;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),60000);}
     function openExport(){finishStaffDrag(false);audition.stop();rt.modalStop();exportDraft=clone(draft());exportPref=clone(pref);exportBpm=bpm();exportName=clip().name;exportMode.value=pref.view==='jianpu'?'jianpu':'staff';dialog.showModal();renderExport();}
-    function closeExport(){exportGeneration++;if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=null;exportBlob=null;if(dialog.open)dialog.close();}
+    function closeExport(){exportGeneration++;if(exportAbort)exportAbort.abort();exportAbort=null;if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=null;exportBlob=null;preview.replaceChildren();exportPages=[];if(dialog.open)dialog.close();}
     dialog.addEventListener('cancel',()=>closeExport());
     async function renderExport(){
-      const ticket=++exportGeneration;exportBlob=null;pdfButton.disabled=svgButton.disabled=true;preview.replaceChildren();exportPages=[];exportStatus.textContent=t('正在生成预览…','Preparing preview…');
-      try{if(exportMode.value==='staff')await V.load('staff');if(ticket!==exportGeneration)return;
-        const model=N.project(exportDraft,exportBpm,exportPref);
-        exportPages=V.render(model,{mode:exportMode.value,bpm:exportBpm,title:exportName,language:zh()?'zh':'en',footer:model.approximated?t('节奏按显示精度近似记谱','Rhythm approximated to the selected display grid'):''}).pages;
-        // Show frozen score pages immediately, then preview the very same PDF that will download.
-        preview.replaceChildren(...exportPages.map(p=>{const copy=p.cloneNode(true);copy.querySelectorAll('.notation-hit').forEach(e=>e.remove());return copy;}));svgButton.disabled=false;
-        exportStatus.textContent=t(exportPages.length+' 页 · 正在生成 PDF…',exportPages.length+' pages · Preparing PDF…');
-        const blob=await V.pdf(exportPages);if(ticket!==exportGeneration)return;exportBlob=blob;
-        if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=URL.createObjectURL(blob);
+      if(exportAbort)exportAbort.abort();exportAbort=new AbortController();
+      const signal=exportAbort.signal,ticket=++exportGeneration;
+      if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=null;
+      exportBlob=null;pdfButton.disabled=svgButton.disabled=true;retryButton.hidden=true;preview.replaceChildren();exportPages=[];exportStatus.textContent=t('正在生成预览…','Preparing preview…');
+      const mode=exportMode.value,language=zh()?'zh':'en';
+      const key=JSON.stringify([exportDraft,exportPref,exportBpm,exportName,mode,language],(k,v)=>k.startsWith('_')?undefined:v);
+      function ready(blob){
+        exportBlob=blob;exportUrl=URL.createObjectURL(blob);
         const a=document.createElement('a');a.href=exportUrl;a.target='_blank';a.rel='noopener';a.textContent=t('打开实际 PDF 预览','Open actual PDF preview');
-        exportStatus.textContent=t(exportPages.length+' 页 · A4 · ',exportPages.length+' pages · A4 · ');exportStatus.append(a);pdfButton.disabled=false;
-      }catch(err){if(ticket===exportGeneration)exportStatus.textContent=t('导出失败：','Export failed: ')+err.message;}
+        exportStatus.textContent=t(exportPages.length+' 页 · A4 · ',exportPages.length+' pages · A4 · ');exportStatus.append(a);pdfButton.disabled=svgButton.disabled=false;
+      }
+      if(exportCache && exportCache.key===key){exportPages=exportCache.pages;preview.replaceChildren(...exportPages);ready(exportCache.blob);return;}
+      exportCache=null;
+      try{
+        // Paint the dialog before projection/engraving, and allow immediate cancel.
+        await new Promise(resolve=>setTimeout(resolve,0));if(signal.aborted)return;
+        const model=N.project(exportDraft,exportBpm,exportPref);
+        const blob=await V.exportPdf(model,{mode,bpm:exportBpm,title:exportName,language,signal,
+          footer:model.approximated?t('节奏按显示精度近似记谱','Rhythm approximated to the selected display grid'):'',
+          onPage(page,index,total){if(ticket!==exportGeneration)return;page.querySelectorAll('.notation-hit').forEach(e=>e.remove());exportPages.push(page);preview.append(page);
+            exportStatus.textContent=t('正在生成 PDF：'+(index+1)+' / '+total+' 页','Preparing PDF: '+(index+1)+' / '+total+' pages');},
+        });
+        if(ticket!==exportGeneration)return;
+        exportCache={key,pages:exportPages,blob};ready(blob);
+      }catch(err){if(ticket===exportGeneration && !signal.aborted){exportStatus.textContent=t('导出未完成，请重试。','Export did not finish. Please retry. ')+(err.message || '');retryButton.hidden=false;}}
     }
     function downloadPDF(){if(exportBlob)download(exportBlob,fileName()+'.pdf');}
     return {switchView,syncSelection,openExport,redoEdit};

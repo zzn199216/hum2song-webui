@@ -11,14 +11,18 @@
   function text(svg,x,y,value,size,extra){
     const e=el('text',Object.assign({x,y,fill:'#253246','font-size':size || 14,'font-family':'Arial, Microsoft YaHei, sans-serif'},extra || {}),value); svg.append(e); return e;
   }
-  const loading={},pageData=new WeakMap();
+  const loading={},pageData=new WeakMap(),fontLoading={};
   function load(name){
-    const filenames={staff:'vexflow-4.2.5.js',pdf:'jspdf-4.2.1.js'};
+    const filenames={staff:'vexflow-4.2.5.js',pdf:'jspdf-4.2.1.js',vector:'svg2pdf-2.8.1.js'};
     if(name==='staff' && root.Vex) return Promise.resolve();
     if(name==='pdf' && root.jspdf) return Promise.resolve();
+    if(name==='vector' && root.svg2pdf) return Promise.resolve();
     if(!loading[name]) loading[name]=new Promise((resolve,reject)=>{
       const s=document.createElement('script'); s.src='/static/pianoroll/vendor/notation/'+filenames[name];
-      s.onload=resolve; s.onerror=()=>{delete loading[name];s.remove();reject(new Error('Unable to load notation library'));};document.head.append(s);
+      const cleanup=()=>{clearTimeout(timer);s.onload=s.onerror=null;};
+      const fail=()=>{cleanup();delete loading[name];s.remove();reject(new Error('Unable to load notation library. Please retry.'));};
+      const timer=setTimeout(fail,20000);
+      s.onload=()=>{cleanup();resolve();};s.onerror=fail;document.head.append(s);
     });
     return loading[name];
   }
@@ -255,21 +259,85 @@
     const copy=svg.cloneNode(true);copy.querySelectorAll('.notation-hit,.notation-playhead').forEach(e=>e.remove());
     copy.setAttribute('xmlns',NS);return new XMLSerializer().serializeToString(copy);
   }
-  async function pdf(pages){
-    await load('pdf');await document.fonts.ready;
-    const doc=new root.jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
-    for(let i=0;i<pages.length;i++){
-      const url=URL.createObjectURL(new Blob([cleanSvg(pages[i])],{type:'image/svg+xml'}));
+  function checkAbort(signal){if(signal && signal.aborted)throw new DOMException('Export cancelled','AbortError');}
+  // Bound external waits and release listeners even when an export is cancelled.
+  function waitFor(promise,signal,timeout=15000){
+    checkAbort(signal);
+    return new Promise((resolve,reject)=>{
+      const finish=(fn,value)=>{clearTimeout(timer);if(signal)signal.removeEventListener('abort',abort);fn(value);};
+      const abort=()=>finish(reject,new DOMException('Export cancelled','AbortError'));
+      const timer=setTimeout(()=>finish(reject,new Error('Score export timed out. Please retry.')),timeout);
+      if(signal)signal.addEventListener('abort',abort,{once:true});
+      promise.then(v=>finish(resolve,v),e=>finish(reject,e));
+    });
+  }
+  const yieldExport=signal=>waitFor(new Promise(resolve=>setTimeout(resolve,0)),signal);
+  function scoreFont(kind){
+    if(!fontLoading[kind])fontLoading[kind]=(async()=>{
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
       try{
-        const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=url;});
-        const canvas=document.createElement('canvas');canvas.width=1588;canvas.height=2246;
-        canvas.getContext('2d').drawImage(img,0,0,1588,2246);
-        if(i)doc.addPage();doc.addImage(canvas.toDataURL('image/png'),'PNG',0,0,210,297);
-        canvas.width=canvas.height=1;
-      }finally{URL.revokeObjectURL(url);}
+        const response=await fetch('/static/pianoroll/vendor/notation/ScoreText-'+kind+'-20261002.ttf',{signal:controller.signal,cache:'force-cache'});
+        if(!response.ok)throw new Error('Unable to load score font. Please retry.');
+        const bytes=new Uint8Array(await response.arrayBuffer());
+        let binary='';for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));
+        const family='H2SScore'+kind;
+        const face=new FontFace(family,bytes,{weight:'400'});await face.load();document.fonts.add(face);
+        return {binary,family,file:family+'.ttf'};
+      }finally{clearTimeout(timer);}
+    })().catch(error=>{delete fontLoading[kind];if(error.name==='AbortError')throw new Error('Score font timed out. Please retry.');throw error;});
+    return fontLoading[kind];
+  }
+  async function installScoreFont(doc,font,signal){
+    doc.addFileToVFS(font.file,font.binary);
+    doc.addFont(font.file,font.family,'normal');await yieldExport(signal);
+    doc.addFont(font.file,font.family,'bold');await yieldExport(signal);
+    return doc.getFont(font.family,'normal').metadata;
+  }
+  function vectorPage(page,font){
+    const copy=page.cloneNode(true);copy.querySelectorAll('.notation-hit,.notation-playhead').forEach(e=>e.remove());
+    copy.querySelectorAll('text,tspan').forEach(e=>{
+      e.setAttribute('font-family',font.family);e.style.fontFamily=font.family;
+      const weight=Number(e.getAttribute('font-weight') || 400)>=600?'bold':'normal';
+      e.setAttribute('font-weight',weight);e.style.fontWeight=weight;
+    });
+    return copy;
+  }
+  async function encodePdf(count,getPage,options={}){
+    const {signal,onPage,onProgress}=options;
+    checkAbort(signal);
+    if(!count)throw new Error('No score pages to export');
+    await waitFor(load('pdf'),signal,21000);
+    await waitFor(load('vector'),signal,21000);
+    let font=await waitFor(scoreFont('Common'),signal,21000);
+    const doc=new root.jspdf.jsPDF({unit:'pt',format:'a4',compress:true,putOnlyUsedFonts:true,floatPrecision:4});
+    let metadata=await installScoreFont(doc,font,signal);
+    for(let i=0;i<count;i++){
+      await yieldExport(signal);
+      const page=getPage(i);
+      if(onPage)onPage(page,i,count);
+      checkAbort(signal);
+      const text=[...page.querySelectorAll('text')].map(e=>e.textContent).join('');
+      if(font.family==='H2SScoreCommon' && [...text].some(c=>!metadata.characterToGlyph(c.codePointAt(0)))){
+        font=await waitFor(scoreFont('Extended'),signal,21000);checkAbort(signal);metadata=await installScoreFont(doc,font,signal);
+      }
+      if(i)doc.addPage();
+      // Existing engraved paths, staff lines and text become PDF primitives.
+      // Never rasterize a score page or fall back to an image-based export.
+      await waitFor(doc.svg(vectorPage(page,font),{x:0,y:0,width:doc.internal.pageSize.getWidth(),height:doc.internal.pageSize.getHeight()}),signal);
+      checkAbort(signal);if(onProgress)onProgress(i+1,count);
     }
-    return doc.output('blob');
+    await yieldExport(signal);
+    const blob=doc.output('blob');
+    if(!blob || !blob.size)throw new Error('Unable to create score PDF');
+    return blob;
+  }
+  function pdf(pages,options){return encodePdf(pages.length,i=>pages[i],options);}
+  async function exportPdf(model,options={}){
+    await yieldExport(options.signal);
+    if(!options.mode || options.mode==='staff')await waitFor(load('staff'),options.signal,21000);
+    const plan=layout(model,options);
+    return encodePdf(plan.pages.length,i=>render(model,{...options,plan,pageIndex:i}).pages[0],options);
   }
   function playbackRows(svg){return (pageData.get(svg)?.rows || []).map(r=>r.playback);}
-  root.H2SNotationView={render,layout,load,pdf,cleanSvg,playbackRows};
+  root.H2SNotationView={render,layout,load,pdf,exportPdf,cleanSvg,playbackRows};
 })(window);
