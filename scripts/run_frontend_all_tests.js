@@ -78,3 +78,5 @@ runOne('scripts/tests/score_trim_note_extent.test.js');
 runOne('scripts/tests/score_segment_gap_max.test.js');
 
 console.log('\nAll frontend tests (contracts + editor + numeric invariants + timeline) passed.');
+
+runOne('scripts/tests/advanced_stem_timeout_recovery.test.js');
