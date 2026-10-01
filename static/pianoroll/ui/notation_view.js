@@ -276,9 +276,11 @@
     if(!fontLoading[kind])fontLoading[kind]=(async()=>{
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
       try{
-        const response=await fetch('/static/pianoroll/vendor/notation/ScoreText-'+kind+'-20261002.ttf',{signal:controller.signal,cache:'force-cache'});
+        const compressed=kind==='Common' && typeof DecompressionStream==='function';
+        const response=await fetch('/static/pianoroll/vendor/notation/ScoreText-'+kind+'-20261002.ttf'+(compressed?'.gz':''),{signal:controller.signal,cache:'force-cache'});
         if(!response.ok)throw new Error('Unable to load score font. Please retry.');
-        const bytes=new Uint8Array(await response.arrayBuffer());
+        const source=compressed?new Response(response.body.pipeThrough(new DecompressionStream('gzip'))):response;
+        const bytes=new Uint8Array(await source.arrayBuffer());
         let binary='';for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));
         const family='H2SScore'+kind;
         const face=new FontFace(family,bytes,{weight:'400'});await face.load();document.fonts.add(face);
@@ -338,6 +340,9 @@
     const plan=layout(model,options);
     return encodePdf(plan.pages.length,i=>render(model,{...options,plan,pageIndex:i}).pages[0],options);
   }
+  // Editor use usually precedes export. Warm the locally served dependencies
+  // here, never on Studio startup, so the first PDF avoids a cold font download.
+  function preparePdf(){return Promise.all([load('pdf').then(()=>load('vector')),scoreFont('Common')]);}
   function playbackRows(svg){return (pageData.get(svg)?.rows || []).map(r=>r.playback);}
-  root.H2SNotationView={render,layout,load,pdf,exportPdf,cleanSvg,playbackRows};
+  root.H2SNotationView={render,layout,load,pdf,exportPdf,preparePdf,cleanSvg,playbackRows};
 })(window);

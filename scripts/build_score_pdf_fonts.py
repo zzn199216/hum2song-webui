@@ -37,4 +37,7 @@ for kind,codepoints in [('Common',coverage),('Extended',regular.getBestCmap())]:
         font['name'].setName(value,name_id,3,1,0x409)
     target=vendor/f'ScoreText-{kind}-20261002.ttf'
     font.save(target)
+    if kind=='Common':
+        import gzip
+        target.with_suffix('.ttf.gz').write_bytes(gzip.compress(target.read_bytes(),compresslevel=9,mtime=0))
     print(target.name,target.stat().st_size)

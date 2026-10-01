@@ -24,6 +24,8 @@ function setup({vectorError=false,vectorHang=false,loadError=false,loadHang=fals
  const blob=await ok.V.pdf(Array(3).fill(ok.page),{onProgress:(n,total)=>progress.push([n,total])});
  assert(blob.size>0);assert.deepEqual(progress,[[1,3],[2,3],[3,3]]);assert.equal(ok.stats.vectors,3);assert.equal(ok.stats.fontFetches,1);
  await ok.V.pdf([ok.page]);assert.equal(ok.stats.fontFetches,1,'Font bytes should be reused by later exports');
+ const warmed=setup();await warmed.V.preparePdf();assert.equal(warmed.stats.fontFetches,1);
+ await warmed.V.pdf([warmed.page]);assert.equal(warmed.stats.fontFetches,1,'Editor prewarm must be reused by export');
  const early=setup(),aborted=new AbortController();aborted.abort();
  await assert.rejects(early.V.pdf([early.page],{signal:aborted.signal}),{name:'AbortError'});assert.equal(early.stats.vectors,0);
  const mid=setup(),cancel=new AbortController();

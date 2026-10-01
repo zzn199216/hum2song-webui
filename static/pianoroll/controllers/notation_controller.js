@@ -282,7 +282,7 @@
       if((e.ctrlKey || e.metaKey) && ((e.key.toLowerCase()==='z' && e.shiftKey) || e.key.toLowerCase()==='y')){e.preventDefault();e.stopImmediatePropagation();redoEdit();}
     },true);
     const originalOpen=rt.openClipEditor.bind(rt),originalClose=rt.closeModal.bind(rt),originalDraw=rt.modalDraw.bind(rt);
-    rt.openClipEditor=function(id){originalOpen(id);if(!rt.state.modal.show || rt.state.modal.clipId!==id)return;rollPosition=null;surface.scrollTop=0;pref=N.preferences(clip().meta && clip().meta.notation);redo=[];switchView(pref.view);startHighlight();};
+    rt.openClipEditor=function(id){originalOpen(id);if(!rt.state.modal.show || rt.state.modal.clipId!==id)return;V.preparePdf().catch(()=>{});rollPosition=null;surface.scrollTop=0;pref=N.preferences(clip().meta && clip().meta.notation);redo=[];switchView(pref.view);startHighlight();};
     rt.closeModal=function(save){
       finishSeek(false);finishStaffDrag(false);audition.dispose();rt.modalEndEdgeScroll();
       const id=rt.state.modal.clipId, shouldSave=save && rt.state.modal.show;

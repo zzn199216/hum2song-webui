@@ -1,7 +1,7 @@
 # Vector score PDF export - 2026-10-02
 
 Prepared from active Studio commit `4bd3d7925a6a4be39345e9adb629995d4b8a3b1f`.
-Cache marker: `notation-vector-pdf-v1-20261002`. Release evidence is appended after deployment.
+Cache marker: `notation-vector-pdf-v2-20261002`. Release evidence is appended after deployment.
 
 ## Problem and final change
 
@@ -15,7 +15,7 @@ Additional recovery behavior:
 - Cache the last completed PDF and frozen preview by score/settings/BPM/title/format/language. Source edits invalidate it.
 - Show retry for internal errors, including internal AbortError failures; only explicit user cancellation is silent. Never enable partial PDF downloads.
 - Attach download anchors to the DOM and keep their temporary URLs alive for 60 seconds.
-- Font bytes are reused in memory and by the browser HTTP cache. Extended CJK text loads its larger font only when required. No runtime external CDN is used.
+- Font bytes are reused in memory and by the browser HTTP cache. Dependencies are warmed when the note editor opens. The common font uses a lossless gzip transport copy (1.59 MB instead of 2.54 MB) with a raw TTF fallback for browsers without DecompressionStream. This changes font transfer only; PDF pages remain vectors. Extended CJK text loads its larger font only when required. No runtime external CDN is used.
 
 The existing manual-split regression test normalizes CRLF before matching an LF delimiter, so a fresh Windows checkout can run its existing assertions. No splitting behavior changes. Release marker assertions were aligned to the new asset version.
 
