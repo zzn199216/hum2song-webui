@@ -7217,10 +7217,10 @@ renderTimeline(){
       const p2 = this.getProjectV2();
       const track = p2 && p2.tracks && p2.tracks[trackIndex];
       if (!track) return;
-      const names = { drums: 'Drums', bass: 'Bass', vocals: 'Vocals', other: 'Other', instrumental: 'Instrumental' };
+      const names = { drums: 'Drums', bass: 'Bass', piano: 'Piano', guitar: 'Guitar', vocals: 'Vocals', other: 'Other', instrumental: 'Instrumental' };
       if (!Object.prototype.hasOwnProperty.call(names, stem)) return;
       track.name = names[stem];
-      track.instrument = instrumentOverride || (stem === 'drums' ? 'drum' : stem === 'bass' ? 'bass' : 'default');
+      track.instrument = instrumentOverride || (stem === 'drums' ? 'drum' : stem === 'bass' ? 'bass' : stem === 'guitar' ? 'guitar-acoustic' : 'default');
       // Write canonical v2 first. persist() intentionally preserves its instrument
       // over the legacy view, which otherwise resets the imported stem to piano.
       this.setProjectFromV2(p2, { render: false });
@@ -9333,9 +9333,9 @@ renderTimeline(){
         const planner = window.H2SAudioSeparationTimeline.planTrackIndices(this.project, sourceInstance.id, 1);
         const trackIndex = planner.trackIndices[0];
         this.ensureTimelineTrackIndex(trackIndex);
-        if (source.stemId === 'drums') this.project.tracks[trackIndex].instrument = 'drum';
+        this._setSeparatedTrackIdentity(trackIndex, source.stemId);
         const materialized = this._materializeScoreDocToTimeline(score, { baseName: window.H2SAudioSeparationTimeline.stemLabel(source.stemId) + ' MIDI',
-          workerJobId: result.workerJobId, workerConversionSource: 'stem_to_midi', forceSingleClip: true,
+          workerJobId: result.workerJobId, workerConversionSource: 'stem_to_midi', separationStem: source.stemId, forceSingleClip: true,
           placeStartSec: Number(sourceInstance.startSec || 0) + seg.startSec, placeTrackIndex: trackIndex });
         if (!materialized || !materialized.ok) throw new Error('score_fetch_failed');
         const current = this.getProjectV2();

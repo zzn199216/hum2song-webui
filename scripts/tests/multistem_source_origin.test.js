@@ -19,7 +19,7 @@ async function main() {
   assert.deepEqual(timeline.timelineItems(manifest), [{stem:'piano',kind:'audio',artifactId:'p',stemId:'piano'}]);
   assert.equal(manifest.stems.length, 2, 'quiet artifact stays recoverable');
   const src = {jobId:'owned-separation',stemId:'piano',assetRef:'localidb:source'};
-  let sent, materialized;
+  let sent, materialized, trackIdentity;
   window.H2SAudioWorkerConversionClient = {convert: async options => {
     sent = options;
     return {ok:true,workerJobId:'midi',scoreDoc:{tempo_bpm:120,tracks:[{notes:[{pitch:60,start:4,duration:1,velocity:90}]}]}};
@@ -27,6 +27,7 @@ async function main() {
   const context = {
     project: {tracks:[{},{}],instances:[{id:'i',clipId:'c',startSec:7,trackIndex:0}]},
     _ensureAudioSeparationSourceInstance: () => 'i',
+    _setSeparatedTrackIdentity:(index,stem)=>{trackIdentity={index,stem};},
     _setAudioConvertState:()=>{}, setImportStatus:()=>{}, _clearAudioConvertState:()=>{}, ensureTimelineTrackIndex:()=>{},
     getProjectV2:()=>({clips:{}}), setProjectFromV2:()=>{},
     _materializeScoreDocToTimeline:(score, options)=>{materialized={score,options};return {ok:true};},
@@ -37,6 +38,11 @@ async function main() {
   assert.equal(materialized.options.placeStartSec,9);
   assert.equal(materialized.options.placeStartSec + materialized.score.tracks[0].notes[0].start,11, '7s source + 4s late piano');
   assert.equal(P.scoreSecToBeat(materialized.score,90).tracks[0].notes[0].startBeat,3, 'project BPM controls seconds to beats');
+  for(const stem of ['drums','bass','guitar','piano']) {
+    assert.equal((await method.call(context,'c',{...src,stemId:stem},{},{startSec:2,durationSec:8},{})).ok,true);
+    assert.equal(trackIdentity.stem,stem,'MIDI uses canonical instrument identity before materialization');
+    assert.equal(materialized.options.separationStem,stem,'MIDI stem metadata survives persistence');
+  }
   sent=null;
   assert.equal((await method.call(context,'c',{...src,quiet:true},{},{},{})).reason,'stem_too_quiet');
   assert.equal((await method.call(context,'c',{...src,stemId:'instrumental'},{},{},{})).reason,'stem_audio_only');
