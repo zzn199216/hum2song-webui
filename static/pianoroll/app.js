@@ -1682,6 +1682,10 @@
         })) : [],
         meta: {
           agent: (meta && meta.agent) ? meta.agent : null,
+          multistemSource: meta.multistemSource || null,
+          multistemResult: meta.multistemResult || null,
+          multistemSubmission: meta.multistemSubmission || null,
+          multistemMidiKey: meta.multistemMidiKey || null,
           notes: (typeof meta.notes === 'number') ? meta.notes : 0,
           pitchMin: (typeof meta.pitchMin === 'number') ? meta.pitchMin : null,
           pitchMax: (typeof meta.pitchMax === 'number') ? meta.pitchMax : null,
@@ -7259,7 +7263,18 @@ renderTimeline(){
       const els = this._audioSeparationElements();
       if (els.run) els.run.disabled = true;
       try {
+        if (opts.separationIntent) {
+          const previous = clip.meta && clip.meta.multistemSubmission;
+          opts.submissionKey = previous && previous.intent === opts.separationIntent && previous.assetRef === clip.audio.assetRef
+            ? previous.key : (opts.submissionKey || 'multi-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+          clip.meta = Object.assign({}, clip.meta, { multistemSubmission: {
+            key: opts.submissionKey, intent: opts.separationIntent, assetRef: clip.audio.assetRef,
+          } });
+          this.setProjectFromV2(p2);
+        }
         const result = await client.separate({
+          separationIntent: opts.separationIntent,
+          submissionKey: opts.submissionKey,
           file: file,
           durationSec: durationSec,
           mode: mode,
@@ -7283,7 +7298,16 @@ renderTimeline(){
           },
         });
         if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
-        const items = timeline.timelineItems(result.manifest);
+        const items = timeline.timelineItems(result.manifest).filter(item => !item.stemId ||
+          !Object.values(this.getProjectV2().clips).some(c => c.meta && c.meta.multistemSource &&
+            c.meta.multistemSource.jobId === result.workerJobId && c.meta.multistemSource.stemId === item.stemId));
+        if (result.manifest.schemaVersion === 'h2s-multistem/v1') {
+          const updated = this.getProjectV2();
+          updated.clips[clipId].meta = Object.assign({}, updated.clips[clipId].meta, {
+            multistemResult: { jobId: result.workerJobId, stems: result.manifest.stems.filter(s => s.presence === 'quiet') },
+          });
+          this.setProjectFromV2(updated);
+        }
         const plan = timeline.planTrackIndices(this.project, sourceInstanceId, items.length);
         if (!plan.ok) throw new Error(plan.reason || 'timeline_placement_failed');
         if (plan.trackIndices.length) this.ensureTimelineTrackIndex(Math.max.apply(Math, plan.trackIndices));
@@ -7291,7 +7315,7 @@ renderTimeline(){
         const failures = [];
         for (let index = 0; index < items.length; index += 1) {
           const item = items[index];
-          const artifact = timeline.findArtifact(result.artifacts, item.artifactRole);
+          const artifact = item.artifactId ? result.artifacts.find(a => a.artifactId === item.artifactId) : timeline.findArtifact(result.artifacts, item.artifactRole);
           if (!artifact) {
             failures.push(item.stem + ': artifact missing');
             continue;
@@ -7313,13 +7337,23 @@ renderTimeline(){
                 ? LAS.normalizeAudioDownloadFilename(stemNameCandidate, stemMime, downloaded.buffer, item.stem)
                 : (item.stem + '.wav');
               const stemFile = new File([downloaded.buffer], stemFilename, { type: stemMime });
-              const prepared = await this._prepareSeparatedAudioStemParts(stemFile, item.stem, { discardWholeSilent: false });
-              await this._commitPreparedSeparatedAudioParts(prepared.parts, {
+              const prepared = item.stemId ? { parts: [{ file: stemFile, baseName: timeline.stemLabel(item.stem), startOffsetSec: 0 }] }
+                : await this._prepareSeparatedAudioStemParts(stemFile, item.stem, { discardWholeSilent: false });
+              const imported = await this._commitPreparedSeparatedAudioParts(prepared.parts, {
                 trackIndex: trackIndex,
                 sourceStartBeat: sourceStartBeat,
                 bpm: bpm,
                 statusDoneKey: 'io.importAudioStoredLocal',
               });
+              if (item.stemId) {
+                const updated = this.getProjectV2();
+                imported.committed.forEach(part => {
+                  const c = updated.clips[part.clipId];
+                  c.meta = Object.assign({}, c.meta, { multistemSource: { jobId: result.workerJobId, stemId: item.stemId,
+                    assetRef: c.audio.assetRef, durationSec: result.manifest.numSamples / result.manifest.sampleRate } });
+                });
+                this.setProjectFromV2(updated);
+              }
             } else {
               const text = new TextDecoder('utf-8').decode(new Uint8Array(downloaded.buffer));
               const scoreDoc = JSON.parse(text);
@@ -7346,18 +7380,60 @@ renderTimeline(){
           ? result.manifest.transcriptionFailures.map(function (failure) { return String(failure.stem || '') + ': ' + String(failure.message || 'transcription_failed'); })
           : [];
         const allFailures = failures.concat(workerFailures);
+        if (opts.separationIntent && !allFailures.length) {
+          const current = this.getProjectV2();
+          current.clips[clipId].meta.multistemSubmission = null;
+          this.setProjectFromV2(current);
+        }
+        const quietCount = (result.manifest.stems || []).filter(s => s.presence === 'quiet').length;
         const done = allFailures.length
           ? ('AI 自动分轨完成，但部分 stem 失败：' + allFailures.join('；'))
-          : 'AI 自动分轨完成。原始音频已保留。';
+          : 'AI 自动分轨完成。原始音频已保留。' + (quietCount ? '已隐藏 ' + quietCount + ' 个很安静的轨道。' : '');
         this._setAudioSeparationStatus(done);
         this.setImportStatus(done, false);
         if (!allFailures.length) this.closeAudioSeparation(true);
         return { ok: true, workerJobId: result.workerJobId, failures: allFailures };
+      } catch (error) {
+        if (opts.separationIntent && error.jobFailed) {
+          const current = this.getProjectV2();
+          current.clips[clipId].meta.multistemSubmission = null;
+          this.setProjectFromV2(current);
+        }
+        throw error;
       } finally {
         this._audioSeparationBusy = false;
         this._audioSeparationStatusObserver = null;
         if (els.run) els.run.disabled = false;
       }
+    },
+
+    async _restoreQuietStems(clipId, instanceId){
+      const p2 = this.getProjectV2();
+      const source = p2.clips[clipId];
+      const saved = source && source.meta && source.meta.multistemResult;
+      const instance = p2.instances.find(i => String(i.id) === String(instanceId));
+      if (!saved || !instance || !saved.stems.length) return { ok: false, reason: 'no_quiet_stems' };
+      if (this._audioSeparationBusy) return { ok: false, reason: 'already_active' };
+      this._audioSeparationBusy = true;
+      try {
+        const quietStems = saved.stems.slice();
+        const plan = window.H2SAudioSeparationTimeline.planTrackIndices(this.project, instanceId, quietStems.length);
+        for (let i = 0; i < quietStems.length; i++) {
+          const stem = quietStems[i];
+          const downloaded = await window.H2SAudioWorkerSeparationClient.downloadArtifact(saved.jobId, stem.audio.artifactId);
+          this.ensureTimelineTrackIndex(plan.trackIndices[i]);
+          const imported = await this._commitNativeAudioFile(new File([downloaded.buffer], stem.category + '.wav', { type: 'audio/wav' }), {
+            baseName: window.H2SAudioSeparationTimeline.stemLabel(stem.category), startBeat: instance.startBeat, trackIndex: plan.trackIndices[i],
+          });
+          if (!imported || !imported.ok) throw new Error('audio_materialize_failed');
+          const current = this.getProjectV2();
+          const c = current.clips[imported.clipId];
+          c.meta.multistemSource = { jobId: saved.jobId, stemId: stem.stemId, assetRef: c.audio.assetRef, quiet: true };
+          current.clips[clipId].meta.multistemResult.stems = current.clips[clipId].meta.multistemResult.stems.filter(s => s.stemId !== stem.stemId);
+          this.setProjectFromV2(current);
+        }
+        return { ok: true };
+      } finally { this._audioSeparationBusy = false; }
     },
 
     async _checkAdvancedStemAvailability(){
@@ -9172,6 +9248,70 @@ renderTimeline(){
       }
     },
 
+    async _convertSeparatedStem(clipId, source, file, seg, opts){
+      const client = window.H2SAudioWorkerConversionClient;
+      const instanceId = this._ensureAudioSeparationSourceInstance(clipId, opts.sourceAudioInstanceId);
+      if (source.quiet) {
+        this.setImportStatus('这个分轨音量很小，可能是分离残留。已保留音频供试听。', false);
+        return { ok: false, reason: 'stem_too_quiet' };
+      }
+      if (source.stemId === 'instrumental') {
+        this.setImportStatus('伴奏轨可试听和下载。请使用多轨分离后，逐个乐器转 MIDI。', false);
+        return { ok: false, reason: 'stem_audio_only' };
+      }
+      this._setAudioConvertState(clipId, { phase: 'processing', workerRoute: true });
+      try {
+        const result = await client.convert({ file, segment: seg, sourceStem: source,
+          onStatus: status => { if (status.jobId) source.lastJobId = status.jobId; } });
+        if (!result || !result.ok || !result.scoreDoc) throw new Error('score_fetch_failed');
+        const midiKey = [result.workerJobId, instanceId, seg.startSec, seg.durationSec].join('|');
+        const existingMidi = Object.values(this.getProjectV2().clips).find(c => c.meta && c.meta.multistemMidiKey === midiKey);
+        if (existingMidi) {
+          this._setAudioConvertState(clipId, { phase: 'completed', workerRoute: true, workerJobId: result.workerJobId });
+          this._clearAudioConvertState(clipId, 4000);
+          this.setImportStatus('已复用这个分轨的 MIDI，没有重复扣费。', false);
+          return { ok: true, workerJobId: result.workerJobId };
+        }
+        const score = window.H2SProject.deepClone(result.scoreDoc);
+        // Transcribe the immutable complete stem once; selection crops notes locally.
+        // Keep leading silence inside the selection and place it relative to the source instance.
+        (score.tracks || []).forEach(track => {
+          track.notes = (track.notes || []).flatMap(note => {
+            const start = Math.max(Number(note.start), seg.startSec);
+            const end = Math.min(Number(note.start) + Number(note.duration), seg.startSec + seg.durationSec);
+            return end > start ? [Object.assign({}, note, { start: start - seg.startSec, duration: end - start })] : [];
+          });
+        });
+        const sourceInstance = (this.project.instances || []).find(i => String(i.id) === String(instanceId));
+        if (!sourceInstance) throw new Error('source_audio_not_found');
+        const planner = window.H2SAudioSeparationTimeline.planTrackIndices(this.project, sourceInstance.id, 1);
+        const trackIndex = planner.trackIndices[0];
+        this.ensureTimelineTrackIndex(trackIndex);
+        if (source.stemId === 'drums') this.project.tracks[trackIndex].instrument = 'drum';
+        const materialized = this._materializeScoreDocToTimeline(score, { baseName: window.H2SAudioSeparationTimeline.stemLabel(source.stemId) + ' MIDI',
+          workerJobId: result.workerJobId, workerConversionSource: 'stem_to_midi', forceSingleClip: true,
+          placeStartSec: Number(sourceInstance.startSec || 0) + seg.startSec, placeTrackIndex: trackIndex });
+        if (!materialized || !materialized.ok) throw new Error('score_fetch_failed');
+        const current = this.getProjectV2();
+        (materialized.clipIds || []).forEach(id => { current.clips[id].meta.multistemMidiKey = midiKey; });
+        this.setProjectFromV2(current);
+        this._setAudioConvertState(clipId, { phase: 'completed', workerRoute: true, workerJobId: result.workerJobId });
+        this.setImportStatus('MIDI 已生成，原分轨音频已保留。', false);
+        this._clearAudioConvertState(clipId, 4000);
+        return { ok: true, workerJobId: result.workerJobId };
+      } catch (err) {
+        if (err.message === 'task_failed' && source.lastJobId) {
+          const p2 = this.getProjectV2();
+          const c = p2.clips[clipId];
+          c.meta.multistemSource = Object.assign({}, source, { retryOfJobId: source.lastJobId });
+          this.setProjectFromV2(p2);
+        }
+        this._setAudioConvertState(clipId, { phase: 'failed', workerRoute: true, errorBucket: 'worker_job_failed' });
+        this.setImportStatus('转 MIDI 未完成，原音频已保留。' + String(err.message || ''), false);
+        return { ok: false, reason: String(err.message || 'task_failed') };
+      }
+    },
+
     async convertAudioClipToEditable(clipId, opts){
       opts = opts || {};
       const P = window.H2SProject;
@@ -9222,6 +9362,9 @@ renderTimeline(){
         return { ok: false, reason: 'invalid_segment' };
       }
       const transcriptionControls = Object.assign({}, this.getAudioTranscriptionControls(clipId));
+      if (c.meta && c.meta.multistemSource && c.meta.multistemSource.assetRef === assetRef) {
+        return this._convertSeparatedStem(clipId, c.meta.multistemSource, file, seg, opts);
+      }
       if (Object.prototype.hasOwnProperty.call(opts, 'separateFirst')) {
         transcriptionControls.separateFirst = opts.separateFirst === true;
       }
@@ -9471,11 +9614,18 @@ renderTimeline(){
           options = options || {};
           const sourceAudioInstanceId = self._ensureAudioSeparationSourceInstance(clipId, instanceId);
           return self._runAudioSeparationForClip(clipId, {
+            separationIntent: options.separationIntent,
+            submissionKey: options.submissionKey,
             sourceAudioInstanceId: sourceAudioInstanceId,
             separationPreset: options.separationPreset,
             mode: options.mode,
             onStatus: options.onStatus,
           });
+        },
+        restoreQuietStems(clipId, instanceId){ return self._restoreQuietStems(clipId, instanceId); },
+        hasQuietStems(clipId){
+          const c = self.getProjectV2().clips[clipId];
+          return !!(c && c.meta && c.meta.multistemResult && c.meta.multistemResult.stems.length);
         },
         checkAdvancedStemAvailability(){
           return self._checkAdvancedStemAvailability();

@@ -379,9 +379,10 @@
               '<span data-i18n-role="wfSeparationSettingsLabel"></span>' +
             '</label>' +
             '<button type="button" class="btn mini primary" data-act="waveSeparate"></button>' +
+            '<button type="button" class="btn mini" data-act="waveQuiet" hidden style="display:none"></button>' +
           '</div>' +
           '<div class="h2s-audio-waveform-separation-controls" data-role="wfSeparationSettings" hidden>' +
-            '<div class="h2s-audio-waveform-separation-field">' +
+            '<div class="h2s-audio-waveform-separation-field" style="display:none">' +
               '<span data-i18n-role="wfSeparatorOptionLabel"></span>' +
               '<div class="h2s-audio-waveform-choice-group" data-role="wfSeparatorOptionChoices" role="radiogroup">' +
                 '<button type="button" class="h2s-audio-waveform-choice is-selected" data-separator-option-value="demucs" role="radio" aria-checked="true"></button>' +
@@ -394,7 +395,7 @@
                 '<option value="advanced_stems" data-advanced-option></option>' +
               '</select>' +
             '</div>' +
-            '<label>' +
+            '<label style="display:none">' +
               '<span data-i18n-role="wfSeparationPresetLabel"></span>' +
               '<select data-role="wfSeparationPreset">' +
                 '<option value="vocals_instrumental"></option>' +
@@ -403,7 +404,7 @@
                 '<option value="vocals_bass_drums"></option>' +
               '</select>' +
             '</label>' +
-            '<div class="h2s-audio-waveform-separation-field">' +
+            '<div class="h2s-audio-waveform-separation-field" style="display:none">' +
               '<span data-i18n-role="wfSeparationModeLabel"></span>' +
               '<div class="h2s-audio-waveform-choice-group" data-role="wfSeparationModeChoices" role="radiogroup">' +
                 '<button type="button" class="h2s-audio-waveform-choice is-selected" data-separation-mode-value="separate_only" role="radio" aria-checked="true"></button>' +
@@ -414,7 +415,8 @@
                 '<option value="separate_and_transcribe"></option>' +
               '</select>' +
             '</div>' +
-            '<div class="muted" data-role="wfSeparatorOptionHint"></div>' +
+            '<div class="muted" data-role="wfSeparatorOptionHint" style="display:none"></div>' +
+            '<label><span data-i18n-role="wfIntentLabel"></span><select data-role="wfSeparationIntent"><option value="vocal"></option><option value="multitrack" selected></option></select></label>' +
             '<div class="muted" data-role="wfSeparationCost"></div>' +
           '</div>' +
           '<div class="muted" data-role="wfStatus" style="margin-top:8px;font-size:11px;min-height:1.2em;"></div>' +
@@ -455,6 +457,16 @@
           });
         }
         if (act === 'waveSeparate') startSeparation();
+        if (act === 'waveQuiet' && typeof hooks.restoreQuietStems === 'function') {
+          var quietButton = panel.querySelector('[data-act="waveQuiet"]');
+          quietButton.disabled = true;
+          Promise.resolve(hooks.restoreQuietStems(openCtx.clipId, openCtx.instanceId)).then(function () {
+            quietButton.hidden = !hooks.hasQuietStems(openCtx.clipId);
+            quietButton.style.display = quietButton.hidden ? 'none' : '';
+          }).catch(function () {
+            if (statusEl) statusEl.textContent = t('audio.waveform.separationFailed', 'Could not load tracks. Please try again.');
+          }).finally(function () { quietButton.disabled = false; });
+        }
         if (act === 'waveConvert' && typeof hooks.convertToEditable === 'function') {
           var separateBeforeConvert = panel.querySelector('[data-role="wfSeparateBeforeConvert"]');
           var separationPreset = panel.querySelector('[data-role="wfSeparationPreset"]');
@@ -488,6 +500,10 @@
         syncSeparatorAvailability();
       });
       var separatorOption = panel.querySelector('[data-role="wfSeparatorOption"]');
+      var separationIntent = panel.querySelector('[data-role="wfSeparationIntent"]');
+      if (separationIntent) separationIntent.addEventListener('change', function () {
+        if (openCtx) openCtx.separationSubmissionKey = null;
+      });
       if (separatorOption) separatorOption.addEventListener('change', syncSeparatorAvailability);
       Array.prototype.forEach.call(panel.querySelectorAll('[data-separator-option-value]'), function (button) {
         button.addEventListener('click', function () {
@@ -523,6 +539,10 @@
       var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
       var cost = panel.querySelector('[data-role="wfSeparationCost"]');
       if (!cost) return;
+      if (panel.querySelector('[data-role="wfSeparationIntent"]')) {
+        cost.textContent = t('audio.multistem.cost', 'Separation: 1 credit. Convert each resulting track to MIDI separately: 1 credit per track. Audio is retained.');
+        return;
+      }
       cost.textContent = separator && separator.value === 'advanced_stems'
         ? t('audio.waveform.advancedCost', 'Each advanced stem-separation task uses 30 regular transcription credits. Credits are charged only when the task starts.')
         : mode && mode.value === 'separate_and_transcribe'
@@ -644,7 +664,8 @@
       var preset = panel.querySelector('[data-role="wfSeparationPreset"]');
       var mode = panel.querySelector('[data-role="wfSeparationMode"]');
       var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
-      var requestedSeparator = separator ? separator.value : 'demucs';
+      var intent = panel.querySelector('[data-role="wfSeparationIntent"]');
+      var requestedSeparator = intent ? 'demucs' : (separator ? separator.value : 'demucs');
       if (requestedSeparator === 'advanced_stems') {
         await startAdvancedStemSeparation();
         return;
@@ -655,21 +676,28 @@
       if (statusEl) statusEl.textContent = t('audio.waveform.separationRunning', 'AI stem separation is running. You can keep this window open to see progress.');
       try {
         var result = await hooks.runSeparation(openCtx.clipId, openCtx.instanceId, {
-          separationPreset: preset ? preset.value : 'four_stem',
-          mode: mode ? mode.value : 'separate_only',
+          separationIntent: intent ? intent.value : undefined,
+          submissionKey: openCtx.separationSubmissionKey || (openCtx.separationSubmissionKey = 'stem-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
+          separationPreset: intent ? (intent.value === 'vocal' ? 'vocals_instrumental' : 'four_stem') : (preset ? preset.value : 'four_stem'),
+          mode: intent ? 'separate_only' : (mode ? mode.value : 'separate_only'),
           separatorOption: requestedSeparator,
           onStatus: function (text) {
             if (statusEl && text) statusEl.textContent = String(text);
           },
         });
         if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
+        openCtx.separationSubmissionKey = null;
+        applyI18nLabels();
         if (statusEl && (!result.failures || !result.failures.length)) {
           statusEl.textContent = t('audio.waveform.separationDone', 'AI stem separation is complete. The original audio was preserved.');
         }
       } catch (err) {
         if (statusEl) {
           var message = err && err.message ? String(err.message) : 'worker_failed';
-          statusEl.textContent = message === 'payload_too_large'
+          if (err && err.jobFailed) openCtx.separationSubmissionKey = null;
+          statusEl.textContent = message === 'feature_disabled'
+            ? t('audio.multistem.unavailable', 'The new separation service is not available yet. No credits were used.')
+            : message === 'payload_too_large'
             ? t('audio.waveform.separationTooLarge', 'This audio is too large to upload for stem separation. Shorten the selected segment and try again.')
             : requestedSeparator === 'uvr5_ensemble_vocal_full'
               ? t('audio.waveform.uvr5FailedRefunded', 'Enhanced vocal separation failed. This attempt was not charged.')
@@ -703,6 +731,18 @@
         var el = panel.querySelector('[data-i18n-role="' + row[0] + '"]');
         if (el) el.textContent = t(row[1], row[2]);
       });
+      var intentSelect = panel.querySelector('[data-role="wfSeparationIntent"]');
+      var quietButton = panel.querySelector('[data-act="waveQuiet"]');
+      if (quietButton) {
+        quietButton.textContent = t('audio.multistem.quiet', 'Show quiet tracks (audio only)');
+        quietButton.hidden = !(openCtx && hooks.hasQuietStems && hooks.hasQuietStems(openCtx.clipId));
+        quietButton.style.display = quietButton.hidden ? 'none' : '';
+      }
+      if (intentSelect) {
+        panel.querySelector('[data-i18n-role="wfIntentLabel"]').textContent = t('audio.multistem.intent', 'Separation');
+        intentSelect.options[0].textContent = t('audio.multistem.vocal', 'Vocal separation');
+        intentSelect.options[1].textContent = t('audio.multistem.multi', 'Multitrack separation');
+      }
       var settingsLabel = panel.querySelector('[data-i18n-role="wfSeparationSettingsLabel"]');
       if (settingsLabel) settingsLabel.textContent = t('audio.waveform.separationSettings', 'Stem separation settings');
       var separateBeforeConvertLabel = panel.querySelector('[data-i18n-role="wfSeparateBeforeConvertLabel"]');
@@ -802,10 +842,13 @@
       if (separationPreset) separationPreset.disabled = busy || separationBusy;
       if (separationMode) separationMode.disabled = busy || separationBusy;
       if (separatorOption) separatorOption.disabled = busy || separationBusy;
+      var intentSelect = panel.querySelector('[data-role="wfSeparationIntent"]');
+      if (intentSelect) intentSelect.disabled = busy || separationBusy;
       syncSeparatorAvailability();
       if (retryBtn) {
         var showRetry = convertPhase === 'failed' || convertPhase === 'timed_out';
         retryBtn.hidden = !showRetry;
+        retryBtn.style.display = showRetry ? '' : 'none';
         retryBtn.disabled = busy || separationBusy;
       }
     }
@@ -845,7 +888,7 @@
         ? hooks.getTranscriptionControls(openCtx.clipId)
         : null;
       var separateBeforeConvert = panel.querySelector('[data-role="wfSeparateBeforeConvert"]');
-      if (separateBeforeConvert) separateBeforeConvert.checked = !!(transcriptionControls && transcriptionControls.separateFirst === true);
+      if (separateBeforeConvert) { separateBeforeConvert.checked = false; separateBeforeConvert.closest('label').style.display = 'none'; }
       var separatorOption = panel.querySelector('[data-role="wfSeparatorOption"]');
       if (separatorOption) separatorOption.value = 'demucs';
       var separationPreset = panel.querySelector('[data-role="wfSeparationPreset"]');

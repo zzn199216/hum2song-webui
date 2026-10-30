@@ -149,12 +149,18 @@
       return { ok: false, reason: 'uvr5_separate_only' };
     }
     if (durationSec > MAX_DURATION_SEC + 0.001) return { ok: false, reason: 'audio_too_long' };
+    if (options.separationIntent) {
+      var availability = await base._requestHost('H2S_CLOUD_MULTISTEM_AVAILABILITY', {}, null, { timeoutMs: STATUS_TIMEOUT_MS });
+      if (!availability.enabled) throw new Error('feature_disabled');
+    }
 
     emit(options, { phase: 'encoding' });
     var preparedUpload = await prepareUploadAudio(base, file, durationSec);
     var audioBuffer = preparedUpload.audioBuffer;
     emit(options, { phase: 'uploading' });
     var created = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_JOB_CREATE', {
+      separationIntent: options.separationIntent,
+      submissionKey: options.submissionKey,
       filename: preparedUpload.filename,
       mimeType: preparedUpload.mimeType,
       mode: mode,
@@ -190,6 +196,7 @@
         var message = statusJob.error && statusJob.error.message ? String(statusJob.error.message) : code;
         var failure = new Error(message);
         failure.code = code;
+        failure.jobFailed = true;
         failure.refunded = statusJob.type === 'audio_separation_uvr5';
         throw failure;
       }

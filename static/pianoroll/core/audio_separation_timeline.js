@@ -18,6 +18,11 @@
 
   function timelineItems(manifest) {
     manifest = manifest || {};
+    if (manifest.schemaVersion === 'h2s-multistem/v1') {
+      return (manifest.stems || []).filter(function (s) { return s.presence === 'candidate'; }).map(function (s) {
+        return { stem: s.category, kind: 'audio', artifactId: s.audio.artifactId, stemId: s.stemId };
+      });
+    }
     var timeline = Array.isArray(manifest.timelineAudioStems) ? manifest.timelineAudioStems : [];
     var transcribed = {};
     (Array.isArray(manifest.transcribedStems) ? manifest.transcribedStems : []).forEach(function (stem) {
@@ -68,6 +73,10 @@
   }
 
   var api = {
+    stemLabel: function (stem) {
+      var fallback = { vocals: 'Vocals', instrumental: 'Instrumental', piano: 'Piano', guitar: 'Guitar', bass: 'Bass', drums: 'Drums', other: 'Other sounds' }[stem] || stem;
+      return typeof window !== 'undefined' && window.I18N && window.I18N.t ? window.I18N.t('audio.stem.' + stem, fallback) : fallback;
+    },
     timelineItems: timelineItems,
     planTrackIndices: planTrackIndices,
     findArtifact: findArtifact,

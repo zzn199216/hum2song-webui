@@ -259,11 +259,13 @@
     diag('encode_start', {
       durationMs: 0,
     });
-    var audioBuffer = await segmentToWavArrayBuffer(file, segment);
+    var audioBuffer = options.sourceStem ? null : await segmentToWavArrayBuffer(file, segment);
     diag('encode_end', { durationMs: Math.round(nowMs() - encodeStart) });
     var createStart = nowMs();
     diag('job_create_upload_start', { timeoutMs: CREATE_UPLOAD_RPC_TIMEOUT_MS });
-    var created = await requestHost('H2S_CLOUD_AUDIO_TO_MIDI_JOB_CREATE', {
+    var created = options.sourceStem ? await requestHost('H2S_CLOUD_STEM_TRANSCRIPTION_CREATE', {
+      jobId: options.sourceStem.jobId, stemId: options.sourceStem.stemId, retryOfJobId: options.sourceStem.retryOfJobId,
+    }, null, { timeoutMs: CREATE_UPLOAD_RPC_TIMEOUT_MS, stage: 'stem_create' }) : await requestHost('H2S_CLOUD_AUDIO_TO_MIDI_JOB_CREATE', {
       filename: 'studio-selected-segment.wav',
       mimeType: 'audio/wav',
       segmentStartSec: Number(segment.startSec || 0),

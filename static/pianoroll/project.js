@@ -1826,6 +1826,9 @@ function beginNewClipRevision(project, clipId, opts){
           },
         };
         if (c.meta && c.meta.agent) clip2.meta.agent = c.meta.agent;
+        if (c.meta && c.meta.multistemSource) clip2.meta.multistemSource = deepClone(c.meta.multistemSource);
+        if (c.meta && c.meta.multistemResult) clip2.meta.multistemResult = deepClone(c.meta.multistemResult);
+        if (c.meta && c.meta.multistemSubmission) clip2.meta.multistemSubmission = deepClone(c.meta.multistemSubmission);
         if (c.revisionId != null && String(c.revisionId).trim()) clip2.revisionId = String(c.revisionId);
         if (c.parentRevisionId !== undefined) clip2.parentRevisionId = c.parentRevisionId;
         if (c.revisions && typeof c.revisions === 'object' && !Array.isArray(c.revisions)) clip2.revisions = deepClone(c.revisions);
@@ -1859,6 +1862,7 @@ function beginNewClipRevision(project, clipId, opts){
       clip2.meta.sourceTempoBpm = sourceTempoBpm;
       // Preserve meta.agent (e.g. patchSummary) when re-building v2 from v1 view (persist path).
       if (c.meta && c.meta.agent) clip2.meta.agent = c.meta.agent;
+      if (c.meta && c.meta.multistemMidiKey) clip2.meta.multistemMidiKey = c.meta.multistemMidiKey;
       if (c.meta) {
         const splitKeys = ['splitGroupId', 'splitIndex', 'splitCount', 'splitSourceStartSec', 'splitSourceSpanSec', 'autoSplit', 'autoSplitSource', 'autoSplitBarSegment', 'heuristicPitchSplit'];
         for (const k of splitKeys) {
