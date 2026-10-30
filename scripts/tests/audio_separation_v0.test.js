@@ -68,7 +68,7 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(waveform.includes('transcribeOption.disabled = uvrSelected'));
   assert(waveform.includes('value="uvr5_ensemble_vocal_full" data-uvr5-option hidden disabled'));
   assert(waveform.includes("uvrOption.disabled = !uvr5EnsembleUiEnabled() || midiEnabled"));
-  assert(waveform.includes("preset.disabled = uvrSelected || advancedSelected || separationBusy || _isConvertBusy()"));
+  assert(waveform.includes("preset.disabled = uvrSelected || advancedSelected || separationBusy || silenceSplitBusy || _isConvertBusy()"));
   assert(waveform.includes("requestedSeparator === 'advanced_stems'"));
   assert(waveform.includes('startAdvancedStemSeparation()'));
   assert(waveform.includes("audio.waveform.uvr5FailedRefunded"));
@@ -86,13 +86,14 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(app.includes("transcriptionControls.separateFirst = opts.separateFirst === true"));
   assert(app.includes('durationSecOverride: seg.durationSec'));
   assert(app.includes('placementOffsetSec: seg.startSec'));
-  assert(app.includes("this.project.tracks[trackIndex].instrument = 'drum'"));
+  assert(app.includes('this._setSeparatedTrackIdentity(trackIndex, item.stem)'));
   assert(app.includes('artifact.filename || downloaded.filename'));
   assert(app.includes("artifactMime || 'audio/wav'"));
   assert(app.includes('LAS.normalizeAudioDownloadFilename(stemNameCandidate'));
   assert(app.includes('_prepareSeparatedAudioStemParts'));
-  assert(app.includes('groupNearDuplicateRanges'));
-  assert(app.includes('instanceGainDb: Number.isFinite(Number(group.relativeGainDb))'));
+  assert(app.includes('options.splitSilence !== true'), 'stem splitting requires an explicit action');
+  assert(!app.includes('groupNearDuplicateRanges'), 'manual audio split keeps original phrase differences');
+  assert(waveform.includes('data-act="waveSplitSilence"'), 'splitting is a waveform-editor action');
   assert(app.includes('duplicateOfPartIndex'));
   assert(app.includes('_commitPreparedSeparatedAudioParts'));
   assert(app.includes('_addNativeAudioClipInstance'));

@@ -20,7 +20,7 @@ const ver = verMatch[1];
 function scriptVersion(src) {
   const escaped = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const m = index.match(new RegExp('<script\\s+src="/static/pianoroll/' + escaped + '\\?v=([^"]+)"'));
-  return m ? m[1] : '';
+  return m ? new URLSearchParams('v=' + m[1].replace(/&amp;/g, '&')).get('v') : '';
 }
 
 const requiredVersionedScripts = [

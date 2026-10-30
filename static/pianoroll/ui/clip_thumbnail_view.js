@@ -139,6 +139,37 @@
     return true;
   }
 
+  function drawNotationPreview(canvas, preview, width, height, pref, options){
+    var surface = setupCanvas(canvas, width, height, options && options.pixelRatio);
+    if (!surface) return false;
+    var ctx=surface.ctx, w=surface.width, h=surface.height;
+    var N=root && root.H2SNotation;
+    if (!N) return drawMidiPreview(canvas, preview, width, height, options);
+    var baseline=Math.max(30,h*0.65), gap=Math.max(3,Math.min(5,(h-22)/7));
+    ctx.strokeStyle='rgba(219,238,255,.32)';ctx.lineWidth=0.7;
+    if(pref.view==='staff') for(var l=0;l<5;l++){
+      ctx.beginPath();ctx.moveTo(0,baseline-l*gap);ctx.lineTo(w,baseline-l*gap);ctx.stroke();
+    }
+    ctx.fillStyle=NOTE_FILL;ctx.strokeStyle=NOTE_FILL;ctx.font='600 12px Arial';ctx.textAlign='center';
+    (preview.notes || []).forEach(function(n){
+      var x=n.startTime/Math.max(.001,preview.spanTime)*w;
+      var sp=N.spelling(n.pitch,pref.key || 'C');
+      if(pref.view==='jianpu'){
+        ctx.fillText((sp.accidental==='b'?'♭':sp.accidental==='#'?'♯':'')+sp.degree,Math.max(5,x),baseline);
+        for(var k=0;k<Math.min(3,Math.abs(sp.octave));k++){
+          ctx.beginPath();ctx.arc(Math.max(5,x),sp.octave>0?baseline-14-k*3:baseline+5+k*3,1,0,Math.PI*2);ctx.fill();
+        }
+      }else{
+        var key=sp.key.split('/'),degree='cdefgab'.indexOf(key[0])+Number(key[1])*7;
+        var low=pref.clef==='bass'?18:30; // G2 / E4 at the bottom staff line.
+        var y=Math.max(19,Math.min(h-4,baseline-(degree-low)*gap/2));
+        ctx.beginPath();ctx.ellipse(Math.max(3,x),y,3,2,-.3,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.moveTo(Math.max(3,x)+2,y);ctx.lineTo(Math.max(3,x)+2,y-10);ctx.stroke();
+      }
+    });
+    return true;
+  }
+
   function drawAudioPlaceholder(canvas, width, height, failed, options){
     var surface = setupCanvas(canvas, width, height, options && options.pixelRatio);
     if (!surface) return false;
@@ -274,6 +305,12 @@
         maxScanNotesPerClip: Number.MAX_SAFE_INTEGER,
         spanSec: options && options.spanSec,
       });
+      var pref=clip.meta && clip.meta.notation;
+      if(pref && (pref.view==='staff' || pref.view==='jianpu')){
+        canvas.dataset.notation=pref.view;
+        return Promise.resolve(drawNotationPreview(canvas,preview,width,height,pref,options));
+      }
+      if(canvas.dataset) delete canvas.dataset.notation;
       return Promise.resolve(drawMidiPreview(canvas, preview, width, height, options));
     }
 
@@ -319,6 +356,7 @@
     derivePitchViewport: derivePitchViewport,
     buildMidiDrawCommands: buildMidiDrawCommands,
     drawMidiPreview: drawMidiPreview,
+    drawNotationPreview: drawNotationPreview,
     drawAudioPlaceholder: drawAudioPlaceholder,
     drawAudioWaveform: drawAudioWaveform,
     loadWaveformForClip: loadWaveformForClip,

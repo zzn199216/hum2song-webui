@@ -1,0 +1,8 @@
+# Local notation dependencies
+
+- VexFlow 4.2.5: `https://cdn.jsdelivr.net/npm/vexflow@4.2.5/build/cjs/vexflow.js`, MIT (VEXFLOW-LICENSE).
+- jsPDF 4.2.1: `https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js`, MIT (JSPDF-LICENSE).
+- svg2pdf.js 2.8.1: npm registry distribution, MIT (SVG2PDF-LICENSE). Bundle SHA-256: `2f10c0d16959e9a0c4cfd8605cfce0830ddc384337f74fa0351a6eff1c1efb8b`.
+- Hum2Song Score text fonts: derived from Google Fonts Noto Sans SC 2.004, weight 400, SIL OFL 1.1 (NOTO-OFL.txt). Upstream variable TTF SHA-256: `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`. Common coverage follows Fontsource 5.3.0's common Chinese subset plus Latin/Cyrillic/kana/punctuation/music symbols; extended coverage retains 30,890 mapped characters. The modified fonts use the name Hum2Song Score, remove hints/layout tables and are embedded with used glyphs by jsPDF. Common TTF is loaded once; extended TTF is loaded only when page text needs it. Source URLs and rebuild instructions are in `scripts/build_score_pdf_fonts.py`.
+
+Pinned, locally served browser bundles and fonts. VexFlow 4 includes its engraving font outlines and does not require a runtime font CDN. PDF dependencies are warmed when a note editor opens, never during Studio startup. The common font has a lossless gzip transport copy (1,592,795 bytes instead of 2,537,788 bytes), decoded with DecompressionStream; browsers without that API use the TTF. Extended coverage is loaded only when needed. No remote content or user uploads are sent to these projects. Both PDF and SVG export preserve vectors. PDF contains searchable Unicode text, engraved music paths and staff lines, with no rasterized page images.

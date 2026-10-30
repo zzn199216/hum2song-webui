@@ -273,6 +273,7 @@
       transcriptionTarget: controls.transcriptionTarget,
       cleanupStrength: controls.cleanupStrength,
       preserveRawCandidates: controls.preserveRawCandidates,
+      separationStem: options.separationStem || undefined,
       audioBuffer: audioBuffer,
     }, [audioBuffer], { timeoutMs: CREATE_UPLOAD_RPC_TIMEOUT_MS, stage: 'job_create_upload' });
     var job = created.job || {};

@@ -2216,7 +2216,8 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/controllers/agent_controller.js?v=typed-ai-optfail-detail-20260526-0355"></script>
   <script src="/static/pianoroll/controllers/arrangement_controller.js?v=arrangement-creative-v1"></script>
   <script src="/static/pianoroll/core/clip_thumbnail_math.js?v=clip-canvas-v1"></script>
-  <script src="/static/pianoroll/ui/clip_thumbnail_view.js?v=clip-canvas-v1"></script>
+  <script src="/static/pianoroll/core/notation.js?v=notation-vector-pdf-v2-20261002"></script>
+  <script src="/static/pianoroll/ui/clip_thumbnail_view.js?v=notation-vector-pdf-v2-20261002"></script>
   <script src="/static/pianoroll/ui/timeline_view.js?v=clip-canvas-v1"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
   <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>
@@ -2239,7 +2240,7 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/core/timeline_edge_snap.js?v=seq-place-v1"></script>
   <script src="/static/pianoroll/core/clip_auto_split.js?v=seq-place-v1"></script>
   <script src="/static/pianoroll/core/project_last_undo.js?v=clip-edit-v16"></script>
-  <script src="/static/pianoroll/controllers/editor_runtime.js?v=clip-edit-v16"></script>
+  <script src="/static/pianoroll/controllers/editor_runtime.js?v=notation-vector-pdf-v2-20261002"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_wav_controller.js?v=multistem-source-origin-v1"></script>
@@ -2287,6 +2288,9 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
       flex: 0 0 auto;
     }
     .h2s-audio-waveform-download-icon svg { width: 16px; height: 16px; pointer-events: none; }
+    .h2s-audio-waveform-status { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .h2s-audio-waveform-status:empty { display: none; }
+    .h2s-audio-waveform-status.is-error { color: #b42318; background: #fff1f0; border-color: #f4b4ad; }
     .h2s-audio-waveform-separation-actions { flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
     .h2s-audio-waveform-separation-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
     .h2s-audio-waveform-separation-toggle input { margin: 0; }
@@ -2521,6 +2525,10 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   })();
   if (window.H2S_CLOUD_MODE === true) document.documentElement.classList.add('h2sCloudMode');
   </script>
+  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=multistem-source-origin-v1">
+  <script src="/static/pianoroll/ui/notation_view.js?v=multistem-source-origin-v1"></script>
+  <script src="/static/pianoroll/ui/editor_audition.js?v=multistem-source-origin-v1"></script>
+  <script src="/static/pianoroll/controllers/notation_controller.js?v=multistem-source-origin-v1"></script>
   <script src="/static/pianoroll/app.js?v=multistem-source-origin-v1"></script>
   <script src="/static/pianoroll/cloud_project_bridge.js?v=multistem-source-origin-v1"></script>
   <script src="/static/pianoroll/cloud_materials_panel.js?v=multistem-source-origin-v1"></script>

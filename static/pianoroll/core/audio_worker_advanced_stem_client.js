@@ -50,6 +50,20 @@
     };
   }
 
+  async function requestExistingJob(base, type, payload, timeoutMs, stage, started, options) {
+    for (;;) {
+      try {
+        return await base._requestHost(type, payload, null, { timeoutMs: timeoutMs, stage: stage });
+      } catch (err) {
+        if (!err || err.message !== 'worker_timeout' || Date.now() - started >= MAX_WAIT_MS) throw err;
+        // A slow status read can still be downloading completed stems on the server.
+        // Keep the original job; never create or charge again after a lost response.
+        emit(options, { phase: 'processing', jobId: payload.jobId, status: 'running', retrying: true });
+        await delay(POLL_MS);
+      }
+    }
+  }
+
   async function separate(options) {
     options = options || {};
     var base = baseClient();
@@ -71,16 +85,16 @@
     var started = Date.now();
     for (;;) {
       if (Date.now() - started > MAX_WAIT_MS) throw new Error('worker_timeout');
-      var response = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_JOB_STATUS', { jobId: jobId }, null, { timeoutMs: STATUS_TIMEOUT_MS, stage: 'advanced_stem_status' });
+      var response = await requestExistingJob(base, 'H2S_CLOUD_AUDIO_SEPARATION_JOB_STATUS', { jobId: jobId }, STATUS_TIMEOUT_MS, 'advanced_stem_status', started, options);
       var statusJob = response && response.job ? response.job : {};
       emit(options, { phase: 'processing', jobId: jobId, status: statusJob.status || '' });
       if (statusJob.status === 'failed' || statusJob.status === 'cancelled') throw new Error(statusJob.error && statusJob.error.message ? String(statusJob.error.message) : 'task_failed');
       if (statusJob.status === 'succeeded') break;
       await delay(POLL_MS);
     }
-    var result = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_JOB_RESULT', { jobId: jobId }, null, { timeoutMs: RESULT_TIMEOUT_MS, stage: 'advanced_stem_result' });
+    var result = await requestExistingJob(base, 'H2S_CLOUD_AUDIO_SEPARATION_JOB_RESULT', { jobId: jobId }, RESULT_TIMEOUT_MS, 'advanced_stem_result', started, options);
     if (!result || !result.manifest || !Array.isArray(result.artifacts)) throw new Error('result_unavailable');
-    return { ok: true, workerJobId: jobId, costUnits: created.costUnits || 30, reused: created.reused === true, manifest: result.manifest, artifacts: result.artifacts };
+    return { ok: true, workerJobId: jobId, costUnits: typeof created.costUnits === "number" ? created.costUnits : 30, reused: created.reused === true, manifest: result.manifest, artifacts: result.artifacts };
   }
 
   async function downloadArtifact(jobId, artifactId) {

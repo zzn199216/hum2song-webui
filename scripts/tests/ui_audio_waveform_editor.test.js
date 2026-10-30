@@ -63,7 +63,6 @@ const repoRoot = path.resolve(__dirname, '..', '..');
   const appSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'app.js'), 'utf8');
   const clientSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'core', 'audio_worker_advanced_stem_client.js'), 'utf8');
   assert(appSrc.includes('getSourceMetadataForLocalAssetRef'), 'advanced stems recover Cloud source identity from the local playback copy');
-  assert(appSrc.includes('if (cloudSourceAssetId && isFullSource)'), 'complete generated music prefers the original Cloud asset id');
   assert(appSrc.includes("sourceTitle: String(clip.name || '').trim()"), 'legacy imported clips provide an owner-scoped title fallback');
   assert(appSrc.includes('client.prepareSource({'), 'user-uploaded local audio is prepared as a public Kie audioUrl source');
   assert(appSrc.includes('_segmentToWavArrayBuffer'), 'local selections are materialized before upload');

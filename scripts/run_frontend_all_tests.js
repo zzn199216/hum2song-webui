@@ -10,16 +10,22 @@ function runOne(script){
 }
 
 runOne('scripts/tests/studio_source_syntax.test.js');
+runOne('scripts/tests/notation.test.js');
+runOne('scripts/tests/notation_system_pages.test.js');
+runOne('scripts/tests/notation_pdf.test.js');
+runOne('scripts/tests/editor_audition.test.js');
 runOne('scripts/run_frontend_contract_tests.js');
 runOne('scripts/run_frontend_editor_contract_tests.js');
 runOne('scripts/run_frontend_numeric_invariants_tests.js');
 runOne('scripts/run_frontend_bpm_invariants_tests.js');
 runOne('scripts/run_frontend_timeline_unit_tests.js');
 runOne('scripts/tests/project_v1_v2_persistence_compat.test.js');
+runOne('scripts/tests/stem_materialization_regression.test.js');
 runOne('scripts/tests/clip_thumbnail_math.test.js');
 runOne('scripts/tests/waveform_peaks.test.js');
 runOne('scripts/tests/audio_analysis_engine.test.js');
 runOne('scripts/tests/audio_stem_silence_segments.test.js');
+runOne('scripts/tests/manual_audio_split.test.js');
 runOne('scripts/tests/audio_analysis_ui.test.js');
 runOne('scripts/tests/audio_worker_analysis_client.test.js');
 runOne('scripts/tests/audio_instrument_web.test.js');
@@ -56,6 +62,8 @@ runOne('scripts/tests/audio_convert_status.test.js');
 runOne('scripts/tests/audio_convert_segment.test.js');
 runOne('scripts/tests/audio_transcription_controls.test.js');
 runOne('scripts/tests/audio_separation_v0.test.js');
+runOne('scripts/tests/advanced_stem_source_precision.test.js');
+runOne('scripts/tests/waveform_separation_dispatch.test.js');
 runOne('scripts/tests/ui_audio_waveform_editor.test.js');
 runOne('scripts/tests/dark_select_styling.test.js');
 runOne('scripts/tests/ai_assist_dock.test.js');
@@ -72,3 +80,5 @@ runOne('scripts/tests/score_trim_note_extent.test.js');
 runOne('scripts/tests/score_segment_gap_max.test.js');
 
 console.log('\nAll frontend tests (contracts + editor + numeric invariants + timeline) passed.');
+
+runOne('scripts/tests/advanced_stem_timeout_recovery.test.js');
