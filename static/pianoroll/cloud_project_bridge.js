@@ -444,6 +444,7 @@
 
     switch (type) {
       case 'H2S_CLOUD_PING':
+        if (window.H2SStudioUi) window.H2SStudioUi.notify();
         postBack(event.origin, {
           type: 'H2S_CLOUD_PONG',
           requestId: data.requestId,

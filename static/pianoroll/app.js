@@ -4340,10 +4340,14 @@ if (typeof localStorage !== 'undefined') {
 
       // PR-UX4c: AI Settings drawer — restore open state, bind open/close
       if (typeof localStorage !== 'undefined' && localStorage.getItem(LS_KEY_AI_DRAWER_OPEN) === '1') this.state.aiSettingsOpen = true;
-      // PR-UX7a1: AI Assistant dock — default open on first use; persist once user toggles
+      // Mobile preference is separate: a desktop-open preference must not obscure a phone on first use.
+      const narrowAssistant = typeof matchMedia === 'function' && matchMedia('(max-width: 640px)').matches;
+      this._aiAssistStorageKey = LS_KEY_AI_ASSIST_OPEN + (narrowAssistant ? '_mobile' : '');
+      this.state.aiAssistOpen = !narrowAssistant;
+      // Persist once the user toggles.
       if (typeof localStorage !== 'undefined') {
-        const stored = localStorage.getItem(LS_KEY_AI_ASSIST_OPEN);
-        this.state.aiAssistOpen = (stored === null) ? true : (stored === '1');
+        const stored = localStorage.getItem(this._aiAssistStorageKey);
+        this.state.aiAssistOpen = (stored === null) ? !narrowAssistant : (stored === '1');
       }
       this._initAiSettingsDrawer();
       this._initAiAssistDock();
@@ -4916,6 +4920,7 @@ try{
 
       this.render();
       log('UI ready.');
+      if (window.H2SStudioUi) window.H2SStudioUi.runtimeReady();
       try{
         if (typeof window !== 'undefined' && window.H2SStartupPerf){
           if (typeof window.H2SStartupPerf.mark === 'function') window.H2SStartupPerf.mark('studio_runtime_ready');
@@ -4982,6 +4987,7 @@ try{
         for (const o of opts){
           const op = document.createElement('option');
           op.value = o.v;
+          op.setAttribute('data-i18n', o.k);
           op.textContent = _t(o.k);
           sel.appendChild(op);
         }
@@ -5173,9 +5179,10 @@ ensureTrackButtons(){
       });
       if (header) header.addEventListener('click', () => {
         this.state.aiAssistOpen = !this.state.aiAssistOpen;
-        try { localStorage.setItem(LS_KEY_AI_ASSIST_OPEN, this.state.aiAssistOpen ? '1' : '0'); } catch (e) {}
+        try { localStorage.setItem(this._aiAssistStorageKey || LS_KEY_AI_ASSIST_OPEN, this.state.aiAssistOpen ? '1' : '0'); } catch (e) {}
         this.render();
       });
+      if (header) header.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); header.click(); } });
       if (sendBtn) sendBtn.addEventListener('click', () => this._aiAssistSend());
       if (body) body.addEventListener('click', (ev) => {
         const t = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
@@ -5473,6 +5480,8 @@ ensureTrackButtons(){
       } else { dock.style.width = ''; dock.style.height = ''; }
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       if (headerTarget) headerTarget.textContent = this._getAiAssistTargetSummary();
+      const accessibleHeader = document.getElementById('aiAssistHeader');
+      if (accessibleHeader) accessibleHeader.setAttribute('aria-expanded', String(!!this.state.aiAssistOpen));
       if (headerChevron) headerChevron.textContent = this.state.aiAssistOpen ? '\u25BE' : '\u25B8';
       if (messagesEl) {
         const items = this._aiAssistItems || [];
@@ -10575,13 +10584,17 @@ renderTimeline(){
         const I18N = window.I18N;
         const code = _normalizeStudioLocale(lang);
         if (!code) return;
+        const request = this._languageRequest = (this._languageRequest || 0) + 1;
         await I18N.load(code);
+        if (request !== this._languageRequest) return;
         I18N.setLang(code, { persist });
         this._syncInspectorLangSelect();
         this._updateI18nLabels();
         if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
         this.render();
+        if (window.H2SStudioUi) window.H2SStudioUi.languageReady(code);
       }catch(e){
+        if (window.H2SStudioUi) window.H2SStudioUi.fail();
         console.warn('[i18n] applyStudioLanguage failed', e);
         throw e;
       }
@@ -10647,21 +10660,18 @@ renderTimeline(){
         sel.addEventListener('blur', clearLangSelectActive);
         sel.addEventListener('change', onLangChange);
 
+        const request = this._languageRequest = (this._languageRequest || 0) + 1;
+        const initialLanguage = I18N.getLang();
         Promise.all([
           I18N.loadManifest ? I18N.loadManifest().catch(() => {}) : Promise.resolve(),
-          I18N.load(I18N.getLang()).catch(() => {})
+          I18N.load(initialLanguage)
         ]).then(() => {
-          try{
-            if (window.H2SStartupPerf && typeof window.H2SStartupPerf.mark === 'function') window.H2SStartupPerf.mark('studio_i18n_ready');
-          }catch(_perfI18n){}
+          if (request !== this._languageRequest) return;
           populate(); this._updateI18nLabels(); if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip(); this.render();
-        }).catch(() => {
-          try{
-            if (window.H2SStartupPerf && typeof window.H2SStartupPerf.mark === 'function') window.H2SStartupPerf.mark('studio_i18n_ready');
-          }catch(_perfI18n2){}
-          populate(); this._updateI18nLabels(); if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip(); this.render();
-        });
-      }catch(e){ console.warn('[i18n] _initLangDropdown failed', e); }
+          if (window.H2SStartupPerf && typeof window.H2SStartupPerf.mark === 'function') window.H2SStartupPerf.mark('studio_i18n_ready');
+          if (window.H2SStudioUi) window.H2SStudioUi.languageReady(initialLanguage);
+        }).catch(() => { if (window.H2SStudioUi) window.H2SStudioUi.fail(); });
+      }catch(e){ if (window.H2SStudioUi) window.H2SStudioUi.fail(); console.warn('[i18n] _initLangDropdown failed', e); }
     },
 
     _initBeginnerHintBar(){
@@ -10676,6 +10686,7 @@ renderTimeline(){
         const btnClose = document.getElementById('btnBeginnerHintHelpClose');
         const btnEntry = document.getElementById('btnBeginnerHelpEntry');
         const bar = document.getElementById('beginnerHintBar');
+        if (bar && typeof matchMedia === 'function' && matchMedia('(max-width: 640px)').matches) bar.classList.add('hidden');
 
         const openHelp = () => {
           if (!panel) return;
