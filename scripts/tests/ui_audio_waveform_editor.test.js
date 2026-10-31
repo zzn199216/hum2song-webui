@@ -94,7 +94,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 
 (function testAdvancedStemIsASeparatorChoice(){
   const wfSrc = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'ui', 'audio_waveform_editor.js'), 'utf8');
-  assert(wfSrc.includes('data-separator-option-value="advanced_stems"'), 'advanced stems are presented inside the separator-choice group');
+  assert(wfSrc.includes('data-separation-choice-value="advanced_stems"'), 'advanced stems are presented inside the separator-choice group');
   assert(wfSrc.includes('value="advanced_stems" data-advanced-option'), 'advanced stems participate in the single select state');
   assert(wfSrc.includes("requestedSeparator === 'advanced_stems'"), 'the shared separation action dispatches the advanced provider');
   assert(wfSrc.includes('advancedOption.disabled = midiEnabled'), 'advanced audio-only separation cannot be combined with MIDI conversion');

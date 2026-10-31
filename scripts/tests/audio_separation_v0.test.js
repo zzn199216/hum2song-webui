@@ -28,11 +28,11 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'startup-cache-v6'"));
-  assert(html.includes('studio_asset_version.js?v=startup-cache-v6'));
-  assert(html.includes('audio_worker_separation_client.js?v=startup-cache-v6'));
-  assert(html.includes('audio_stem_silence_segments.js?v=startup-cache-v6'));
-  assert(html.includes('app.js?v=startup-cache-v6'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'separation-choices-v7'"));
+  assert(html.includes('studio_asset_version.js?v=separation-choices-v7'));
+  assert(html.includes('audio_worker_separation_client.js?v=separation-choices-v7'));
+  assert(html.includes('audio_stem_silence_segments.js?v=separation-choices-v7'));
+  assert(html.includes('app.js?v=separation-choices-v7'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -61,8 +61,9 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(waveform.includes('data-role="wfSeparatorOption"'));
   assert(waveform.includes('data-role="wfSeparatorOptionChoices"'));
   assert(waveform.includes('data-role="wfSeparationModeChoices"'));
-  assert(waveform.includes('data-separator-option-value="uvr5_ensemble_vocal_full"'));
-  assert(waveform.includes('data-separator-option-value="advanced_stems"'));
+  assert(waveform.includes('data-separation-choice-value="vocal"'));
+  assert(waveform.includes('data-separation-choice-value="multitrack"'));
+  assert(waveform.includes('data-separation-choice-value="advanced_stems"'));
   assert(waveform.includes('data-separation-mode-value="separate_and_transcribe"'));
   assert(waveform.includes("button.classList.toggle('is-selected', selected)"));
   assert(waveform.includes('transcribeOption.disabled = uvrSelected'));

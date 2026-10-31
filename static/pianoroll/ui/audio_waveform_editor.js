@@ -388,9 +388,9 @@
             '<div class="h2s-audio-waveform-separation-field">' +
               '<span data-i18n-role="wfSeparatorOptionLabel"></span>' +
               '<div class="h2s-audio-waveform-choice-group" data-role="wfSeparatorOptionChoices" role="radiogroup">' +
-                '<button type="button" class="h2s-audio-waveform-choice is-selected" data-separator-option-value="demucs" role="radio" aria-checked="true"></button>' +
-                '<button type="button" class="h2s-audio-waveform-choice" data-separator-option-value="uvr5_ensemble_vocal_full" role="radio" aria-checked="false" hidden disabled></button>' +
-                '<button type="button" class="h2s-audio-waveform-choice h2s-audio-waveform-choice-advanced" data-separator-option-value="advanced_stems" role="radio" aria-checked="false"></button>' +
+                '<button type="button" class="h2s-audio-waveform-choice" data-separation-choice-value="vocal" role="radio" aria-checked="false"></button>' +
+                '<button type="button" class="h2s-audio-waveform-choice is-selected" data-separation-choice-value="multitrack" role="radio" aria-checked="true"></button>' +
+                '<button type="button" class="h2s-audio-waveform-choice h2s-audio-waveform-choice-advanced" data-separation-choice-value="advanced_stems" role="radio" aria-checked="false"></button>' +
               '</div>' +
               '<select data-role="wfSeparatorOption" hidden aria-hidden="true" tabindex="-1">' +
                 '<option value="demucs" selected></option>' +
@@ -419,7 +419,7 @@
               '</select>' +
             '</div>' +
             '<div class="muted" data-role="wfSeparatorOptionHint"></div>' +
-            '<label><span data-i18n-role="wfIntentLabel"></span><select data-role="wfSeparationIntent"><option value="vocal"></option><option value="multitrack" selected></option></select></label>' +
+            '<label hidden style="display:none"><span data-i18n-role="wfIntentLabel"></span><select data-role="wfSeparationIntent" tabindex="-1" aria-hidden="true"><option value="vocal"></option><option value="multitrack" selected></option></select></label>' +
             '<div class="muted" data-role="wfSeparationCost"></div>' +
           '</div>' +
         '</div>';
@@ -509,11 +509,10 @@
         if (openCtx) openCtx.separationSubmissionKey = null;
       });
       if (separatorOption) separatorOption.addEventListener('change', syncSeparatorAvailability);
-      Array.prototype.forEach.call(panel.querySelectorAll('[data-separator-option-value]'), function (button) {
+      Array.prototype.forEach.call(panel.querySelectorAll('[data-separation-choice-value]'), function (button) {
         button.addEventListener('click', function () {
-          if (!separatorOption || button.disabled) return;
-          separatorOption.value = button.getAttribute('data-separator-option-value') || 'demucs';
-          syncSeparatorAvailability();
+          if (button.disabled) return;
+          selectSeparationChoice(button.getAttribute('data-separation-choice-value'));
         });
       });
       Array.prototype.forEach.call(panel.querySelectorAll('[data-separation-mode-value]'), function (button) {
@@ -676,9 +675,49 @@
       });
     }
 
+    function selectSeparationChoice(value) {
+      if (!panel || separationBusy || silenceSplitBusy || _isConvertBusy()) return;
+      if (['vocal', 'multitrack', 'advanced_stems'].indexOf(value) < 0) return;
+      var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
+      var intent = panel.querySelector('[data-role="wfSeparationIntent"]');
+      var preset = panel.querySelector('[data-role="wfSeparationPreset"]');
+      var mode = panel.querySelector('[data-role="wfSeparationMode"]');
+      var beforeConvert = panel.querySelector('[data-role="wfSeparateBeforeConvert"]');
+      if (!separator || !intent) return;
+      var previous = separator.value === 'advanced_stems' ? 'advanced_stems' : intent.value;
+      if (previous !== value && openCtx) openCtx.separationSubmissionKey = null;
+      separator.value = value === 'advanced_stems' ? 'advanced_stems' : 'demucs';
+      if (value === 'advanced_stems') {
+        if (mode) mode.value = 'separate_only';
+        if (beforeConvert) beforeConvert.checked = false;
+      } else {
+        intent.value = value;
+        if (preset) preset.value = value === 'vocal' ? 'vocals_instrumental' : 'four_stem';
+      }
+      syncSeparatorAvailability();
+    }
+
     function syncSeparationChoiceButtons() {
-      syncTwoChoiceButtons('wfSeparatorOption', 'wfSeparatorOptionChoices', 'data-separator-option-value');
+      if (!panel) return;
+      var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
+      var intent = panel.querySelector('[data-role="wfSeparationIntent"]');
+      var advanced = !!(separator && separator.value === 'advanced_stems');
+      var selected = advanced ? 'advanced_stems' : (intent ? intent.value : 'multitrack');
+      var labels = {
+        vocal: t('audio.multistem.vocal', 'Vocal separation'),
+        multitrack: t('audio.multistem.multi', 'Multitrack separation'),
+        advanced_stems: t('audio.waveform.sunoChoice', 'Suno stems'),
+      };
+      Array.prototype.forEach.call(panel.querySelectorAll('[data-separation-choice-value]'), function (button) {
+        var value = button.getAttribute('data-separation-choice-value');
+        button.textContent = labels[value];
+        button.disabled = !!(separator && separator.disabled) || separationBusy || silenceSplitBusy || _isConvertBusy();
+        button.classList.toggle('is-selected', value === selected);
+        button.setAttribute('aria-checked', value === selected ? 'true' : 'false');
+      });
       syncTwoChoiceButtons('wfSeparationMode', 'wfSeparationModeChoices', 'data-separation-mode-value');
+      var audioOnly = panel.querySelector('[data-separation-mode-value="separate_only"]');
+      if (advanced && audioOnly) audioOnly.textContent = t('audio.waveform.sunoAudioOnly', 'Create audio stems (30 audio credits)');
     }
 
     function syncSeparatorAvailability() {
@@ -705,8 +744,11 @@
       }
       if (advancedSelected && mode) mode.value = 'separate_only';
       var intent = panel.querySelector('[data-role="wfSeparationIntent"]');
-      if (intent) intent.parentElement.hidden = advancedSelected;
-      if (transcribeOption) transcribeOption.disabled = uvrSelected || advancedSelected;
+      if (intent) intent.parentElement.hidden = true;
+      if (transcribeOption) {
+        transcribeOption.disabled = uvrSelected || advancedSelected;
+        transcribeOption.hidden = advancedSelected;
+      }
       if (preset) preset.disabled = uvrSelected || advancedSelected || separationBusy || silenceSplitBusy || _isConvertBusy();
       var hint = panel.querySelector('[data-role="wfSeparatorOptionHint"]');
       if (hint) hint.textContent = advancedSelected

@@ -57,3 +57,20 @@ console.log('PASS waveform manual splitting targets only the selected timeline o
   values.wfSeparationMode.value='separate_only'; price(); assert(values.wfSeparationCost.textContent.includes('1'));
   console.log('PASS waveform new-intent combined dispatch, Suno dispatch and 1/2/30 pricing');
 })().catch(e=>{console.error(e);process.exitCode=1;});
+
+(function testThreeExplicitChoices() {
+  const waveform = fs.readFileSync(path.join(__dirname, '../../static/pianoroll/ui/audio_waveform_editor.js'), 'utf8');
+  const from = waveform.indexOf('    function selectSeparationChoice(');
+  const to = waveform.indexOf('    function syncSeparationChoiceButtons()', from);
+  const values = { wfSeparatorOption: { value: 'demucs' }, wfSeparationIntent: { value: 'multitrack' }, wfSeparationPreset: { value: 'four_stem' }, wfSeparationMode: { value: 'separate_and_transcribe' }, wfSeparateBeforeConvert: { checked: true } };
+  let refreshes = 0;
+  const context = { panel: { querySelector: s => values[s.match(/"([^"]+)"/)[1]] }, separationBusy: false, silenceSplitBusy: false, _isConvertBusy: () => false, openCtx: { separationSubmissionKey: 'existing' }, syncSeparatorAvailability: () => refreshes++ };
+  const choose = vm.runInNewContext('(' + waveform.slice(from, to).trim() + ')', context);
+  choose('multitrack'); assert.equal(context.openCtx.separationSubmissionKey, 'existing', 'same choice preserves retry identity');
+  choose('vocal'); assert.equal(values.wfSeparatorOption.value, 'demucs'); assert.equal(values.wfSeparationIntent.value, 'vocal'); assert.equal(values.wfSeparationPreset.value, 'vocals_instrumental'); assert.equal(values.wfSeparationMode.value, 'separate_and_transcribe', 'ordinary conversion remains available'); assert.equal(context.openCtx.separationSubmissionKey, null);
+  choose('advanced_stems'); assert.equal(values.wfSeparatorOption.value, 'advanced_stems'); assert.equal(values.wfSeparationMode.value, 'separate_only'); assert.equal(values.wfSeparateBeforeConvert.checked, false);
+  choose('multitrack'); assert.equal(values.wfSeparatorOption.value, 'demucs'); assert.equal(values.wfSeparationIntent.value, 'multitrack'); assert.equal(values.wfSeparationPreset.value, 'four_stem');
+  context.separationBusy = true; choose('vocal'); assert.equal(values.wfSeparationIntent.value, 'multitrack', 'running tasks cannot switch target');
+  context.separationBusy = false; choose('unknown'); assert.equal(refreshes, 4);
+  console.log('PASS three separation choices map to existing routes and preserve busy/retry guards');
+})();
