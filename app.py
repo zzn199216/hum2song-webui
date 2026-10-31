@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,10 @@ class StudioStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):  # type: ignore[override]
         response = await super().get_response(path, scope)
         normalized = path.replace("\\", "/").lower()
+        # Only content-addressed startup bundles are immutable. A query string
+        # alone does not guarantee an old URL still identifies the same bytes.
+        if re.fullmatch(r"pianoroll/startup-[0-9a-f]{16}\.js", normalized):
+            response.headers["Cache-Control"] = VERSIONED_MODEL_CACHE_CONTROL
         if normalized.endswith(".mjs"):
             # ORT loads its WASM backend through a dynamic module import.  A
             # text/plain response makes Chromium reject that import before the
@@ -103,7 +108,7 @@ def _render_studio_index(index_path: Path, settings: Settings) -> HTMLResponse:
         html = html.replace(marker, script + "\n" + marker, 1)
     else:
         html = html.replace("</body>", script + "\n</body>", 1)
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @asynccontextmanager

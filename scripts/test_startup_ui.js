@@ -22,7 +22,7 @@ for (const first of ['runtimeReady', 'languageReady']) {
   const f = fixture();
   f.ui[first]('zh'); f.tick(); assert.equal(f.panel.hidden, false);
   f.ui[first === 'runtimeReady' ? 'languageReady' : 'runtimeReady']('zh');
-  assert.equal(f.panel.hidden, false); f.tick();
+  // Never flush animation frames: hidden tabs must become ready too.
   assert.equal(f.panel.hidden, true); assert.equal(f.root.dataset.studioUiState, 'ready');
   assert.equal(f.messages.at(-1).locale, 'zh');
   f.ui.fail(); assert.equal(f.root.dataset.studioUiState, 'ready', 'later errors must not cover existing work');
@@ -41,4 +41,4 @@ for (const first of ['runtimeReady', 'languageReady']) {
   f.retry.onclick(); assert.equal(f.didReload(), true);
   f.ui.languageReady('zh'); f.tick(); assert.equal(f.panel.hidden, true, 'late successful resources recover from timeout');
 }
-console.log('startup_ui: readiness ordering, paint boundary, error, retry and recovery passed');
+console.log('startup_ui: readiness ordering without paint, error, retry and recovery passed');

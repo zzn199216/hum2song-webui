@@ -15,10 +15,10 @@
   }
   function finish() {
     if (!runtime || !language) return;
-    requestAnimationFrame(function () {
-      state = 'ready'; document.documentElement.dataset.studioUiState = 'ready';
-      panel.hidden = true; clearTimeout(timeout); clearTimeout(slowTimer); notify();
-    });
+    // Readiness is a resource state, not a paint event. Background/occluded
+    // frames may suspend requestAnimationFrame even when initialization is done.
+    state = 'ready'; reason = null; document.documentElement.dataset.studioUiState = 'ready';
+    panel.hidden = true; clearTimeout(timeout); clearTimeout(slowTimer); notify();
   }
   function fail(code) {
     if (state === 'ready') return;

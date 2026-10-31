@@ -58,6 +58,22 @@ def test_unversioned_studio_scripts_do_not_inherit_sampler_cache_policy(client):
     )
 
 
+def test_content_hashed_startup_bundle_cache(monkeypatch, tmp_path):
+    import asyncio
+    from app import StudioStaticFiles
+    assets = tmp_path / "pianoroll"
+    assets.mkdir()
+    (assets / "startup-0123456789abcdef.js").write_text("void 0;", encoding="utf-8")
+    static = StudioStaticFiles(directory=str(tmp_path))
+    scope = {"type": "http", "method": "GET", "headers": []}
+    response = asyncio.run(static.get_response("pianoroll/startup-0123456789abcdef.js", scope))
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_ui_always_revalidates_release_entrypoint(client):
+    assert client.get("/ui").headers["cache-control"] == "no-cache"
+
+
 def test_production_cors_uses_explicit_config(monkeypatch, tmp_path):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
