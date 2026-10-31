@@ -372,7 +372,7 @@
   "top.importAudioClip": "Import as audio",
   "top.importAudioClipTitle": "Add original audio as a clip (saved in this browser; no piano roll editing)",
   "top.importAudio": "Import audio",
-  "top.importAudioTitle": "Pick a file. With “Make editable notes” on (default), transcribe via the server. With it off, add original audio only (saved in this browser).",
+  "top.importAudioTitle": "Pick a file. By default, import original audio only (saved in this browser). Select “Make editable notes” when you want server transcription.",
   "top.importAudioMakeNotesLabel": "Make editable notes (server)",
   "top.importAudioMakeNotesTitle": "On: create an editable note clip (uses the server). Off: keep the file as original audio only (saved in this browser; not editable in the piano roll).",
   "top.importAudioModeHint": "When enabled, Transcription settings apply to imported audio.",

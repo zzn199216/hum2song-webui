@@ -366,7 +366,7 @@
   "top.importAudioClip": "音声としてインポート",
   "top.importAudioClipTitle": "元音声をクリップとして追加します（このブラウザーに保存、ピアノロール編集なし）",
   "top.importAudio": "音声をインポート",
-  "top.importAudioTitle": "ファイルを選択します。「編集可能なノートを作成」がオン（既定）の場合はサーバーで採譜し、オフの場合は元音声のみを追加します（このブラウザーに保存）。",
+  "top.importAudioTitle": "ファイルを選択します。初期設定では元音声のみを追加します（このブラウザーに保存）。サーバーで採譜する場合は「編集可能なノートを作成」を選択してください。",
   "top.importAudioMakeNotesLabel": "編集可能なノートを作成（サーバー）",
   "top.importAudioMakeNotesTitle": "オン: 編集可能なノートクリップを作成します（サーバー使用）。オフ: 元音声のみ保持します（このブラウザーに保存、ピアノロール編集不可）。",
   "top.importAudioModeHint": "オンにすると、採譜設定が読み込んだ音声に適用されます。",
