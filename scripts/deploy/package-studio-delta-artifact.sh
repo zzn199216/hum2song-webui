@@ -58,7 +58,7 @@ for asset in \
 done
 
 log "Running complete Studio frontend suite"
-node scripts/run_frontend_all_tests.js
+node scripts/test-changed.js run --base "${BASE_COMMIT}" --release --full
 
 mapfile -d '' changed_paths < <(git diff --name-only -z "${BASE_COMMIT}"..HEAD)
 [[ "${#changed_paths[@]}" -gt 0 ]] || die "no changed files to package"

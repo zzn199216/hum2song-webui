@@ -9,7 +9,9 @@ function runOne(script){
   }
 }
 
+runOne('scripts/tests/test_changed.test.js');
 runOne('scripts/tests/studio_source_syntax.test.js');
+runOne('scripts/tests/multistem_source_origin.test.js');
 runOne('scripts/tests/notation.test.js');
 runOne('scripts/tests/notation_system_pages.test.js');
 runOne('scripts/tests/notation_pdf.test.js');

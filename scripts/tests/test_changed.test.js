@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {plan}=require('../test-changed.js');
+assert.deepEqual(plan(['docs/report.md','output/canary.json']).tests,[]);
+assert.deepEqual(plan(['static/i18n/locales/zh.json']).tests,['scripts/tests/i18n.test.js']);
+assert.equal(plan(['static/i18n/locales/zh.json']).externalStatus,'NOT_RUN');
+assert.deepEqual(plan(['static/pianoroll/style.css']).tests,['scripts/tests/dark_select_styling.test.js']);
+for(const f of ['static/pianoroll/app.js','static/pianoroll/core/audio_worker_conversion_client.js','unknown-config.json','scripts/tests/removed.test.js'])assert.deepEqual(plan([f]).tests,['scripts/run_frontend_all_tests.js']);
+assert.deepEqual(plan(['static/i18n/locales/zh.json'],{release:true}).tests,['scripts/run_frontend_all_tests.js']);
+assert.deepEqual(plan([],{full:true}).tests,['scripts/run_frontend_all_tests.js']);
+assert.deepEqual(plan(['scripts/test-changed.js']).tests,['scripts/tests/test_changed.test.js']);
+console.log('PASS changed-test planner: locale/css selection, broad/deleted/unknown fallback, mandatory release suite');

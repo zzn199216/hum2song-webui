@@ -56,3 +56,6 @@ assets/**
 .deploy-artifacts/
 .deploy-tmp/
 
+
+# Local verification report
+.verification-cache/
