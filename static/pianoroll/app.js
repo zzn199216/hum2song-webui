@@ -10589,6 +10589,9 @@ renderTimeline(){
         await I18N.load(code);
         if (request !== this._languageRequest) return;
         I18N.setLang(code, { persist });
+        // Host locale can arrive while the parallel boot waits for identity.
+        // Preload the translation now; init will render after safe restoration.
+        if (!this.project) return;
         this._syncInspectorLangSelect();
         this._updateI18nLabels();
         if (typeof this._renderBackendReadinessStrip === 'function') this._renderBackendReadinessStrip();
