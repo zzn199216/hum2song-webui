@@ -131,7 +131,7 @@ assert(timelineController.includes("textOverflow = 'ellipsis'"), 'compact instru
 const indexHtml = fs.readFileSync(path.join(root, 'static/pianoroll/index.html'), 'utf8');
 const manifestScriptIndex = indexHtml.indexOf('core/instrument_manifest.js');
 const timelineScriptIndex = indexHtml.indexOf('timeline_controller.js');
-const instrumentCacheBust = 'startup-fast-v4';
+const instrumentCacheBust = 'startup-parallel-v5';
 assert(manifestScriptIndex >= 0, 'index should load the instrument manifest');
 assert(timelineScriptIndex >= 0, 'index should load the timeline controller');
 assert(manifestScriptIndex < timelineScriptIndex, 'manifest should load before timeline controller');

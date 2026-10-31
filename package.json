@@ -1,0 +1,5 @@
+{
+  "name": "hum2song-studio-build",
+  "private": true,
+  "devDependencies": { "esbuild": "0.27.7" }
+}

@@ -1,2 +1,2 @@
 /** Bumped when pianoroll app.js / cloud_project_bridge.js behavior changes (cache bust). */
-  window.H2S_STUDIO_ASSET_VERSION = 'startup-fast-v4';
+  window.H2S_STUDIO_ASSET_VERSION = 'startup-parallel-v5';

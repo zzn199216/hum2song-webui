@@ -443,6 +443,11 @@
     if (typeof type !== 'string') return;
 
     switch (type) {
+      case 'H2S_HOST_BIND_STUDIO_SESSION': {
+        if (event.source !== window.parent || data.version !== 1) return;
+        if (window.H2SCloudBoot) window.H2SCloudBoot.bind(data.hostSessionKey);
+        return;
+      }
       case 'H2S_CLOUD_PING':
         if (window.H2SStudioUi) window.H2SStudioUi.notify();
         postBack(event.origin, {

@@ -1820,6 +1820,7 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
   function _cloudHostSessionKeyFromLocation(){
     if (!_cloudModeRequestedForStorageReset()) return '';
+    if (window.H2S_CLOUD_HOST_SESSION_KEY) return window.H2S_CLOUD_HOST_SESSION_KEY;
     try{
       const params = new URLSearchParams((typeof window !== 'undefined' && window.location) ? (window.location.search || '') : '');
       const raw = String(params.get('hostSession') || '').trim();
@@ -11165,7 +11166,10 @@ renderTimeline(){
           });
         }
 
-        refreshUploadStatus();
+        // This inspector is collapsed at boot. Probe files only when opened;
+        // playback and explicit instrument selection already load on demand.
+        const libraryBox = document.getElementById('instrumentLibraryBox');
+        if (libraryBox) libraryBox.addEventListener('toggle', () => { if (libraryBox.open) refreshUploadStatus(); });
         if (window.H2SInstrumentLibraryStore && window.H2SInstrumentLibraryStore.listCustomInstruments){
           window.H2SInstrumentLibraryStore.listCustomInstruments().then(list => {
             window.__h2s_custom_instruments = list;
@@ -11346,11 +11350,15 @@ renderTimeline(){
 // Boot when the DOM is ready; waiting for window.load keeps Cloud users on the
 // loading overlay until every parser-blocking script and noncritical resource is done.
   function bootAppWhenDomReady(){
+    function start() {
+      if (window.H2SCloudBoot) window.H2SCloudBoot.run(() => app.init());
+      else app.init();
+    }
     if (document.readyState === 'loading'){
-      document.addEventListener('DOMContentLoaded', () => app.init(), { once: true });
+      document.addEventListener('DOMContentLoaded', start, { once: true });
       return;
     }
-    setTimeout(() => app.init(), 0);
+    setTimeout(start, 0);
   }
   bootAppWhenDomReady();
 })();

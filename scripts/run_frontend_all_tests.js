@@ -60,6 +60,7 @@ runOne('scripts/tests/cloud_ai_settings_drawer.test.js');
 runOne('scripts/tests/studio_cloud_ai_runtime.test.js');
 runOne('scripts/tests/studio_startup_perf.test.js');
 runOne('scripts/test_startup_ui.js');
+runOne('scripts/tests/cloud_boot.test.js');
 runOne('scripts/tests/startup_bundle.test.js');
 runOne('scripts/tests/cloud_materials_panel.test.js');
 runOne('scripts/tests/humming_music_mvp_contract.test.js');

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
+const esbuild = require('esbuild');
 function build(root, output) {
   const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
   const digest = content => crypto.createHash('sha256').update(content).digest('hex');
@@ -17,13 +18,16 @@ function build(root, output) {
     const sources = Array.from(original.matchAll(new RegExp(tag, 'g')), m => m[1]);
     if (sources.some(s => !s.endsWith('.js') || s.includes('..'))) throw new Error('Invalid script path');
     const sourceHashes = Object.fromEntries(sources.map(s => [s, digest(read(s.slice(1)))]));
-    const content = sources.map(s => '\n;\n/* ' + s + ' */\n' + read(s.slice(1)) + '\n').join('');
+    const rawContent = sources.map(s => '\n;\n/* ' + s + ' */\n' + read(s.slice(1)) + '\n').join('');
+    const content = esbuild.transformSync(rawContent, {
+      minify: true, keepNames: true, target: 'es2020', charset: 'utf8', legalComments: 'inline',
+    }).code;
     new vm.Script(content); // Reject invalid combined lexical scope before release.
     const hash = crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
     const file = 'static/pianoroll/startup-' + hash + '.js';
     fs.mkdirSync(path.join(output, 'static/pianoroll'), {recursive:true});
     fs.writeFileSync(path.join(output, file), content);
-    groups.push({file, sources, sourceHashes, sha256:digest(content), bytes:Buffer.byteLength(content)});
+    groups.push({file, sources, sourceHashes, sha256:digest(content), bytes:Buffer.byteLength(content), rawBytes:Buffer.byteLength(rawContent)});
     return '<script src="/' + file + '"></script>\n';
   });
   if (!groups.length) throw new Error('No startup script groups found');
