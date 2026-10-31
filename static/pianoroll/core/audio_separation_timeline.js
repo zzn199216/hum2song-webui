@@ -74,11 +74,33 @@
     }) || null;
   }
 
+  var STEM_LABELS = {
+    vocals: 'Vocals', instrumental: 'Instrumental', other: 'Other accompaniment', accordion: 'Accordion',
+    acoustic_guitar: 'Acoustic guitar', back_vocal: 'Backing vocals', banjo: 'Banjo', bass: 'Bass', bassoon: 'Bassoon',
+    bells: 'Bells', bowed_strings: 'Bowed strings', brass: 'Brass', cello: 'Cello', clarinet: 'Clarinet', congas: 'Congas',
+    digital_piano: 'Digital piano', dobro: 'Resonator guitar', double_bass: 'Double bass', drums: 'Drums',
+    electric_guitar: 'Electric guitar', flute: 'Flute', french_horn: 'French horn', glockenspiel: 'Glockenspiel',
+    guitar: 'Guitar', harmonica: 'Harmonica', harp: 'Harp', harpsichord: 'Harpsichord', hh: 'Hi-hat', keys: 'Keyboards',
+    kick: 'Kick drum', lead_vocal: 'Lead vocals', mandolin: 'Mandolin', marimba: 'Marimba', oboe: 'Oboe', organ: 'Organ',
+    percussion: 'Percussion', piano: 'Piano', saxophone: 'Saxophone', sitar: 'Sitar', snare: 'Snare drum', strings: 'Strings',
+    synth: 'Synthesizer', tambourine: 'Tambourine', timpani: 'Timpani', toms: 'Toms', triangle: 'Triangle',
+    trombone: 'Trombone', trumpet: 'Trumpet', tuba: 'Tuba', ukulele: 'Ukulele', viola: 'Viola', violin: 'Violin',
+    wind: 'Wind instruments', wind_chimes: 'Wind chimes', woodwind: 'Woodwinds',
+  };
+
   var api = {
     stemLabel: function (stem) {
-      var fallback = { vocals: 'Vocals', instrumental: 'Instrumental', piano: 'Piano', guitar: 'Guitar', bass: 'Bass', drums: 'Drums', other: 'Other sounds' }[stem] || stem;
+      var fallback = STEM_LABELS[stem] || stem;
       return typeof window !== 'undefined' && window.I18N && window.I18N.t ? window.I18N.t('audio.stem.' + stem, fallback) : fallback;
     },
+    stemInstrument: function (stem) {
+      if (['drums', 'kick', 'snare', 'hh', 'toms', 'percussion', 'congas', 'tambourine', 'timpani', 'triangle'].indexOf(stem) >= 0) return 'drum';
+      return { bass: 'bass', double_bass: 'contrabass', guitar: 'guitar-acoustic', acoustic_guitar: 'guitar-acoustic',
+        electric_guitar: 'guitar-electric', dobro: 'guitar-acoustic', violin: 'violin', cello: 'cello',
+        strings: 'strings', bowed_strings: 'strings', flute: 'flute', clarinet: 'clarinet', trumpet: 'trumpet',
+        french_horn: 'french-horn', trombone: 'trombone', saxophone: 'saxophone', synth: 'lead', organ: 'pad', keys: 'pad' }[stem] || 'default';
+    },
+    STEM_LABELS: STEM_LABELS,
     timelineItems: timelineItems,
     planTrackIndices: planTrackIndices,
     findArtifact: findArtifact,

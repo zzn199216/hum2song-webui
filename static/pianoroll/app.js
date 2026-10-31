@@ -7228,10 +7228,10 @@ renderTimeline(){
       const p2 = this.getProjectV2();
       const track = p2 && p2.tracks && p2.tracks[trackIndex];
       if (!track) return;
-      const names = { drums: 'Drums', bass: 'Bass', piano: 'Piano', guitar: 'Guitar', vocals: 'Vocals', other: 'Other', instrumental: 'Instrumental' };
-      if (!Object.prototype.hasOwnProperty.call(names, stem)) return;
-      track.name = names[stem];
-      track.instrument = instrumentOverride || (stem === 'drums' ? 'drum' : stem === 'bass' ? 'bass' : stem === 'guitar' ? 'guitar-acoustic' : 'default');
+      const helper = window.H2SAudioSeparationTimeline;
+      if (!helper || !Object.prototype.hasOwnProperty.call(helper.STEM_LABELS, stem)) return;
+      track.name = helper.stemLabel(stem);
+      track.instrument = instrumentOverride || helper.stemInstrument(stem);
       // Write canonical v2 first. persist() intentionally preserves its instrument
       // over the legacy view, which otherwise resets the imported stem to piano.
       this.setProjectFromV2(p2, { render: false });
@@ -7328,7 +7328,7 @@ renderTimeline(){
         if (result.manifest.schemaVersion === 'h2s-multistem/v1') {
           const updated = this.getProjectV2();
           updated.clips[clipId].meta = Object.assign({}, updated.clips[clipId].meta, {
-            multistemResult: { jobId: result.workerJobId, stems: result.manifest.stems.filter(s => s.presence === 'quiet') },
+            multistemResult: { jobId: result.workerJobId, stems: result.manifest.stems.filter(s => s.presence !== 'candidate') },
           });
           this.setProjectFromV2(updated);
         }
@@ -7419,10 +7419,10 @@ renderTimeline(){
           current.clips[clipId].meta.multistemSubmission = null;
           this.setProjectFromV2(current);
         }
-        const quietCount = (result.manifest.stems || []).filter(s => s.presence === 'quiet').length;
+        const quietCount = (result.manifest.stems || []).filter(s => s.presence !== 'candidate').length;
         const done = allFailures.length
           ? ('AI 自动分轨完成，但部分 stem 失败：' + allFailures.join('；'))
-          : 'AI 自动分轨完成。原始音频已保留。' + (quietCount ? '已隐藏 ' + quietCount + ' 个很安静的轨道。' : '');
+          : 'AI 自动分轨完成。原始音频已保留。' + (quietCount ? '已折叠 ' + quietCount + ' 个较弱或存疑声部，可按需恢复。' : '');
         this._setAudioSeparationStatus(done);
         this.setImportStatus(done, false);
         if (!allFailures.length) this.closeAudioSeparation(true);
@@ -7456,13 +7456,15 @@ renderTimeline(){
           const stem = quietStems[i];
           const downloaded = await window.H2SAudioWorkerSeparationClient.downloadArtifact(saved.jobId, stem.audio.artifactId);
           this.ensureTimelineTrackIndex(plan.trackIndices[i]);
-          const imported = await this._commitNativeAudioFile(new File([downloaded.buffer], stem.category + '.wav', { type: 'audio/wav' }), {
+          const mime = downloaded.mimeType || stem.audio.mimeType || 'audio/wav';
+          const filename = downloaded.filename || stem.audio.filename || (stem.category + (mime === 'audio/mpeg' ? '.mp3' : '.wav'));
+          const imported = await this._commitNativeAudioFile(new File([downloaded.buffer], filename, { type: mime }), {
             baseName: window.H2SAudioSeparationTimeline.stemLabel(stem.category), startBeat: instance.startBeat, trackIndex: plan.trackIndices[i],
           });
           if (!imported || !imported.ok) throw new Error('audio_materialize_failed');
           const current = this.getProjectV2();
           const c = current.clips[imported.clipId];
-          c.meta.multistemSource = { jobId: saved.jobId, stemId: stem.stemId, assetRef: c.audio.assetRef, quiet: true };
+          c.meta.multistemSource = { jobId: saved.jobId, stemId: stem.stemId, assetRef: c.audio.assetRef, quiet: stem.presence === 'quiet' };
           current.clips[clipId].meta.multistemResult.stems = current.clips[clipId].meta.multistemResult.stems.filter(s => s.stemId !== stem.stemId);
           this.setProjectFromV2(current);
         }

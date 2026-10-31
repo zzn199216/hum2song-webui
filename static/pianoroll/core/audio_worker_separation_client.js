@@ -38,6 +38,16 @@
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
+  async function readHost(base, type, payload, options, deadline) {
+    for (var attempt = 0; ; attempt += 1) {
+      try { return await base._requestHost(type, payload, null, options); }
+      catch (error) {
+        if (attempt >= 2 || !/^(worker_timeout|network_error|network_failed|fetch_failed)$/.test(String(error && error.message)) || Date.now() >= deadline) throw error;
+        await delay(1000 * (attempt + 1));
+      }
+    }
+  }
+
   function directUploadInfo(file) {
     if (!file || typeof file.arrayBuffer !== 'function') return null;
     var type = String(file.type || '').split(';')[0].trim().toLowerCase();
@@ -185,10 +195,10 @@
     var started = Date.now();
     for (;;) {
       if (Date.now() - started > MAX_WAIT_MS) throw new Error('worker_timeout');
-      var response = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_JOB_STATUS', { jobId: jobId }, null, {
+      var response = await readHost(base, 'H2S_CLOUD_AUDIO_SEPARATION_JOB_STATUS', { jobId: jobId }, {
         timeoutMs: STATUS_TIMEOUT_MS,
         stage: 'separation_status',
-      });
+      }, started + MAX_WAIT_MS);
       var statusJob = response && response.job ? response.job : {};
       emit(options, { phase: 'processing', jobId: jobId, status: statusJob.status || '' });
       if (statusJob.status === 'failed' || statusJob.status === 'cancelled') {
@@ -204,10 +214,10 @@
       await delay(POLL_MS);
     }
 
-    var result = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_JOB_RESULT', { jobId: jobId }, null, {
+    var result = await readHost(base, 'H2S_CLOUD_AUDIO_SEPARATION_JOB_RESULT', { jobId: jobId }, {
       timeoutMs: RESULT_TIMEOUT_MS,
       stage: 'separation_result',
-    });
+    }, Date.now() + 3 * RESULT_TIMEOUT_MS);
     if (!result || !result.manifest || !Array.isArray(result.artifacts)) throw new Error('result_unavailable');
     return {
       ok: true,
@@ -221,10 +231,10 @@
   async function downloadArtifact(jobId, artifactId) {
     var base = baseClient();
     if (!base || typeof base._requestHost !== 'function') throw new Error('worker_unavailable');
-    var response = await base._requestHost('H2S_CLOUD_AUDIO_SEPARATION_ARTIFACT', {
+    var response = await readHost(base, 'H2S_CLOUD_AUDIO_SEPARATION_ARTIFACT', {
       jobId: String(jobId || ''),
       artifactId: String(artifactId || ''),
-    }, null, { timeoutMs: ARTIFACT_TIMEOUT_MS, stage: 'separation_artifact' });
+    }, { timeoutMs: ARTIFACT_TIMEOUT_MS, stage: 'separation_artifact' }, Date.now() + 3 * ARTIFACT_TIMEOUT_MS);
     if (!(response.artifactBuffer instanceof ArrayBuffer)) throw new Error('result_unavailable');
     return {
       buffer: response.artifactBuffer,

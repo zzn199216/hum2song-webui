@@ -60,7 +60,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 (function testIndexLoadsWorkerClientBeforeApp(){
   const indexHtml = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'index.html'), 'utf8');
   assert(indexHtml.includes('core/audio_worker_conversion_client.js'), 'index loads worker conversion client');
-  assert(indexHtml.includes('separation-choices-v7'), 'index cache-busts the current Studio release');
+  assert(indexHtml.includes('dynamic-stems-preview-v8'), 'index cache-busts the current Studio release');
   assert(indexHtml.indexOf('core/audio_worker_conversion_client.js') < indexHtml.indexOf('app.js?v='), 'worker client loads before app');
   console.log('PASS index worker conversion client load order');
 })();
