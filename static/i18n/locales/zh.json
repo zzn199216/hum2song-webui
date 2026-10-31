@@ -233,7 +233,7 @@
   "beginnerHint.region": "在编曲里先做这些",
   "beginnerHint.stepStudio1a": "在顶部栏使用 ",
   "beginnerHint.stepStudio1b": " 或 ",
-  "beginnerHint.stepStudio1c": "。若只要原始音频片段，请关闭「导入音频」旁的「转为可编辑音符」。在左侧列表中双击音符片段即可编辑。",
+  "beginnerHint.stepStudio1c": "。默认只导入音频，需要转写时请主动勾选「转为可编辑音符」。在左侧列表中双击音符片段即可编辑。",
   "beginnerHint.step4a": "若异常：在新标签页打开 ",
   "beginnerHint.step4b": "。",
   "beginnerHint.setupSummary": "Windows 首次运行（推荐）",

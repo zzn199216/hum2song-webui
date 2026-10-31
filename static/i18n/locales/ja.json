@@ -232,7 +232,7 @@
   "beginnerHint.region": "Studio の最初の手順",
   "beginnerHint.stepStudio1a": "上部バーで ",
   "beginnerHint.stepStudio1b": " または ",
-  "beginnerHint.stepStudio1c": " を使います。元音声だけを使いたい場合は、音声インポート横の「編集可能なノートを作成」をオフにしてください。ライブラリ内のノートクリップをダブルクリックすると編集できます。",
+  "beginnerHint.stepStudio1c": " を使います。初期設定では音声のみを取り込みます。ノートへの変換が必要な場合は「編集可能なノートを作成」を選択してください。ライブラリ内のノートクリップをダブルクリックすると編集できます。",
   "beginnerHint.step4a": "問題がある場合: ",
   "beginnerHint.step4b": " を新しいタブで開いてください。",
   "beginnerHint.setupSummary": "Windows 初回セットアップ（推奨）",

@@ -138,6 +138,7 @@ function testImportWordingInIndexHtml(){
   assert(html.includes('data-i18n="top.importAudio"'), 'top bar import audio i18n key');
   assert(html.includes('data-i18n-title="top.importAudioTitle"'), 'import audio title key');
   assert(html.includes('id="chkImportAudioToNotes"'), 'import audio make-notes checkbox');
+  assert(!/<input[^>]*id="chkImportAudioToNotes"[^>]*checked/.test(html), 'importing audio must not opt into paid transcription by default');
   assert(html.includes('data-i18n="top.importAudioMakeNotesLabel"'), 'make-notes label i18n key');
 }
 

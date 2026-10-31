@@ -385,7 +385,7 @@
             '<button type="button" class="btn mini" data-act="waveQuiet" hidden style="display:none"></button>' +
           '</div>' +
           '<div class="h2s-audio-waveform-separation-controls" data-role="wfSeparationSettings" hidden>' +
-            '<div class="h2s-audio-waveform-separation-field" style="display:none">' +
+            '<div class="h2s-audio-waveform-separation-field">' +
               '<span data-i18n-role="wfSeparatorOptionLabel"></span>' +
               '<div class="h2s-audio-waveform-choice-group" data-role="wfSeparatorOptionChoices" role="radiogroup">' +
                 '<button type="button" class="h2s-audio-waveform-choice is-selected" data-separator-option-value="demucs" role="radio" aria-checked="true"></button>' +
@@ -407,7 +407,7 @@
                 '<option value="vocals_bass_drums"></option>' +
               '</select>' +
             '</label>' +
-            '<div class="h2s-audio-waveform-separation-field" style="display:none">' +
+            '<div class="h2s-audio-waveform-separation-field">' +
               '<span data-i18n-role="wfSeparationModeLabel"></span>' +
               '<div class="h2s-audio-waveform-choice-group" data-role="wfSeparationModeChoices" role="radiogroup">' +
                 '<button type="button" class="h2s-audio-waveform-choice is-selected" data-separation-mode-value="separate_only" role="radio" aria-checked="true"></button>' +
@@ -418,7 +418,7 @@
                 '<option value="separate_and_transcribe"></option>' +
               '</select>' +
             '</div>' +
-            '<div class="muted" data-role="wfSeparatorOptionHint" style="display:none"></div>' +
+            '<div class="muted" data-role="wfSeparatorOptionHint"></div>' +
             '<label><span data-i18n-role="wfIntentLabel"></span><select data-role="wfSeparationIntent"><option value="vocal"></option><option value="multitrack" selected></option></select></label>' +
             '<div class="muted" data-role="wfSeparationCost"></div>' +
           '</div>' +
@@ -499,6 +499,7 @@
       });
       var separationMode = panel.querySelector('[data-role="wfSeparationMode"]');
       if (separationMode) separationMode.addEventListener('change', function () {
+        if (openCtx) openCtx.separationSubmissionKey = null;
         updateSeparationCost();
         syncSeparatorAvailability();
       });
@@ -518,6 +519,7 @@
       Array.prototype.forEach.call(panel.querySelectorAll('[data-separation-mode-value]'), function (button) {
         button.addEventListener('click', function () {
           if (!separationMode || button.disabled) return;
+          if (openCtx) openCtx.separationSubmissionKey = null;
           separationMode.value = button.getAttribute('data-separation-mode-value') || 'separate_only';
           updateSeparationCost();
           syncSeparatorAvailability();
@@ -542,10 +544,6 @@
       var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
       var cost = panel.querySelector('[data-role="wfSeparationCost"]');
       if (!cost) return;
-      if (panel.querySelector('[data-role="wfSeparationIntent"]')) {
-        cost.textContent = t('audio.multistem.cost', 'Separation: 1 credit. Convert each resulting track to MIDI separately: 1 credit per track. Audio is retained.');
-        return;
-      }
       cost.textContent = separator && separator.value === 'advanced_stems'
         ? t('audio.waveform.advancedCost', 'Each advanced stem-separation task uses 30 regular transcription credits. Credits are charged only when the task starts.')
         : mode && mode.value === 'separate_and_transcribe'
@@ -694,8 +692,8 @@
       var separateBeforeConvert = panel.querySelector('[data-role="wfSeparateBeforeConvert"]');
       var midiEnabled = !!((mode && mode.value === 'separate_and_transcribe') || (separateBeforeConvert && separateBeforeConvert.checked));
       if (uvrOption) {
-        uvrOption.hidden = !uvr5EnsembleUiEnabled();
-        uvrOption.disabled = !uvr5EnsembleUiEnabled() || midiEnabled;
+        uvrOption.hidden = !!panel.querySelector('[data-role="wfSeparationIntent"]') || !uvr5EnsembleUiEnabled();
+        uvrOption.disabled = uvrOption.hidden || midiEnabled;
       }
       if (advancedOption) advancedOption.disabled = midiEnabled;
       if (separator && (separator.value === 'uvr5_ensemble_vocal_full' || separator.value === 'advanced_stems') && midiEnabled) separator.value = 'demucs';
@@ -706,6 +704,8 @@
         if (mode) mode.value = 'separate_only';
       }
       if (advancedSelected && mode) mode.value = 'separate_only';
+      var intent = panel.querySelector('[data-role="wfSeparationIntent"]');
+      if (intent) intent.parentElement.hidden = advancedSelected;
       if (transcribeOption) transcribeOption.disabled = uvrSelected || advancedSelected;
       if (preset) preset.disabled = uvrSelected || advancedSelected || separationBusy || silenceSplitBusy || _isConvertBusy();
       var hint = panel.querySelector('[data-role="wfSeparatorOptionHint"]');
@@ -713,7 +713,7 @@
         ? t('audio.waveform.advancedHint', 'High-cost fine separation creates more independent instrument stems and audio tracks only.')
         : uvrSelected
           ? t('audio.waveform.uvr5Hint', 'Vocal enhancement is still experimental and slower; it outputs only vocal and accompaniment stems.')
-          : midiEnabled
+          : midiEnabled && !intent
             ? t('audio.waveform.uvr5DisabledForMidi', 'Creating editable notes requires Stable separation.')
             : '';
       var separateBtn = panel.querySelector('[data-act="waveSeparate"]');
@@ -730,7 +730,7 @@
       var mode = panel.querySelector('[data-role="wfSeparationMode"]');
       var separator = panel.querySelector('[data-role="wfSeparatorOption"]');
       var intent = panel.querySelector('[data-role="wfSeparationIntent"]');
-      var requestedSeparator = intent ? 'demucs' : (separator ? separator.value : 'demucs');
+      var requestedSeparator = separator ? separator.value : 'demucs';
       if (requestedSeparator === 'advanced_stems') {
         await startAdvancedStemSeparation();
         return;
@@ -744,7 +744,7 @@
           separationIntent: intent ? intent.value : undefined,
           submissionKey: openCtx.separationSubmissionKey || (openCtx.separationSubmissionKey = 'stem-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
           separationPreset: intent ? (intent.value === 'vocal' ? 'vocals_instrumental' : 'four_stem') : (preset ? preset.value : 'four_stem'),
-          mode: intent ? 'separate_only' : (mode ? mode.value : 'separate_only'),
+          mode: mode ? mode.value : 'separate_only',
           separatorOption: requestedSeparator,
           onStatus: function (text) {
             if (statusEl && text) statusEl.textContent = String(text);

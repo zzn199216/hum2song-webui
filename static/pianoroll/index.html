@@ -1399,7 +1399,7 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
         <button type="button" id="btnImportAudio" class="btn" data-i18n="top.importAudio" data-i18n-title="top.importAudioTitle">Import audio</button>
         <span id="topbarTranscriptionGroup" class="transcriptionImportOptions" data-enabled="true">
           <label class="transcriptionImportToggle">
-            <input type="checkbox" id="chkImportAudioToNotes" checked />
+            <input type="checkbox" id="chkImportAudioToNotes" />
             <span data-i18n="top.importAudioMakeNotesLabel" data-i18n-title="top.importAudioMakeNotesTitle">Make editable notes (server)</span>
           </label>
           <button type="button" id="btnTopImportTranscriptionSettings" class="btn transcriptionSettingsTrigger" data-i18n="transcription.settings" data-i18n-title="transcription.settings">Transcription settings</button>
@@ -1410,10 +1410,8 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
           <label class="transcriptionImportToggle">
             <span data-i18n="transcription.separationPreset">Stem separation target</span>
             <select id="selImportAudioSeparationPreset" disabled>
-              <option value="vocals_instrumental" data-i18n="transcription.separationPreset.vocalsInstrumental">Vocals / instrumental</option>
-              <option value="four_stem" data-i18n="transcription.separationPreset.fourStem" selected>Four stems</option>
-              <option value="instruments_only" data-i18n="transcription.separationPreset.instrumentsOnly">Instrument stems</option>
-              <option value="vocals_bass_drums" data-i18n="transcription.separationPreset.vocalsBassDrums">Vocals + bass + drums</option>
+              <option value="vocals_instrumental" data-i18n="audio.multistem.vocal">Vocal separation</option>
+              <option value="four_stem" data-i18n="audio.multistem.multi" selected>Multitrack separation</option>
             </select>
           </label>
           <span id="importAudioSeparationCost" class="transcriptionImportHint" data-i18n="transcription.separationCost.normal">Normal transcription uses 1 AI transcription credit.</span>
@@ -1447,10 +1445,8 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
           <label class="transcriptionSettingsField">
             <span data-i18n="transcription.separationPreset">Stem separation target</span>
             <select id="audioSeparationPreset">
-              <option value="vocals_instrumental" data-i18n="transcription.separationPreset.vocalsInstrumental">Vocals / instrumental</option>
-              <option value="four_stem" data-i18n="transcription.separationPreset.fourStem" selected>Four stems</option>
-              <option value="instruments_only" data-i18n="transcription.separationPreset.instrumentsOnly">Instrument stems</option>
-              <option value="vocals_bass_drums" data-i18n="transcription.separationPreset.vocalsBassDrums">Vocals + bass + drums</option>
+              <option value="vocals_instrumental" data-i18n="audio.multistem.vocal">Vocal separation</option>
+              <option value="four_stem" data-i18n="audio.multistem.multi" selected>Multitrack separation</option>
             </select>
           </label>
           <label class="transcriptionSettingsField">
@@ -1518,10 +1514,8 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
           <label id="transcriptionSettingsSeparationPresetField" class="transcriptionSettingsField" style="margin-top:12px;">
             <span data-i18n="transcription.separationPreset">Stem separation target</span>
             <select id="transcriptionSettingsSeparationPreset" disabled>
-              <option value="vocals_instrumental" data-i18n="transcription.separationPreset.vocalsInstrumental">Vocals / instrumental</option>
-              <option value="four_stem" data-i18n="transcription.separationPreset.fourStem" selected>Four stems</option>
-              <option value="instruments_only" data-i18n="transcription.separationPreset.instrumentsOnly">Instrument stems</option>
-              <option value="vocals_bass_drums" data-i18n="transcription.separationPreset.vocalsBassDrums">Vocals + bass + drums</option>
+              <option value="vocals_instrumental" data-i18n="audio.multistem.vocal">Vocal separation</option>
+              <option value="four_stem" data-i18n="audio.multistem.multi" selected>Multitrack separation</option>
             </select>
           </label>
           <p id="transcriptionSettingsSeparationCost" class="transcriptionSettingsTargetHelp" data-i18n="transcription.separationCost.normal">Normal transcription uses 1 AI transcription credit.</p>
@@ -1550,7 +1544,7 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
         <li class="h2sCloudOnly" data-i18n="beginnerHint.cloudStep2">Wait a moment. The recording becomes a note clip in the library on the left.</li>
         <li class="h2sCloudOnly" data-i18n="beginnerHint.cloudStep3">Double-click the clip to open the editor, fix notes or change instruments, then click Save at the top.</li>
         <li class="h2sLocalOnly">
-          <span data-i18n="beginnerHint.stepStudio1a">In the top bar, use </span><strong data-i18n="top.importAudio">Import audio</strong><span data-i18n="beginnerHint.stepStudio1b"> or </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.stepStudio1c">. Turn off “Make editable notes” beside Import audio if you want original audio only. Double-click a note clip in the library to edit.</span>
+          <span data-i18n="beginnerHint.stepStudio1a">In the top bar, use </span><strong data-i18n="top.importAudio">Import audio</strong><span data-i18n="beginnerHint.stepStudio1b"> or </span><strong data-i18n="top.record">Record</strong><span data-i18n="beginnerHint.stepStudio1c">. Audio is imported as audio by default. Select “Make editable notes” beside Import audio when you want transcription. Double-click a note clip in the library to edit.</span>
         </li>
         <li class="h2sLocalOnly">
           <span data-i18n="beginnerHint.step4a">If something looks wrong: open </span><a href="/api/v1/health" target="_blank" rel="noopener">/api/v1/health</a><span data-i18n="beginnerHint.step4b"> in a new tab.</span>
@@ -2190,18 +2184,18 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   </div>
 
   <!-- i18n core (PR-G1a) - load before other scripts -->
-  <script src="/static/pianoroll/studio_asset_version.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/h2s_startup_perf.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/i18n/i18n.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/studio_asset_version.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/h2s_startup_perf.js?v=multistem-bundle-v3"></script>
+  <script src="/static/i18n/i18n.js?v=multistem-bundle-v3"></script>
   <!-- Tone.js (UMD) - local vendor -->
   <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
-  <script src="/static/pianoroll/project.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/project.js?v=multistem-bundle-v3"></script>
   <script src="/static/pianoroll/core/waveform_peaks.js?v=clip-canvas-v1"></script>
-  <script src="/static/pianoroll/core/local_audio_assets.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/instrument_manifest.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/gm_drum_kit.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/core/local_audio_assets.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/instrument_manifest.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/gm_drum_kit.js?v=multistem-bundle-v3"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
   <script src="/static/pianoroll/core/velocity_shape.js?v=1"></script>
   <script src="/static/pianoroll/core/local_transpose.js?v=1"></script>
@@ -2221,12 +2215,12 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/ui/timeline_view.js?v=clip-canvas-v1"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
   <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>
-  <script src="/static/pianoroll/timeline_controller.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/ui/library_view.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/controllers/library_controller.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/ui/selection_view.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/controllers/selection_controller.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/controllers/audio_controller.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/timeline_controller.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/ui/library_view.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/controllers/library_controller.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/ui/selection_view.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/controllers/selection_controller.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/controllers/audio_controller.js?v=multistem-bundle-v3"></script>
   <script src="/static/pianoroll/llm_defaults.js"></script>
   <script src="/static/pianoroll/llm_config.js"></script>
   <script src="/static/pianoroll/llm_client.js"></script>
@@ -2243,18 +2237,18 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/controllers/editor_runtime.js?v=notation-vector-pdf-v2-20261002"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
-  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=multistem-bundle-v3"></script>
   <script src="/static/pianoroll/core/audio_convert_segment.js?v=clip-edit-v16"></script>
-  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/audio_decode.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/audio_analysis.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/audio_stem_silence_segments.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/core/audio_instrument_client.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/audio_decode.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/audio_analysis.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/audio_stem_silence_segments.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/core/audio_instrument_client.js?v=multistem-bundle-v3"></script>
   <script src="/static/pianoroll/core/audio_worker_analysis_client.js?v=audio-analysis-worker-v1"></script>
-  <script src="/static/pianoroll/core/audio_worker_advanced_stem_client.js?v=multistem-source-origin-v2"></script>
+  <script src="/static/pianoroll/core/audio_worker_advanced_stem_client.js?v=multistem-bundle-v3"></script>
   <script src="/static/pianoroll/internal_action_registry.js"></script>
   <script src="/static/pianoroll/internal_skill_registry.js"></script>
   <style>
@@ -2525,13 +2519,13 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   })();
   if (window.H2S_CLOUD_MODE === true) document.documentElement.classList.add('h2sCloudMode');
   </script>
-  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=multistem-source-origin-v2">
-  <script src="/static/pianoroll/ui/notation_view.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/ui/editor_audition.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/controllers/notation_controller.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/app.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/cloud_project_bridge.js?v=multistem-source-origin-v2"></script>
-  <script src="/static/pianoroll/cloud_materials_panel.js?v=multistem-source-origin-v2"></script>
+  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=multistem-bundle-v3">
+  <script src="/static/pianoroll/ui/notation_view.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/ui/editor_audition.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/controllers/notation_controller.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/app.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/cloud_project_bridge.js?v=multistem-bundle-v3"></script>
+  <script src="/static/pianoroll/cloud_materials_panel.js?v=multistem-bundle-v3"></script>
   <script>
   (function () {
     try {

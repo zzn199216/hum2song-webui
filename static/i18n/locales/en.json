@@ -233,7 +233,7 @@
   "beginnerHint.region": "First steps in Studio",
   "beginnerHint.stepStudio1a": "In the top bar, use ",
   "beginnerHint.stepStudio1b": " or ",
-  "beginnerHint.stepStudio1c": ". Turn off “Make editable notes” beside Import audio if you want original audio only. Double-click a note clip in the library to edit.",
+  "beginnerHint.stepStudio1c": ". Audio is imported as audio by default. Select “Make editable notes” when you want transcription. Double-click a note clip in the library to edit.",
   "beginnerHint.step4a": "If something looks wrong: open ",
   "beginnerHint.step4b": " in a new tab.",
   "beginnerHint.setupSummary": "Windows first run (recommended)",

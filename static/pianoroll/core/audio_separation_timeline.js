@@ -19,8 +19,10 @@
   function timelineItems(manifest) {
     manifest = manifest || {};
     if (manifest.schemaVersion === 'h2s-multistem/v1') {
-      return (manifest.stems || []).filter(function (s) { return s.presence === 'candidate'; }).map(function (s) {
-        return { stem: s.category, kind: 'audio', artifactId: s.audio.artifactId, stemId: s.stemId };
+      return (manifest.stems || []).filter(function (s) { return s.presence === 'candidate'; }).flatMap(function (s) {
+        var items = [{ stem: s.category, kind: 'audio', artifactId: s.audio.artifactId, stemId: s.stemId }];
+        if (s.transcription && s.transcription.status === 'succeeded') items.push({ stem: s.category, kind: 'midi', artifactId: s.transcription.score.artifactId, stemId: s.stemId });
+        return items;
       });
     }
     var timeline = Array.isArray(manifest.timelineAudioStems) ? manifest.timelineAudioStems : [];

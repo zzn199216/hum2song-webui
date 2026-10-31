@@ -18,6 +18,11 @@ async function main() {
     {stemId:'guitar',category:'guitar',presence:'quiet',audio:{artifactId:'g'}}] };
   assert.deepEqual(timeline.timelineItems(manifest), [{stem:'piano',kind:'audio',artifactId:'p',stemId:'piano'}]);
   assert.equal(manifest.stems.length, 2, 'quiet artifact stays recoverable');
+  manifest.stems[0].transcription = {status:'succeeded',score:{artifactId:'p-score'}};
+  assert.deepEqual(timeline.timelineItems(manifest), [
+    {stem:'piano',kind:'audio',artifactId:'p',stemId:'piano'},
+    {stem:'piano',kind:'midi',artifactId:'p-score',stemId:'piano'}
+  ], 'bundle retains audio and imports the matching score exactly once');
   const src = {jobId:'owned-separation',stemId:'piano',assetRef:'localidb:source'};
   let sent, materialized, trackIdentity;
   window.H2SAudioWorkerConversionClient = {convert: async options => {

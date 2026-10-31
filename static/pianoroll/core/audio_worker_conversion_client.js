@@ -279,6 +279,7 @@
     var job = created.job || {};
     var jobId = typeof job.id === 'string' ? job.id : '';
     if (!jobId) throw new Error('worker_failed');
+    if (options.sourceStem && created.scoreDoc) return { ok: true, workerJobId: jobId, scoreDoc: created.scoreDoc };
     diag('job_create_upload_end', { jobId: jobId, status: job.status || '', durationMs: Math.round(nowMs() - createStart) });
     emitStatus(options, { phase: 'processing', jobId: jobId, status: job.status || 'queued' });
     var started = nowMs();

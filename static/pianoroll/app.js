@@ -1686,6 +1686,7 @@
           multistemResult: meta.multistemResult || null,
           multistemSubmission: meta.multistemSubmission || null,
           multistemMidiKey: meta.multistemMidiKey || null,
+          multistemBundleMidi: meta.multistemBundleMidi || null,
           notation: (meta && meta.notation) ? H2SProject.deepClone(meta.notation) : null,
           notes: (typeof meta.notes === 'number') ? meta.notes : 0,
           pitchMin: (typeof meta.pitchMin === 'number') ? meta.pitchMin : null,
@@ -6878,7 +6879,7 @@ renderTimeline(){
         checkbox.disabled = !serverAllowed;
       }
       if (authHint) authHint.hidden = serverAllowed;
-      const enabled = serverAllowed && (!checkbox || !!checkbox.checked);
+      const enabled = serverAllowed && !!(checkbox && checkbox.checked);
       const controls = this.getTopBarImportTranscriptionControls();
       if (trigger) trigger.hidden = !enabled;
       if (group) group.setAttribute('data-enabled', enabled ? 'true' : 'false');
@@ -7263,6 +7264,7 @@ renderTimeline(){
       if (separatorOption === 'uvr5_ensemble_vocal_full' && (mode !== 'separate_only' || separationPreset !== 'vocals_instrumental')) {
         throw new Error('uvr5_separate_only');
       }
+      if (separatorOption === 'demucs' && !opts.separationIntent) opts.separationIntent = separationPreset === 'vocals_instrumental' ? 'vocal' : 'multitrack';
       const controls = opts.transcriptionControls || this.getAudioTranscriptionControls(clipId);
       const placementOffsetSec = Math.max(0, Number(opts.placementOffsetSec) || 0);
       const bpm = Number(p2.bpm || 120);
@@ -7275,10 +7277,10 @@ renderTimeline(){
       try {
         if (opts.separationIntent) {
           const previous = clip.meta && clip.meta.multistemSubmission;
-          opts.submissionKey = previous && previous.intent === opts.separationIntent && previous.assetRef === clip.audio.assetRef
+          opts.submissionKey = previous && previous.intent === opts.separationIntent && (previous.mode || 'separate_only') === mode && previous.assetRef === clip.audio.assetRef
             ? previous.key : (opts.submissionKey || 'multi-' + Date.now() + '-' + Math.random().toString(36).slice(2));
           clip.meta = Object.assign({}, clip.meta, { multistemSubmission: {
-            key: opts.submissionKey, intent: opts.separationIntent, assetRef: clip.audio.assetRef,
+            key: opts.submissionKey, intent: opts.separationIntent, mode: mode, assetRef: clip.audio.assetRef,
           } });
           this.setProjectFromV2(p2);
         }
@@ -7309,8 +7311,10 @@ renderTimeline(){
         });
         if (!result || !result.ok) throw new Error((result && result.reason) || 'worker_failed');
         const items = timeline.timelineItems(result.manifest).filter(item => !item.stemId ||
-          !Object.values(this.getProjectV2().clips).some(c => c.meta && c.meta.multistemSource &&
-            c.meta.multistemSource.jobId === result.workerJobId && c.meta.multistemSource.stemId === item.stemId));
+          !Object.values(this.getProjectV2().clips).some(c => {
+            const saved = c.meta && (item.kind === 'audio' ? c.meta.multistemSource : c.meta.multistemBundleMidi);
+            return saved && saved.jobId === result.workerJobId && saved.stemId === item.stemId;
+          }));
         if (result.manifest.schemaVersion === 'h2s-multistem/v1') {
           const updated = this.getProjectV2();
           updated.clips[clipId].meta = Object.assign({}, updated.clips[clipId].meta, {
@@ -7375,12 +7379,22 @@ renderTimeline(){
                 separationStem: item.stem,
                 sourceTaskId: result.workerJobId,
                 workerJobId: result.workerJobId,
-                workerConversionSource: 'audio_separation_demucs',
+                workerConversionSource: item.stemId ? 'audio_separation_multistem' : 'audio_separation_demucs',
                 placeStartSec: effectiveSourceStartSec,
                 placeTrackIndex: trackIndex,
                 forceSingleClip: true,
               });
               if (!materialized || !materialized.ok) throw new Error('midi_materialize_failed');
+              if (item.stemId) {
+                const current = this.getProjectV2();
+                const audioClip = Object.values(current.clips).find(c => c.meta && c.meta.multistemSource && c.meta.multistemSource.jobId === result.workerJobId && c.meta.multistemSource.stemId === item.stemId);
+                const audioInstance = audioClip && (this.project.instances || []).find(i => i.clipId === audioClip.id);
+                (materialized.clipIds || []).forEach(id => {
+                  current.clips[id].meta.multistemBundleMidi = { jobId: result.workerJobId, stemId: item.stemId };
+                  if (audioInstance) current.clips[id].meta.multistemMidiKey = [result.workerJobId, audioInstance.id, 0, result.manifest.numSamples / result.manifest.sampleRate].join('|');
+                });
+                this.setProjectFromV2(current);
+              }
             }
           } catch (err) {
             failures.push(item.stem + ': ' + ((err && err.message) ? err.message : 'import_failed'));
@@ -7621,7 +7635,7 @@ renderTimeline(){
       }
       els.modal.__h2sTranscriptionControlsBound = true;
       const captureTopBarSeparationControls = () => {
-        const notesEnabled = !checkbox || !!checkbox.checked;
+        const notesEnabled = !!(checkbox && checkbox.checked);
         this.setTopBarImportTranscriptionControls({
           separateFirst: notesEnabled && !!(separateFirst && separateFirst.checked),
           separationPreset: separationPreset ? separationPreset.value : 'four_stem',
@@ -7664,10 +7678,10 @@ renderTimeline(){
       this._syncTopBarImportTranscriptionControls();
     },
 
-    /** Top bar: one Import audio control + “Make editable notes” checkbox (default on). */
+    /** Top bar: one Import audio control + “Make editable notes” checkbox (default off). */
     async runTopBarImportAudio(){
       const chk = (typeof document !== 'undefined') ? document.getElementById('chkImportAudioToNotes') : null;
-      const toNotes = !chk || !!chk.checked;
+      const toNotes = !!(chk && chk.checked);
       const separateFirst = (typeof document !== 'undefined') ? document.getElementById('chkImportAudioSeparateFirst') : null;
       if (toNotes && separateFirst && separateFirst.checked) {
         const preset = document.getElementById('selImportAudioSeparationPreset');

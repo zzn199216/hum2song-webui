@@ -13,7 +13,7 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   assert(html.includes('id="audioSeparationModal"'));
   assert(html.includes('id="audioSeparationPreset"'));
-  assert(html.includes('value="four_stem" data-i18n="transcription.separationPreset.fourStem" selected'));
+  assert(html.includes('value="four_stem" data-i18n="audio.multistem.multi" selected'));
   assert(html.includes('id="audioSeparationMode"'));
   assert(html.includes('id="chkImportAudioSeparateFirst"'));
   assert(html.includes('id="selImportAudioSeparationPreset" disabled'));
@@ -28,11 +28,11 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'multistem-source-origin-v2'"));
-  assert(html.includes('studio_asset_version.js?v=multistem-source-origin-v2'));
-  assert(html.includes('audio_worker_separation_client.js?v=multistem-source-origin-v2'));
-  assert(html.includes('audio_stem_silence_segments.js?v=multistem-source-origin-v2'));
-  assert(html.includes('app.js?v=multistem-source-origin-v2'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'multistem-bundle-v3'"));
+  assert(html.includes('studio_asset_version.js?v=multistem-bundle-v3'));
+  assert(html.includes('audio_worker_separation_client.js?v=multistem-bundle-v3'));
+  assert(html.includes('audio_stem_silence_segments.js?v=multistem-bundle-v3'));
+  assert(html.includes('app.js?v=multistem-bundle-v3'));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();
@@ -67,7 +67,7 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   assert(waveform.includes("button.classList.toggle('is-selected', selected)"));
   assert(waveform.includes('transcribeOption.disabled = uvrSelected'));
   assert(waveform.includes('value="uvr5_ensemble_vocal_full" data-uvr5-option hidden disabled'));
-  assert(waveform.includes("uvrOption.disabled = !uvr5EnsembleUiEnabled() || midiEnabled"));
+  assert(waveform.includes("uvrOption.disabled = uvrOption.hidden || midiEnabled"));
   assert(waveform.includes("preset.disabled = uvrSelected || advancedSelected || separationBusy || silenceSplitBusy || _isConvertBusy()"));
   assert(waveform.includes("requestedSeparator === 'advanced_stems'"));
   assert(waveform.includes('startAdvancedStemSeparation()'));
