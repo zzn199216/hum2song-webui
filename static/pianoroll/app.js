@@ -11355,7 +11355,12 @@ renderTimeline(){
   function bootAppWhenDomReady(){
     function start() {
       if (window.H2SCloudBoot) window.H2SCloudBoot.run(() => app.init());
-      else app.init();
+      else {
+        // A failed first bundle can leave app.js available without the identity
+        // gate. Never initialize or reset stored drafts under the pending key.
+        if (_cloudHostSessionKeyFromLocation() === 'pending') return;
+        app.init();
+      }
     }
     if (document.readyState === 'loading'){
       document.addEventListener('DOMContentLoaded', start, { once: true });
