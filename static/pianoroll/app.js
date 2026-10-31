@@ -10884,6 +10884,7 @@ renderTimeline(){
         this._masterGainDb = this._getMasterGainDb();
 
         const wrap = document.createElement('div');
+        wrap.className = 'masterVolume';
         wrap.style.display = 'flex';
         wrap.style.alignItems = 'center';
         wrap.style.gap = '6px';
