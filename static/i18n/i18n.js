@@ -90,7 +90,17 @@
     if (G.H2S_STUDIO_ASSET_VERSION) url += '?v=' + encodeURIComponent(String(G.H2S_STUDIO_ASSET_VERSION));
     var cacheKey = code + '|' + url;
     if (_loadPromises[cacheKey]) return _loadPromises[cacheKey];
-    var loadPromise = fetchFn(url).then(function(r){ if (!r.ok) throw new Error('i18n.load: ' + r.status); return r.json(); }).then(function(d){ register(code, d); return d; });
+    function fetchLocale(attempt) {
+      return Promise.resolve().then(function(){ return fetchFn(url); }).then(function(r){
+        if (!r.ok) { var error = new Error('i18n.load: ' + r.status); error.status = r.status; throw error; }
+        return r.json();
+      }).catch(function(error){
+        var status = error && error.status;
+        if (attempt >= 2 || error instanceof SyntaxError || (status >= 400 && status < 500 && status !== 408 && status !== 429)) throw error;
+        return new Promise(function(resolve){ setTimeout(resolve, opts.retryDelayMs == null ? 250 * (attempt + 1) : opts.retryDelayMs); }).then(function(){ return fetchLocale(attempt + 1); });
+      });
+    }
+    var loadPromise = fetchLocale(0).then(function(d){ register(code, d); return d; });
     _loadPromises[cacheKey] = loadPromise;
     loadPromise.then(function(){ delete _loadPromises[cacheKey]; }, function(){ delete _loadPromises[cacheKey]; });
     return loadPromise;

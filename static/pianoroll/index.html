@@ -1388,6 +1388,18 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
 
   <style>
     #aiAssistDock { max-width:calc(100vw - 24px); max-height:calc(100dvh - 24px); }
+    .topbar .row { flex:1 1 100%; order:2; flex-wrap:wrap; padding-bottom:8px; }
+    .topbar .btn, .transport .btn, .transport .miniLabel { white-space:nowrap; flex-shrink:0; }
+    .topbarImportWorkflow { display:contents; }
+    #studioRecordStatus:empty, #studioImportStatus:empty { display:none; }
+    #btnStop[style*="visibility:hidden"], #btnStop[style*="visibility: hidden"] { display:none; }
+    .transport { flex-wrap:wrap; }
+    .transport .bpmBox { flex-shrink:0; }
+    .center { min-width:0; }
+    @media (min-width:641px) {
+      #aiAssistDock, #aiAssistDock.open { width:320px; max-width:320px; }
+      .layout { grid-template-columns:minmax(190px,280px) minmax(0,1fr) 320px; }
+    }
     #aiAssistHeader { min-height:28px; }
     #aiAssistHeader:focus-visible { outline:2px solid #60a5fa; outline-offset:-2px; }
     @media (max-width:640px) {
@@ -1418,7 +1430,7 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
 
 <body>
   <div id="studioStartup" role="status"><span id="studioStartupLabel">Loading Studio…</span><button id="studioStartupRetry" type="button" hidden>Reload</button></div>
-  <script src="/static/pianoroll/startup_ui.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/startup_ui.js?v=startup-fast-v4"></script>
 
   <div class="topbar">
     <div class="brand">
@@ -2223,18 +2235,18 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   </div>
 
   <!-- i18n core (PR-G1a) - load before other scripts -->
-  <script src="/static/pianoroll/studio_asset_version.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/h2s_startup_perf.js?v=interface-ready-v3"></script>
-  <script src="/static/i18n/i18n.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/studio_asset_version.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/h2s_startup_perf.js?v=startup-fast-v4"></script>
+  <script src="/static/i18n/i18n.js?v=startup-fast-v4"></script>
   <!-- Tone.js (UMD) - local vendor -->
   <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
-  <script src="/static/pianoroll/project.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/project.js?v=startup-fast-v4"></script>
   <script src="/static/pianoroll/core/waveform_peaks.js?v=clip-canvas-v1"></script>
-  <script src="/static/pianoroll/core/local_audio_assets.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/instrument_manifest.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/gm_drum_kit.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/core/local_audio_assets.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/instrument_manifest.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/gm_drum_kit.js?v=startup-fast-v4"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
   <script src="/static/pianoroll/core/velocity_shape.js?v=1"></script>
   <script src="/static/pianoroll/core/local_transpose.js?v=1"></script>
@@ -2254,12 +2266,12 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/ui/timeline_view.js?v=clip-canvas-v1"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
   <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>
-  <script src="/static/pianoroll/timeline_controller.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/ui/library_view.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/controllers/library_controller.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/ui/selection_view.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/controllers/selection_controller.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/controllers/audio_controller.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/timeline_controller.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/ui/library_view.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/controllers/library_controller.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/ui/selection_view.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/controllers/selection_controller.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/controllers/audio_controller.js?v=startup-fast-v4"></script>
   <script src="/static/pianoroll/llm_defaults.js"></script>
   <script src="/static/pianoroll/llm_config.js"></script>
   <script src="/static/pianoroll/llm_client.js"></script>
@@ -2276,18 +2288,18 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/controllers/editor_runtime.js?v=notation-vector-pdf-v2-20261002"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
-  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=startup-fast-v4"></script>
   <script src="/static/pianoroll/core/audio_convert_segment.js?v=clip-edit-v16"></script>
-  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/audio_decode.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/audio_analysis.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/audio_stem_silence_segments.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/core/audio_instrument_client.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/audio_decode.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/audio_analysis.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/audio_stem_silence_segments.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/core/audio_instrument_client.js?v=startup-fast-v4"></script>
   <script src="/static/pianoroll/core/audio_worker_analysis_client.js?v=audio-analysis-worker-v1"></script>
-  <script src="/static/pianoroll/core/audio_worker_advanced_stem_client.js?v=interface-ready-v3"></script>
+  <script src="/static/pianoroll/core/audio_worker_advanced_stem_client.js?v=startup-fast-v4"></script>
   <script src="/static/pianoroll/internal_action_registry.js"></script>
   <script src="/static/pianoroll/internal_skill_registry.js"></script>
   <style>
@@ -2558,13 +2570,13 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   })();
   if (window.H2S_CLOUD_MODE === true) document.documentElement.classList.add('h2sCloudMode');
   </script>
-  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=interface-ready-v3">
-  <script src="/static/pianoroll/ui/notation_view.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/ui/editor_audition.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/controllers/notation_controller.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/app.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/cloud_project_bridge.js?v=interface-ready-v3"></script>
-  <script src="/static/pianoroll/cloud_materials_panel.js?v=interface-ready-v3"></script>
+  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=startup-fast-v4">
+  <script src="/static/pianoroll/ui/notation_view.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/ui/editor_audition.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/controllers/notation_controller.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/app.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/cloud_project_bridge.js?v=startup-fast-v4"></script>
+  <script src="/static/pianoroll/cloud_materials_panel.js?v=startup-fast-v4"></script>
   <script>
   (function () {
     try {

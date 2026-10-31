@@ -69,6 +69,7 @@ trap cleanup EXIT
 mkdir -p "${work_dir}/root" .deploy-artifacts
 git archive --format=tar -o "${work_dir}/delta.tar" HEAD -- "${changed_paths[@]}"
 tar -xf "${work_dir}/delta.tar" -C "${work_dir}/root"
+node scripts/build-startup-bundles.js "${work_dir}/root"
 cat > "${work_dir}/root/ARTIFACT_MANIFEST.txt" <<EOF
 artifact=studio-delta
 commit=${HEAD_COMMIT}

@@ -356,7 +356,8 @@
           // Track header (stacked): name -> volume -> instrument
           const track = (proj.tracks||[])[ti] || {};
           const _t = (typeof window !== 'undefined' && window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t.bind(window.I18N) : function(k){ return k; };
-          const trackName = (track && track.name) ? track.name : (_t('trackpanel.trackN').replace('{n}', String(ti+1)));
+          const defaultName = String(track.name || '').match(/^Track\s+(\d+)$/i);
+          const trackName = defaultName || !track.name ? _t('trackpanel.trackN').replace('{n}', defaultName ? defaultName[1] : String(ti+1)) : track.name;
 
           label.style.cursor = 'pointer';
           label.title = _t('trackpanel.setTargetTrack');
