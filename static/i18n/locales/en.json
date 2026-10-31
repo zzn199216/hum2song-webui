@@ -976,5 +976,7 @@
   "instrument.category.unknown": "Unknown",
   "instrument.search.placeholder": "Search instruments",
   "instrument.search.empty": "No matching instruments",
-  "instrument.missing": "Missing instrument"
+  "instrument.missing": "Missing instrument",
+  "arrange.selectGroup": "Select group",
+  "arrange.selectGroupTip": "Select all clips in the same split group"
 }

@@ -85,7 +85,7 @@
     if (!fetchFn) throw new Error('i18n.load: fetch unavailable and opts.fetchFn not provided');
     var code = normalizeLang(lang);
     if (_dicts[code]) return Promise.resolve(_dicts[code]);
-    var base = (opts.baseUrl != null) ? opts.baseUrl : '/static/i18n/locales';
+    var base = (opts.baseUrl != null) ? opts.baseUrl : (G.H2S_I18N_BASE_URL ? G.H2S_I18N_BASE_URL + '/locales' : '/static/i18n/locales');
     var url = base.replace(/\/+$/, '') + '/' + code + '.json';
     if (G.H2S_STUDIO_ASSET_VERSION) url += '?v=' + encodeURIComponent(String(G.H2S_STUDIO_ASSET_VERSION));
     var cacheKey = code + '|' + url;
@@ -110,7 +110,7 @@
     opts = opts || {};
     var fetchFn = opts.fetchFn || (typeof G.fetch === 'function' ? G.fetch : null);
     if (!fetchFn) return Promise.reject(new Error('i18n.loadManifest: fetch unavailable and opts.fetchFn not provided'));
-    var base = (opts.baseUrl != null) ? opts.baseUrl : '/static/i18n';
+    var base = (opts.baseUrl != null) ? opts.baseUrl : (G.H2S_I18N_BASE_URL || '/static/i18n');
     var url = base.replace(/\/+$/, '') + '/manifest.json';
     if (G.H2S_STUDIO_ASSET_VERSION) url += '?v=' + encodeURIComponent(String(G.H2S_STUDIO_ASSET_VERSION));
     return fetchFn(url).then(function(r){ if (!r.ok) throw new Error('i18n.loadManifest: ' + r.status); return r.json(); }).then(function(arr){

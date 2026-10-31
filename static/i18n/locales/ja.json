@@ -954,5 +954,7 @@
   "instrument.category.unknown": "不明",
   "instrument.search.placeholder": "楽器を検索",
   "instrument.search.empty": "一致する楽器がありません",
-  "instrument.missing": "楽器が見つかりません"
+  "instrument.missing": "楽器が見つかりません",
+  "arrange.selectGroup": "グループを選択",
+  "arrange.selectGroupTip": "同じ分割グループのクリップをすべて選択"
 }

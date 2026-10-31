@@ -14,4 +14,7 @@ for(const group of manifest.groups){
   new vm.Script(source);
   for(const file of group.sources)if(digest(read(file.slice(1)))!==group.sourceHashes[file])throw new Error('Stale bundled source: '+file);
 }
+for(const [file,entry] of Object.entries(manifest.resources?.files||{})) {
+  if(digest(read(file))!==entry.sha256 || digest(read(entry.source))!==entry.sha256)throw new Error('Stale startup resource: '+file);
+}
 console.log('Verified startup HTML, script order manifest, bundles and all source hashes');

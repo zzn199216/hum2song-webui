@@ -9,7 +9,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'h2s-startup-bundle-'));
 const result = build(root, output);
 const html = fs.readFileSync(path.join(output,'static/pianoroll/index.html'),'utf8');
 assert(result.scriptsBefore > 60 && result.scriptsAfter === 2);
-assert(html.includes('/startup_ui.js?'), 'watchdog remains independent of runtime bundle');
+assert(html.includes('/'+Object.keys(result.resources.files).find(f=>f.endsWith('/startup_ui.js'))), 'watchdog remains independent of runtime bundle');
+assert(html.includes('H2S_I18N_BASE_URL'), 'locale base is tied to content-hashed resources');
+for(const [file,entry] of Object.entries(result.resources.files)) {
+  assert.equal(require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(output,file))).digest('hex'),entry.sha256);
+}
 assert(html.indexOf(result.groups[0].file) < html.indexOf('function localCloudParentOrigins()'));
 assert(html.indexOf(result.groups[1].file) > html.indexOf('function localCloudParentOrigins()'), 'host config executes before app');
 for (const group of result.groups) {

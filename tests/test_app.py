@@ -140,3 +140,15 @@ def test_ui_injects_safe_cloud_parent_origins(monkeypatch, tmp_path):
         assert "H2S_TEST_SECRET_TOKEN" not in html
     finally:
         get_settings.cache_clear()
+
+def test_content_hashed_startup_resources_cache(tmp_path):
+    import asyncio
+    from app import StudioStaticFiles
+    folder = tmp_path / 'startup-resources' / '0123456789abcdef'
+    for name in ['startup_ui.js', 'notation.css', 'i18n/manifest.json', 'i18n/locales/zh.json']:
+        asset = folder / name
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_text('{}', encoding='utf-8')
+        response = asyncio.run(StudioStaticFiles(directory=str(tmp_path)).get_response(
+            'startup-resources/0123456789abcdef/' + name, {'type': 'http', 'method': 'GET', 'headers': []}))
+        assert response.headers['cache-control'] == 'public, max-age=31536000, immutable'

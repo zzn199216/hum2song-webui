@@ -55,7 +55,9 @@ class StudioStaticFiles(StaticFiles):
         normalized = path.replace("\\", "/").lower()
         # Only content-addressed startup bundles are immutable. A query string
         # alone does not guarantee an old URL still identifies the same bytes.
-        if re.fullmatch(r"pianoroll/startup-[0-9a-f]{16}\.js", normalized):
+        if re.fullmatch(r"pianoroll/startup-[0-9a-f]{16}\.js", normalized) or re.fullmatch(
+            r"startup-resources/[0-9a-f]{16}/(?:startup_ui\.js|notation\.css|i18n/(?:manifest\.json|locales/(?:en|zh|ja)\.json))", normalized
+        ):
             response.headers["Cache-Control"] = VERSIONED_MODEL_CACHE_CONTROL
         if normalized.endswith(".mjs"):
             # ORT loads its WASM backend through a dynamic module import.  A
