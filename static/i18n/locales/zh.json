@@ -622,6 +622,7 @@
   "timeline.bpm": "BPM",
   "timeline.snap": "吸附",
   "timeline.snapLabel": "吸附:",
+  "timeline.fit": "适应",
   "timeline.playhead": "播放头",
   "timeline.tipDrag": "提示：拖动片段块；双击打开编辑器。",
   "timeline.log": "日志",

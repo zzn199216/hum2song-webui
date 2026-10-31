@@ -622,6 +622,7 @@
   "timeline.bpm": "BPM",
   "timeline.snap": "Snap",
   "timeline.snapLabel": "Snap:",
+  "timeline.fit": "Fit",
   "timeline.playhead": "Playhead",
   "timeline.tipDrag": "Tip: drag clip blocks; double-click to open editor.",
   "timeline.log": "Log",

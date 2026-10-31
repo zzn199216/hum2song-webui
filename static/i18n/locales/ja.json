@@ -608,6 +608,7 @@
   "timeline.bpm": "BPM",
   "timeline.snap": "スナップ",
   "timeline.snapLabel": "スナップ:",
+  "timeline.fit": "全体",
   "timeline.playhead": "再生ヘッド",
   "timeline.tipDrag": "ヒント: クリップブロックをドラッグし、ダブルクリックでエディターを開きます。",
   "timeline.log": "ログ",

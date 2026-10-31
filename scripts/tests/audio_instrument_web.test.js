@@ -23,8 +23,8 @@ assert(worker.includes("{ id: 'piano'") && worker.includes("{ id: 'drums'"), 'wo
 assert(client.includes('new Worker(workerUrl'), 'client should isolate inference in a browser Worker');
 assert(client.includes('[samples.buffer]'), 'audio samples should transfer instead of clone');
 assert(controller.includes('instrumentAnalyzer') && controller.includes('result.instruments = await instrumentAnalyzer') && controller.includes('onProgress: renderInstrumentProgress'), 'controller should merge worker results and show progress');
-assert(index.includes('audio_instrument_client.js?v=interface-ready-v1'), 'index should load the worker client');
-assert(index.includes('app.js?v=interface-ready-v1'), 'app cache version should match the current Studio release');
+assert(index.includes('audio_instrument_client.js?v=interface-ready-v2'), 'index should load the worker client');
+assert(index.includes('app.js?v=interface-ready-v2'), 'app cache version should match the current Studio release');
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxruntime-web', 'ort.wasm.min.js')), 'ORT runtime asset should be vendored');
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxruntime-web', 'ort-wasm-simd.wasm')), 'ORT SIMD WASM asset should be vendored');
 assert(fs.existsSync(path.join(root, 'static', 'pianoroll', 'vendor', 'onnxruntime-web', 'ort-wasm.wasm')), 'ORT fallback WASM asset should be vendored');
