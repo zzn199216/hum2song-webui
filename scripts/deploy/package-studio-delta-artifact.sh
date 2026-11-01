@@ -49,6 +49,9 @@ unsafe_changes="$(git diff --name-status "${BASE_COMMIT}"..HEAD | awk '$1 ~ /^[D
 
 grep -Fq "H2S_STUDIO_ASSET_VERSION = '${STUDIO_VERSION}'" static/pianoroll/studio_asset_version.js \
   || die "studio_asset_version.js does not match ${STUDIO_VERSION}"
+if git show "${BASE_COMMIT}:static/pianoroll/studio_asset_version.js" | grep -Fq "H2S_STUDIO_ASSET_VERSION = '${STUDIO_VERSION}'"; then
+  die "Studio cache version must change from the deployed delta base"
+fi
 for asset in \
   studio_asset_version.js h2s_startup_perf.js i18n.js \
   audio_worker_conversion_client.js audio_worker_separation_client.js \

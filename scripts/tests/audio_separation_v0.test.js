@@ -1,3 +1,4 @@
+const releaseVersion = require('./studio_release_version.cjs');
 #!/usr/bin/env node
 'use strict';
 
@@ -28,11 +29,11 @@ const timeline = require(path.join(repoRoot, 'static', 'pianoroll', 'core', 'aud
   const html = read('static', 'pianoroll', 'index.html');
   const assetVersion = read('static', 'pianoroll', 'studio_asset_version.js');
   const locale = read('static', 'i18n', 'locales', 'zh.json');
-  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = 'unified-user-flow-v9'"));
-  assert(html.includes('studio_asset_version.js?v=unified-user-flow-v9'));
-  assert(html.includes('audio_worker_separation_client.js?v=unified-user-flow-v9'));
-  assert(html.includes('audio_stem_silence_segments.js?v=unified-user-flow-v9'));
-  assert(html.includes('app.js?v=unified-user-flow-v9'));
+  assert(assetVersion.includes("H2S_STUDIO_ASSET_VERSION = releaseVersion"));
+  assert(html.includes('studio_asset_version.js?v=' + releaseVersion));
+  assert(html.includes('audio_worker_separation_client.js?v=' + releaseVersion));
+  assert(html.includes('audio_stem_silence_segments.js?v=' + releaseVersion));
+  assert(html.includes('app.js?v=' + releaseVersion));
   assert(locale.includes('"audio.waveform.separatorOption.uvr5"'));
   console.log('PASS UVR5 UI and locale assets share a cache-busting version');
 })();

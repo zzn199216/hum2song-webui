@@ -1,3 +1,4 @@
+const releaseVersion = require('./studio_release_version.cjs');
 #!/usr/bin/env node
 'use strict';
 
@@ -131,7 +132,7 @@ assert(timelineController.includes("textOverflow = 'ellipsis'"), 'compact instru
 const indexHtml = fs.readFileSync(path.join(root, 'static/pianoroll/index.html'), 'utf8');
 const manifestScriptIndex = indexHtml.indexOf('core/instrument_manifest.js');
 const timelineScriptIndex = indexHtml.indexOf('timeline_controller.js');
-const instrumentCacheBust = 'unified-user-flow-v9';
+const instrumentCacheBust = releaseVersion;
 assert(manifestScriptIndex >= 0, 'index should load the instrument manifest');
 assert(timelineScriptIndex >= 0, 'index should load the timeline controller');
 assert(manifestScriptIndex < timelineScriptIndex, 'manifest should load before timeline controller');

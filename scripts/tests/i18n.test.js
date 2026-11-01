@@ -1,3 +1,4 @@
+const releaseVersion = require('./studio_release_version.cjs');
 #!/usr/bin/env node
 /* PR-G1a/G1b/G1c: i18n Core - minimal tests for register, t, setLang, fallback, persistence, loadManifest, zh-covers-en. */
 'use strict';
@@ -127,7 +128,7 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('data-i18n="audio.multistem.multi"') !== -1, 'separation preset choices should be localized');
   assert(indexHtml.indexOf('data-i18n="audio.waveform.separationHelp"') !== -1, 'separation dialog help should be localized');
   assert(indexHtml.indexOf('data-i18n="audio.waveform.separationStart"') !== -1, 'separation dialog action should be localized');
-  assert(indexHtml.indexOf('unified-user-flow-v9') !== -1, 'current Studio release should bump the script cache version');
+  assert(indexHtml.indexOf(releaseVersion) !== -1, 'current Studio release should bump the script cache version');
 }
 
 // Last optimize: staleness uses revision + project doc key (see app.js)
@@ -156,7 +157,7 @@ if (fs.existsSync(i18nCorePath)) {
 var assetVersionPath = path.join(__dirname, '../../static/pianoroll/studio_asset_version.js');
 if (fs.existsSync(assetVersionPath)) {
   var assetVersionSrc = fs.readFileSync(assetVersionPath, 'utf8');
-  assert(assetVersionSrc.indexOf('unified-user-flow-v9') !== -1, 'Studio asset version should match the current release');
+  assert(assetVersionSrc.indexOf(releaseVersion) !== -1, 'Studio asset version should match the current release');
 }
 
 var bridgePath = path.join(__dirname, '../../static/pianoroll/cloud_project_bridge.js');
