@@ -6,6 +6,10 @@
     const modal=document.getElementById('modal');if(!modal || !N || !V)return;
     const zh=()=>String((root.I18N && root.I18N.getLang && root.I18N.getLang()) || document.documentElement.lang || '').startsWith('zh');
     const t=(cn,en)=>zh()?cn:en;
+    const controlLabel=(key,cn,en)=>{
+      const value=root.I18N&&typeof root.I18N.t==='function'?root.I18N.t(key):'';
+      return value&&value!==key?value:t(cn,en);
+    };
     let pref=N.preferences(),renderKey='',generation=0,redo=[],raf=0,exportUrl=null,exportGeneration=0;
     let pageJob=0,slots=[],screenModel=null,screenOptions=null,screenPlan=null,currentPage=0,visibleHits=[],selectedHits=new Set(),playingHits=new Set();
     const pageCache=new Map(),hitItems=new WeakMap(),slotKeys=new WeakMap();
@@ -165,8 +169,10 @@
     function syncSelection(){
       if(!rt.state.modal.show)return;
       const play=document.getElementById('btnClipPlay'),playing=rt.state.modal.isPlaying;
-      play.textContent=playing?'Ⅱ':'▶';play.setAttribute('aria-label',playing?t('暂停片段','Pause clip'):t('播放片段','Play clip'));play.title=play.getAttribute('aria-label');
-      document.getElementById('btnClipStop').title=t('停止并回到开头','Stop and return to start');
+      const key=playing?'editor.pauseClip':'editor.playClip';
+      play.setAttribute('data-i18n-title',key);play.setAttribute('data-i18n-aria-label',key);
+      play.textContent=playing?'Ⅱ':'▶';play.setAttribute('aria-label',playing?controlLabel(key,'暂停片段','Pause clip'):controlLabel(key,'播放片段','Play clip'));play.title=play.getAttribute('aria-label');
+      const stop=document.getElementById('btnClipStop');stop.title=controlLabel('editor.stopClip','停止并回到开头','Stop and return to start');stop.setAttribute('aria-label',stop.title);
       const notes=selectedNotes(),one=notes.length===1?notes[0]:null;
       noteLabel.textContent=notes.length?t('已选 '+notes.length+' 个音','Selected: '+notes.length):t('选择音符开始编辑','Select a note to edit');
       [pitchInput,startInput,lengthInput,velInput,durationInput].forEach(e=>{e.disabled=!one;});

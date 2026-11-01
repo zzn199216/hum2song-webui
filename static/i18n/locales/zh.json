@@ -1081,5 +1081,8 @@
   "revision.select": "选择片段版本",
   "revision.use": "使用此版本",
   "revision.rollback": "恢复上一版本",
-  "revision.compare": "对比版本"
+  "revision.compare": "对比版本",
+  "editor.playClip": "播放片段",
+  "editor.pauseClip": "暂停片段",
+  "editor.stopClip": "停止并回到开头"
 }

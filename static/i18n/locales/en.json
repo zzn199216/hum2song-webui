@@ -1081,5 +1081,8 @@
   "revision.select": "Select clip version",
   "revision.use": "Use version",
   "revision.rollback": "Restore previous version",
-  "revision.compare": "Compare versions"
+  "revision.compare": "Compare versions",
+  "editor.playClip": "Play clip",
+  "editor.pauseClip": "Pause clip",
+  "editor.stopClip": "Stop and return to start"
 }

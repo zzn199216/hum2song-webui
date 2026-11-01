@@ -1081,5 +1081,8 @@
   "revision.select": "クリップのバージョンを選択",
   "revision.use": "このバージョンを使用",
   "revision.rollback": "前のバージョンに戻す",
-  "revision.compare": "バージョンを比較"
+  "revision.compare": "バージョンを比較",
+  "editor.playClip": "クリップを再生",
+  "editor.pauseClip": "クリップを一時停止",
+  "editor.stopClip": "停止して先頭に戻る"
 }
