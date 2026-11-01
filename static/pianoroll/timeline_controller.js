@@ -799,7 +799,17 @@
             openInstrumentPopoverV1();
           });
           instWrap.appendChild(trigger);
-          label.appendChild(instWrap);
+          const trackInstances = (proj.instances || []).filter(instance => Number(instance.trackIndex || 0) === ti);
+          const clipItems = Array.isArray(proj.clips) ? proj.clips : Object.values(proj.clips || {});
+          const audioOnly = trackInstances.length > 0 && trackInstances.every(instance => {
+            const clip = clipItems.find(item => item.id === instance.clipId);
+            return clip && (clip.kind === 'audio' || clip.audio);
+          });
+          if (audioOnly) {
+            const audioLabel = document.createElement('span');
+            audioLabel.className = 'trackAudioLabel';audioLabel.textContent = _t('trackpanel.originalAudio');
+            label.appendChild(audioLabel);
+          } else label.appendChild(instWrap);
 
           // Click empty header area to set Active Track (target for Add-to-Song)
           label.addEventListener('click', ()=>{

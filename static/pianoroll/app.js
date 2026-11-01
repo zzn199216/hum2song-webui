@@ -1757,12 +1757,13 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
   }
 
   let _lastLogLine = '';
+  let _lastLogMessageKey = '';
   function updateLogStatusBar(){
     if (typeof document === 'undefined') return;
     const bar = document.getElementById('logStatusBar');
     if (!bar) return;
     const statusText = (app.state && app.state.statusText != null && String(app.state.statusText).trim()) ? String(app.state.statusText).trim() : '';
-    const txt = statusText || _lastLogLine || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
+    const txt = statusText || (_lastLogMessageKey ? window.I18N.t(_lastLogMessageKey) : _lastLogLine) || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
     bar.textContent = txt.length > 80 ? txt.slice(0, 77) + '...' : txt;
     bar.classList.toggle('error', /failed|error/i.test(txt));
     bar.title = (window.I18N && window.I18N.t) ? window.I18N.t('log.clickToExpand') : 'Click to expand log';
@@ -1773,7 +1774,9 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
     panel.classList.toggle('collapsed', !open);
     try{ localStorage.setItem(LS_KEY_LOG_OPEN, open ? '1' : '0'); }catch(e){}
   }
-  function log(msg){
+  function log(msg, messageKey){
+    _lastLogMessageKey = messageKey || '';
+    if (messageKey && window.I18N && window.I18N.t) msg = window.I18N.t(messageKey);
     const el = $('#log');
     const t = new Date();
     const line = `[${t.toLocaleTimeString()}] ${msg}\n`;
@@ -2377,6 +2380,7 @@ undoLastTimelineEdit(){
 },
 
 resetForCloudHostSessionChange(hostSessionKey){
+  this._nativeAudioImportEpoch = (this._nativeAudioImportEpoch || 0) + 1;
   const nextKey = String(hostSessionKey || _cloudHostSessionKeyFromLocation() || 'host-reset').trim().slice(0, 160);
   _clearStoredProjectDocumentsForCloudHostReset();
   try{
@@ -4506,7 +4510,7 @@ if (typeof localStorage !== 'undefined') {
       });
 
       // Transport buttons
-      $('#btnPlayProject').addEventListener('click', (ev) => { try{ _unlockAudioFromGesture(); }catch(e){} return this.playProject(); });
+      $('#btnPlayProject').addEventListener('click', () => { try{ _unlockAudioFromGesture(); }catch(e){} return this._isPlaying() ? this.stopProject() : this.playProject(); });
       $('#btnStop').addEventListener('click', () => { this.stopProjectReset(); });
       $('#btnRecord').addEventListener('click', () => {
         try{ _unlockAudioFromGesture(); }catch(e){}
@@ -4617,9 +4621,12 @@ $('#rngPitchCenter').addEventListener('input', () => {
           }
         }
         const path = (ev.composedPath && ev.composedPath()) || (ev.target ? [ev.target] : []);
-        const inInput = path.some((el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+        const inInput = path.some((el) => el && (['INPUT','TEXTAREA','SELECT','BUTTON','A'].includes(el.tagName) || el.isContentEditable));
         if (inInput) return;
+        if (ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey || ev.defaultPrevented) return;
         if (!this.state.modal.show){
+          if (document.querySelector('dialog[open]') || (cfp && !cfp.classList.contains('hidden')) || (ph && !ph.classList.contains('hidden'))) return;
+          if (ev.key === ' '){try{ _unlockAudioFromGesture(); }catch(e){} if (this._isPlaying()) this.stopProject(); else void this.playProject(); ev.preventDefault();return;}
           if (ev.key === 'r' || ev.key === 'R'){ try{ _unlockAudioFromGesture(); }catch(e){} if (this.state.recordingActive) this.stopRecording(); else this.startRecording(); ev.preventDefault(); }
           if (ev.key === 's' || ev.key === 'S'){ if (!this.state.recordingActive) this.stopProjectReset(); ev.preventDefault(); }
           return;
@@ -4827,7 +4834,7 @@ H2SProject: (typeof window !== 'undefined') ? window.H2SProject : null,
               this.project.ui.playheadSec = sec;
               const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
               const beat = (sec * bpm) / 60;
-              $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+              $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)} ${window.I18N.t('timeline.beats')})`;
               if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
                 this.timelineCtrl.setPlayheadSec(sec);
               } else {
@@ -4895,7 +4902,7 @@ try{
       this.project.ui.playheadSec = sec;
       const bpm = (this.project && typeof this.project.bpm === 'number') ? this.project.bpm : 120;
       const beat = (sec * bpm) / 60;
-      $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)}b)`;
+      $('#lblPlayhead').textContent = `${((window.I18N && window.I18N.t) ? window.I18N.t('timeline.playhead') : 'Playhead')}: ${fmtSec(sec)} (${beat.toFixed(2)} ${window.I18N.t('timeline.beats')})`;
 
       if (this.timelineCtrl && typeof this.timelineCtrl.setPlayheadSec === 'function'){
         this.timelineCtrl.setPlayheadSec(sec);
@@ -4920,7 +4927,7 @@ try{
 }
 
       this.render();
-      log('UI ready.');
+      log('', 'log.ready');
       if (window.H2SStudioUi) window.H2SStudioUi.runtimeReady();
       try{
         if (typeof window !== 'undefined' && window.H2SStartupPerf){
@@ -7793,6 +7800,7 @@ renderTimeline(){
      */
     async _commitNativeAudioFile(file, opts){
       opts = opts || {};
+      const importEpoch = this._nativeAudioImportEpoch || 0;
       const P = window.H2SProject;
       if (!P || typeof P.createClipFromAudio !== 'function' || typeof P.createInstanceV2 !== 'function'){
         try { alert('Audio import is unavailable (project helpers missing).'); } catch (_e) {}
@@ -7800,6 +7808,15 @@ renderTimeline(){
       }
       if (!file || !(file instanceof Blob)){
         return { ok: false, reason: 'no_file' };
+      }
+      const sourceId = opts.sourceMetadata && opts.sourceMetadata.cloudSourceAssetId;
+      if (opts.deduplicateCloudSource && sourceId) {
+        const existingProject = this.getProjectV2();
+        const existing = existingProject && Object.values(existingProject.clips || {}).find(function(clip){
+          return clip && clip.meta && clip.meta.cloudSourceAssetId === sourceId &&
+            (existingProject.instances || []).some(function(inst){return inst.clipId === clip.id;});
+        });
+        if (existing) return {ok:true,alreadyImported:true,clipId:existing.id};
       }
       const _t = (window.I18N && window.I18N.t) ? window.I18N.t.bind(window.I18N) : (k) => k;
       this.setImportStatus(_t('io.importAudioDecoding'), false);
@@ -7815,6 +7832,7 @@ renderTimeline(){
         catch (_durationError) { durationSec = 1; }
       }
       if (!isFinite(durationSec) || durationSec <= 0) durationSec = 1e-6;
+      if ((this._nativeAudioImportEpoch || 0) !== importEpoch) return {ok:false,reason:'session_changed'};
       const LAS = (typeof window !== 'undefined') ? window.H2SLocalAudioAssets : null;
       if (!LAS || typeof LAS.storeImportedAudioFile !== 'function'){
         try { alert(_t('io.importAudioNoStore') || 'Local audio storage is not available in this environment.'); } catch (_e) {}
@@ -7836,6 +7854,7 @@ renderTimeline(){
       const nameFromFile = (file.name && /\.[^/.]+$/.test(String(file.name)))
         ? String(file.name).replace(/\.[^/.]+$/, '')
         : '';
+      if ((this._nativeAudioImportEpoch || 0) !== importEpoch) return {ok:false,reason:'session_changed'};
       const baseName = (typeof opts.baseName === 'string' && String(opts.baseName).trim())
         ? String(opts.baseName).trim()
         : (nameFromFile || 'Imported audio');
@@ -7851,6 +7870,7 @@ renderTimeline(){
         name: baseName,
         bpm: projBpm,
       });
+      if (sourceId) clip.meta = Object.assign({}, clip.meta, {cloudSourceAssetId:String(sourceId)});
       if (opts.separationStem) clip.meta = Object.assign({}, clip.meta, { separationStem: opts.separationStem });
       if (!p2.clips || typeof p2.clips !== 'object' || Array.isArray(p2.clips)) p2.clips = {};
       p2.clips[clip.id] = clip;
@@ -8375,7 +8395,7 @@ renderTimeline(){
       if (typeof document === 'undefined') return;
       const bar = $('#logStatusBar');
       if (!bar) return;
-      const status = (this.state && this.state.statusText) || _lastLogLine || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
+      const status = (this.state && this.state.statusText) || (_lastLogMessageKey ? window.I18N.t(_lastLogMessageKey) : _lastLogLine) || ((window.I18N && window.I18N.t) ? window.I18N.t('log.ready') : 'Ready');
       const txt = String(status || '');
       bar.textContent = txt.length > 80 ? txt.slice(0, 77) + '...' : txt;
       bar.classList.toggle('error', /Failed|Error/i.test(String(status)));
@@ -9948,17 +9968,28 @@ renderTimeline(){
       const timerEl = $('#studioRecordTimer');
       const waveEl = $('#studioRecordWaveform');
       const statusEl = $('#studioRecordStatus');
+      const t = (key,fallback) => {const value=window.I18N && window.I18N.t ? window.I18N.t(key) : null;return value && value!==key ? value : fallback;};
       const active = !!this.state.recordingActive;
       if (rec) {
         rec.textContent = active ? ('\u23F9 ' + ((window.I18N && window.I18N.t) ? window.I18N.t('top.stop') : 'Stop')) : ('\u{1F534} ' + ((window.I18N && window.I18N.t) ? window.I18N.t('top.record') : 'Record'));
-        rec.title = active ? 'Stop recording' : 'Record mic (R)';
+        rec.title = active ? t('transport.stopRecording','Stop recording') : t('transport.record','Record microphone (R)');
+        rec.setAttribute('aria-label',rec.title);
         rec.disabled = false;
       }
       if (stp) {
         const playing = this._isPlaying();
-        stp.style.visibility = playing ? 'visible' : 'hidden';
-        stp.style.pointerEvents = playing ? '' : 'none';
-        stp.title = 'Stop + Reset (S)';
+        stp.style.visibility = 'visible';
+        stp.style.pointerEvents = '';
+        stp.title = t('transport.stop','Stop and return to start (S)');
+        stp.setAttribute('aria-label',stp.title);
+      }
+      const play = document.getElementById('btnPlayProject');
+      if (play) {
+        const playing = this._isPlaying();
+        const key = playing ? 'transport.pause' : 'transport.play';
+        play.textContent = playing ? '❚❚' : '▶';
+        play.setAttribute('data-i18n-title',key);play.setAttribute('data-i18n-aria-label',key);
+        play.title = t(key,playing ? 'Pause (Space)' : 'Play (Space)');play.setAttribute('aria-label',play.title);
       }
       if (useLast) {
         useLast.disabled = !this.state.lastRecordedFile;
@@ -10857,6 +10888,9 @@ renderTimeline(){
       try{
         if (typeof document === 'undefined' || !window.I18N || typeof window.I18N.t !== 'function') return;
         const I18N = window.I18N;
+        this.updateLogStatusBar();
+        this.updateRecordButtonStates();
+        if (this._refreshSamplerPackDropdown) this._refreshSamplerPackDropdown();
         document.querySelectorAll('[data-i18n]').forEach(function(el){
           const k = el.getAttribute('data-i18n');
           if (k) el.textContent = I18N.t(k);
@@ -10993,8 +11027,13 @@ renderTimeline(){
 
         function refreshPackDropdown(){
           if (!selPack || !window.H2SProject || !window.H2SProject.SAMPLER_PACKS) return;
+          const previousValue = selPack.value;
           const packs = window.H2SProject.SAMPLER_PACKS;
-          let html = Object.keys(packs).map(k => `<option value="${k}">${(packs[k].label || k).replace(/</g,'&lt;')}</option>`).join('');
+          let html = Object.keys(packs).map(k => {
+            const item = window.H2SInstrumentManifest && window.H2SInstrumentManifest.getInstrumentByLegacyKey('sampler:'+k);
+            const label = item && item.i18nNameKey && window.I18N ? window.I18N.t(item.i18nNameKey) : (packs[k].label || k).replace(/ \(tonejs-instruments\)$/,'');
+            return `<option value="${k}">${escapeHtml(label)}</option>`;
+          }).join('');
           const custom = window.__h2s_custom_instruments || [];
           if (custom.length){
             html += '<optgroup label="' + escapeHtml((window.I18N && window.I18N.t) ? window.I18N.t('inst.myInstruments') : 'My Instruments') + '">';
@@ -11002,12 +11041,14 @@ renderTimeline(){
             html += '</optgroup>';
           }
           selPack.innerHTML = html;
+          if (Array.from(selPack.options).some(option=>option.value===previousValue)) selPack.value=previousValue;
         }
+        this._refreshSamplerPackDropdown = refreshPackDropdown;
         if (selPack && window.H2SProject && window.H2SProject.SAMPLER_PACKS) refreshPackDropdown();
 
         function updateUploadButtonLabel(){
           if (!btnUpload) return;
-          btnUpload.textContent = 'Upload samples (creates new instrument)';
+          btnUpload.textContent = window.I18N.t('inst.upload');
         }
 
         function refreshUploadStatus(){

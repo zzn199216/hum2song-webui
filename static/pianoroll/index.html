@@ -1430,7 +1430,7 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
 
 <body>
   <div id="studioStartup" role="status"><span id="studioStartupLabel">Loading Studio…</span><button id="studioStartupRetry" type="button" hidden>Reload</button></div>
-  <script src="/static/pianoroll/startup_ui.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/startup_ui.js?v=unified-user-flow-v9"></script>
 
   <div class="topbar">
     <div class="brand">
@@ -1444,8 +1444,8 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
       <span id="studioRecordTimer" class="smallmuted" style="display:none; min-width:42px; font-variant-numeric:tabular-nums;">00:00</span>
       <canvas id="studioRecordWaveform" width="160" height="28" style="display:none; vertical-align:middle; background:rgba(0,0,0,.25); border-radius:6px;" title="Recording waveform"></canvas>
       <span id="studioRecordStatus" class="smallmuted" style="min-width:60px;"></span>
-      <button id="btnPlayProject" class="btn icon primary" title="Play Project">P</button>
-      <button id="btnStop" class="btn icon" title="Stop + Reset (S)" style="visibility:hidden;pointer-events:none;">S</button>
+      <button type="button" id="btnPlayProject" class="btn icon primary" data-i18n-title="transport.play" data-i18n-aria-label="transport.play" title="Play (Space)" aria-label="Play (Space)">▶</button>
+      <button type="button" id="btnStop" class="btn icon" data-i18n-title="transport.stop" data-i18n-aria-label="transport.stop" title="Stop and return to start (S)" aria-label="Stop and return to start (S)">■</button>
       <span class="topbarImportWorkflow">
         <button type="button" id="btnImportAudio" class="btn" data-i18n="top.importAudio" data-i18n-title="top.importAudioTitle">Import audio</button>
         <span id="topbarTranscriptionGroup" class="transcriptionImportOptions" data-enabled="true">
@@ -1688,7 +1688,7 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
     <div class="panel">
       <div class="panelHeader">
         <h3 data-i18n="cliplib.title">Clip Library</h3>
-        <button id="btnNewTrack" class="btn icon" title="Add track (MVP: 1 track only)" disabled>+</button>
+        <button id="btnNewTrack" class="btn icon" title="Add track (MVP: 1 track only)" disabled data-i18n-title="timeline.addTrack">+</button>
       </div>
       <div class="panelBody">
         <div class="col">
@@ -1706,29 +1706,29 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
           <div id="h2sLegacyHummingMusicPanel" hidden aria-hidden="true" style="display:none;">
             <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
               <strong style="font-size:12px;">生成完整音乐</strong>
-              <button type="button" id="btnHummingGenerateMusic" class="btn primary mini">生成完整音乐</button>
+              <button type="button" id="btnHummingGenerateMusic" class="btn primary mini" data-i18n="studioUi.generate.full.music">生成完整音乐</button>
             </div>
             <p class="smallmuted" style="font-size:11px; margin:6px 0;">完整音乐是生成音频素材；原 MIDI/clip 仍可继续编辑。</p>
             <div class="col" style="gap:6px;">
               <div class="row" data-h2s-hum-group="instruments" style="gap:4px; flex-wrap:wrap;">
-                <button type="button" class="btn mini" data-h2s-hum-chip="piano">Piano</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="guitar">Guitar</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="synth">Synth</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="piano" data-i18n="studioUi.piano">Piano</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="guitar" data-i18n="studioUi.guitar">Guitar</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="synth" data-i18n="studioUi.synth">Synth</button>
               </div>
               <div class="row" data-h2s-hum-group="style" style="gap:4px; flex-wrap:wrap;">
-                <button type="button" class="btn mini" data-h2s-hum-chip="pop">Pop</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="lo-fi">Lo-fi</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="city pop">City pop</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="pop" data-i18n="studioUi.pop">Pop</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="lo-fi" data-i18n="studioUi.lo.fi">Lo-fi</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="city pop" data-i18n="studioUi.city.pop">City pop</button>
               </div>
               <div class="row" data-h2s-hum-group="mood" style="gap:4px; flex-wrap:wrap;">
-                <button type="button" class="btn mini" data-h2s-hum-chip="warm">Warm</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="bright">Bright</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="dreamy">Dreamy</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="warm" data-i18n="studioUi.warm">Warm</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="bright" data-i18n="studioUi.bright">Bright</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="dreamy" data-i18n="studioUi.dreamy">Dreamy</button>
               </div>
               <div class="row" data-h2s-hum-group="arrangement" style="gap:4px; flex-wrap:wrap;">
-                <button type="button" class="btn mini" data-h2s-hum-chip="full band">Full band</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="acoustic">Acoustic</button>
-                <button type="button" class="btn mini" data-h2s-hum-chip="cinematic">Cinematic</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="full band" data-i18n="studioUi.full.band">Full band</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="acoustic" data-i18n="studioUi.acoustic">Acoustic</button>
+                <button type="button" class="btn mini" data-h2s-hum-chip="cinematic" data-i18n="studioUi.cinematic">Cinematic</button>
               </div>
               <input id="h2sHummingCustomKeywords" type="text" placeholder="Custom keywords" style="width:100%; font-size:12px;" />
               <div id="h2sHummingMusicStatus" class="smallmuted" style="font-size:11px;"></div>
@@ -1743,15 +1743,15 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
           <div id="clipLibraryToolbar" class="clipLibraryToolbar row" style="gap:6px; flex-wrap:wrap; margin-bottom:8px;">
             <button type="button" class="btn mini" id="btnAutoSplitClips" data-i18n="cliplib.autoSplit" title="Split long clip into shorter segments">自动拆轨</button>
             <button type="button" class="btn mini" id="btnSelectSplitGroup" data-i18n="arrange.selectGroup" data-i18n-title="arrange.selectGroupTip" title="Select all clips in the same split group">Select group</button>
-            <select id="selPlaceAnchor" class="btn mini" title="Placement anchor" style="min-width:8rem;">
-              <option value="playhead">From playhead</option>
-              <option value="selectionStart">From selection start</option>
-              <option value="selectionEnd">From selection end</option>
-              <option value="timelineStart">From timeline start</option>
+            <select id="selPlaceAnchor" class="btn mini" title="Placement anchor" style="min-width:8rem;" data-i18n-title="arrange.anchor">
+              <option value="playhead" data-i18n="studioUi.from.playhead">From playhead</option>
+              <option value="selectionStart" data-i18n="studioUi.from.selection.start">From selection start</option>
+              <option value="selectionEnd" data-i18n="studioUi.from.selection.end">From selection end</option>
+              <option value="timelineStart" data-i18n="studioUi.from.timeline.start">From timeline start</option>
             </select>
-            <button type="button" class="btn mini primary" id="btnPlaceClipsSequence" title="Place selected clips sequentially on timeline">Place in sequence</button>
-            <button type="button" class="btn mini" id="btnCompactInstances" title="Remove gaps between grouped instances">Close gaps</button>
-            <button type="button" class="btn mini" id="btnRepeatInstances" title="Repeat selected group">Repeat ×2</button>
+            <button type="button" class="btn mini primary" id="btnPlaceClipsSequence" title="Place selected clips sequentially on timeline" data-i18n="studioUi.place.in.sequence" data-i18n-title="studioUi.place.selected.clips.sequentially.on.timeline">Place in sequence</button>
+            <button type="button" class="btn mini" id="btnCompactInstances" title="Remove gaps between grouped instances" data-i18n="studioUi.close.gaps" data-i18n-title="studioUi.remove.gaps.between.grouped.instances">Close gaps</button>
+            <button type="button" class="btn mini" id="btnRepeatInstances" title="Repeat selected group" data-i18n="studioUi.repeat.2" data-i18n-title="studioUi.repeat.selected.group">Repeat ×2</button>
           </div>
           <div id="clipList" class="col"></div>
         </div>
@@ -1761,16 +1761,16 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
     <!-- Center -->
     <div class="center">
       <div class="transport">
-        <button id="btnPlayheadToStart" class="btn icon" title="Go to start">|&lt;</button>
+        <button id="btnPlayheadToStart" class="btn icon" title="Go to start" data-i18n-title="transport.goStart">|&lt;</button>
         <div class="bpmBox">
           <span class="muted" data-i18n="timeline.bpm">BPM</span>
           <input id="inpBpm" type="number" min="30" max="260" value="120" />
         </div>
         <div class="pill" id="lblPlayhead"><span data-i18n="timeline.playhead">Playhead</span>: 0.00s</div>
         <div class="timelineZoomBox row" style="gap:4px; align-items:center;">
-          <button type="button" id="btnTimelineZoomOut" class="btn mini" title="Zoom out">−</button>
+          <button type="button" id="btnTimelineZoomOut" class="btn mini" title="Zoom out" data-i18n-title="timeline.zoomOut">−</button>
           <span id="lblTimelineZoom" class="pill muted" style="min-width:3rem;text-align:center;">100%</span>
-          <button type="button" id="btnTimelineZoomIn" class="btn mini" title="Zoom in">+</button>
+          <button type="button" id="btnTimelineZoomIn" class="btn mini" title="Zoom in" data-i18n-title="timeline.zoomIn">+</button>
           <button type="button" id="btnTimelineZoomFit" class="btn mini" data-i18n="timeline.fit" data-i18n-title="editor.timeFitWidth">Fit</button>
         </div>
         <div class="hint" data-i18n="timeline.tipDrag">Tip: drag clip blocks; double-click to open editor.</div>
@@ -1831,11 +1831,11 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
           <div class="muted" style="font-size:11px; margin-bottom:4px;" data-i18n="inspector.timelineSelectionHint">Selected instance on timeline (start/transpose/edit).</div>
           <div id="selectionBox" class="muted">Select a clip instance on timeline.</div>
           <div class="row" style="gap:6px; align-items:center; margin-top:8px;">
-            <label for="selTrackRole" class="muted" style="font-size:11px;">Track role</label>
+            <label for="selTrackRole" class="muted" style="font-size:11px;" data-i18n="studioUi.track.role">Track role</label>
             <select id="selTrackRole" class="btn mini" title="Default track for sequential placement">
-              <option value="">(none)</option>
-              <option value="melody">Melody</option>
-              <option value="accompaniment">Accompaniment</option>
+              <option value="" data-i18n="studioUi.none">(none)</option>
+              <option value="melody" data-i18n="studioUi.melody">Melody</option>
+              <option value="accompaniment" data-i18n="studioUi.accompaniment">Accompaniment</option>
             </select>
           </div>
         </div>
@@ -2002,9 +2002,9 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
               <option value="dynamics_accent" data-i18n="opt.dynamicsAccent">Dynamics Accent</option>
               <option value="dynamics_level" data-i18n="opt.dynamicsLevel">Dynamics Level</option>
               <option value="duration_gentle" data-i18n="opt.durationGentle">Duration Gentle</option>
-              <option value="velocity_shape">Velocity shape</option>
-              <option value="local_transpose">Local transpose</option>
-              <option value="rhythm_tighten_loosen">Rhythm tighten/loosen</option>
+              <option value="velocity_shape" data-i18n="studioUi.velocity.shape">Velocity shape</option>
+              <option value="local_transpose" data-i18n="studioUi.local.transpose">Local transpose</option>
+              <option value="rhythm_tighten_loosen" data-i18n="studioUi.rhythm.tighten.loosen">Rhythm tighten/loosen</option>
               <option value="llm_v0" data-i18n="opt.llmV0">LLM v0</option>
             </select>
             <button id="btnEditorOptimize" class="btn" type="button" data-i18n="opt.optimize">Optimize</button>
@@ -2085,9 +2085,9 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
                   <option value="dynamics_accent" data-i18n="opt.dynamicsAccent">Dynamics Accent</option>
                   <option value="dynamics_level" data-i18n="opt.dynamicsLevel">Dynamics Level</option>
                   <option value="duration_gentle" data-i18n="opt.durationGentle">Duration Gentle</option>
-                  <option value="velocity_shape">Velocity shape</option>
-                  <option value="local_transpose">Local transpose</option>
-                  <option value="rhythm_tighten_loosen">Rhythm tighten/loosen</option>
+                  <option value="velocity_shape" data-i18n="studioUi.velocity.shape">Velocity shape</option>
+                  <option value="local_transpose" data-i18n="studioUi.local.transpose">Local transpose</option>
+                  <option value="rhythm_tighten_loosen" data-i18n="studioUi.rhythm.tighten.loosen">Rhythm tighten/loosen</option>
                   <option value="llm_v0" selected data-i18n="opt.llmV0">LLM v0</option>
                 </select>
                 <button id="btnEditorQuickOptimize" class="btn primary" type="button" data-i18n="opt.run">Run Optimize</button>
@@ -2120,30 +2120,30 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
                   <strong style="font-size:12px;">生成完整音乐</strong>
                   <div class="smallmuted" style="font-size:11px; margin-top:2px;">基于当前 Clip 生成音频素材；原 MIDI/clip 仍可继续编辑。</div>
                 </div>
-                <button type="button" id="btnHummingGenerateMusicFromClip" class="btn primary mini">用这个片段生成完整音乐</button>
+                <button type="button" id="btnHummingGenerateMusicFromClip" class="btn primary mini" data-i18n="studioUi.generate.full.music.from.this.clip">用这个片段生成完整音乐</button>
               </div>
               <details class="help" style="margin-top:8px;">
                 <summary style="cursor:pointer; font-size:12px;">风格关键词</summary>
                 <div class="col" style="gap:6px; margin-top:8px;">
                   <div class="row" data-h2s-hum-group="instruments" style="gap:4px; flex-wrap:wrap;">
-                    <button type="button" class="btn mini" data-h2s-hum-chip="piano">Piano</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="guitar">Guitar</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="synth">Synth</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="piano" data-i18n="studioUi.piano">Piano</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="guitar" data-i18n="studioUi.guitar">Guitar</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="synth" data-i18n="studioUi.synth">Synth</button>
                   </div>
                   <div class="row" data-h2s-hum-group="style" style="gap:4px; flex-wrap:wrap;">
-                    <button type="button" class="btn mini" data-h2s-hum-chip="pop">Pop</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="lo-fi">Lo-fi</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="city pop">City pop</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="pop" data-i18n="studioUi.pop">Pop</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="lo-fi" data-i18n="studioUi.lo.fi">Lo-fi</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="city pop" data-i18n="studioUi.city.pop">City pop</button>
                   </div>
                   <div class="row" data-h2s-hum-group="mood" style="gap:4px; flex-wrap:wrap;">
-                    <button type="button" class="btn mini" data-h2s-hum-chip="warm">Warm</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="bright">Bright</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="dreamy">Dreamy</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="warm" data-i18n="studioUi.warm">Warm</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="bright" data-i18n="studioUi.bright">Bright</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="dreamy" data-i18n="studioUi.dreamy">Dreamy</button>
                   </div>
                   <div class="row" data-h2s-hum-group="arrangement" style="gap:4px; flex-wrap:wrap;">
-                    <button type="button" class="btn mini" data-h2s-hum-chip="full band">Full band</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="acoustic">Acoustic</button>
-                    <button type="button" class="btn mini" data-h2s-hum-chip="cinematic">Cinematic</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="full band" data-i18n="studioUi.full.band">Full band</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="acoustic" data-i18n="studioUi.acoustic">Acoustic</button>
+                    <button type="button" class="btn mini" data-h2s-hum-chip="cinematic" data-i18n="studioUi.cinematic">Cinematic</button>
                   </div>
                   <input id="h2sHummingCustomKeywords" type="text" placeholder="Custom keywords" style="width:100%; font-size:12px;" />
                 </div>
@@ -2235,19 +2235,19 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   </div>
 
   <!-- i18n core (PR-G1a) - load before other scripts -->
-  <script src="/static/pianoroll/studio_asset_version.js?v=dynamic-stems-preview-v8"></script>
-<script src="/static/pianoroll/cloud_boot.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/h2s_startup_perf.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/i18n/i18n.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/studio_asset_version.js?v=unified-user-flow-v9"></script>
+<script src="/static/pianoroll/cloud_boot.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/h2s_startup_perf.js?v=unified-user-flow-v9"></script>
+  <script src="/static/i18n/i18n.js?v=unified-user-flow-v9"></script>
   <!-- Tone.js (UMD) - local vendor -->
   <script src="/static/pianoroll/vendor/tone/Tone.js"></script>
 
-  <script src="/static/pianoroll/project.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/project.js?v=unified-user-flow-v9"></script>
   <script src="/static/pianoroll/core/waveform_peaks.js?v=clip-canvas-v1"></script>
-  <script src="/static/pianoroll/core/local_audio_assets.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/instrument_manifest.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/gm_drum_kit.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/core/local_audio_assets.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/controllers/instrument_library_store.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/instrument_manifest.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/gm_drum_kit.js?v=unified-user-flow-v9"></script>
   <script src="/static/pianoroll/core/agent_patch.js?v=1"></script>
   <script src="/static/pianoroll/core/velocity_shape.js?v=1"></script>
   <script src="/static/pianoroll/core/local_transpose.js?v=1"></script>
@@ -2267,12 +2267,12 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/ui/timeline_view.js?v=clip-canvas-v1"></script>
   <script src="/static/pianoroll/core/timeline_math.js"></script>
   <script src="/static/pianoroll/controllers/timeline_runtime.js"></script>
-  <script src="/static/pianoroll/timeline_controller.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/ui/library_view.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/controllers/library_controller.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/ui/selection_view.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/controllers/selection_controller.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/controllers/audio_controller.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/timeline_controller.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/ui/library_view.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/controllers/library_controller.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/ui/selection_view.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/controllers/selection_controller.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/controllers/audio_controller.js?v=unified-user-flow-v9"></script>
   <script src="/static/pianoroll/llm_defaults.js"></script>
   <script src="/static/pianoroll/llm_config.js"></script>
   <script src="/static/pianoroll/llm_client.js"></script>
@@ -2289,18 +2289,18 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   <script src="/static/pianoroll/controllers/editor_runtime.js?v=notation-vector-pdf-v2-20261002"></script>
   <script src="/static/pianoroll/controllers/export_flatten_controller.js"></script>
   <script src="/static/pianoroll/controllers/export_midi_controller.js"></script>
-  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/controllers/export_wav_controller.js?v=unified-user-flow-v9"></script>
   <script src="/static/pianoroll/core/audio_convert_segment.js?v=clip-edit-v16"></script>
-  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/audio_decode.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/audio_analysis.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/audio_stem_silence_segments.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/core/audio_instrument_client.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/core/audio_worker_conversion_client.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/audio_separation_timeline.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/audio_worker_separation_client.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/audio_decode.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/audio_analysis.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/audio_stem_silence_segments.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/controllers/audio_analysis_controller.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/core/audio_instrument_client.js?v=unified-user-flow-v9"></script>
   <script src="/static/pianoroll/core/audio_worker_analysis_client.js?v=audio-analysis-worker-v1"></script>
-  <script src="/static/pianoroll/core/audio_worker_advanced_stem_client.js?v=dynamic-stems-preview-v8"></script>
+  <script src="/static/pianoroll/core/audio_worker_advanced_stem_client.js?v=unified-user-flow-v9"></script>
   <script src="/static/pianoroll/internal_action_registry.js"></script>
   <script src="/static/pianoroll/internal_skill_registry.js"></script>
   <style>
@@ -2574,13 +2574,13 @@ label:has(#transcriptionSettingsSeparateFirst), #transcriptionSettingsSeparation
   })();
   if (window.H2S_CLOUD_MODE === true) document.documentElement.classList.add('h2sCloudMode');
   </script>
-  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=dynamic-stems-preview-v8">
-  <script src="/static/pianoroll/ui/notation_view.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/ui/editor_audition.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/controllers/notation_controller.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/app.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/cloud_project_bridge.js?v=dynamic-stems-preview-v8"></script>
-  <script src="/static/pianoroll/cloud_materials_panel.js?v=dynamic-stems-preview-v8"></script>
+  <link rel="stylesheet" href="/static/pianoroll/ui/notation.css?v=unified-user-flow-v9">
+  <script src="/static/pianoroll/ui/notation_view.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/ui/editor_audition.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/controllers/notation_controller.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/app.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/cloud_project_bridge.js?v=unified-user-flow-v9"></script>
+  <script src="/static/pianoroll/cloud_materials_panel.js?v=unified-user-flow-v9"></script>
   <script>
   (function () {
     try {

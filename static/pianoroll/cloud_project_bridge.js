@@ -433,7 +433,7 @@
     return false;
   }
 
-  window.addEventListener('message', function (event) {
+  window.addEventListener('message', async function (event) {
     if (!allowedOrigin(event.origin)) return;
 
     var data = event.data;
@@ -443,6 +443,17 @@
     if (typeof type !== 'string') return;
 
     switch (type) {
+      case 'H2S_CLOUD_IMPORT_MATERIAL': {
+        if (event.source !== window.parent || !window.H2S_CLOUD_AUTHENTICATED || typeof data.requestId !== 'string') return;
+        if (typeof window.H2S_IMPORT_CLOUD_MATERIAL !== 'function') {
+          postBack(event.origin,{type:'H2S_CLOUD_IMPORT_MATERIAL_RESULT',requestId:data.requestId,ok:false,error:'not_ready'});return;
+        }
+        Promise.resolve(window.H2S_IMPORT_CLOUD_MATERIAL(data.assetId,data.title,null,{deduplicate:true}))
+          .then(function(result){postBack(event.origin,{type:'H2S_CLOUD_IMPORT_MATERIAL_RESULT',requestId:data.requestId,
+            ok:!!(result && result.ok),alreadyImported:!!(result && result.alreadyImported),error:result && result.error});})
+          .catch(function(){postBack(event.origin,{type:'H2S_CLOUD_IMPORT_MATERIAL_RESULT',requestId:data.requestId,ok:false,error:'import_failed'});});
+        return;
+      }
       case 'H2S_HOST_BIND_STUDIO_SESSION': {
         if (event.source !== window.parent || data.version !== 1) return;
         if (window.H2SCloudBoot) window.H2SCloudBoot.bind(data.hostSessionKey);
@@ -715,6 +726,9 @@
           if (window.H2SStartupPerf && typeof window.H2SStartupPerf.mark === 'function') {
             window.H2SStartupPerf.mark('studio_project_load_start');
           }
+          var loadEpoch = appLoad._nativeAudioImportEpoch || 0;
+          if (typeof window.H2S_RESTORE_CLOUD_AUDIO_REFERENCES === 'function') pd = await window.H2S_RESTORE_CLOUD_AUDIO_REFERENCES(pd);
+          if ((appLoad._nativeAudioImportEpoch || 0) !== loadEpoch) throw Error('session_changed');
           var res = appLoad.setProjectFromV2(pd);
           if (window.H2SStartupPerf && typeof window.H2SStartupPerf.mark === 'function') {
             window.H2SStartupPerf.mark('studio_project_load_done');

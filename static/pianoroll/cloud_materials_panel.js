@@ -170,56 +170,66 @@
     });
   }
 
-  async function importMaterial(assetId, title, btn) {
-    if (!assetId) return;
-    if (importingAssetId === assetId) return;
+  async function importMaterial(assetId, title, btn, options) {
+    if (typeof assetId !== 'string' || !assetId.trim()) return {ok:false,error:'bad_request'};
+    if (importingAssetId) return {ok:false,error:'busy'};
     if (typeof window.H2S_REQUEST_CLOUD_MATERIAL_CONTENT !== 'function') {
-      setStatus(t('cloudMaterials.bridgeMissing', 'Cloud bridge unavailable.'), true);
-      return;
+      setStatus(t('cloudMaterials.bridgeMissing','Cloud bridge unavailable.'),true);return {ok:false,error:'bridge_missing'};
     }
-    importingAssetId = assetId;
-    if (btn) btn.disabled = true;
-    document.querySelectorAll('.cloudMaterialsImportBtn').forEach(function (b) {
-      if (b.getAttribute('data-asset-id') === assetId) b.disabled = true;
-    });
-    setStatus(t('cloudMaterials.importing', 'Importing…'), false);
-    window.H2S_REQUEST_CLOUD_MATERIAL_CONTENT(assetId, title);
-    var detail = await waitForContentResponse();
-    importingAssetId = null;
-    if (btn) btn.disabled = false;
-    document.querySelectorAll('.cloudMaterialsImportBtn').forEach(function (b) {
-      if (b.getAttribute('data-asset-id') === assetId) b.disabled = false;
-    });
-    if (!detail || !detail.ok || !(detail.audioBuffer instanceof ArrayBuffer)) {
-      setStatus(mapContentError(detail && detail.error), true);
-      return;
-    }
-    var app = getApp();
-    if (!app || typeof app._commitNativeAudioFile !== 'function') {
-      setStatus(t('cloudMaterials.importUnavailable', 'Audio import is unavailable in Studio.'), true);
-      return;
-    }
-    var mime = detail.mimeType || 'audio/mpeg';
-    var blob = new Blob([detail.audioBuffer], { type: mime });
-    var ext =
-      mime.indexOf('wav') >= 0 ? '.wav' : mime.indexOf('ogg') >= 0 ? '.ogg' : mime.indexOf('mpeg') >= 0 || mime.indexOf('mp3') >= 0 ? '.mp3' : '.audio';
+    importingAssetId=assetId;
+    var buttons=Array.from(document.querySelectorAll('.cloudMaterialsImportBtn'));
+    var disabledBefore=buttons.map(function(b){return b.disabled;});
+    buttons.forEach(function(b){b.disabled=true;});
+    setStatus(t('cloudMaterials.importing','Importing…'),false);
     try {
-      var file = new File([blob], (detail.title || title || 'cloud-material') + ext, { type: mime });
-      var res = await app._commitNativeAudioFile(file, {
-        baseName: detail.title || title || 'Cloud material',
-        statusDoneKey: 'cloudMaterials.importDone',
-        sourceMetadata: { cloudSourceAssetId: assetId },
-      });
-      if (!res || res.ok !== true) {
-        setStatus(t('cloudMaterials.importFailed', 'Import failed.'), true);
-        return;
+      // Install the listener before requesting, including immediate cached responses.
+      var response=waitForContentResponse(assetId);
+      window.H2S_REQUEST_CLOUD_MATERIAL_CONTENT(assetId,title);
+      var detail=await response;
+      if(!detail || !detail.ok || !(detail.audioBuffer instanceof ArrayBuffer)){
+        setStatus(mapContentError(detail && detail.error),true);return {ok:false,error:'content_failed'};
       }
-      setStatus(t('cloudMaterials.importDone', 'Imported to clip library.'), false);
-    } catch (e) {
-      console.warn('[cloud_materials_panel] import failed', e);
-      setStatus(t('cloudMaterials.importFailed', 'Import failed.'), true);
-    }
+      var app=getApp();
+      if(!app || typeof app._commitNativeAudioFile!=='function')return {ok:false,error:'not_ready'};
+      var mime=detail.mimeType||'audio/mpeg';
+      var ext=mime.indexOf('wav')>=0?'.wav':mime.indexOf('ogg')>=0?'.ogg':'.mp3';
+      var file=new File([detail.audioBuffer],(detail.title||title||'cloud-material')+ext,{type:mime});
+      var result=await app._commitNativeAudioFile(file,{
+        baseName:detail.title||title||'Cloud material',statusDoneKey:'cloudMaterials.importDone',
+        sourceMetadata:{cloudSourceAssetId:assetId},deduplicateCloudSource:!!(options && options.deduplicate)
+      });
+      if(!result || result.ok!==true){setStatus(t('cloudMaterials.importFailed','Import failed.'),true);return {ok:false,error:'import_failed'};}
+      setStatus(t('cloudMaterials.importDone','Imported to timeline.'),false);
+      closeModal();return result;
+    }catch(_error){setStatus(t('cloudMaterials.importFailed','Import failed.'),true);return {ok:false,error:'import_failed'};}
+    finally{importingAssetId=null;buttons.forEach(function(b,i){b.disabled=disabledBefore[i];});if(btn)btn.disabled=false;}
   }
+  window.H2S_IMPORT_CLOUD_MATERIAL=importMaterial;
+  // Cloud-owned audio can be recovered on another browser; note data and beat timing stay intact.
+  window.H2S_RESTORE_CLOUD_AUDIO_REFERENCES=async function(project) {
+    var app=getApp(),store=window.H2SLocalAudioAssets;
+    if(!store || !store.getFileForLocalAssetRef || !store.storeImportedAudioFile)return project;
+    var epoch=app && (app._nativeAudioImportEpoch || 0);
+    var clips=Array.isArray(project.clips)?project.clips:Object.values(project.clips||{});
+    for(var clip of clips){
+      var id=clip && clip.meta && clip.meta.cloudSourceAssetId;
+      if(!id || !clip.audio || !/^localidb:/.test(clip.audio.assetRef||''))continue;
+      if(await store.getFileForLocalAssetRef(clip.audio.assetRef))continue;
+      if(importingAssetId)throw Error('material_import_busy');
+      importingAssetId=id;
+      try{
+        var pending=waitForContentResponse(id);window.H2S_REQUEST_CLOUD_MATERIAL_CONTENT(id,clip.name||'Cloud material');
+        var content=await pending;
+        if(!content || !content.ok || !(content.audioBuffer instanceof ArrayBuffer))throw Error('cloud_audio_unavailable');
+        if(app && (app._nativeAudioImportEpoch || 0)!==epoch)throw Error('session_changed');
+        var file=new File([content.audioBuffer],clip.name||'Cloud material',{type:content.mimeType||'audio/mpeg'});
+        var saved=await store.storeImportedAudioFile(file,{sourceMetadata:{cloudSourceAssetId:id}});
+        clip.audio.assetRef=saved.assetRef;
+      }finally{importingAssetId=null;}
+    }
+    if(app && (app._nativeAudioImportEpoch || 0)!==epoch)throw Error('session_changed');
+    return project;
+  };
 
   function mapContentError(code) {
     var key = typeof code === 'string' ? code : '';
@@ -241,14 +251,16 @@
   function waitForListResponse() {
     return new Promise(function (resolve) {
       var done = false;
+      var timer;
       var onEvt = function (ev) {
         if (done) return;
         done = true;
+        clearTimeout(timer);
         window.removeEventListener('h2s-cloud-materials-list', onEvt);
         resolve(ev && ev.detail ? ev.detail : null);
       };
       window.addEventListener('h2s-cloud-materials-list', onEvt);
-      setTimeout(function () {
+      timer = setTimeout(function () {
         if (done) return;
         done = true;
         window.removeEventListener('h2s-cloud-materials-list', onEvt);
@@ -257,17 +269,19 @@
     });
   }
 
-  function waitForContentResponse() {
+  function waitForContentResponse(assetId) {
     return new Promise(function (resolve) {
       var done = false;
+      var timer;
       var onEvt = function (ev) {
-        if (done) return;
+        if (done || (ev && ev.detail && ev.detail.id && ev.detail.id !== assetId)) return;
         done = true;
+        clearTimeout(timer);
         window.removeEventListener('h2s-cloud-material-content', onEvt);
         resolve(ev && ev.detail ? ev.detail : null);
       };
       window.addEventListener('h2s-cloud-material-content', onEvt);
-      setTimeout(function () {
+      timer = setTimeout(function () {
         if (done) return;
         done = true;
         window.removeEventListener('h2s-cloud-material-content', onEvt);

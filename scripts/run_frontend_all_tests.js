@@ -24,6 +24,8 @@ runOne('scripts/run_frontend_bpm_invariants_tests.js');
 runOne('scripts/run_frontend_timeline_unit_tests.js');
 runOne('scripts/tests/project_v1_v2_persistence_compat.test.js');
 runOne('scripts/tests/stem_materialization_regression.test.js');
+runOne('scripts/tests/cloud_material_direct_import.test.js');
+runOne('scripts/tests/cloud_audio_restore.test.js');
 runOne('scripts/tests/clip_thumbnail_math.test.js');
 runOne('scripts/tests/waveform_peaks.test.js');
 runOne('scripts/tests/audio_analysis_engine.test.js');
