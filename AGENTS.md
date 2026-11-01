@@ -2,6 +2,8 @@
 
 ## Single development line
 
+- Keep live `.git` metadata out of file-cloud synchronization. The Cloud checkout's `scripts/ops/source_backup.py` creates verified NAS backups for both repositories and their historical worktrees; see `docs/ops/GIT_SAFETY_AND_SOURCE_BACKUP_20261102.md` in that checkout. Archived directories under `W:/git/Hum2song1/_archives` are recovery-only, not development entry points.
+
 - The only active Studio checkout is `W:/git/Hum2song1/hum2song-studio-cloud`, branch `codex/unified-maintenance-20261101`. Use this same source for both regions; retain region-specific configuration and verified startup artifacts.
 - Coordinate through the Hum2Song unified maintenance chat and the Cloud checkout's `docs/ops/UNIFIED_DEVELOPMENT_PLAN_20261101.md` / `UNIFIED_TASK_QUEUE_20261101.md` at `W:/git/Hum2song1/_worktrees/music-model-display-cn-20261011`.
 - Other Studio worktrees are read-only recovery/history inputs. Preserve their work; do not start another regional or UI implementation line from them.

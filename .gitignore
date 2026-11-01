@@ -60,3 +60,10 @@ assets/**
 # Local verification report
 .verification-cache/
 node_modules/
+
+# Baidu transfer sidecars; live Git synchronization must stay disabled.
+*.baiduyun.uploading.cfg
+
+output/
+
+.playwright-cli/
