@@ -1,6 +1,6 @@
-const releaseVersion = require('./studio_release_version.cjs');
 #!/usr/bin/env node
 'use strict';
+const releaseVersion = require('./studio_release_version.cjs');
 
 const fs = require('fs');
 const path = require('path');

@@ -1,6 +1,6 @@
-const releaseVersion = require('./studio_release_version.cjs');
 #!/usr/bin/env node
 'use strict';
+const releaseVersion = require('./studio_release_version.cjs');
 
 const assert = require('assert');
 const path = require('path');
@@ -61,7 +61,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 (function testIndexLoadsWorkerClientBeforeApp(){
   const indexHtml = fs.readFileSync(path.join(repoRoot, 'static', 'pianoroll', 'index.html'), 'utf8');
   assert(indexHtml.includes('core/audio_worker_conversion_client.js'), 'index loads worker conversion client');
-  assert(indexHtml.includes(releaseVersion), 'index cache-busts the current Studio release');
+  assert(indexHtml.includes('audio_worker_conversion_client.js?v=' + releaseVersion), 'index uses the declared cache version for the worker client');
   assert(indexHtml.indexOf('core/audio_worker_conversion_client.js') < indexHtml.indexOf('app.js?v='), 'worker client loads before app');
   console.log('PASS index worker conversion client load order');
 })();

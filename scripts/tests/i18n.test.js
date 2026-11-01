@@ -1,7 +1,7 @@
-const releaseVersion = require('./studio_release_version.cjs');
 #!/usr/bin/env node
 /* PR-G1a/G1b/G1c: i18n Core - minimal tests for register, t, setLang, fallback, persistence, loadManifest, zh-covers-en. */
 'use strict';
+const releaseVersion = require('./studio_release_version.cjs');
 
 const fs = require('fs');
 const path = require('path');
@@ -128,7 +128,7 @@ if (fs.existsSync(indexHtmlPath)) {
   assert(indexHtml.indexOf('data-i18n="audio.multistem.multi"') !== -1, 'separation preset choices should be localized');
   assert(indexHtml.indexOf('data-i18n="audio.waveform.separationHelp"') !== -1, 'separation dialog help should be localized');
   assert(indexHtml.indexOf('data-i18n="audio.waveform.separationStart"') !== -1, 'separation dialog action should be localized');
-  assert(indexHtml.indexOf(releaseVersion) !== -1, 'current Studio release should bump the script cache version');
+  assert(indexHtml.includes('i18n.js?v=' + releaseVersion), 'i18n script uses the declared cache version');
 }
 
 // Last optimize: staleness uses revision + project doc key (see app.js)
