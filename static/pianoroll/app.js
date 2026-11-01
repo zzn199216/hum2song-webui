@@ -5155,13 +5155,19 @@ ensureTrackButtons(){
   const btnAdd = document.createElement('button');
   btnAdd.className = 'btn';
   btnAdd.textContent = '+';
-  btnAdd.title = 'Add track';
+  btnAdd.setAttribute('data-i18n-title','timeline.addTrack');
+  btnAdd.setAttribute('data-i18n-aria-label','timeline.addTrack');
+  btnAdd.title = window.I18N ? window.I18N.t('timeline.addTrack') : 'Add track';
+  btnAdd.setAttribute('aria-label',btnAdd.title);
   btnAdd.setAttribute('data-act','addTrack');
 
   const btnDel = document.createElement('button');
   btnDel.className = 'btn';
   btnDel.textContent = '−';
-  btnDel.title = 'Remove active track';
+  btnDel.setAttribute('data-i18n-title','timeline.removeTrack');
+  btnDel.setAttribute('data-i18n-aria-label','timeline.removeTrack');
+  btnDel.title = window.I18N ? window.I18N.t('timeline.removeTrack') : 'Remove selected track';
+  btnDel.setAttribute('aria-label',btnDel.title);
   btnDel.setAttribute('data-act','removeTrack');
 
   wrap.appendChild(btnAdd);
@@ -10907,6 +10913,9 @@ renderTimeline(){
           const k = el.getAttribute('data-i18n-aria-label');
           if (k) el.setAttribute('aria-label', I18N.t(k));
         });
+        document.querySelectorAll('[data-preview-note]').forEach(function(el){
+          el.setAttribute('aria-label',I18N.t('editor.previewNote',{note:el.getAttribute('data-preview-note')}));
+        });
         if (typeof this._applyLastOptimizeSummaryI18n === 'function') this._applyLastOptimizeSummaryI18n();
         if (typeof this._renderLastOptimizeDetailsBodyIfOpen === 'function') this._renderLastOptimizeDetailsBodyIfOpen();
         if (typeof this._renderArrangementDetailsBodyIfOpen === 'function') this._renderArrangementDetailsBodyIfOpen();
@@ -10943,7 +10952,10 @@ renderTimeline(){
         input.max = '0';
         input.step = '1';
         input.value = String(this._masterGainDb);
-        input.title = 'Master volume (dB)';
+        input.setAttribute('data-i18n-title','top.masterVolumeTitle');
+        input.setAttribute('data-i18n-aria-label','top.masterVolumeTitle');
+        input.title = window.I18N ? window.I18N.t('top.masterVolumeTitle') : 'Master volume (dB)';
+        input.setAttribute('aria-label',input.title);
         input.style.width = '120px';
         const val = document.createElement('span');
         val.id = 'h2sMasterVolVal';

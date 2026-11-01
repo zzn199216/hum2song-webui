@@ -1,0 +1,30 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const source=fs.readFileSync('static/pianoroll/ui/library_view.js','utf8');
+for(const lang of ['zh','en','ja']){
+ const dictionary=JSON.parse(fs.readFileSync('static/i18n/locales/'+lang+'.json','utf8'));
+ const I18N={t:key=>dictionary[key]||key,getLang:()=>lang};
+ const context={module:{exports:{}},I18N,window:{I18N}};
+ vm.runInNewContext(source,context);
+ const view=context.module.exports;
+ const clip={id:'fixture-clip',kind:'note',name:'<img src=x onerror=alert(1)>',revisionId:'rev_private_head',parentRevisionId:'rev_private_old'};
+ const current={revisionId:clip.revisionId,parentRevisionId:clip.parentRevisionId,createdAt:1793495400000,kind:'head',label:'Current · internal timestamp'};
+ const old={revisionId:clip.parentRevisionId,parentRevisionId:null,createdAt:1793491800000,kind:'history',label:'Original · internal timestamp'};
+ const info={activeRevisionId:clip.revisionId,items:[current,{...current,kind:'history'},old]};
+ const before=JSON.stringify({clip,info});
+ const card=view.clipCardInnerHTML(clip,{},null,null,info);
+ assert.ok(!card.includes('rev_private_'),'revision identifiers are not user-facing card text');
+ assert.ok(!card.includes('Rev:')&&!card.includes('Versions:')&&!card.includes('Active:'));
+ assert.ok(!card.includes('<img '),'clip names remain escaped');
+ assert.ok(card.includes(dictionary['revision.total'].replace('{{count}}','2')),'duplicate head snapshot does not inflate displayed version count');
+ const controls=view.historyControlsHTML(clip.id,info);
+ assert.equal((controls.match(/<option /g)||[]).length,2,'version selector has distinct revision identities');
+ assert.ok(controls.includes('value="rev_private_head" selected'),'current version identity is retained for activation');
+ const visible=controls.replace(/<[^>]*>/g,'');
+ assert.ok(!visible.includes('rev_private_')&&!visible.includes('internal timestamp'));
+ for(const key of ['revision.heading','revision.current','revision.use','revision.rollback'])assert.ok(visible.includes(dictionary[key]),key+' is localized');
+ assert.equal(JSON.stringify({clip,info}),before,'presentation never mutates the revision chain');
+}
+console.log('PASS localized revision presentation: distinct versions, private identities, unchanged history, escaped names');

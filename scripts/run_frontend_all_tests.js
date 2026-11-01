@@ -17,6 +17,7 @@ runOne('scripts/tests/notation.test.js');
 runOne('scripts/tests/notation_system_pages.test.js');
 runOne('scripts/tests/notation_pdf.test.js');
 runOne('scripts/tests/editor_audition.test.js');
+runOne('scripts/tests/library_presentation.test.js');
 runOne('scripts/run_frontend_contract_tests.js');
 runOne('scripts/run_frontend_editor_contract_tests.js');
 runOne('scripts/run_frontend_numeric_invariants_tests.js');

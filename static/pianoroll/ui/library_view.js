@@ -110,6 +110,29 @@
     }
   }
 
+  function revisionItems(info){
+    const seen=new Set();
+    return ((info && Array.isArray(info.items)) ? info.items : []).filter(function(item){
+      const id=String(item && item.revisionId || '');
+      if(!id || seen.has(id))return false;
+      seen.add(id);return true;
+    });
+  }
+  function revisionLabel(item,index,total,active){
+    let label=_t('revision.number','Version {{number}}').replace('{{number}}',String(Math.max(1,total-index)));
+    if(String(item.revisionId||'')===active)label+=' · '+_t('revision.current','Current');
+    else if(item.parentRevisionId===null)label+=' · '+_t('revision.original','Original');
+    if(item.createdAt){
+      try{
+        const I=typeof globalThis!=='undefined'?globalThis.I18N:null;
+        const lang=I&&typeof I.getLang==='function'?I.getLang():'en';
+        const date=new Date(item.createdAt);
+        if(!isNaN(date.getTime()))label+=' · '+date.toLocaleString(lang==='zh'?'zh-CN':lang==='ja'?'ja-JP':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      }catch(_){}
+    }
+    return label;
+  }
+
 function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPreset, selectedClipId, audioConvertState, multiSelectOpts){
     clip = clip || {};
     stats = stats || {};
@@ -141,30 +164,18 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     
     
     const headRevId = String(clip.revisionId || '');
-    const headParentId = String(clip.parentRevisionId || '');
-
-    const revItems = (revInfo && Array.isArray(revInfo.items)) ? revInfo.items : null;
-    const versions = revItems ? revItems.length : 0;
+    const revItems = revisionItems(revInfo);
+    const versions = revItems.length;
     const activeRevId = String((revInfo && revInfo.activeRevisionId) || headRevId || '');
 
-    let activeLabel = '';
-    try{
-      if (revItems && activeRevId){
-        const it = revItems.find(it => String(it.revisionId || '') === activeRevId) || revItems.find(it => it && it.isActive) || null;
-        if (it){
-          activeLabel = it.label || (it.parentRevisionId
-            ? (`Rev ${_shortRev(activeRevId)} ← ${_shortRev(it.parentRevisionId)}`)
-            : (`Original ${_shortRev(activeRevId)}`));
-        }
-      }
-    }catch(_){ /* ignore */ }
+    const activeIndex = Math.max(0,revItems.findIndex(it=>String(it.revisionId||'')===activeRevId));
+    const activeItem = revItems[activeIndex] || {revisionId:headRevId,createdAt:clip.updatedAt};
+    const activeLabel = revisionLabel(activeItem,activeIndex,Math.max(1,versions),activeRevId);
 
     const revLine = headRevId
       ? (`<div class="clip-rev" style="margin-top:4px; font-size:12px; opacity:0.7;">` +
-         `Rev: ${escapeHtml(_shortRev(activeRevId || headRevId))}` +
-         (headParentId ? ` · Parent: ${escapeHtml(_shortRev(headParentId))}` : ``) +
-         (versions ? ` · Versions: ${versions}` : ``) +
-         (activeLabel ? ` · Active: ${escapeHtml(activeLabel)}` : ``) +
+         escapeHtml(activeLabel) +
+         (versions>1 ? ' · '+escapeHtml(_t('revision.total','{{count}} versions').replace('{{count}}',String(versions))) : '') +
          `</div>`)
       : '';
 
@@ -304,20 +315,14 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
     let revHtml = '';
     if (revInfo && Array.isArray(revInfo.items) && revInfo.items.length >= 1){
       const active = String(revInfo.activeRevisionId || '');
-      const items = revInfo.items || [];
+      const items = revisionItems(revInfo);
       const activeItem = items.find(it => String(it.revisionId || '') === active) || items.find(it => it && it.isActive) || items[0] || null;
       const hasParent = !!(activeItem && activeItem.parentRevisionId);
 
-      const opts = items.map(it => {
+      const opts = items.map((it,index) => {
         const ridRaw = String(it.revisionId || '');
         const rid = escapeHtml(ridRaw);
-        let label = it.label;
-        if (!label){
-          const shortRid = _shortRev(ridRaw);
-          const shortPar = _shortRev(it.parentRevisionId || '');
-          label = it.parentRevisionId ? (`Rev ${shortRid}${shortPar ? ` ← ${shortPar}` : ''}`) : (`Original ${shortRid}`);
-        }
-        label = escapeHtml(label);
+        const label = escapeHtml(revisionLabel(it,index,items.length,active));
         const sel = (ridRaw === active) ? ' selected' : '';
         return `<option value="${rid}"${sel}>${label}</option>`;
       }).join('');
@@ -329,11 +334,11 @@ function clipCardInnerHTML(clip, stats, fmtSec, escapeHtml, revInfo, selectedPre
 
       revHtml = (
         `<div class="clip-revisions" style="margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">` +
-          `<span style="font-size:12px; opacity:0.7;">Version</span>` +
-          `<select data-act="inspRevSelect" data-id="${id}" style="padding:4px 6px; max-width:220px;"${selectDisabled}>${opts}</select>` +
-          `<button class="btn" data-act="inspRevActivate" data-id="${id}" style="padding:4px 8px;"${useDisabled}>Use</button>` +
-          `<button class="btn" data-act="inspRollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>Rollback</button>` +
-          `<button class="btn" data-act="inspAbToggle" data-id="${id}" style="padding:4px 8px;"${abDisabled}>A/B</button>` +
+          `<span style="font-size:12px; opacity:0.7;">${escapeHtml(_t('revision.heading','Version'))}</span>` +
+          `<select data-act="inspRevSelect" data-id="${id}" aria-label="${escapeHtml(_t('revision.select','Select clip version'))}" style="padding:4px 6px; max-width:220px;"${selectDisabled}>${opts}</select>` +
+          `<button class="btn" data-act="inspRevActivate" data-id="${id}" style="padding:4px 8px;"${useDisabled}>${escapeHtml(_t('revision.use','Use version'))}</button>` +
+          `<button class="btn" data-act="inspRollbackRev" data-id="${id}" style="padding:4px 8px;"${rollbackDisabled}>${escapeHtml(_t('revision.rollback','Restore previous version'))}</button>` +
+          `<button class="btn" data-act="inspAbToggle" data-id="${id}" title="${escapeHtml(_t('revision.compare','Compare versions'))}" style="padding:4px 8px;"${abDisabled}>A/B</button>` +
         `</div>`
       );
     }

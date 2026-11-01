@@ -7,7 +7,8 @@
     const names=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
     const grid=document.querySelector('.editorGridWrap'),inner=document.querySelector('.editorGridInner');
     const keyboard=document.createElement('div');keyboard.className='editor-piano-keys';
-    keyboard.setAttribute('role','group');keyboard.setAttribute('aria-label','Piano preview keyboard');inner.append(keyboard);
+    keyboard.setAttribute('role','group');keyboard.setAttribute('data-i18n-aria-label','editor.previewKeyboard');
+    keyboard.setAttribute('aria-label',root.I18N?root.I18N.t('editor.previewKeyboard'):'Piano preview keyboard');inner.append(keyboard);
     function highlight(){keyboard.querySelectorAll('[data-pitch]').forEach(b=>b.classList.toggle('is-sounding',Number(b.dataset.pitch)===active));}
     async function play(pitch,velocity){
       pitch=Math.round(Number(pitch));
@@ -47,7 +48,8 @@
         const b=document.createElement('button');b.type='button';b.dataset.pitch=p;
         b.className='editor-piano-key '+(black?'is-black':'is-white');
         b.style.top=(padT+(w.pitchMax-p)*rowH)+'px';b.style.height=rowH+'px';
-        b.textContent=p%12===0?name:'';b.title=name;b.setAttribute('aria-label','Preview '+name);
+        b.textContent=p%12===0?name:'';b.title=name;b.setAttribute('data-preview-note',name);
+        b.setAttribute('aria-label',root.I18N?root.I18N.t('editor.previewNote',{note:name}):'Preview '+name);
         b.addEventListener('keydown',e=>{if(e.key==='Enter' || e.key===' '){e.preventDefault();e.stopPropagation();if(!e.repeat){rt.modalStop();play(p,90);}}});
         b.addEventListener('keyup',e=>{if(e.key==='Enter' || e.key===' '){e.preventDefault();stop();}});
         b.addEventListener('blur',stop);keyboard.append(b);
